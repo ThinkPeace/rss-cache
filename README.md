@@ -17,6 +17,8 @@ The repository is designed for a GitHub Actions scheduled run:
    - combined item JSON at `feeds/combined.json`
    - a full-text RSS feed at `feeds/fulltext.xml`
 
+The workflow is scheduled every 5 minutes using GitHub Actions cron. To reduce GitHub's top-of-hour delay risk, it runs on minute `2,7,12,...,57` rather than exactly on `:00,:05,:10`.
+
 After Pages is enabled, the default URLs are:
 
 - `https://ThinkPeace.github.io/rss-cache/`
