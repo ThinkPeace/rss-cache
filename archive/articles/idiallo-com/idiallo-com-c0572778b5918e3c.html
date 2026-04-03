@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zipbombs are not as effective as they used to be | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Zipbombs are not as effective as they used to be</h1>
+        <div class="meta">iDiallo.com 2026-04-03T12:00:00Z</div>
+        <div class="links">
+          <a href="https://idiallo.com/blog/zip-bombs-are-not-as-effective-as-they-used-to-be?src=feed">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/idiallo-com/idiallo-com-c0572778b5918e3c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Last year, I wrote about my server setup and how I use zipbombs to mitigate attacks from rogue bots. It was an effective method that help my blog survive for 10 years. I usually hesitate to write these types of articles, especially since it means revealing the inner workings of my own servers. This blog runs on a basic DigitalOcean droplet, a modest setup t…</div>
+        <div class="content">
+          <p>Last year, I wrote about my server setup and how I use zipbombs to mitigate attacks from rogue bots. It was an effective method that help my blog survive for 10 years. I usually hesitate to write these types of articles, especially since it means revealing the inner workings of my own servers. This blog runs on a basic DigitalOcean droplet, a modest setup that can handle the usual traffic spike without breaking a sweat. But lately, things have started to change. My zipbomb strategy doesn't seem to be as effective as it used to be.</p>
+			<blockquote>
+  <p>TLDR; What I learned... and won't tell you</p>
+</blockquote>
+
+<p>Here is the code I shared <a href="https://idiallo.com/blog/zipbomb-protection">last year</a>:</p>
+
+<pre><code class="code-lang-default">if (ipIsBlackListed() || isMalicious()) {
+    header("Content-Encoding: gzip");
+    header("Content-Length: ". filesize(ZIP_BOMB_FILE_10G)); // 10 MB
+    readfile(ZIP_BOMB_FILE_10G);
+    exit;
+}
+</code></pre>
+
+<p>I deliberately didn't reveal what a function like <code>isMalicious()</code> does in the background. But that wasn't really the secret sauce bots needed to know to avoid my trap. In fact, I mentioned it casually:</p>
+
+<blockquote>
+  <p>One more thing, a zip bomb is not foolproof. It can be easily detected and circumvented. You could partially read the content after all. But for unsophisticated bots that are blindly crawling the web disrupting servers, this is a good enough tool for protecting your server.</p>
+</blockquote>
+
+<p>One way to test whether my zipbomb was working was to place an abusive IP address in my blacklist and serve it a bomb. Those bots would typically access hundreds of URLs per second. But the moment they hit my trap, all requests from that IP would cease immediately. They don't wave a white flag or signal that they'll stop the abuse. They simply disappear on my end, and I imagine they crash on theirs.</p>
+
+<p>For a lean server like mine, serving 10 MB per request at a rate of a couple per second is manageable. But serving 10 MB per request at a rate of hundreds per second takes a serious toll. Serving large static files had already been a pain through Apache2, which is why I moved static files to a separate nginx server to <a href="https://idiallo.com/blog/creating-your-own-cdn-with-nginx">reduce the load</a>. Now, bots that ingest my bombs, detect them, and continue requesting without ever crashing, have turned my defense into a double-edged sword.</p>
+
+<p>Whenever there's an attack, my server becomes unresponsive, requests are dropped, and my monthly bandwidth gets eaten up. Worst of all, I'm left with a database full of spam. Thousands of fake emails in my newsletter and an overwhelmed comment section. After combing through the logs, I found a pattern and fixed the issue.</p>
+
+<p>AI-driven bots, or simply bots that do more than scrape or spam, are far more sophisticated than their dumber counterparts. When a request fails, they keep trying. And in doing so, I serve multiple zipbombs, and end up effectively DDoS-ing my own server.</p>
+
+<p>Looking at my web server settings: I run 2 instances of Apache, each with a minimum of 25 workers and a maximum of 75. Each worker consumes around 2 MB for a regular request, so I can technically handle 150 concurrent requests before the next one is queued. That's 300 MB of memory on my 1 GB RAM server, which should be plenty.</p>
+
+<p>The problem is that Apache is not efficient at serving large files, especially when they pass through a PHP instance. Instead of consuming just 2 MB per worker, serving a 10 MB zipbomb pushes usage to around 1.5 GB of RAM to handle those requests. In the worst case, this sends the server into a panic and triggers an automatic restart. Meaning that during a bot swarm, my server becomes completely unresponsive.</p>
+
+<p>And yet, here I am complaining, while you're reading this without experiencing any hiccups. So what did I do?</p>
+
+<p>For one, I turned off the zipbomb defense entirely. As for spam, I've found another way to deal with it. I still get the occasional hit when individuals try to game my system manually, but for my broader defense mechanism, I'm keeping my mouth shut. I've learned my lesson.</p>
+
+<p>I've spent countless evenings reading through spam and bot patterns to arrive at a solution. I wish I could share it, but I don't want to go back to the drawing board. Until the world collectively arrives at a reliable way to handle LLM-driven bots, my secret stays with me.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
