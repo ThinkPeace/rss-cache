@@ -15,7 +15,9 @@ The repository is designed for a GitHub Actions scheduled run:
    - archive index at `archive/index.json`
    - archived article JSON files under `archive/articles/...`
    - combined item JSON at `feeds/combined.json`
-   - a full-text RSS feed at `feeds/fulltext.xml`
+   - a recent 72-hour full-text RSS feed at `feeds/fulltext.xml`
+   - an explicit recent 72-hour full-text RSS feed at `feeds/fulltext-72h.xml`
+   - a historical full-text RSS feed at `feeds/fulltext-all.xml`
 
 The workflow is scheduled every 5 minutes using GitHub Actions cron. To reduce GitHub's top-of-hour delay risk, it runs on minute `2,7,12,...,57` rather than exactly on `:00,:05,:10`.
 
@@ -25,7 +27,9 @@ After Pages is enabled, the default URLs are:
 - `https://ThinkPeace.github.io/rss-cache/archive/index.json`
 - `https://ThinkPeace.github.io/rss-cache/feeds/index.json`
 - `https://ThinkPeace.github.io/rss-cache/feeds/combined.json`
-- `https://ThinkPeace.github.io/rss-cache/feeds/fulltext.xml`
+- `https://ThinkPeace.github.io/rss-cache/feeds/fulltext.xml` (recent 72 hours)
+- `https://ThinkPeace.github.io/rss-cache/feeds/fulltext-72h.xml` (recent 72 hours)
+- `https://ThinkPeace.github.io/rss-cache/feeds/fulltext-all.xml` (all archived history)
 
 ## Local run
 

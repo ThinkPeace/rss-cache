@@ -32,6 +32,7 @@ DEFAULT_FEED_WORKERS = 12
 DEFAULT_ARTICLE_WORKERS = 16
 MAX_ITEMS_PER_FEED = 30
 MAX_COMBINED_ITEMS = 250
+RECENT_FEED_HOURS = 72
 SUMMARY_PREVIEW_LIMIT = 360
 MIN_FULLTEXT_CHARS = 900
 MIN_ARTICLE_EXTRACT_CHARS = 300
@@ -85,12 +86,20 @@ def main() -> int:
     )
 
     archived_articles.sort(key=combined_sort_key, reverse=True)
-    recent_articles = archived_articles[:MAX_COMBINED_ITEMS]
+    recent_72h_articles = filter_recent_articles(archived_articles, reference_time=generated_at, hours=RECENT_FEED_HOURS)
+    recent_json_items = recent_72h_articles[:MAX_COMBINED_ITEMS]
     archive_index = build_archive_index(archived_articles)
     write_json(archive_dir / "index.json", archive_index)
     copy_directory(archive_dir, output_dir / "archive")
 
-    stats = build_stats(feed_specs, feed_index, combined_items, archived_articles, generated_at)
+    stats = build_stats(
+        feed_specs,
+        feed_index,
+        combined_items,
+        archived_articles,
+        recent_72h_articles,
+        generated_at,
+    )
     write_json(feeds_dir / "index.json", {"generated_at": generated_at, "stats": stats, "feeds": feed_index})
     write_json(
         feeds_dir / "combined.json",
@@ -98,16 +107,52 @@ def main() -> int:
             "generated_at": generated_at,
             "site_url": site_url,
             "stats": stats,
-            "items": [public_article_view(article) for article in recent_articles],
+            "items": [public_article_view(article) for article in recent_json_items],
         },
     )
     write_text(
         feeds_dir / "combined.xml",
-        build_combined_rss(site_url=site_url, generated_at=generated_at, items=recent_articles, fulltext=False),
+        build_rss_feed(
+            site_url=site_url,
+            generated_at=generated_at,
+            items=recent_72h_articles,
+            fulltext=False,
+            channel_title=f"rss-cache recent {RECENT_FEED_HOURS}h feed",
+            channel_description=f"Recent archived articles from the last {RECENT_FEED_HOURS} hours.",
+        ),
     )
     write_text(
         feeds_dir / "fulltext.xml",
-        build_combined_rss(site_url=site_url, generated_at=generated_at, items=recent_articles, fulltext=True),
+        build_rss_feed(
+            site_url=site_url,
+            generated_at=generated_at,
+            items=recent_72h_articles,
+            fulltext=True,
+            channel_title=f"rss-cache recent {RECENT_FEED_HOURS}h fulltext feed",
+            channel_description=f"Recent full-text archived articles from the last {RECENT_FEED_HOURS} hours.",
+        ),
+    )
+    write_text(
+        feeds_dir / "fulltext-72h.xml",
+        build_rss_feed(
+            site_url=site_url,
+            generated_at=generated_at,
+            items=recent_72h_articles,
+            fulltext=True,
+            channel_title=f"rss-cache recent {RECENT_FEED_HOURS}h fulltext feed",
+            channel_description=f"Recent full-text archived articles from the last {RECENT_FEED_HOURS} hours.",
+        ),
+    )
+    write_text(
+        feeds_dir / "fulltext-all.xml",
+        build_rss_feed(
+            site_url=site_url,
+            generated_at=generated_at,
+            items=archived_articles,
+            fulltext=True,
+            channel_title="rss-cache historical fulltext feed",
+            channel_description="Historical full-text archived articles from the entire repository archive.",
+        ),
     )
     write_text(
         output_dir / "index.html",
@@ -116,12 +161,12 @@ def main() -> int:
             generated_at=generated_at,
             stats=stats,
             feeds=feed_index,
-            articles=recent_articles,
+            articles=recent_72h_articles,
         ),
     )
 
     print(
-        f"Generated {len(feed_index)} feeds, {len(recent_articles)} recent items, "
+        f"Generated {len(feed_index)} feeds, {len(recent_72h_articles)} recent {RECENT_FEED_HOURS}h items, "
         f"and {len(archived_articles)} archived full-text articles into {output_dir}"
     )
     return 0
@@ -609,6 +654,7 @@ def build_stats(
     feed_index: list[dict[str, object]],
     combined_items: list[dict[str, object]],
     archived_articles: list[dict[str, object]],
+    recent_articles: list[dict[str, object]],
     generated_at: str,
 ) -> dict[str, object]:
     ok_count = sum(1 for feed in feed_index if feed.get("status") == "ok")
@@ -622,22 +668,28 @@ def build_stats(
         "current_feed_item_count": len(combined_items),
         "archived_article_count": len(archived_articles),
         "archived_fulltext_count": fulltext_ok,
-        "combined_item_count": min(len(archived_articles), MAX_COMBINED_ITEMS),
+        "recent_72h_article_count": len(recent_articles),
+        "combined_item_count": min(len(recent_articles), MAX_COMBINED_ITEMS),
     }
 
 
-def build_combined_rss(site_url: str, generated_at: str, items: list[dict[str, object]], fulltext: bool) -> str:
+def build_rss_feed(
+    site_url: str,
+    generated_at: str,
+    items: list[dict[str, object]],
+    fulltext: bool,
+    channel_title: str,
+    channel_description: str,
+) -> str:
     pub_date = format_http_date(generated_at) or format_datetime(datetime.now(timezone.utc))
     namespace = ' xmlns:content="http://purl.org/rss/1.0/modules/content/"' if fulltext else ""
-    title = "rss-cache fulltext feed" if fulltext else "rss-cache combined feed"
-    description = "Full-text archived articles generated from the OPML source list." if fulltext else "Combined feed generated from the OPML source list."
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         f"<rss version=\"2.0\"{namespace}>",
         "<channel>",
-        f"<title>{escape(title)}</title>",
+        f"<title>{escape(channel_title)}</title>",
         f"<link>{escape(site_url)}</link>",
-        f"<description>{escape(description)}</description>",
+        f"<description>{escape(channel_description)}</description>",
         "<language>en</language>",
         f"<lastBuildDate>{escape(pub_date)}</lastBuildDate>",
         f"<generator>{escape(DEFAULT_USER_AGENT)}</generator>",
@@ -826,12 +878,14 @@ def build_home_page(
         <a href="{escape(site_url)}/feeds/index.json">feeds/index.json</a>
         <a href="{escape(site_url)}/feeds/combined.json">feeds/combined.json</a>
         <a href="{escape(site_url)}/feeds/fulltext.xml">feeds/fulltext.xml</a>
+        <a href="{escape(site_url)}/feeds/fulltext-72h.xml">feeds/fulltext-72h.xml</a>
+        <a href="{escape(site_url)}/feeds/fulltext-all.xml">feeds/fulltext-all.xml</a>
       </div>
       <section class="stats">
         <div class="panel"><strong>{escape(str(stats.get("configured_feed_count")))}</strong>Configured feeds</div>
         <div class="panel"><strong>{escape(str(stats.get("successful_feed_count")))}</strong>Successful mirrors</div>
         <div class="panel"><strong>{escape(str(stats.get("archived_article_count")))}</strong>Archived articles</div>
-        <div class="panel"><strong>{escape(str(stats.get("archived_fulltext_count")))}</strong>Archived with full text</div>
+        <div class="panel"><strong>{escape(str(stats.get("recent_72h_article_count")))}</strong>Recent 72h items</div>
       </section>
       <section class="panel" style="margin-bottom: 1.5rem;">
         <strong>Generated at</strong>
@@ -905,6 +959,22 @@ def dedupe_items(feed_items: list[dict[str, object]]) -> list[dict[str, object]]
         if existing is None or combined_sort_key(item) > combined_sort_key(existing):
             deduped[article_id] = item
     return list(deduped.values())
+
+
+def filter_recent_articles(articles: list[dict[str, object]], reference_time: str, hours: int) -> list[dict[str, object]]:
+    reference_dt = parse_iso_datetime(reference_time)
+    if reference_dt is None:
+        return []
+    threshold_seconds = hours * 3600
+    recent: list[dict[str, object]] = []
+    for article in articles:
+        article_dt = parse_iso_datetime(str(article.get("published_at") or article.get("archived_at") or ""))
+        if article_dt is None:
+            continue
+        delta_seconds = (reference_dt - article_dt).total_seconds()
+        if 0 <= delta_seconds <= threshold_seconds:
+            recent.append(article)
+    return recent
 
 
 def has_archived_content(article: dict[str, object]) -> bool:
@@ -1075,6 +1145,16 @@ def normalize_timestamp(raw_value: str) -> str | None:
     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def parse_iso_datetime(value: str) -> datetime | None:
+    normalized = normalize_timestamp(value)
+    if not normalized:
+        return None
+    try:
+        return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def combined_sort_key(item: dict[str, object]) -> tuple[int, str, str]:
     published_at = str(item.get("published_at") or "")
     title = str(item.get("title") or "")
@@ -1093,11 +1173,9 @@ def first_published_at(items: list[dict[str, object]]) -> str | None:
 def format_http_date(value: object) -> str | None:
     if not value:
         return None
-    text = str(value)
-    normalized = normalize_timestamp(text)
-    if not normalized:
+    parsed = parse_iso_datetime(str(value))
+    if parsed is None:
         return None
-    parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
     return format_datetime(parsed)
 
 
