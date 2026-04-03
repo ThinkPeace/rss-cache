@@ -88,6 +88,7 @@ def main() -> int:
     archived_articles.sort(key=combined_sort_key, reverse=True)
     recent_72h_articles = filter_recent_articles(archived_articles, reference_time=generated_at, hours=RECENT_FEED_HOURS)
     recent_json_items = recent_72h_articles[:MAX_COMBINED_ITEMS]
+    write_article_pages(archive_dir=archive_dir, articles=archived_articles, site_url=site_url)
     archive_index = build_archive_index(archived_articles)
     write_json(archive_dir / "index.json", archive_index)
     copy_directory(archive_dir, output_dir / "archive")
@@ -149,9 +150,10 @@ def main() -> int:
             site_url=site_url,
             generated_at=generated_at,
             items=archived_articles,
-            fulltext=True,
-            channel_title="rss-cache historical fulltext feed",
-            channel_description="Historical full-text archived articles from the entire repository archive.",
+            fulltext=False,
+            channel_title="rss-cache historical summary feed",
+            channel_description="Historical archived articles with summaries and GitHub-hosted full-text links.",
+            item_link_key="archive_html_url",
         ),
     )
     write_text(
@@ -514,7 +516,8 @@ def build_article_record(
 
 def merge_article_record(existing: dict[str, object], item: dict[str, object], site_url: str) -> dict[str, object]:
     record = dict(existing)
-    article_url = archive_json_url(site_url, item)
+    article_json = archive_json_url(site_url, item)
+    article_html = archive_html_url(site_url, item)
     record.update(
         {
             "id": item["id"],
@@ -528,8 +531,10 @@ def merge_article_record(existing: dict[str, object], item: dict[str, object], s
             "guid": item.get("guid"),
             "published_at": item.get("published_at"),
             "summary": item.get("summary"),
-            "archive_json_url": article_url,
+            "archive_json_url": article_json,
             "archive_relative_path": f"articles/{item['source_slug']}/{item['id']}.json",
+            "archive_html_url": article_html,
+            "archive_html_relative_path": f"articles/{item['source_slug']}/{item['id']}.html",
         }
     )
     return record
@@ -632,6 +637,114 @@ def build_archive_index(articles: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
+def write_article_pages(archive_dir: Path, articles: list[dict[str, object]], site_url: str) -> None:
+    for article in articles:
+        write_text(article_html_path(archive_dir, article), build_article_page(article, site_url))
+
+
+def build_article_page(article: dict[str, object], site_url: str) -> str:
+    title = str(article.get("title") or "(untitled)")
+    published = str(article.get("published_at") or "")
+    feed_title = str(article.get("feed_title") or "unknown")
+    summary = str(article.get("summary") or "")
+    source_link = str(article.get("link") or "#")
+    content_html = sanitize_html_fragment(str(article.get("content_html") or ""))
+    if not content_html:
+        content_html = text_to_html(str(article.get("content_text") or ""))
+    archive_json = str(article.get("archive_json_url") or "#")
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{escape(title)} | rss-cache archive</title>
+    <style>
+      :root {{
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }}
+      main {{
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }}
+      article {{
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }}
+      h1 {{
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }}
+      .meta {{
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }}
+      .links {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }}
+      .links a {{
+        color: var(--accent);
+        text-decoration: none;
+      }}
+      .summary {{
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }}
+      img {{
+        max-width: 100%;
+        height: auto;
+      }}
+      pre {{
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }}
+      a {{
+        color: var(--accent);
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>{escape(title)}</h1>
+        <div class="meta">{escape(feed_title)} {escape(published)}</div>
+        <div class="links">
+          <a href="{escape(source_link)}">Original article</a>
+          <a href="{escape(archive_json)}">Archive JSON</a>
+          <a href="{escape(site_url)}/">rss-cache home</a>
+        </div>
+        <div class="summary">{escape(summary)}</div>
+        <div class="content">
+          {content_html}
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
+"""
+
+
 def archive_index_entry(article: dict[str, object]) -> dict[str, object]:
     return {
         "id": article.get("id"),
@@ -646,6 +759,8 @@ def archive_index_entry(article: dict[str, object]) -> dict[str, object]:
         "content_status": article.get("content_status"),
         "archive_relative_path": article.get("archive_relative_path"),
         "archive_json_url": article.get("archive_json_url"),
+        "archive_html_relative_path": article.get("archive_html_relative_path"),
+        "archive_html_url": article.get("archive_html_url"),
     }
 
 
@@ -680,6 +795,7 @@ def build_rss_feed(
     fulltext: bool,
     channel_title: str,
     channel_description: str,
+    item_link_key: str = "link",
 ) -> str:
     pub_date = format_http_date(generated_at) or format_datetime(datetime.now(timezone.utc))
     namespace = ' xmlns:content="http://purl.org/rss/1.0/modules/content/"' if fulltext else ""
@@ -699,11 +815,12 @@ def build_rss_feed(
         if description_text:
             description_text = f"[{item.get('feed_title')}] {description_text}"
         pub = format_http_date(item.get("published_at"))
+        item_link = str(item.get(item_link_key) or item.get("link") or site_url)
         lines.extend(
             [
                 "<item>",
                 f"<title>{escape(str(item.get('title') or '(untitled)'))}</title>",
-                f"<link>{escape(str(item.get('link') or site_url))}</link>",
+                f"<link>{escape(item_link)}</link>",
                 f"<guid isPermaLink=\"false\">{escape(str(item.get('id') or item.get('guid') or item.get('link') or item.get('title')))}</guid>",
                 f"<description>{escape(description_text)}</description>",
                 f"<category>{escape(str(item.get('feed_title') or 'unknown'))}</category>",
@@ -747,9 +864,11 @@ def build_home_page(
         title = escape(str(item.get("title") or "(untitled)"))
         link = escape(str(item.get("link") or site_url))
         archive_json = escape(str(item.get("archive_json_url") or "#"))
+        archive_html = escape(str(item.get("archive_html_url") or "#"))
         published = escape(str(item.get("published_at") or ""))
         latest_items.append(
             f"<li><a href=\"{link}\">{title}</a> <small>{source} {published}</small> "
+            f"<small><a href=\"{archive_html}\">archive html</a></small> "
             f"<small><a href=\"{archive_json}\">archive json</a></small></li>"
         )
 
@@ -934,6 +1053,7 @@ def public_article_view(article: dict[str, object]) -> dict[str, object]:
         "summary": article.get("summary"),
         "content_length": article.get("content_length", 0),
         "content_source": article.get("content_source"),
+        "archive_html_url": article.get("archive_html_url"),
         "archive_json_url": article.get("archive_json_url"),
     }
 
@@ -942,8 +1062,16 @@ def archive_json_url(site_url: str, item: dict[str, object]) -> str:
     return f"{site_url}/archive/articles/{item['source_slug']}/{item['id']}.json"
 
 
+def archive_html_url(site_url: str, item: dict[str, object]) -> str:
+    return f"{site_url}/archive/articles/{item['source_slug']}/{item['id']}.html"
+
+
 def article_json_path(archive_dir: Path, article: dict[str, object]) -> Path:
     return archive_dir / "articles" / str(article["feed_slug"]) / f"{article['id']}.json"
+
+
+def article_html_path(archive_dir: Path, article: dict[str, object]) -> Path:
+    return archive_dir / "articles" / str(article["feed_slug"]) / f"{article['id']}.html"
 
 
 def build_article_id(source_slug: str, identity: str) -> str:
