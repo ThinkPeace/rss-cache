@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Writing an LLM from scratch, part 32h -- Interventions: full fat float32 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Writing an LLM from scratch, part 32h -- Interventions: full fat float32</h1>
+        <div class="meta">Giles&#x27; blog 2026-04-03T23:50:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/04/llm-from-scratch-32h-interventions-full-fat-float32">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-859825d0fc205c40.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">This is the last of the interventions I&#x27;m trying out to see if I can improve the test loss for a from-scratch GPT-2 small base model, trained on code based on Sebastian Raschka &#x27;s book &quot; Build a Large Language Model (from Scratch) &quot;. Back when I did my first training run for a base model, on my local RTX 3090 , I used two optimisations: Setting the 32-bit f…</div>
+        <div class="content">
+          <p>This is the last of the interventions I'm trying out to see if I can improve the
+test loss for a from-scratch GPT-2 small base model, trained on code based on
+<a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>".</p>
+
+<p>Back when I did my first training run for a base model, <a href="/2025/12/llm-from-scratch-28-training-a-base-model-from-scratch">on my local RTX 3090</a>,
+I used two optimisations:</p>
+
+<ul>
+<li>Setting the
+<a href="https://docs.pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html">32-bit floating point matrix multiplication precision to "high" rather than to "highest"</a>,
+which means that it uses lower-precision (but still technically 32-bit) TF32
+for those operations rather than normal float32.</li>
+<li>Using <a href="https://docs.pytorch.org/tutorials/recipes/recipes/amp_recipe.html">PyTorch's Automated Mixed Precision (AMP)</a>,
+which allows it to use 16-bit calculations rather than 32-bit in places where it
+makes sense to do so.</li>
+</ul>
+
+<p>The first of those boosted training speed from 12,599 tokens per second to 15,402
+in my test harness, while AMP on its own boosted it to 19,921 tps (and also allowed me
+to increase the batch size from 5 to 6).  Doing both appeared to hit some kind of
+diminishing returns -- it maxed out at 19,997 tps, only a little better than AMP on its
+own.</p>
+
+<p>But intuitively, you'd expect that might come at a cost.  While I'm sure the PyTorch
+developers have solid understanding of where switching to 16-bit will have a minimal
+impact on training quality, it seems too good to be true that it would have no impact
+at all.</p>
+
+<p>Let's see what happens if we switch both of these optimisations off!</p>
+<p>I added a new flag to the <code>train.json</code> config file for the training harness,
+<code>use_amp</code> with a default of <code>True</code> <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>.  The core implementation was pretty simple;
+where we had the call to <code>torch.set_float32_matmul_precision</code>, we needed to guard it:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="k">if</span> <span class="n">use_amp</span><span class="p">:</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">set_float32_matmul_precision</span><span class="p">(</span><span class="s2">&quot;high&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and where we did the forward pass and the loss calculation, we had to not
+wrap it in a <code>with torch.amp.autocast</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="k">if</span> <span class="n">use_amp</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">amp</span><span class="o">.</span><span class="n">autocast</span><span class="p">(</span><span class="n">device_type</span><span class="o">=</span><span class="n">device</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float16</span><span class="p">):</span>
+                <span class="n">logits</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+                <span class="n">train_loss</span> <span class="o">=</span> <span class="n">calculate_loss</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logits</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+            <span class="n">train_loss</span> <span class="o">=</span> <span class="n">calculate_loss</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>We also had to avoid <a href="/2026/02/llm-from-scratch-32b-interventions-gradient-clipping#how">unscaling when clipping gradients</a>; I did that by just not
+creating a scaler when in non-AMP mode, and then:</p>
+
+<div class="codehilite">
+<pre><span></span><code>            <span class="k">if</span> <span class="n">scaler</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">scaler</span><span class="o">.</span><span class="n">unscale_</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and likewise, instead of using the scaler to step the optimiser, we step it
+directly if we don't have one:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="k">if</span> <span class="n">scaler</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">scaler</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+            <span class="n">scaler</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>However, there was an issue: non-finite gradients.  As I discovered when
+<a href="/2026/02/llm-from-scratch-32b-interventions-gradient-clipping#chasing-infinity">looking into gradient clipping</a>,
+the scaler was actually doing something quite useful for us.   Somewhat buried in
+the <a href="https://docs.pytorch.org/tutorials/recipes/recipes/amp_recipe.html#adding-gradscaler">AMP recipes page</a>
+is a comment:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="c1"># ``scaler.step()`` first unscales the gradients of the optimizer&#39;s assigned parameters.</span>
+<span class="c1"># If these gradients do not contain ``inf``s or ``NaN``s, optimizer.step() is then called,</span>
+<span class="c1"># otherwise, optimizer.step() is skipped.</span>
+</code></pre>
+</div>
+
+<p>Now, from the gradient clipping train, I'd come to the conclusion that we were occasionally
+getting non-finite gradients, and the scaler was saving us from applying junk updates
+when that happened.</p>
+
+<p>If our new code was stepping the optimiser directly, we'd not have that safety net.  We'd
+need something to save us from that.</p>
+
+<p>My first cut at this was to use the one other API feature I'd seen that handled
+non-finite gradients for you: <a href="https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html"><code>torch.nn.utils.clip_grad_norm_</code></a>
+has a <code>error_if_nonfinite</code> parameter, so if we were using gradient clipping, we could
+set that to <code>True</code> and use the exception to skip stepping the optimiser if it was
+raised.  To avoid actually doing any gradient clipping when that happened, if we did not
+have gradient clipping explicitly enabled, we could set the <code>max_norm</code> to infinity.</p>
+
+<p>Here's <a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/f1b7b4acad6170c156e4b6caab0e6385f98489e2/ddp_train.py">the code for that version</a>.
+I wasn't very happy with it, though.  The use of a gradient clipping API just for
+its side-effect of telling us about non-finite gradients felt a bit ugly, and even worse,
+the exception it raised was just a generic <code>RuntimeError</code>, not a custom exception type,
+which meant that I had to distinguish between it and other <code>RuntimeErrors</code> by looking
+at the exception message -- not terribly safe, as that's something that could easily change
+in the future.</p>
+
+<p>So I switched to a more explicit, simpler version: scan through the parameters looking for
+non-finite gradients, and skip the optimiser step if any are found:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="k">if</span> <span class="n">scaler</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">scaler</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+            <span class="n">scaler</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># The scaler skips non-finite gradients, but if we&#39;re not using it we have</span>
+            <span class="c1"># to do that for ourselves.</span>
+            <span class="n">found_nonfinite</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">torch</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">grad</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">():</span>
+                    <span class="n">found_nonfinite</span> <span class="o">=</span> <span class="kc">True</span>
+                    <span class="k">break</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">found_nonfinite</span><span class="p">:</span>
+                <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>I did have some concerns about the performance impact of that; on my local machine
+it took about 0.13 seconds to scan all of the parameters like that for one step.
+However, it's better than failing to train the model
+at all due to garbage updates!</p>
+
+<p>So with that, it was time to do the training run.</p>
+
+<h3 id="the-train">The train</h3>
+
+<p>It was pretty clear that I would not be able to run this with my normal microbatch
+size of 12 on the 8x A100 40 GiB machines that I'd been using so far for these intervention
+tests -- AMP and the lower-precision matrix multiplications save a bit of VRAM, and
+I was already pretty much at the limit of what would fit in there.</p>
+
+<p>Changing the batch size would make this a poor test of the effects of removing the
+FP precision stuff in isolation, so I decided that the safest minimal change was to
+use a machine with more VRAM -- specifically an 8x A100 80 GiB, as that was the closest
+to what I was using (switching to eg. H100s would add all kinds of confounding changes).</p>
+
+<p>The next problem was getting any kind of machine at all!  <a href="https://lambda.ai/">Lambda</a> (they
+appear to have rebranded away from "Lambda Labs") very rarely seemed to have any
+available instances, never mind the specific type that I wanted.  Eventually,
+I <a href="/2026/04/automating-starting-lambda-instances">put together a system to poll their API and launch an instance</a>
+when one was available.  At 3:25am today <sup class="footnote-ref" id="fnref-2"><a href="#fn-2">2</a></sup>, I got a Telegram message from the script saying
+that it had managed to find and start one.</p>
+
+<p>I kicked off the training run, and watched as it got started.  I could see it was using
+43.8 GiB/GPU, so it definitely did need the larger instance type.  And it quickly became clear
+that this was going to be a long one -- it was estimating 8 hours to do the complete
+run!</p>
+
+<p>In a way that was good news, though, as I could just set an alarm and go to bed.
+When I woke up, it was done:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Training complete in 29,230.838 seconds</span>
+<span class="go">Tokens seen: 3,260,252,160</span>
+<span class="go">Throughput: 111,535 tokens/second</span>
+<span class="go">Final train loss: 3.729</span>
+</code></pre>
+</div>
+
+<p>That's 8h7m.  For comparison, the baseline train took 3h24m, so we're taking more
+than double the time.</p>
+
+<p>Cost-wise, things were even worse -- more than US$135 in server costs, because as
+well as needing the server for much longer, being a larger machine it cost US$16.48/hour rather than
+$11.84.  So that's more than three times as expensive
+as the US$42 that a typical recent
+train has cost me (Lambda raised their prices, so it went up from about US$35 in February).</p>
+
+<p>Still, at least it looked like a solid run:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32h-interventions-full-fat-float32/loss-chart.png" alt="Full train run loss without AMP" title="Full train run loss without AMP" /></p>
+
+<p>Very similar to the others we've seen in this series.</p>
+
+<p>Time to upload it to <a href="https://huggingface.co/gpjt/8xa100m80-no-amp">Hugging Face Hub</a>, and
+on to the evals to see if all of this extra cost was worthwhile.</p>
+
+<h3 id="evals">Evals</h3>
+
+<p>Firstly, the smoke test -- how did it complete <code>Every effort moves you</code>?</p>
+
+<pre><code>Every effort moves you towards greater success. And even then, they’re on your way to winning a prize and
+</code></pre>
+
+<p>Not bad at all!  But the important metric is the loss on the test set, and for that
+I got 3.679.  Let's add it to the table to see how that compares to the other training runs:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test set loss</th>
+  <th>Improvement vs baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>8xa100m40-weight-tying</td>
+  <td>3.874</td>
+  <td>-0.182</td>
+</tr>
+<tr>
+  <td>8xa100m40-weight-decay-cerebras</td>
+  <td>3.867</td>
+  <td>-0.175</td>
+</tr>
+<tr>
+  <td>8xa100m40-baseline</td>
+  <td>3.692</td>
+  <td>-</td>
+</tr>
+<tr>
+  <td>8xa100m80-no-amp</td>
+  <td>3.679</td>
+  <td>0.013</td>
+</tr>
+<tr>
+  <td>8xa100m40-gradient-clipping</td>
+  <td>3.678</td>
+  <td>0.014</td>
+</tr>
+<tr>
+  <td>8xa100m40-qkv-bias</td>
+  <td>3.669</td>
+  <td>0.023</td>
+</tr>
+<tr>
+  <td>8xa100m40-weight-decay-gpt2</td>
+  <td>3.643</td>
+  <td>0.049</td>
+</tr>
+<tr>
+  <td>8xa100m40-remove-dropout</td>
+  <td>3.641</td>
+  <td>0.051</td>
+</tr>
+<tr>
+  <td>8xa100m40-schedule-learning-rate</td>
+  <td>3.602</td>
+  <td>0.09</td>
+</tr>
+</tbody>
+</table>
+
+<p>So, a <em>tiny</em> improvement over our baseline.  Taking more than twice as long on the training run, and
+spending three times as much, gained us a loss improvement that's smaller than any other
+successful intervention.</p>
+
+<h3 id="conclusion">Conclusion</h3>
+
+<p>The first question is, did removing AMP and lower-precision matrix multiplications
+lead to a better model?  The answer appears to be "yes" -- but it's a tiny enough
+difference that it could well be in the noise.</p>
+
+<p>But the follow-up has to be, was it worth the extra cost in time and money?  And for
+that I'm certain that the answer is "no".  If we'd spent twice the time
+training with AMP -- on an extra 3B-odd tokens, or on a second epoch with the same
+3B -- it seems implausible that the resulting loss would not have been better.</p>
+
+<p>And anyway, given that my goal with these interventions is to train the best model
+I can in two days locally (or 3h30m or so on an 8x A100 40 GiB), it's pretty clear that
+if we'd cut this run off about halfway through it would have been worse -- and that's not
+even accounting for it being more memory-hungry.</p>
+
+<p>So, I think the takeaway from this is that AMP appears to be a huge win, at least for
+this model.  It has a tiny cost (if any) in model quality, and a huge benefit in training
+speed, plus a smallish but still useful benefit in training VRAM requirements. <sup class="footnote-ref" id="fnref-3"><a href="#fn-3">3</a></sup></p>
+
+<p>And with that, I've reached the end of <a href="/2026/02/llm-from-scratch-32a-interventions-baseline-model#the-interventions">the interventions that I wanted to try</a>!  Next,
+I'll need to think through what we need to do to try to stack them up.  In particular,
+is there any easy way to work out whether any of the improvements I've seen might
+be due to random noise?  After all, even though I've been carefully using explicit
+seeds, each intervention will have changed the way the training run uses the random
+number stream, and that could easily have an effect.</p>
+
+<p>Stay tuned!</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>The name of the flag is not quite right, as of course we're switching off
+not just AMP but the matrix multiplication precision, but it's a decent shorthand.&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-2">
+<p>I'm a night owl, so luckily I was still awake.&#160;<a href="#fnref-2" class="footnoteBackLink" title="Jump back to footnote 2 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-3">
+<p>I have to admit that I'm very tempted to see what effect even bigger moves in
+the low-precision direction might have.  What if I moved to some kind of 16-bit
+training, like <code>bfloat16</code>?  After all, most of the open weights models like
+Qwen are at least released at that kind of bittedness.  But that's one to look into
+later, I think.&#160;<a href="#fnref-3" class="footnoteBackLink" title="Jump back to footnote 3 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
