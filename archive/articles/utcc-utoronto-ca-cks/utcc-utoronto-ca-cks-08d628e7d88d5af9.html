@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Updating Ubuntu packages that you have local changes for with dgit | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Updating Ubuntu packages that you have local changes for with dgit</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-03-31T22:07:16Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/DgitUpdatingDebsWithChanges">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-08d628e7d88d5af9.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Suppose, not entirely hypothetically, that you&#x27;ve made local changes to an Ubuntu package using dgit and now Ubuntu has come out with an update to that package that you want to switch to, with your local changes still on top. Back when I wrote about moving local changes to a new Ubuntu release with dgit , I wrote an appendix with a theory of how to do this,…</div>
+        <div class="content">
+          <div class="wikitext"><p>Suppose, not entirely hypothetically, that <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/DgitOnUbuntuEarlyNotes">you've made local
+changes to an Ubuntu package using dgit</a>
+and now Ubuntu has come out with an update to that package that you
+want to switch to, with your local changes still on top. Back when
+I wrote about <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/DgitForwardPortingChanges">moving local changes to a new Ubuntu release with
+dgit</a>, I wrote an appendix with a theory
+of how to do this, based on <a href="https://mastodon.social/@cks/115769365150522346">a</a> <a href="https://mastodon.me.uk/@Diziet/115769377698929398">conversation</a>. Now that I've
+actually done this, I've discovered that there is a minor variation
+and I'm going to write it down explicitly (with additional notes
+because I forgot some things between <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/DgitForwardPortingChanges">then</a>
+and now).</p>
+
+<p>I'll assume we're starting from an existing dgit based repository
+with <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/DgitOnUbuntuEarlyNotes">a full setup of local changes</a>,
+including an updated debian/changelog. Our first step, for safety,
+is to make a branch to capture the current state of our repository.
+I suggest you name this branch after the current upstream package
+version that you're on top of, for example if the current upstream
+version you're adding local changes to can be summarized as
+'ubuntu2.6':</p>
+
+<blockquote><pre>
+git branch cslab-2.6
+</pre>
+</blockquote>
+
+<p>Making a branch allows you to use '<code>git diff cslab-2.6..</code>' later to
+see exactly what changed between your versions. A useful thing to
+do here is to exclude the 'debian/' directory from diffs, which can
+be done with '<code>git diff cslab-2.6.. -- . :!debian</code>', although
+your shell may require you to quote the '!' (<a href="https://stackoverflow.com/questions/4380945/exclude-a-directory-from-git-diff">cf</a>).</p>
+
+<p>Then we need to use <a href="https://manpages.debian.org/testing/dgit/dgit.1.en.html">dgit</a> to fetch
+the upstream updates:</p>
+
+<blockquote><pre>
+dgit fetch -d ubuntu
+</pre>
+</blockquote>
+
+<p>We need to use '-d ubuntu', at least in current versions of dgit,
+or 'dgit fetch' gets confused and fails. At this point we have the
+updated upstream in the remote tracking branch
+'dgit/dgit/jammy,-security,-updates' but our local tree is still
+not updated.</p>
+
+<p>(All of dgit's remote tracking branches start with 'dgit/dgit/',
+while all of its local branches start with just 'dgit/'. This is
+less than optimal for my clarity.)</p>
+
+<p>Normally you would now rebase to shift your local changes on top
+of the new upstream, but we don't want to immediately do that. The
+problem is that our top commit is our own dgit-based change to
+<code>debian/changelog</code>, and we don't want to rebase that commit; instead
+we'll make a new version of it after we rebase our real local
+changes. So our first step is to discard our top commit:</p>
+
+<blockquote><pre>
+git reset --hard HEAD~
+</pre>
+</blockquote>
+
+<p>(In <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/DgitOnUbuntuEarlyNotes">my original theory</a> I didn't realize
+we had to drop this commit before the rebase, not after, because
+otherwise things get confused. At a minimum, you wind up with
+<code>debian/changelog</code> out of order, and I don't know if dropping your
+HEAD commit after the rebase works right. It's possible you might
+get <code>debian/changelog</code> rebase conflicts as well, so I feel dropping
+your <code>debian/changelog</code> change before the rebase is cleaner.)</p>
+
+<p>Now we can rebase, for which the simpler two-argument form does
+work (but not <a href="https://utcc.utoronto.ca/~cks/space/blog/programming/GitRebaseUnderstanding">plain rebasing</a>,
+or at least I didn't bother testing plain rebasing):</p>
+
+<blockquote><pre>
+git rebase dgit/dgit/jammy,-security,-updates dgit/jammy,-security,-updates
+</pre>
+</blockquote>
+
+<p>(If you are wondering how this command possibly works, as I was
+part way through writing this entry, note that the first branch is
+'dgit/dgit/...', ie our remote tracking branch, and then second
+branch is 'dgit/...', our local branch with our changes on it.)</p>
+
+<p>At this point we should have all of our local changes stacked on top
+of the upstream changes, but no debian/changelog entry for them that
+will bump the package version. We create that with:</p>
+
+<blockquote><pre>
+gbp dch --since dgit/dgit/jammy,-security,-updates --local .cslab. --ignore-branch --commit
+</pre>
+</blockquote>
+
+<p>Then we can build with 'dpkg-buildpackage -uc -b', and afterward
+do 'git clean -xdf; git reset --hard' to reset your tree back to
+its pristine state.</p>
+
+<p>(My view is that while you can prepare a source package for your
+work if you want to, the 'source' artifact you really want to save
+is your dgit VCS repository. This will be (much) less bulky when
+you clean it up to get rid of all of the stuff (to be polite) that
+dpkg-buildpackage leaves behind.)</p>
+</div>
+<div> (<a href="https://utcc.utoronto.ca/~cks/space/blog/linux/DgitUpdatingDebsWithChanges?showcomments#comments">One comment</a>.) </div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

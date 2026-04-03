@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Writing an LLM from scratch, part 32c -- Interventions: removing dropout | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Writing an LLM from scratch, part 32c -- Interventions: removing dropout</h1>
+        <div class="meta">Giles&#x27; blog 2026-02-05T23:35:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/02/llm-from-scratch-32c-interventions-removing-dropout">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-fb896defdf6e513a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">This is the second in my series of attempts to improve the loss on my test dataset -- interventions, as I&#x27;m calling them -- for a from-scratch GPT-2 small base model, trained on code based on Sebastian Raschka &#x27;s book &quot; Build a Large Language Model (from Scratch) &quot;. Last time around I saw what gradient clipping can do -- it improved loss over the baseline b…</div>
+        <div class="content">
+          <p>This is the second in my series of attempts to improve the loss on my test dataset
+-- interventions, as I'm calling them --
+for a from-scratch GPT-2 small base model, trained on code based on
+<a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>".</p>
+
+<p>Last time around I saw <a href="/2026/02/llm-from-scratch-32b-interventions-gradient-clipping">what gradient clipping can do</a> --
+it improved loss over <a href="/2026/02/llm-from-scratch-32a-interventions-baseline-model">the baseline</a>
+by 0.014, bringing it down from 3.692 to 3.678.  Not much, but it's something!</p>
+
+<p>This time, I wanted to see what happened if we trained without dropout.  Would removing it make
+the test loss worse, or better?</p>
+<h3 id="background">Background:</h3>
+
+<p>In a blog post last summer about
+<a href="https://magazine.sebastianraschka.com/i/170506328/21-removing-dropout">architectural advances in LLMs since GPT-2</a>,
+Sebastian Raschka wrote:</p>
+
+<blockquote>
+  <p>Dropout (2012) is a traditional technique to prevent overfitting by randomly
+  "dropping out" (i.e., setting to zero) a fraction of the layer activations or
+  attention scores (Figure 3) during training. However, dropout is rarely used
+  in modern LLMs, and most models after GPT-2 have dropped it (no pun intended).</p>
+  
+  <p>I assume that dropout was originally used in GPT-2 because it was inherited
+  from the original transformer architecture. Researchers likely noticed that
+  it does not really improve LLM performance (I observed the same in my
+  small-scale GPT-2 replication runs). This is likely because LLMs are typically
+  trained for only a single epoch over massive datasets, which is in contrast to
+  the multi-hundred-epoch training regimes for which dropout was first
+  introduced. So, since LLMs see each token only once during training, there is
+  little risk of overfitting.</p>
+</blockquote>
+
+<p>That makes quite a lot of sense.  My own understanding of dropout was that it was
+a bit broader than just preventing overfitting -- it seemed to me to be similar
+to the
+<a href="/2025/03/dropout-and-mandatory-vacation">mandatory vacation policies that financial firms user to prevent over-dependence on individuals</a>.
+My instinct was that having knowledge distributed across different weights in the
+model was good in and of itself, even beyond its benefit on multiple-epoch training.</p>
+
+<p>But it is quite a high price to pay.
+With the training parameters we've been using we're literally discarding 10% of our calculations' results --
+attention weights, feed-forward neuron activations, and so on -- as we do the forward pass.
+It's easy to see why it would harm training.</p>
+
+<p>Let's give it a go.</p>
+
+<h3 id="the-training-run">The training run</h3>
+
+<p>The nice thing about this one is that, unlike the gradient clipping experiment,
+I didn't have to write any new code.  The dropout level was already controlled by
+a setting in the <a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/main/runs/8xa100m40-remove-dropout/model.json"><code>model.json</code> file</a>,
+so by setting that to zero for this run, I could just kick it off and let it
+do its thing while I worked on something else:</p>
+
+<p>Here's what the training run chart looked like (please disregard the stuff about
+grad norms in the title and the axis -- I'll remove that for the next train):</p>
+
+<p><img src="/post-assets/llm-from-scratch-32c-interventions-removing-dropout/training-chart.png" alt="Training chart for zero-dropout run" title="Training chart for zero-dropout run" /></p>
+
+<p>As you can see, we still have loss spikes, including one just after global step 20,000
+that lasts for several checkpoint periods of 617 steps.  I imagine gradient clipping
+might have helped with that, but I'm very deliberately testing each intervention in
+isolation.</p>
+
+<p>At the end of the training run, we got this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Training complete in 11,376.067 seconds</span>
+<span class="go">Tokens seen: 3,260,252,160</span>
+<span class="go">Throughput: 286,589 tokens/second</span>
+<span class="go">Final train loss: 3.621</span>
+</code></pre>
+</div>
+
+<p>So, interestingly, it took 967 seconds -- about 16 minutes -- less time than the
+gradient clipping run, and about 15 minutes less than the baseline train.  So
+while gradient clipping added on a small amount of time (or maybe that was just noise),
+dropping dropout certainly seems to speed things up!  I guess there's quite a lot of
+work involved in generating and applying the random masks that drop things out as we're
+doing the forward pass.</p>
+
+<p>Anyway, with the model trained, it was time to download it,
+<a href="https://huggingface.co/gpjt/8xa100m40-remove-dropout">upload it to Hugging Face Hub</a>, and run the evals.</p>
+
+<h3 id="evals">Evals</h3>
+
+<p>Firstly, the smoke test, where it just needs to continue the sequence <code>Every effort moves you</code>,
+it came up with something reasonably coherent:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp">giles@perry:~/Dev/ddp-base-model-from-scratch (main)$ </span>uv<span class="w"> </span>run<span class="w"> </span>test_smoke.py<span class="w"> </span>runs/8xa100m40-remove-dropout/model.json<span class="w"> </span>runs/8xa100m40-remove-dropout/checkpoints/best/model.safetensors
+<span class="go">Every effort moves you to make the world a better place.</span>
+<span class="go">As an international student of the arts in the UK,</span>
+</code></pre>
+</div>
+
+<p>...but it was on the test of the loss on the training set that it was most impressive:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp">giles@perry:~/Dev/ddp-base-model-from-scratch (main)$ </span>uv<span class="w"> </span>run<span class="w"> </span>test_loss.py<span class="w"> </span>datasets/<span class="w"> </span>runs/8xa100m40-remove-dropout/model.json<span class="w"> </span>runs/8xa100m40-remove-dropout/checkpoints/best/model.safetensors
+<span class="go">Fetching 4 files: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4/4 [00:00&lt;00:00, 1086.75it/s]</span>
+<span class="go">100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 3200/3200 [04:54&lt;00:00, 10.87it/s]</span>
+<span class="go">Loss against our test dataset: 3.641</span>
+</code></pre>
+</div>
+
+<p>That's a bigger improvement on the baseline train's 3.692 than gradient clipping:
+0.051, which is more than three times the improvement!</p>
+
+<p>Let's start keeping a table of these:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test set loss</th>
+  <th>Improvement vs baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>8xa100m40-baseline</td>
+  <td>3.692</td>
+  <td>-</td>
+</tr>
+<tr>
+  <td>8xa100m40-gradient-clipping</td>
+  <td>3.678</td>
+  <td>0.014</td>
+</tr>
+<tr>
+  <td>8xa100m40-remove-dropout</td>
+  <td>3.641</td>
+  <td>0.051</td>
+</tr>
+</tbody>
+</table>
+
+<p>Now, of course, we don't know how these different interventions combine together --
+it would be naive to think that if we did both gradient clipping and dropout
+removal, we'd get a total loss reduction of 0.014 + 0.051 -- but, especially with that
+long-lived loss spike in our training run -- it does feel like they might play well
+together.</p>
+
+<h3 id="wrapping-up">Wrapping up</h3>
+
+<p>So, that's dropout covered.  Which one next?  I think a nice easy one that I should
+be able to get done on a Friday will be adding bias to the attention weight calculations.
+Let's give that a go and see if it makes things worse or better!</p>
+
+<p>Stay tuned...</p>
+
+<p><a href="/2026/02/llm-from-scratch-32d-interventions-adding-attention-bias">Here's a link to the next post in this series</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

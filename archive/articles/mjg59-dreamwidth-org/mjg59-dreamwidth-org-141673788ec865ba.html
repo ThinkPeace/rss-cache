@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How did IRC ping timeouts end up in a lawsuit? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How did IRC ping timeouts end up in a lawsuit?</h1>
+        <div class="meta">Matthew Garrett 2025-12-17T13:17:23Z</div>
+        <div class="links">
+          <a href="https://mjg59.dreamwidth.org/73777.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/mjg59-dreamwidth-org/mjg59-dreamwidth-org-141673788ec865ba.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I recently won a lawsuit against Roy and Rianne Schestowitz, the authors and publishers of the Techrights and Tuxmachines websites. The short version of events is that they were subject to an online harassment campaign, which they incorrectly blamed me for. They responded with a large number of defamatory online posts about me, which the judge described as…</div>
+        <div class="content">
+          I recently won <a href="https://caselaw.nationalarchives.gov.uk/ewhc/kb/2025/3063">a lawsuit</a> against Roy and Rianne Schestowitz, the authors and publishers of the Techrights and Tuxmachines websites. The short version of events is that they were subject to an online harassment campaign, which they incorrectly blamed me for. They responded with a large number of defamatory online posts about me, which the judge described as <q>unsubstantiated character assassination</q> and consequently awarded me significant damages. That's not what this post is about, as such. It's about the sole meaningful claim made that tied me to the abuse.<br /><br />In the defendants' <a href="https://codon.org.uk/~mjg59/case/Defence_Counterclaim.pdf">defence and counterclaim</a>[1], 15.27 asserts in part <q>The facts linking the Claimant to the sock puppet accounts include, on the IRC network: simultaneous dropped connections to the mjg59_ and elusive_woman accounts. This is so unlikely to be coincidental that the natural inference is that the same person posted under both names</q>. "elusive_woman" here is an account linked to the harassment, and "mjg59_" is me. This is actually a surprisingly interesting claim to make, and it's worth going into in some more detail.<br /><br />The event in question occurred on the <a href="https://web.archive.org/web/20231205031558/http://techrights.org/irc-archives/irc-log-techrights-280423.html#tApr%2028%2009:52:52">28th of April, 2023</a>. You can see a line reading <q><tt>*elusive_woman has quit (Ping timeout: 2m30s)</tt></q>, followed by one reading <q><tt>*mjg59_ has quit (Ping timeout: 2m30s)</tt></q>. The timestamp listed for the first is 09:52, and for the second 09:53. Is that actually simultaneous? We can actually gain some more information - if you hover over the timestamp links on the right hand side you can see that the link is actually accurate to the second even if that's not displayed. The first event took place at 09:52:52, and the second at 09:53:03. That's 11 seconds apart, which is clearly not simultaneous, but maybe it's close enough. Figuring out more requires knowing what a "ping timeout" actually means here.<br /><br />The IRC server in question is running <a href="https://ergo.chat/">Ergo</a> (link to <a href="https://github.com/ergochat/ergo">source code</a>), and the relevant function is <a href="https://github.com/ergochat/ergo/blob/v2.11.1/irc/client.go#L788">handleIdleTimeout()</a>. The logic here is fairly simple - track the time since activity was last seen from the client. If that time is longer than DefaultIdleTimeout (which defaults to 90 seconds) and a ping hasn't been sent yet, send a ping to the client. If a ping has been sent and the timeout is greater than DefaultTotalTimeout (which defaults to 150 seconds), disconnect the client with a "Ping timeout" message. There's no special logic for handling the ping reply - a pong simply counts as any other client activity and resets the "last activity" value and timeout.<br /><br />What does this mean? Well, for a start, two clients running on the same system will only have simultaneous ping timeouts if their last activity was simultaneous. Let's imagine a machine with two clients, A and B. A sends a message at 02:22:59. B sends a message 2 seconds later, at 02:23:01. The idle timeout for A will fire at 02:24:29, and for B at 02:24:31. A ping is sent for A at 02:24:29 and is responded to immediately - the idle timeout for A is now reset to 02:25:59, 90 seconds later. The machine hosting A and B has its network cable pulled out at 02:24:30. The ping to B is sent at 02:24:31, but receives no reply. A minute later, at 02:25:31, B quits with a "Ping timeout" message. A ping is sent to A at 02:25:59, but receives no reply. A minute later, at 02:26:59, A quits with a "Ping timeout" message. Despite both clients having their network interrupted simultaneously, the ping timeouts occur 88 seconds apart.<br /><br />So, two clients disconnecting with ping timeouts 11 seconds apart is not incompatible with the network connection being interrupted simultaneously - depending on activity, simultaneous network interruption may result in disconnections up to 90 seconds apart. But another way of looking at this is that network interruptions may occur up to 90 seconds apart and generate simultaneous disconnections[2]. Without additional information it's impossible to determine which is the case.<br /><br />This already casts doubt over the assertion that the disconnection was simultaneous, but if this is unusual enough it's still potentially significant. Unfortunately for the Schestowitzes, even looking just at the elusive_woman account, there were several cases where elusive_woman and another user had a ping timeout within 90 seconds of each other - including one case where elusive_woman and schestowitz[TR] disconnect <a href="http://web.archive.org/web/20230927043802/http://techrights.org/irc-archives/irc-log-techrights-190323.html#tMar%2019%2014:27:53">40 seconds apart</a>. By the Schestowitzes argument, it's also a natural inference that elusive_woman and schestowitz[TR] (one of Roy Schestowitz's accounts) are the same person.<br /><br />We didn't actually need to make this argument, though. In England it's necessary to file a witness statement describing the evidence that you're going to present in advance of the actual court hearing. Despite being warned of the consequences on multiple occasions the Schestowitzes never provided any witness statements, and as a result weren't allowed to provide any evidence in court, which made for a fairly foregone conclusion.<br /><br />[1] As well as defending themselves against my claim, the Schestowitzes made a counterclaim on the basis that I had engaged in a campaign of harassment against them. This counterclaim failed.<br /><br />[2] Client A and client B both send messages at 02:22:59. A falls off the network at 02:23:00, has a ping sent at 02:24:29, and has a ping timeout at 02:25:29. B falls off the network at 02:24:28, has a ping sent at 02:24:29, and has a ping timeout at 02:25:29. Simultaneous disconnects despite over a minute of difference in the network interruption.<br /><br /><img src="https://www.dreamwidth.org/tools/commentcount?user=mjg59&ditemid=73777" width="30" height="12" alt="comment count unavailable"/> comments
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

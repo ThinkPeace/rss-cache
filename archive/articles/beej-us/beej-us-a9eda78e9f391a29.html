@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rust RPN Calculator | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Rust RPN Calculator</h1>
+        <div class="meta">Beej&#x27;s Bit Bucket 2025-10-24T00:00:00Z</div>
+        <div class="links">
+          <a href="http://beej.us/blog/data/rust-rpn-calc/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/beej-us/beej-us-a9eda78e9f391a29.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Another Rust rabbit hole digging into some RPN calculator code.</div>
+        <div class="content">
+          <html>
+  <body><p>2025-10-24</p><h1>Implementing an RPN Calculator in Rust</h1><p><graphic src="images/hp48g.jpg" alt="HP-48G calculator"/><a href="https://en.wikipedia.org/wiki/HP_48_series">HP-48G</a> RPN calculator. This is what I used in college back in 1872.</p><p>Welcome back to another edition of Rust Rabbit Holes wherein I attempt to learn a thing or two about Rust by implementing something and poking around. As usual, since I'm far from a Rust expert, I highly value learned feedback if you have it.</p><p>The intention is that you just read this through. It's not focused on how to do any one particular thing. It's just train-of-thought exploration.</p><p>Today we're going to implement a
+<a href="https://en.wikipedia.org/wiki/Reverse_Polish_notation">postfix</a> (AKA
+Reverse Polish Notation, AKA RPN) calculator.</p><p>This is inextricably tied to the concept of the <a href="https://en.wikipedia.org/wiki/Stack_(abstract_data_type)">stack abstract data
+type</a> so read
+up on that if you have to. We're gonna push and pop!</p><h2>Quick Background</h2><p>You're going to be given a list of numbers and operators that look like this:</p><pre><pre>4 3 +
+</pre></pre>
+<p>Reading from left to right, if the item is a number, push it on the stack.</p><p>If the item is an operator (we'll stick with <pre>+</pre> and <pre>-</pre>), pop the two
+previous numbers off the stack, perform the operation on them to get a
+result, and push the result on the stack.</p><p>So reading the above, we get:</p><pre><pre>4: push 4 on the stack
+
+3: push 3 on the stack
+
++: pop 3 off the stack,
+   pop 4 off the stack,
+   add 3 + 4 to get 7,
+   push 7 on the stack
+</pre></pre>
+<p>When we're done with the input, we do this:</p><pre><pre>pop the stack
+print that value out
+</pre></pre>
+<p>Which in our example would print <pre>7</pre>. Which, happily, is <pre>4+3</pre>.</p><p>In regular algebraic notation, we might have an expression that looks like this:</p><p>$$(3+10)-(1+7)$$</p><p>But with RPN we don't have parentheses; you just have to put stuff on the stack in the correct order.</p><p>We definitely want at least this for the above expression:</p><pre><pre>3 10 +
+</pre></pre>
+<p>And when we do that, we'll have <pre>[13]</pre> on the stack. We can just leave
+that there for later, though, and do more math.</p><pre><pre>3 10 + 1 7 +
+</pre></pre>
+<p>After that, we'll have <pre>[13, 8]</pre> on the stack. Which, if you'll notice,
+are the numbers we want to get the difference between in the original
+expression. So let's just take the difference:</p><pre><pre>3 10 + 1 7 + -
+</pre></pre>
+<p>Again read it from left to right. If it's a number: push. If it's an operator: pop, pop, do math, push result.</p><pre><pre>3:  push 3, stack is [3]
+
+10: push 10, stack is [3, 10]
+
++:  pop 10, stack is [3]
+    pop 3, stack is []
+    add 3 + 10 to get 13
+    push 13, stack is [13]
+
+1:  push 1, stack is [13, 1]
+
+7:  push 7, stack is [13, 1, 7]
+
++:  pop 7, stack is [13, 1]
+    pop 1, stack is [13]
+    add 1 + 7 to get 8
+    push 8, stack is [13, 8]
+
+-:  pop 8, stack is [13]
+    pop 13, stack is []
+    subtract 13 - 8 to get 5
+    push 5, stack is [5]
+</pre></pre>
+<p>And after that we'll have <pre>[5]</pre> on the stack. And if that's the last
+operation, we'll pop the <pre>5</pre> and print it out for the answer.</p><h2>The First Stab</h2><p>This one works. We'll break it down a bit, below, and try to improve it.</p><pre><pre>fn main() {
+    let args: Vec&lt;String&gt; = std::env::args().collect();
+    let mut stack: Vec&lt;i64&gt; = Vec::new();
+
+    for a in &amp;args[1..] {
+        match a.parse::&lt;i64&gt;() {
+            Ok(n) =&gt; stack.push(n),
+            Err(_) =&gt; match a.as_str() {
+                "+" =&gt; {
+                    let o2 = stack.pop().unwrap();
+                    let o1 = stack.pop().unwrap();
+                    stack.push(o1 + o2);
+                }
+                "-" =&gt; {
+                    let o2 = stack.pop().unwrap();
+                    let o1 = stack.pop().unwrap();
+                    stack.push(o1 - o2);
+                }
+                _ =&gt; {
+                    println!("unknown operator {}", a);
+                    std::process::exit(1);
+                }
+            },
+        }
+    }
+
+    let result = stack.pop().unwrap();
+    println!("{}", result);
+}
+</pre></pre>
+<p>An example run:</p><pre><pre>$ cargo run 3 10 + 1 7 + -
+   Compiling rpncalc v0.1.0 (/home/beej/src/rust/rpncalc)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running `/home/beej/src/rust/rpncalc/target/debug/rpncalc 3 10 + 1 7 + -`
+5
+</pre></pre>
+<p>And there's my <pre>5</pre> at the end!</p><p><a href="https://doc.rust-lang.org/clippy/usage.html">Clippy</a> gives its seal of
+approval. But I'm not completely happy.</p><h2>Command Line Arguments</h2><p>As we see, the command line arguments accessed with the
+<a href="https://doc.rust-lang.org/beta/std/env/fn.args.html"> std::env::args()</a>
+function.</p><p>This returns an <a href="https://doc.rust-lang.org/beta/std/env/struct.Args.html"> Args
+struct</a> that
+implements
+</p><p><a href="https://doc.rust-lang.org/beta/std/iter/trait.Iterator.html">, so we can do all kinds of iterator-y stuff with it, including</a></p><pre>Iterator</pre><pre>collect()</pre>ing it into a vector. Which I've done:<pre><pre>let args: Vec&lt;String&gt; = std::env::args().collect();
+</pre></pre>
+<p>What that does is take the <pre>Args</pre> iterator and turn it into a <pre>Vec</pre> so I
+can more easily index it.</p><p>Notably, I don't want the element at index 0 because that's the name of the executable (typically). But I do want the items at indexes 1-to-the-end. And I do that by getting a slice, like so:</p><pre><pre>fn main() {
+    let args: Vec&lt;String&gt; = std::env::args().collect();
+
+    for a in &amp;args[1..] {
+</pre></pre>
+<p>But I'm not super happy with that. I just want to iterate once over the
+command line arguments, and I'm doing it twice. (Once for the
+<pre>collect()</pre> and one for the <pre>for</pre>-loop.)</p><p>We'll steal something from the <a href="https://beej.us/blog/data/rust-trait-impl/">previous blog
+entry</a> and manually run
+through the iterator.</p><p>And we'll discard the command name (the zero-th argument) before we start the loop.</p><p>This also works:</p><pre><pre>fn main() {
+    let mut args = std::env::args();
+
+    let _ = args.next();  // strip off the command name
+
+    while let Some(a) = args.next() {
+</pre></pre>
+<p>And that's only one iteration through the arguments.</p><p>But it's really just longhand for using an <pre>for</pre>-<pre>in</pre> loop:</p><pre><pre>fn main() {
+    let mut args = std::env::args();
+
+    let _ = args.next();  // strip off the command name
+
+    for a in args {
+</pre></pre>
+<p>Happier, still!</p><h2>Calling The Rabbit Hole Collect</h2><p>Before the above refactor, we were doing this, and recall that <pre>args()</pre>
+returns an <pre>Args</pre> structure that implements <pre>Iterator</pre>:</p><pre><pre>let args: Vec&lt;String&gt; = std::env::args().collect();
+</pre></pre>
+<p>Question: why do I have to specify the type of the <pre>args</pre> variable? Why
+can't Rust figure it out? Let's dig in.</p><p>The <pre>collect()</pre> method is interesting in that it has no idea what type
+of thing to collect into. It's a generic method.</p><pre><pre>fn collect&lt;B&gt;(self) -&gt; B
+where
+    B: FromIterator&lt;Self::Item&gt;,
+    Self: Sized,
+</pre></pre>
+<p><pre>Self: Sized</pre> means the thing being collected, <pre>Args</pre>, needs to be
+<a href="https://doc.rust-lang.org/std/marker/trait.Sized.html"> Sized</a>,
+meaning that it has a compile-time known size. So here </p><pre>Self</pre> refers to
+<pre>Args</pre>, the thing on which <pre>.collect()</pre> is being called. And from what I
+can tell it's important to be <pre>Sized</pre> when moving ownership for
+generating code for which the size needs to be known, e.g. stack space.<p>The important bit is <pre>B: FromIterator&lt;Self::Item&gt;</pre>. This means whatever
+we're collecting into, <pre>B</pre>, needs to implement
+<pre>FromIterator&lt;Self::Item&gt;</pre>. Hmm!</p><p>Okay, <pre>B</pre> in this case is <pre>Vec&lt;String&gt;</pre> because that's the type we used.
+Does it implement <pre>FromIterator&lt;Self::Item&gt;</pre>?</p><p>Well, <a href="https://doc.rust-lang.org/std/vec/struct.Vec.html#impl-FromIterator%3CT%3E-for-Vec%3CT%3E"> Vec implements
+FromIterator&lt;T&gt;</a>
+according to the documentation. So that's good. This is the trait that
+allows it to be collected—anything implementing this trait is eligible
+(as long as it's </p><pre/><pre>Sized</pre>).<p>What's <pre>Self::Item</pre>? We saw <pre>Self</pre> referred to the <pre>Args</pre> type. Where is
+<pre>Item</pre> and what is it?</p><p>If we look at the source for
+<a href="https://doc.rust-lang.org/beta/std/iter/trait.Iterator.html"> Iterator</a>,
+we see this at the top:</p><pre><pre>pub trait Iterator {
+    type Item;         // ← There it is!
+
+    // Required method
+    fn next(&amp;mut self) -&gt; Option&lt;Self::Item&gt;;
+</pre></pre>
+<p>What is this <pre>type Item</pre> stuff in the trait? Turns out that's an
+<a href="https://doc.rust-lang.org/book/ch20-02-advanced-traits.html#specifying-placeholder-types-in-trait-definitions-with-associated-types">associated
+type</a>,
+a way of bundling some additional type information along with an
+implementation of the trait. For example, I might be making my own
+iterator that implements <pre>Iterator</pre> over the type I happen to be using,
+say <pre>u64</pre>. In that case, I could do this:</p><pre><pre>impl Iterator for MyStruct {
+    type Item = u64;
+
+    //...
+}
+</pre></pre>
+<p>Now if someone uses a <pre>MyStruct</pre> as an iterator, the type held within
+(<pre>u64</pre>) is automatically bundled along with the iterator. If we didn't
+have this, we'd have to add it as another generic type. That's a lot
+less ergonomic, among other things.</p><blockquote><p>More reading:</p></blockquote><p>Sure enough, if we <a href="https://doc.rust-lang.org/beta/src/std/env.rs.html#867-889">look at the  Args
+source</a>, we
+see:</p><pre><pre>impl Iterator for Args {
+    type Item = String;
+</pre></pre>
+<p>There we go.</p><p>So, to answer my question, I have to specify the type as <pre>Vec&lt;String&gt;</pre>
+and then Rust can figure out <pre>Item</pre> from the type we're assigning into.
+If we left the type off, it would be an error because... Rust doesn't
+know what the type of <pre>Item</pre> is?</p><p>No, wait. Rust has that information. <pre>args()</pre> returns an <pre>Args</pre>, which
+implements <pre>Iterator</pre> with <pre>type Item = String</pre>. It knows it's getting
+<pre>String</pre>s out of it.</p><p>What it doesn't know is that I want this in a <pre>Vec</pre>! All <pre>collect()</pre>
+knows, in this case, is that it's collecting into something that
+implements <pre>FromIterator&lt;String&gt;</pre>. That could be a <pre>Vec</pre> or it could be
+an <pre>Antelope</pre>. So we have to say:</p><pre><pre>let args: Vec&lt;String&gt; = std::env::args().collect();
+</pre></pre>
+<p>Actually, since it knows the <pre>String</pre> part, we can just let the compiler
+fill that in, too. We only need <pre>Vec</pre>. Here's how:</p><pre><pre>let args: Vec&lt;_&gt; = std::env::args().collect();
+</pre></pre>
+<p>All that said, we could also do it the other way and tell <pre>collect()</pre> exactly what
+type to use. That uses <a href="https://doc.rust-lang.org/std/iter/trait.Iterator.html#method.collect">turbo
+fish</a>
+notation (<pre>::&lt;&gt;</pre>):</p><pre><pre>let args = std::env::args().collect::&lt;Vec&lt;String&gt;&gt;();
+let args = std::env::args().collect::&lt;Vec&lt;_&gt;&gt;();      // Or this
+</pre></pre>
+<p>I didn't have to give <pre>args</pre> a type; the compiler infers it from the
+right hand side. Let's look at <pre>collect()</pre> again:</p><pre><pre>fn collect&lt;B&gt;(self) -&gt; B
+</pre></pre>
+<p>What the turbo fish does is it sets type that <pre>B</pre> is. Earlier, with the
+type <pre>Vec&lt;String&gt;</pre> attached to <pre>args</pre>, the compiler could fill <pre>B</pre> in
+itself, inferring it from the type of <pre>args</pre>. Now, with <pre>Vec&lt;String&gt;</pre>
+attached to the <pre>collect()</pre>, the compiler can infer the type of <pre>args</pre>
+in that direction.</p><p>Same thing, different way. Personally I prefer the type attached to the variable for readability, but that's just me.</p><p>We could do both:</p><pre><pre>let args: Vec&lt;String&gt; = std::env::args().collect::&lt;Vec&lt;String&gt;&gt;();
+</pre></pre>
+<p>but that's just redundantly redundant.</p><h2>Parsing Tokens</h2><p>There are two kinds of tokens in our RPN calculator: numbers and operators. We'll differentiate by trying to parse it as a number, then, if that fails, trying to see if it's a valid token.</p><p>Here's how to parse a string into a type like we did with <pre>.parse()</pre> in
+the original code at the top of the page. Keep in mind that <pre>a</pre> is a
+<pre>String</pre>, so <pre>.parse&lt;F&gt;()</pre> must be a method on <pre>String</pre>, and it is.</p><pre><pre>match a.parse::&lt;i64&gt;() {
+</pre></pre>
+<p>And there's the turbo fish again. In this case we're not doing an assignment so we can't specify a type on the left, and we're forced to use it. Let's dig a bit into these traits.</p><p>This is what we have for <pre>parse()</pre>:</p><pre><pre>pub fn parse&lt;F&gt;(&amp;self) -&gt; Result&lt;F, &lt;F as FromStr&gt;::Err&gt;
+where
+    F: FromStr,
+</pre></pre>
+<p>So the type we specify in the turbo fish has to implement <pre>FromStr</pre>.
+Does <pre>i64</pre> do that? <a href="https://doc.rust-lang.org/std/primitive.i64.html#impl-FromStr-for-i64">Yes, it
+does</a>.
+Lots of things do.</p><p>This is interesting to me because it means that all the individual types
+that implement <pre>FromStr</pre> handle their own parsing. Floats will do their
+parsing independent of the integers that do theirs.</p><p>This actually makes the <pre>parse()</pre> code in <pre>String</pre> dirt-simple:</p><pre><pre>pub fn parse&lt;F: FromStr&gt;(&amp;self) -&gt; Result&lt;F, F::Err&gt; {
+    FromStr::from_str(self)
+}
+</pre></pre>
+<p>That's it. All we need to do is somehow specify what <pre>&lt;F&gt;</pre> is and the
+appropriate <pre>from_str()</pre> method is called.</p><h2>Using the Stack and Errors</h2><p>So we try to parse the number, and if that works, we push it on the stack, otherwise we start checking to see if the argument is an operator. If it is an operator, we pop the operands, do the operation, and push the result on the stack.</p><pre><pre>Ok(n) =&gt; stack.push(n),          // parse() succeded
+Err(_) =&gt; match a.as_str() {     // parse() failed
+    "+" =&gt; {
+        let o2 = stack.pop().unwrap();
+        let o1 = stack.pop().unwrap();
+        stack.push(o1 + o2);
+    }
+</pre></pre>
+<p>We have those pesky <pre>unwrap()</pre> calls in there. These operate on
+<pre>Option</pre>s or <pre>Result</pre>s and try to get to the <pre>Ok()</pre> or <pre>Some()</pre> that's
+embedded within them. If it's <pre>Err()</pre> or <pre>None</pre>, <pre>unwrap()</pre> will crash
+the program. It's pretty heavy-handed and crashes are typically not a
+desirable quality in any given piece of software.</p><p>I can force this to happen by computing <pre>1 +</pre>. (That'll try to pop two
+things off the stack, but there's only one, so the second <pre>pop()</pre> will
+return <pre>None</pre> and <pre>unwrap()</pre> will bomb out at that point.)</p><pre><pre>$ cargo run 1 +
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running `/home/beej/src/rust/rpncalc/target/debug/rpncalc 1 +`
+
+thread 'main' panicked at src/main.rs:14:42:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+</pre></pre>
+<p>So it's not super-robust.</p><p>We could nest more <pre>match</pre>es, or push these into functions (would
+certainly be better than nesting). We could also use <pre>if let</pre>, but this
+is positively obnoxious:</p><pre><pre>let mut o1 = 0i64;
+let mut o2 = 0i64;
+
+if let Some(t) = stack.pop() {
+    o2 = t;
+} else {
+    println!("missing argument");
+}
+if let Some(t) = stack.pop() {
+    o1 = t;
+} else {
+    println!("missing argument");
+}
+
+stack.push(o1 + o2);
+</pre></pre>
+<p>We can actually clean that up with a tuple assignment like so:</p><pre><pre>if let (Some(o2), Some(o1)) = (stack.pop(), stack.pop()) {
+    stack.push(o1 + o2);
+} else {
+    println!("missing argument");
+}
+</pre></pre>
+<p>Those <pre>stack.pop()</pre> calls definitely have side-effects, so they'd better
+be in the right order! Rust guarantees left-to-right evaluation in the
+tuple, so that should be fine.</p><p>That's cleaner for sure, and we got rid of some of our <pre>unwrap()</pre>s and
+put in some rudimentary error handling.</p><p>But can we do better? Maybe it's best to restructure this to flatten it out a bit.</p><p>We could check to see if we got a number, and if we did, push it and continue.</p><p>Otherwise, we could do our match.</p><pre><pre>for a in args {
+
+    if let Ok(n) = a.parse::&lt;i64&gt;() {
+        stack.push(n);
+        continue;  // next iteration
+    }
+
+    match a.as_str() {
+        "+" =&gt; {
+            if let (Some(o2), Some(o1)) = (stack.pop(), stack.pop()) {
+                stack.push(o1 + o2);
+            } else {
+                println!("missing argument");
+            }
+        }
+</pre></pre>
+<p>That gets rid of the <pre>match</pre>-in-<pre>match</pre> nesting. Nothing particularly
+Rusty, here—just some run-of-the-mill restructuring.</p><p>But I have some repeated code in that <pre>match</pre>.</p><pre><pre>match a.as_str() {
+    "+" =&gt; {
+        if let (Some(o2), Some(o1)) = (stack.pop(), stack.pop()) {
+            stack.push(o1 + o2);
+        } else {
+            println!("missing argument");
+        }
+    }
+    "-" =&gt; {
+        if let (Some(o2), Some(o1)) = (stack.pop(), stack.pop()) {
+            stack.push(o1 - o2);
+        } else {
+            println!("missing argument");
+        }
+    }
+</pre></pre>
+<p>And if we add more operators, it's just going to get worse. I want some general code to pop two things, perform some operation, and then push them. One way to do this is with an anonymous function, which is called a closure in Rust and some other languages.</p><p>Here's how this might work:</p><pre><pre>match a.as_str() {
+    "+" =&gt; math_op(&amp;mut stack, |x, y| x + y),
+    "-" =&gt; math_op(&amp;mut stack, |x, y| x - y),
+    _ =&gt; {
+        println!("unknown operator {}", a);
+        std::process::exit(1);
+    }
+</pre></pre>
+<p>Oooo... so much cleaner! But what is this?</p><pre><pre>math_op(&amp;mut stack, |x, y| x + y)
+</pre></pre>
+<p><pre>math_op()</pre> is (will be) a function that takes two arguments. The first
+is a mutable reference to the stack. The second is a closure—it's a
+function that accepts two arguments (in parameters <pre>x</pre> and <pre>y</pre>) and
+returns the result of the expression after it. (Nothing magical about
+the return; <pre>x+y</pre> is the last line in the closure, so it takes on the
+return value.)</p><p>All that's left is to code up the <pre>math_op()</pre> function. Great. We'll use
+parameter <pre>f</pre> to represent the closure function.</p><pre><pre>fn math_op(stack: &amp;mut Vec, f ...
+</pre></pre>
+<p>What type is that? Well, we could rabbit hole on this one, but I don't want to get too far off track. Here's my understanding, which is somewhat incomplete.</p><p>Rust has a trait, <pre>FnOnce</pre>, that represents a function (meant to be
+called once). Closures implement this trait.</p><p>In this case, we know we know our closure implements this in particular:</p><pre><pre>FnOnce(i64, i64) -&gt; i64
+</pre></pre>
+<p>Our closures take two <pre>i64</pre>s as arguments and return an <pre>i64</pre>.</p><p>We might be tempted to:</p><pre><pre>fn math_op(stack: &amp;mut Vec, f: FnOnce(i64, i64) -&gt; i64) // NOPE
+</pre></pre>
+<p>But that won't compile. <pre>FnOnce</pre> is a trait, not a type. But we can
+certainly use generics to enforce it!</p><pre><pre>fn math_op&lt;A&gt;(stack: &amp;mut Vec, f: A)
+where
+    A: FnOnce(i64, i64) -&gt; i64,
+</pre></pre>
+<p>Which says the second argument <pre>f</pre> is of generic type <pre>A</pre> where <pre>A</pre> is
+required to implement <pre>FnOnce(i64, i64) -&gt; i64</pre>. Which our closures do.</p><p>So the <pre>math_op()</pre> function will look like this:</p><pre><pre>fn math_op&lt;A&gt;(stack: &amp;mut Vec&lt;i64&gt;, f:A)
+where
+    A: FnOnce(i64, i64) -&gt; i64,
+{
+    if let (Some(o2), Some(o1)) = (stack.pop(), stack.pop()) {
+        let result = f(o1, o2);
+        stack.push(result);
+    } else {
+        println!("missing argument");
+    }
+}
+</pre></pre>
+<p>And we can call it like we planned:</p><pre><pre>match a.as_str() {
+    "+" =&gt; math_op(&amp;mut stack, |x, y| x + y),
+    "-" =&gt; math_op(&amp;mut stack, |x, y| x - y),
+</pre></pre>
+<p>Slick!</p><p>One final rabbit hole fun fact for the section is that all functions
+actually implement <pre>FnOnce</pre>. So I could have a completely separate
+function like this:</p><pre><pre>fn subtract(x: i64, y: i64) -&gt; i64 {
+    x - y
+}
+</pre></pre>
+<p>and then use it in my <pre>match</pre>:</p><pre><pre>match a.as_str() {
+    "+" =&gt; math_op(&amp;mut stack, |x, y| x + y),
+    "-" =&gt; math_op(&amp;mut stack, subtract),     // Works!
+</pre></pre>
+<p>All kinds of fun with function pointers! Woot! This goes down a path to visit on another day.</p><h2>Get Some Results</h2><p>I'm almost happy with that, but really <pre>math_op()</pre> should be returning
+some kind of <pre>Result</pre> instead of printing the error message. But then
+don't we have to handle that in the caller and mess up all our clean
+code?</p><p>Yes... But maybe there's a way. Right now it's all in one big main, but
+we could break out the main code into another function, and that
+function could just propagate the error back to <pre>main()</pre> which could
+handle it. That makes sense in this case since invalid operands should
+be completely fatal to the run.</p><p>But can we get our hands on that <pre>Result</pre> and check it another way?</p><p>Coming from other languages, I forget that in Rust <pre>match</pre> (and other)
+statements can act as expressions and we can "return" things from them.</p><p>Let's change the <pre>math_op()</pre> to return a <pre>Result</pre>:</p><pre><pre>fn math_op&lt;A&gt;(stack: &amp;mut Vec&lt;i64&gt;, f: A) -&gt; Result&lt;(), &amp;'static str&gt;
+where
+    A: FnOnce(i64, i64) -&gt; i64,
+{
+    if let (Some(o2), Some(o1)) = (stack.pop(), stack.pop()) {
+        let result = f(o1, o2);
+        stack.push(result);
+        Ok(())
+    } else {
+        Err("missing argument")
+    }
+}
+</pre></pre>
+<p>And now when we use it in the <pre>match</pre> and then see if the <pre>Result</pre> holds
+an <pre>Err</pre> after that:</p><pre><pre>let result = match a.as_str() {
+    "+" =&gt; math_op5(&amp;mut stack, |x, y| x + y),
+    "-" =&gt; math_op5(&amp;mut stack, |x, y| x - y),
+    _ =&gt; Err("unknown operator"),
+};
+
+if let Err(e) = result {
+    eprintln!("Error: {} at token {}", e, a);
+    std::process::exit(1);
+}
+</pre></pre>
+<p>Now it's a little beefier.</p><h2>The Final Code</h2><p>I'd throw this in the <a href="https://play.rust-lang.org/">Rust Playground</a>,
+but it apparently doesn't support command line arguments. So here it is.</p><pre><pre>fn math_op&lt;A&gt;(stack: &amp;mut Vec&lt;i64&gt;, f: A) -&gt; Result&lt;(), &amp;'static str&gt;
+where
+    A: FnOnce(i64, i64) -&gt; i64,
+{
+    if let (Some(o2), Some(o1)) = (stack.pop(), stack.pop()) {
+        let result = f(o1, o2);
+        stack.push(result);
+        Ok(())
+    } else {
+        Err("missing argument")
+    }
+}
+
+fn main() {
+    let mut args = std::env::args();
+    let mut stack: Vec&lt;i64&gt; = Vec::new();
+
+    let _ = args.next();
+
+    for a in args {
+        if let Ok(n) = a.parse::&lt;i64&gt;() {
+            stack.push(n);
+            continue; // next iteration
+        }
+
+        let result = match a.as_str() {
+            "+" =&gt; math_op(&amp;mut stack, |x, y| x + y),
+            "-" =&gt; math_op(&amp;mut stack, |x, y| x - y),
+            _ =&gt; Err("unknown operator"),
+        };
+
+        if let Err(e) = result {
+            eprintln!("Error: {} at token {}", e, a);
+            std::process::exit(1);
+        }
+    }
+
+    if let Some(result) = stack.pop() {
+        println!("{}", result);
+    } else {
+        eprintln!("Error: empty stack");
+        std::process::exit(2);
+    }
+}
+</pre></pre>
+<p>Good rabbit holes in this one.</p><h2>Further Reading</h2><p>If you really want to learn more fun things about RPN math, read up on
+<a href="https://en.wikipedia.org/wiki/Shunting_yard_algorithm">The Shunting Yard
+algorithm</a> which
+takes a "regular" algebraic expression in infix notation and converts
+it to the postfix notation we used in this blog.</p><h2>Comments</h2><p><a href="https://mastodon.sdf.org/@beejjorgensen/115432898842626559">View Comments</a></p><p><a href="https://mastodon.sdf.org/@beejjorgensen/115432898842626559">Reply</a></p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>the core of rust | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>the core of rust</h1>
+        <div class="meta">the website of jyn 2025-08-21T00:00:00Z</div>
+        <div class="links">
+          <a href="https://jyn.dev/the-core-of-rust/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jyn-dev/jyn-dev-fe0e5e674bdf67de.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">within Rust is a smaller language struggling to get out</div>
+        <div class="content">
+          <p><strong>NOTE: this is not a rust tutorial.</strong></p>
+<figure>
+<blockquote cite="https://donsz.nl/">
+<p>Every year it was an incredible challenge to fit teaching Rust into lectures since you basically need all the concepts right from the start to understand a lot of programs. I never knew how to order things. The flip side was that usually when you understand all the basic components in play lots of it just fits together. i.e. there's some point where the interwovenness turns from a barrier into something incredibly valuable and helpful.</p>
+</blockquote>
+<figcaption>
+<cite ><a href="https://donsz.nl/">Jana Dönszelmann</a></cite>
+</figcaption>
+</figure>
+<h2 id="vision">Vision<a class="zola-anchor" href="#vision" aria-label="Anchor link for: vision"></a>
+</h2>
+<p>One thing I admire in a language is a strong vision. <a href="https://www.uiua.org/">Uiua</a>, for example, has a very strong vision: what does it take to eliminate all local named variables from a language? <a href="https://ziglang.org/">Zig</a> similarly has a strong vision: explicit, simple language features, easy to cross compile, drop-in replacement for C.</p>
+<p>Note that you don’t have to agree with a language’s vision to note that it <em>has</em> one. I expect most people to find Uiua unpleasant to program in. That’s fine. You are not the target audience.</p>
+<p>There’s a famous quote by Bjarne Strousup that goes “Within C++, there is a much smaller and cleaner language struggling to get out.” Within Rust, too, there is a much smaller and cleaner language struggling to get out: one with a clear vision, goals, focus. One that is coherent, because its features <em>cohere</em>. This post is about that language.</p>
+<hr />
+<h2 id="learning-rust-requires-learning-many-things-at-once">Learning Rust requires learning many things at once<a class="zola-anchor" href="#learning-rust-requires-learning-many-things-at-once" aria-label="Anchor link for: learning-rust-requires-learning-many-things-at-once"></a>
+</h2>
+<p>Rust is hard to learn. Not for lack of trying—many, many people have spent person-years on improving the diagnostics, documentation, and APIs—but because it’s complex. When people first learn the language, they are learning many different interleaving concepts:</p>
+<ul>
+<li>first class functions</li>
+<li>enums</li>
+<li>pattern matching</li>
+<li>generics</li>
+<li>traits</li>
+<li>references</li>
+<li>the borrow checker</li>
+<li><code>Send</code>/<code>Sync</code></li>
+<li><code>Iterator</code>s</li>
+</ul>
+<p>These concepts interlock. It is very hard to learn them one at a time because they interact with each other, and each affects the design of the others. Additionally, the standard library uses all of them heavily.</p>
+<p>Let’s look at a Rust program that does something non-trivial:<sup class="footnote-reference" id="fr-1-1"><a href="#fn-1">1</a></sup></p>
+<pre data-lang="rust" class="language-rust z-code"><code class="language-rust" data-lang="rust"><span class="z-source z-rust"><span class="z-keyword z-operator z-rust">#</span><span class="z-keyword z-operator z-logical z-rust">!</span><span class="z-keyword z-operator z-arithmetic z-rust">/</span>usr<span class="z-keyword z-operator z-arithmetic z-rust">/</span>bin<span class="z-keyword z-operator z-arithmetic z-rust">/</span>env <span class="z-keyword z-operator z-arithmetic z-rust">-</span>S cargo <span class="z-keyword z-operator z-arithmetic z-rust">-</span>Zscript
+</span><span class="z-source z-rust"><span class="z-keyword z-operator z-arithmetic z-rust">-</span><span class="z-keyword z-operator z-arithmetic z-rust">-</span><span class="z-keyword z-operator z-arithmetic z-rust">-</span>
+</span><span class="z-source z-rust">package<span class="z-punctuation z-accessor z-dot z-rust">.</span>edition <span class="z-keyword z-operator z-assignment z-rust">=</span> <span class="z-string z-quoted z-double z-rust"><span class="z-punctuation z-definition z-string z-begin z-rust">&quot;</span>2024<span class="z-punctuation z-definition z-string z-end z-rust">&quot;</span></span>
+</span><span class="z-source z-rust"><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">[</span>dependencies<span class="z-punctuation z-section z-group z-end z-rust">]</span></span>
+</span><span class="z-source z-rust">notify <span class="z-keyword z-operator z-assignment z-rust">=</span> <span class="z-string z-quoted z-double z-rust"><span class="z-punctuation z-definition z-string z-begin z-rust">&quot;</span>=8.2.0<span class="z-punctuation z-definition z-string z-end z-rust">&quot;</span></span>
+</span><span class="z-source z-rust"><span class="z-keyword z-operator z-arithmetic z-rust">-</span><span class="z-keyword z-operator z-arithmetic z-rust">-</span><span class="z-keyword z-operator z-arithmetic z-rust">-</span>
+</span><span class="z-source z-rust"><span class="z-keyword z-other z-rust">use</span> <span class="z-meta z-path z-rust">std<span class="z-punctuation z-accessor z-rust">::</span></span><span class="z-meta z-path z-rust">path<span class="z-punctuation z-accessor z-rust">::</span></span>Path<span class="z-punctuation z-terminator z-rust">;</span>
+</span><span class="z-source z-rust"><span class="z-keyword z-other z-rust">use</span> <span class="z-meta z-path z-rust">notify<span class="z-punctuation z-accessor z-rust">::</span></span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>RecursiveMode<span class="z-punctuation z-separator z-rust">,</span> Watcher</span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-function z-rust"><span class="z-storage z-type z-function z-rust">fn</span> </span><span class="z-entity z-name z-function z-rust">main</span></span><span class="z-meta z-function z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-begin z-rust">(</span></span><span class="z-meta z-function z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-end z-rust">)</span></span></span></span><span class="z-meta z-function z-rust"> <span class="z-meta z-function z-return-type z-rust"><span class="z-punctuation z-separator z-rust">-&gt;</span> <span class="z-meta z-generic z-rust"><span class="z-support z-type z-rust">Result</span><span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-punctuation z-section z-group z-end z-rust">)</span>, <span class="z-meta z-path z-rust">notify<span class="z-punctuation z-accessor z-rust">::</span></span>Error<span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span></span> </span><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust">    <span class="z-storage z-type z-rust">let</span> paths <span class="z-keyword z-operator z-assignment z-rust">=</span> <span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">[</span><span class="z-string z-quoted z-double z-rust"><span class="z-punctuation z-definition z-string z-begin z-rust">&quot;</span>pages<span class="z-punctuation z-definition z-string z-end z-rust">&quot;</span></span><span class="z-punctuation z-separator z-rust">,</span> <span class="z-string z-quoted z-double z-rust"><span class="z-punctuation z-definition z-string z-begin z-rust">&quot;</span>templates<span class="z-punctuation z-definition z-string z-end z-rust">&quot;</span></span><span class="z-punctuation z-separator z-rust">,</span> <span class="z-string z-quoted z-double z-rust"><span class="z-punctuation z-definition z-string z-begin z-rust">&quot;</span>static<span class="z-punctuation z-definition z-string z-end z-rust">&quot;</span></span><span class="z-punctuation z-section z-group z-end z-rust">]</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust">    <span class="z-storage z-type z-rust">let</span> <span class="z-storage z-modifier z-rust">mut</span> watcher <span class="z-keyword z-operator z-assignment z-rust">=</span> <span class="z-meta z-path z-rust">notify<span class="z-punctuation z-accessor z-rust">::</span></span>recommended_watcher<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-begin z-rust">|</span></span></span><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-variable z-parameter z-rust">result</span><span class="z-punctuation z-separator z-rust">:</span> <span class="z-meta z-generic z-rust"><span class="z-support z-type z-rust">Result</span><span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-meta z-path z-rust">notify<span class="z-punctuation z-accessor z-rust">::</span></span>Event, <span class="z-keyword z-operator z-rust">_</span><span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span><span class="z-punctuation z-section z-parameters z-end z-rust">|</span></span> </span><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust">        <span class="z-keyword z-control z-rust">if</span> <span class="z-storage z-type z-rust">let</span> <span class="z-support z-type z-rust">Ok</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span>event</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span> <span class="z-keyword z-operator z-assignment z-rust">=</span> result <span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span></span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-block z-rust">            <span class="z-storage z-type z-rust">let</span> paths<span class="z-punctuation z-separator z-rust">:</span> <span class="z-meta z-generic z-rust"><span class="z-support z-type z-rust">Vec</span><span class="z-punctuation z-definition z-generic z-begin z-rust">&lt;</span><span class="z-support z-type z-rust">String</span><span class="z-punctuation z-definition z-generic z-end z-rust">&gt;</span></span> <span class="z-keyword z-operator z-assignment z-rust">=</span> event<span class="z-punctuation z-accessor z-dot z-rust">.</span>paths
+</span></span></span></span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-block z-rust">                <span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">into_iter</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span>
+</span></span></span></span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-block z-rust">                <span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">map</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-punctuation z-section z-parameters z-begin z-rust">|</span></span></span><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-function z-parameters z-rust"><span class="z-variable z-parameter z-rust">path</span><span class="z-punctuation z-section z-parameters z-end z-rust">|</span></span> </span><span class="z-meta z-function z-closure z-rust">path<span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">display</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">to_string</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span></span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span>
+</span></span></span></span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-block z-rust">                <span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">collect</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span></span></span></span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-block z-rust">            <span class="z-support z-macro z-rust">println!</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span><span class="z-meta z-group z-rust"><span class="z-string z-quoted z-double z-rust"><span class="z-punctuation z-definition z-string z-begin z-rust">&quot;</span>:<span class="z-constant z-other z-placeholder z-rust">{:?}</span> <span class="z-constant z-other z-placeholder z-rust">{}</span><span class="z-punctuation z-definition z-string z-end z-rust">&quot;</span></span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-separator z-rust">,</span> event<span class="z-punctuation z-accessor z-dot z-rust">.</span>kind<span class="z-punctuation z-separator z-rust">,</span> paths<span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">join</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-string z-quoted z-double z-rust"><span class="z-punctuation z-definition z-string z-begin z-rust">&quot;</span> <span class="z-punctuation z-definition z-string z-end z-rust">&quot;</span></span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span>
+</span></span></span></span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-block z-rust">        </span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span>
+</span></span></span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-group z-rust"><span class="z-meta z-function z-closure z-rust"><span class="z-meta z-block z-rust">    </span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span></span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-keyword z-operator z-rust">?</span><span class="z-punctuation z-terminator z-rust">;</span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust">    <span class="z-keyword z-control z-rust">for</span> path <span class="z-keyword z-operator z-rust">in</span> paths <span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span>
+</span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-block z-rust">        watcher<span class="z-punctuation z-accessor z-dot z-rust">.</span><span class="z-support z-function z-rust">watch</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span><span class="z-meta z-path z-rust">Path<span class="z-punctuation z-accessor z-rust">::</span></span>new<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span>path</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-separator z-rust">,</span> <span class="z-meta z-path z-rust">RecursiveMode<span class="z-punctuation z-accessor z-rust">::</span></span>Recursive</span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-keyword z-operator z-rust">?</span><span class="z-punctuation z-terminator z-rust">;</span>
+</span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"><span class="z-meta z-block z-rust">    </span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span>
+</span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust">    <span class="z-keyword z-control z-rust">loop</span> <span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-begin z-rust">{</span> <span class="z-meta z-path z-rust">std<span class="z-punctuation z-accessor z-rust">::</span></span><span class="z-meta z-path z-rust">thread<span class="z-punctuation z-accessor z-rust">::</span></span>park<span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-begin z-rust">(</span></span><span class="z-meta z-group z-rust"><span class="z-punctuation z-section z-group z-end z-rust">)</span></span><span class="z-punctuation z-terminator z-rust">;</span> </span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span> <span class="z-comment z-line z-double-slash z-rust"><span class="z-punctuation z-definition z-comment z-rust">//</span> sleep forever
+</span></span></span></span><span class="z-source z-rust"><span class="z-meta z-function z-rust"><span class="z-meta z-block z-rust"></span><span class="z-meta z-block z-rust"><span class="z-punctuation z-section z-block z-end z-rust">}</span></span></span>
+</span></code></pre>
+<p>I tried to make this program as simple as possible: I used only the simplest iterator combinators, I don't touch <code>std::mpsc</code> at all, I don't use async, and I don't do any complicated error handling.</p>
+<p>Already, this program has many interleaving concepts. I'll ignore the module system and macros, which are mostly independent of the rest of the language. To understand this program, you need to know that:</p>
+<ul>
+<li><code>recommended_watcher</code> and <code>map</code> take a function as an argument. In our program, that function is constructed inline as an anonymous function (closure).</li>
+<li>Errors are handled using something called <code>Result</code>, not with exceptions or error codes. I happened to use <code>fn main() -&gt; Result</code> and <code>?</code>, but you would still need to understand Result even without that, because Rust does not let you access the value inside unless you check for an error condition first.</li>
+<li>Result takes a generic error; in our case, <code>notify::Error</code>.</li>
+<li>Result is an data-holding enum that can be either Ok or Err, and you can check which variant it is using pattern matching.</li>
+<li>Iterators can be traversed either with a <code>for</code> loop or with <code>into_iter()</code>. <sup class="footnote-reference" id="fr-2-1"><a href="#fn-2">2</a></sup> <code>for</code> is eager and <code>into_iter</code> is lazy. <code>iter</code> has different ownership semantics than <code>into_iter</code>.</li>
+</ul>
+<p>If you want to modify this program, you need to know some additional things:</p>
+<ul>
+<li><code>println</code> can only print things that implement the traits <code>Display</code> or <code>Debug</code>. As a result, <code>Path</code>s cannot be printed directly.</li>
+<li><code>path.display()</code> returns a struct that borrows from the path. Sending it to another thread (e.g. through a channel) won't work, because <code>event.paths</code> goes out of scope when the closure passed to <code>recommended_watcher</code> finishes running. You need to convert it to an owned value or pass <code>event.paths</code> as a whole.
+<ul>
+<li>As an aside, this kind of thing encourages people to break work into "large" chunks instead of "small" chunks, which I think is often good for performance in CPU-bound programs, although as always it depends.</li>
+</ul>
+</li>
+<li><code>recommended_watcher</code> only accepts functions that are <code>Send + 'static</code>. Small changes to this program, such as passing the current path into the closure, will give a compile error related to ownership. Fixing it requires learning the <code>move</code> keyword, knowing that closures borrow their arguments by default, and the meaning of <code>'static</code>.
+<ul>
+<li>If you are using <code>Rc&lt;RefCell&lt;String&gt;&gt;</code>, which is often recommended for beginners<sup class="footnote-reference" id="fr-3-1"><a href="#fn-3">3</a></sup>, your program will need to be rewritten from scratch (either to use Arc/Mutex or to use exterior mutability). For example, if you wanted to print changes from the main thread instead of worker threads to avoid interleaving output, you couldn't simply push to the end of an <code>all_changes</code> collection, you would have to use <code>Arc&lt;Mutex&lt;Vec&lt;Path&gt;&gt;&gt;</code> in order to communicate between threads.</li>
+</ul>
+</li>
+</ul>
+<p>This is a <em>lot</em> of concepts for a 20 line program. For comparison, here is an equivalent javascript program:</p>
+<pre data-lang="javascript" class="language-javascript z-code"><code class="language-javascript" data-lang="javascript"><span class="z-source z-ts"><span class="z-meta z-var z-expr z-ts"><span class="z-storage z-type z-ts">const</span> <span class="z-meta z-var-single-variable z-expr z-ts"><span class="z-meta z-definition z-variable z-ts"><span class="z-variable z-other z-constant z-ts">fs</span></span> </span><span class="z-keyword z-operator z-assignment z-ts">=</span> <span class="z-meta z-function-call z-ts"><span class="z-support z-function z-ts">require</span></span><span class="z-meta z-brace z-round z-ts">(</span><span class="z-string z-quoted z-single z-ts"><span class="z-punctuation z-definition z-string z-begin z-ts">&#39;</span>fs<span class="z-punctuation z-definition z-string z-end z-ts">&#39;</span></span><span class="z-meta z-brace z-round z-ts">)</span></span><span class="z-punctuation z-terminator z-statement z-ts">;</span>
+</span><span class="z-source z-ts"><span class="z-meta z-var z-expr z-ts"><span class="z-storage z-type z-ts">const</span> <span class="z-meta z-var-single-variable z-expr z-ts"><span class="z-meta z-definition z-variable z-ts"><span class="z-variable z-other z-constant z-ts">paths</span></span> </span><span class="z-keyword z-operator z-assignment z-ts">=</span><span class="z-meta z-array z-literal z-ts"> <span class="z-meta z-brace z-square z-ts">[</span><span class="z-string z-quoted z-single z-ts"><span class="z-punctuation z-definition z-string z-begin z-ts">&#39;</span>pages<span class="z-punctuation z-definition z-string z-end z-ts">&#39;</span></span><span class="z-punctuation z-separator z-comma z-ts">,</span> <span class="z-string z-quoted z-single z-ts"><span class="z-punctuation z-definition z-string z-begin z-ts">&#39;</span>templates<span class="z-punctuation z-definition z-string z-end z-ts">&#39;</span></span><span class="z-punctuation z-separator z-comma z-ts">,</span> <span class="z-string z-quoted z-single z-ts"><span class="z-punctuation z-definition z-string z-begin z-ts">&#39;</span>static<span class="z-punctuation z-definition z-string z-end z-ts">&#39;</span></span><span class="z-meta z-brace z-square z-ts">]</span></span></span><span class="z-punctuation z-terminator z-statement z-ts">;</span>
+</span><span class="z-source z-ts"><span class="z-keyword z-control z-loop z-ts">for</span> <span class="z-meta z-brace z-round z-ts">(</span><span class="z-meta z-var z-expr z-ts"><span class="z-storage z-type z-ts">let</span> <span class="z-meta z-var-single-variable z-expr z-ts"><span class="z-meta z-definition z-variable z-ts"><span class="z-variable z-other z-readwrite z-ts">path</span></span> </span></span><span class="z-keyword z-operator z-expression z-of z-ts">of</span> <span class="z-variable z-other z-readwrite z-ts">paths</span><span class="z-meta z-brace z-round z-ts">)</span> <span class="z-meta z-block z-ts"><span class="z-punctuation z-definition z-block z-ts">{</span>
+</span></span><span class="z-source z-ts"><span class="z-meta z-block z-ts">  <span class="z-meta z-function-call z-ts"><span class="z-variable z-other z-object z-ts">fs</span><span class="z-punctuation z-accessor z-ts">.</span><span class="z-support z-function z-ts">watch</span></span><span class="z-meta z-brace z-round z-ts">(</span><span class="z-variable z-other z-readwrite z-ts">path</span><span class="z-punctuation z-separator z-comma z-ts">,</span><span class="z-meta z-arrow z-ts"> <span class="z-meta z-parameters z-ts"><span class="z-punctuation z-definition z-parameters z-begin z-ts">(</span><span class="z-variable z-parameter z-ts">eventType</span><span class="z-punctuation z-separator z-parameter z-ts">,</span> <span class="z-variable z-parameter z-ts">filename</span><span class="z-punctuation z-definition z-parameters z-end z-ts">)</span></span> </span><span class="z-meta z-arrow z-ts"><span class="z-storage z-type z-function z-arrow z-ts">=&gt;</span> <span class="z-meta z-block z-ts"><span class="z-punctuation z-definition z-block z-ts">{</span>
+</span></span></span></span><span class="z-source z-ts"><span class="z-meta z-block z-ts"><span class="z-meta z-arrow z-ts"><span class="z-meta z-block z-ts">    <span class="z-keyword z-control z-conditional z-ts">if</span> <span class="z-meta z-brace z-round z-ts">(</span><span class="z-variable z-other z-readwrite z-ts">filename</span> <span class="z-keyword z-operator z-comparison z-ts">!==</span> <span class="z-constant z-language z-null z-ts">null</span><span class="z-meta z-brace z-round z-ts">)</span> <span class="z-meta z-block z-ts"><span class="z-punctuation z-definition z-block z-ts">{</span>
+</span></span></span></span></span><span class="z-source z-ts"><span class="z-meta z-block z-ts"><span class="z-meta z-arrow z-ts"><span class="z-meta z-block z-ts"><span class="z-meta z-block z-ts">      <span class="z-meta z-function-call z-ts"><span class="z-support z-class z-console z-ts">console</span><span class="z-punctuation z-accessor z-ts">.</span><span class="z-support z-function z-console z-ts">log</span></span><span class="z-meta z-brace z-round z-ts">(</span><span class="z-string z-template z-ts"><span class="z-punctuation z-definition z-string z-template z-begin z-ts">`</span><span class="z-meta z-template z-expression z-ts"><span class="z-punctuation z-definition z-template-expression z-begin z-ts">${</span></span><span class="z-meta z-template z-expression z-ts"><span class="z-meta z-embedded z-line z-ts"><span class="z-variable z-other z-readwrite z-ts">eventType</span></span><span class="z-punctuation z-definition z-template-expression z-end z-ts">}</span></span> <span class="z-meta z-template z-expression z-ts"><span class="z-punctuation z-definition z-template-expression z-begin z-ts">${</span></span><span class="z-meta z-template z-expression z-ts"><span class="z-meta z-embedded z-line z-ts"><span class="z-variable z-other z-readwrite z-ts">filename</span></span><span class="z-punctuation z-definition z-template-expression z-end z-ts">}</span></span><span class="z-punctuation z-definition z-string z-template z-end z-ts">`</span></span><span class="z-meta z-brace z-round z-ts">)</span>
+</span></span></span></span></span><span class="z-source z-ts"><span class="z-meta z-block z-ts"><span class="z-meta z-arrow z-ts"><span class="z-meta z-block z-ts"><span class="z-meta z-block z-ts">    <span class="z-punctuation z-definition z-block z-ts">}</span></span>
+</span></span></span></span><span class="z-source z-ts"><span class="z-meta z-block z-ts"><span class="z-meta z-arrow z-ts"><span class="z-meta z-block z-ts">  <span class="z-punctuation z-definition z-block z-ts">}</span></span></span><span class="z-meta z-brace z-round z-ts">)</span><span class="z-punctuation z-terminator z-statement z-ts">;</span>
+</span></span><span class="z-source z-ts"><span class="z-meta z-block z-ts"><span class="z-punctuation z-definition z-block z-ts">}</span></span>
+</span><span class="z-source z-ts"><span class="z-keyword z-control z-flow z-ts">await</span> <span class="z-meta z-brace z-round z-ts">(</span><span class="z-new z-expr z-ts"><span class="z-keyword z-operator z-new z-ts">new</span> <span class="z-entity z-name z-type z-ts">Promise</span><span class="z-meta z-brace z-round z-ts">(</span><span class="z-meta z-arrow z-ts"><span class="z-meta z-parameters z-ts"><span class="z-punctuation z-definition z-parameters z-begin z-ts">(</span><span class="z-punctuation z-definition z-parameters z-end z-ts">)</span></span> </span><span class="z-meta z-arrow z-ts"><span class="z-storage z-type z-function z-arrow z-ts">=&gt;</span> <span class="z-meta z-block z-ts"><span class="z-punctuation z-definition z-block z-ts">{</span><span class="z-punctuation z-definition z-block z-ts">}</span></span></span><span class="z-meta z-brace z-round z-ts">)</span></span><span class="z-meta z-brace z-round z-ts">)</span><span class="z-punctuation z-terminator z-statement z-ts">;</span> <span class="z-comment z-line z-double-slash z-ts"><span class="z-punctuation z-definition z-comment z-ts">//</span></span><span class="z-comment z-line z-double-slash z-ts"> sleep forever</span>
+</span></code></pre>
+<p>For this JS program, you need to understand:</p>
+<ul>
+<li>first class functions</li>
+<li>nullability</li>
+<li>yeah that's kinda it.</li>
+</ul>
+<p>I'm cheating a little here because <code>notify</code> returns a list of paths and <code>node:fs/watch</code> doesn't. But only a little.</p>
+<p>My point is not that JS is a simpler language; that's debatable. My point is that you can do things in JS without understanding the whole language. It's very hard to do non-trivial things in Rust without understanding the whole core.</p>
+<h2 id="rust-s-core-is-interwoven-on-purpose">Rust's core is interwoven on purpose<a class="zola-anchor" href="#rust-s-core-is-interwoven-on-purpose" aria-label="Anchor link for: rust-s-core-is-interwoven-on-purpose"></a>
+</h2>
+<p>The previous section makes it out to seem like I'm saying all these concepts are bad. I'm not. Rather the opposite, actually. Because these language features were designed in tandem, they interplay very nicely:</p>
+<ul>
+<li>Enums without pattern matching <a href="https://en.cppreference.com/w/cpp/utility/variant.html">are very painful to work with</a> and pattern matching without enums <a href="https://www.hillelwayne.com/post/python-abc/">has very odd semantics</a></li>
+<li><code>Result</code> and <code>Iterator</code>s are impossible to implement without generics (or duck-typing, which I think of as type-erased generics)</li>
+<li><code>Send</code>/<code>Sync</code>, and the preconditions to <code>println</code>, are impossible to encode without traits—and this often comes up in other languages, for example printing a function in clojure shows something like <code>#object[clojure.core$map 0x2e7de98a "clojure.core$map@2e7de98a"]</code>. In Rust it gives a compile error unless you opt-in with Debug.</li>
+<li><code>Send</code> / <code>Sync</code> are only possible to enforce because the borrow checker does capture analysis for closures. Java, which is <em>wildly</em> committed to thread-safety by the standards of most languages, cannot verify this at compile time and so has to <a href="https://docs.oracle.com/en/java/javase/24/docs/api/java.base/java/text/SimpleDateFormat.html#synchronization">document synchronization concerns explicitly</a> instead.</li>
+</ul>
+<p>There are more interplays than I can easily describe in a post, and all of them are what make Rust what it is.</p>
+<p>Rust has other excellent language features—for example the <a href="https://doc.rust-lang.org/nightly/reference/inline-assembly.html">inline assembly syntax</a> is a work of art, props to <a href="https://github.com/amanieu">Amanieu</a>. But they are not interwoven into the standard library in the same way, and they do not affect the way people <em>think</em> about writing code in the same way.</p>
+<h2 id="a-smaller-rust">A smaller Rust<a class="zola-anchor" href="#a-smaller-rust" aria-label="Anchor link for: a-smaller-rust"></a>
+</h2>
+<p>without.boats wrote a post in 2019 titled <a href="https://without.boats/blog/notes-on-a-smaller-rust/">"Notes on a smaller Rust"</a> (and a follow-up <a href="https://without.boats/blog/revisiting-a-smaller-rust/">revisiting</a> it). In a manner of speaking, that smaller Rust <em>is</em> the language I fell in love with when I first learned it in 2018. Rust is a lot bigger today, in many ways, and the smaller Rust is just a nostalgic rose-tinted memory. But I think it's worth studying as an example of how well <a href="https://en.wikipedia.org/wiki/Orthogonality#Computer_science">orthogonal</a> features can compose when they're designed as one cohesive whole.</p>
+<p>If you liked this post, consider reading <a href="https://matklad.github.io/2020/07/15/two-beautiful-programs.html">Two Beautiful Rust Programs</a> by matklad.</p>
+<section class="footnotes">
+<ol class="footnotes-list">
+<li id="fn-1">
+<p>This program intentionally uses a file watcher because file IO is not possible to implement efficiently with async on Linux (and also because I wrote a file watcher recently for <a href="https://github.com/jyn514/flower/">flower</a>, so it's fresh in my mind). Tokio itself just uses a threadpool, alongside channels for notifying the future. I don’t want to get into async here; this just demonstrates Send/Sync bounds and callbacks. <a href="#fr-1-1">↩</a></p>
+</li>
+<li id="fn-2">
+<p>Technically, <code>for</code> is syntax sugar around <code>into_iter()</code>, but you don't need to know that for most rust programs. <a href="#fr-2-1">↩</a></p>
+</li>
+<li id="fn-3">
+<p>which is a terrible idea by the way, even more experienced Rust programmers often don't understand the interior mutability very well; see <a href="https://docs.rs/dtolnay/latest/dtolnay/macro._02__reference_types.html">this blog post by dtolnay</a> on the difference between mutability and uniqueness in reference types. It would be better to suggest using owned types with exterior mutability and cloning frequently. <a href="#fr-3-1">↩</a></p>
+</li>
+</ol>
+</section>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

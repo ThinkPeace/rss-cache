@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>What the fuck is an SBAT and why does everyone suddenly care | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>What the fuck is an SBAT and why does everyone suddenly care</h1>
+        <div class="meta">Matthew Garrett 2024-08-22T08:52:49Z</div>
+        <div class="links">
+          <a href="https://mjg59.dreamwidth.org/70348.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/mjg59-dreamwidth-org/mjg59-dreamwidth-org-36304ace348beb14.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Short version: Secure Boot Advanced Targeting and if that&#x27;s enough for you you can skip the rest you&#x27;re welcome. Long version: When UEFI Secure Boot was specified, everyone involved was, well, a touch naive. The basic security model of Secure Boot is that all the code that ends up running in a kernel-level privileged environment should be validated before e…</div>
+        <div class="content">
+          Short version: <a href="https://github.com/rhboot/shim/blob/main/SBAT.md">Secure Boot Advanced Targeting</a> and if that's enough for you you can skip the rest you're welcome.<br /><br />Long version: When UEFI Secure Boot was specified, everyone involved was, well, a touch naive. The basic security model of Secure Boot is that all the code that ends up running in a kernel-level privileged environment should be validated before execution - the firmware verifies the bootloader, the bootloader verifies the kernel, the kernel verifies any additional runtime loaded kernel code, and now we have a trusted environment to impose any other security policy we want. Obviously people might screw up, but the spec included a way to revoke any signed components that turned out not to be trustworthy: simply add the hash of the untrustworthy code to a variable, and then refuse to load anything with that hash even if it's signed with a trusted key.<br /><br />Unfortunately, as it turns out, scale. Every Linux distribution that works in the Secure Boot ecosystem generates their own bootloader binaries, and each of them has a different hash. If there's a vulnerability identified in the source code for said bootloader, there's a large number of different binaries that need to be revoked. And, well, the storage available to store the variable containing all these hashes is limited. There's simply not enough space to add a new set of hashes every time it turns out that grub (a bootloader initially written for a simpler time when there was no boot security and which has several separate image parsers and also a font parser and look you know where this is going) has another mechanism for a hostile actor to cause it to execute arbitrary code, so another solution was needed.<br /><br />And that solution is SBAT. The general concept behind SBAT is pretty straightforward. Every important component in the boot chain declares a security generation that's incorporated into the signed binary. When a vulnerability is identified and fixed, that generation is incremented. An update can then be pushed that defines a minimum generation - boot components will look at the next item in the chain, compare its name and generation number to the ones stored in a firmware variable, and decide whether or not to execute it based on that. Instead of having to revoke a large number of individual hashes, it becomes possible to push one update that simply says "Any version of grub with a security generation below this number is considered untrustworthy".<br /><br />So why is this suddenly relevant? SBAT was developed collaboratively between the Linux community and Microsoft, and Microsoft chose to push a Windows update that told systems not to trust versions of grub with a security generation below a certain level. This was because those versions of grub had genuine security vulnerabilities that would allow an attacker to compromise the Windows secure boot chain, and we've seen real world examples of malware wanting to do that (<a href="https://media.defense.gov/2023/Jun/22/2003245723/-1/-1/0/CSI_BlackLotus_Mitigation_Guide.PDF">Black Lotus</a> did so using a vulnerability in the Windows bootloader, but a vulnerability in grub would be just as viable for this). Viewed purely from a security perspective, this was a legitimate thing to want to do.<br /><br />(An aside: the "Something has gone seriously wrong" message that's associated with people having a bad time as a result of this update? That's a message from <a href="https://github.com/rhboot/shim/">shim</a>, not any Microsoft code. Shim pays attention to SBAT updates in order to avoid violating the security assumptions made by other bootloaders on the system, so even though it was Microsoft that pushed the SBAT update, it's the Linux bootloader that refuses to run old versions of grub as a result. This is absolutely working as intended)<br /><br />The problem we've ended up in is that several Linux distributions had not shipped versions of grub with a newer security generation, and so those versions of grub are assumed to be insecure (it's worth noting that grub is signed by individual distributions, not Microsoft, so there's no externally introduced lag here). Microsoft's stated intention was that Windows Update would only apply the SBAT update to systems that were Windows-only, and any dual-boot setups would instead be left vulnerable to attack until the installed distro updated its grub and shipped an SBAT update itself. Unfortunately, as is now obvious, that didn't work as intended and at least some dual-boot setups applied the update and that distribution's Shim refused to boot that distribution's grub.<br /><br />What's the summary? Microsoft (understandably) didn't want it to be possible to attack Windows by using a vulnerable version of grub that could be tricked into executing arbitrary code and then introduce a bootkit into the Windows kernel during boot. Microsoft did this by pushing a Windows Update that updated the SBAT variable to indicate that known-vulnerable versions of grub shouldn't be allowed to boot on those systems. The distribution-provided Shim first-stage bootloader read this variable, read the SBAT section from the installed copy of grub, realised these conflicted, and refused to boot grub with the "Something has gone seriously wrong" message. This update was not supposed to apply to dual-boot systems, but did anyway. Basically:<br /><br />1) Microsoft applied an update to systems where that update shouldn't have been applied<br />2) Some Linux distros failed to update their grub code and SBAT security generation when exploitable security vulnerabilities were identified in grub<br /><br />The outcome is that some people can't boot their systems. I think there's plenty of blame here. Microsoft should have done more testing to ensure that dual-boot setups could be identified accurately. But also distributions shipping signed bootloaders should make sure that they're updating those and updating the security generation to match, because otherwise they're shipping a vector that can be used to attack other operating systems and that's kind of a violation of the social contract around all of this.<br /><br />It's unfortunate that the victims here are largely end users faced with a system that suddenly refuses to boot the OS they want to boot. That should never happen. I don't think asking arbitrary end users whether they want secure boot updates is likely to result in good outcomes, and while I vaguely tend towards UEFI Secure Boot not being something that benefits most end users it's also a thing you really don't want to discover you want after the fact so I have sympathy for it being default on, so I do sympathise with Microsoft's choices here, other than the failed attempt to avoid the update on dual boot systems.<br /><br />Anyway. I was extremely involved in the implementation of this for Linux back in 2012 and wrote the first prototype of Shim (which is now a massively better bootloader maintained by a wider set of people and that I haven't touched in years), so if you want to blame an individual please do feel free to blame me. This is something that shouldn't have happened, and unless you're either Microsoft or a Linux distribution it's not your fault. I'm sorry.<br /><br /><img src="https://www.dreamwidth.org/tools/commentcount?user=mjg59&ditemid=70348" width="30" height="12" alt="comment count unavailable"/> comments
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

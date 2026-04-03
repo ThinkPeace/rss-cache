@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HTML canvas scratcher revisited | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>HTML canvas scratcher revisited</h1>
+        <div class="meta">Beej&#x27;s Bit Bucket 2012-04-23T00:00:00Z</div>
+        <div class="links">
+          <a href="http://beej.us/blog/data/html-canvas-scratcher-2/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/beej-us/beej-us-69f7140115e89965.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">An exercise in refactoring code from being closely tied to a page to being less closely tied. This is based on the previous scratcher code .</div>
+        <div class="content">
+          <html>
+  <body><p>2012-04-23; 2012-08-06</p><h1>HTML Canvas Scratcher, Multiple Canvases</h1><p>Your browser doesn't support HTML canvas. Get a modern browser such
+as <a href="http://www.google.com/chrome/">Chrome</a>,
+<a href="http://firefox.com/">Firefox</a>, <a href="http://www.opera.com/">Opera</a>, or
+<a href="http://windows.microsoft.com/en-us/internet-explorer/products/ie/home">IE9</a>.
+And then, only then, will you be able to see this demo. Sorry!</p><p>In an <a href="http://beej.us/html5-canvas-globalcompositeoperation/">earlier post</a>, I
+talked about how to make a "scratch off" effect using HTML canvas and
+<pre>globalCompositeOperation</pre>. Since it was just a demo and in the interest
+of code clarity, it only worked on one canvas on the page. A couple of
+you asked how to make it work with multiple canvases on the same place,
+so I thought I'd talk about how to refactor and generalize the code.</p><p><graphic src="images/oldway.png" alt="The Old Architecture"/></p><p>In the old code, there was just one set of variables storing information about the one single canvas on the page. Having multiple canvases on the page wouldn't work, since they would use the same variables, overwrite each other's values, and step on each other's toes. War would break out, peace agreements would need to be brokered, and all kinds of badness would ensue.</p><p>Since it's easier to act unilaterally than get permission, let's just fix this so it works in multiple places.</p><p><graphic src="images/newway.png" alt="The New Architecture"/></p><p>The problem is, as we've said, that multiple canvases would conflict when they used the same variables as one another. The obvious solution is to give each canvas its own set of variables to use in isolation. But they should all be able to use the same functions and code to manipulate themselves, since they all perform the same function, just with different data.</p><p>So we need an object that holds data for a specific canvas, plus has all the functionality needed for manipulating that canvas.</p><p>This is a perfect setup for using classes and objects. JavaScript technically doesn't have classes, but it does have objects that can be created with constructors, so it's close enough for government work.</p><h2>Step 1: Identify Utility Functions</h2><p>In this code, there are functions that are helper/utility functions that
+don't need to be in the scratcher object.  For example,
+<pre>supportsCanvas()</pre> returns <pre>true</pre> if this browser supports <pre>&lt;canvas&gt;</pre>.
+This is a general utility function that doesn't have anything to do with
+the scratcher, so it doesn't need to be in the scratcher object.</p><p>There might also be global variables that are similar. Move these out of the way, since they likely won't change during the conversion. I just moved them to the top of this code, but it might make more sense to break them out into a utility library.</p><p>Similar functions in this code are <pre>getEventCoords()</pre> and
+<pre>getLocalCoords()</pre>.</p><h2>Step 2: Move Globals to Constructor</h2><p>Let's identify all those global variables that are specific to the scratcher, and move them all into a constructor:</p><pre><pre>var image = { // back and front images
+    'back': { 'url':'images/background.jpg', 'img':null },
+    'front': { 'url':'images/foreground.jpg', 'img':null }
+};
+
+var canvas = {'temp':null, 'draw':null}; // temp and draw canvases
+
+var mouseDown = false;
+</pre></pre>
+<p>That's not too bad; only a few of them. We'll make a new constructor for holding them in objects by simply moving them out the global space and making them members of the new object. Since the background and foreground images will be different for different scratchers, we'll pass those into the constructor as parameters.</p><p>There's one more thing to consider, and that's functions that reference
+global variables or DOM objects.  For example, we have the following
+old code in <pre>recompositeCanvases()</pre>:</p><pre><pre>var main = $('#maincanvas').get(0);
+</pre></pre>
+<p>It's referring to the one single DOM canvas element with ID
+<pre>#maincanvas</pre>.  This is bad, since we want each scratcher object to
+refer to its own canvas. So like the foreground and background images,
+we'll pass a canvas into the scratcher constructor. (We could pass the
+canvas as a DOM element reference or a <a href="http://jquery.com/">jQuery</a>
+selector result, but we'll just pass it as a string with the canvas's
+ID. Depending on the application, some of these approaches might be
+easier than others.)</p><p>Other additions are an on-load callback, and the fact that we're calling
+<pre>setupCanvases()</pre> from inside the constructor now.  We'll talk more
+about the callback later.</p><p>Here's the new constructor:</p><pre><pre>function Scratcher(canvasId, backImage, frontImage, onLoadCallback) {
+    this.image = {
+        'back': { 'url':backImage, 'img':null },
+        'front': { 'url':frontImage, 'img':null }
+    };
+
+    this.canvas = {'temp':null, 'draw':null}; // temp and draw canvases
+
+    this.mouseDown = false;
+
+    this.canvasId = canvasId;
+
+    this.onLoadCallback = onLoadCallback; // call this when images loaded
+
+    this.setupCanvases(); // finish setup from constructor now
+
+    this.loadImages(); // start image loading from constructor now
+};
+</pre></pre>
+<p>And now we can make new ones like this (here shown without the optional
+<pre>onLoadCallback</pre> argument):</p><pre><pre>var scratcher1 = new Scratcher('can1', 'fgimage1.jpg', 'bgimage1.jpg');
+var scratcher2 = new Scratcher('can2', 'fgimage2.jpg', 'bgimage2.jpg');
+</pre></pre>
+<p>(Note: the constructor would be a great place to set the drawing line width!)</p><p>But we're not nearly done yet—we still need to link the functionality to
+the <pre>Scratcher</pre> objects.</p><h2>Step 3: Move Functions to Methods</h2><p>Now might be a good time to take a refresher course on <a href="http://beej.us/blog/data/javascript-prototypes-inheritance/">how prototypes
+work in
+JavaScript</a>,
+since that's how we're going to add methods to our objects.</p><p>Here are the first couple lines of the old <pre>recompositeCanvases()</pre>
+function:</p><pre><pre>recompositeCanvases() {
+    var main = $('#maincanvas').get(0);
+    ...
+</pre></pre>
+<p>There are two problems with it. One is that it's a function, not a
+method attached to the <pre>Scratcher</pre> object.  The other is that it
+references the DOM element <pre>#maincanvas</pre>, which has been moved into the
+<pre>Scratcher</pre> object as the <pre>canvasId</pre> property.</p><p>We need to convert it to a method, and fix the reference.  We make it a
+method by adding it to <pre>Scratcher</pre>'s prototype object, and fix the
+canvas ID reference like so:</p><pre><pre>Scratcher.prototype.recompositeCanvases = function() {
+    var main = $('#' + this.canvasId).get(0);
+    ...
+</pre></pre>
+<blockquote><p/><graphic>Efficiency! Do we need to look up the canvas DOM element by ID every time we call</graphic><pre>recompositeCanvas()</pre>? It never changes, so no, we don't. It would be more efficient to look it up once in the constructor, and then just refer to it in this method. The current code is rife with such issues.</blockquote><p>Now what about function <pre>scratchLine()</pre>?  In a way this is a generic
+function that draws a line on a canvas. It's broken out into a function
+in the interest of
+<a href="http://en.wikipedia.org/wiki/Don%27t_repeat_yourself">DRY</a>, because it
+gets called in two different places. But should it be a method or a
+utility function?</p><p>This is one of those gray areas, but I'm going to say that since it is only called from Scratcher code, it'll be a private method in the object. (Another option could be to make it a private function within the method that uses it.)</p><p>Since <pre>scratchLine()</pre> only draws on the <pre>draw</pre> canvas, there's no reason
+to pass it in as an argument; we can just get it from <pre>this</pre> since it's
+stored in the object.</p><h3>Step 3A: <pre>this</pre> and Event Handlers</h3>
+<p>We're about to get to the first pesky part of this whole thing, and it
+happens in the <pre>setupCanvases()</pre> function.  This function does a lot of
+setup and it might be better-placed in the constructor.  If not, it
+should at least be called from the constructor.  (Sometimes it makes
+more sense to leave it as a separate method if it can be called from
+multiple places.)</p><p>In the interest of quickly converting the original code, as you see in
+the constructor, above, I just added a call to the end of it to jump to
+the <pre>setupCanvases()</pre> method.</p><p>We see a reference in there to <pre>#maincanvas</pre> that has to be changed to
+<pre>this.canvasId</pre>, and every call to <pre>recompositeCanvases()</pre> needs to be
+changed to <pre>this.recompositeCanvases()</pre> (same for <pre>scratchLine()</pre> and
+the <pre>canvas</pre> and <pre>mousedown</pre> variables)...</p><pre><pre>function mousedown_handler(e) {
+    var local = getLocalCoords(c, getEventCoords(e));
+    mouseDown = true;
+
+    this.scratchLine(local.x, local.y, true); // "this" BADNESS
+    this.recompositeCanvases();               // "this" BADNESS
+
+    return false;
+};
+</pre></pre>
+<p>Except for one thing! See how some of those method calls are inside
+event handlers?  JavaScript has a Feature where <pre>this</pre> in an event
+handler is bound to the object or DOM element firing the event!  <pre>this</pre>
+no longer refers to this <pre>Scratcher</pre> object!  And the DOM element
+certainly doesn't have a <pre>scratchLine()</pre> or <pre>recompositeCanvases()</pre>
+method!  How do we get access back to this <pre>Scratcher</pre> object?  We're
+doomed!  DOOOOOMED!</p><p>Ok, no actually. JavaScript provides a convenient method on each
+Function called <pre>bind()</pre>.  (Not to be confused with jQuery's <pre>bind()</pre>,
+which is a completely different animal.)  The <pre>bind()</pre> method returns a
+new function for which <pre>this</pre> is bound to the object you provide.  So
+before we had this:</p><pre><pre>$(document).on('mousemove', mousemove_handler);
+</pre></pre>
+<p>And we'll change it to this (<pre>this</pre> refers to this <pre>Scratcher</pre> object,
+here):</p><pre><pre>$(document).on('mousemove', mousemove_handler.bind(this));
+</pre></pre>
+<p>And now <pre>this</pre> in the handler will refer to what we've specified in the
+<pre>bind()</pre> call.</p><blockquote><p/><pre>bind()</pre>is a relatively newer feature in JavaScript (spec'd in 2009), and some current browsers still do not support it (e.g. Mobile Safari and Android's stock Web Browser, and IE8 and below.)<p>One option is to</p><a href="">monkey patch</a>your own<pre>bind()</pre>, and add it to<pre>Function</pre>'s prototype.<a href="">The Mozilla Developer's Network has exactly such an example</a>. (I do this in this demo.)<p>Monkey patching as a concept has started a number of spirited articles and discussions</p><a href="">[↑]</a><a href="">[↑]</a><a href="">[↑]</a>. I'm of the opinion that it's not so bad in a limited and expected sense, but if you want to avoid it all together, there are other approaches you can take, as well.<p>I use jQuery for this demo, so we could do it in a jQuery style. The jQuery</p><pre>on()</pre>method allows you to pass arbitrary data to the handler, and we could pass a reference to this canvas in there:<pre>$(document).on('mousedown', null, this, mousedown_handler);</pre><p>And then in the handler, we can extract it from the event's</p><pre>data</pre>property, and use it:<pre>function mousedown_handler(e) { var thisScratcher = e.data; // &lt;-- HERE var local = getLocalCoords(c, getEventCoords(e)); thisScratcher.mouseDown = true; thisScratcher.scratchLine(local.x, local.y, true); thisScratcher.recompositeCanvases(); return false; };</pre><p>And finally, there's the classic way of doing things, which I'll cover since it's pretty common. We're going to use something called a</p><a href="">closure</a>to make this<pre>Scratcher</pre>available in the handler function. And we do it like so:<pre>Scratcher.prototype.setupCanvases = function() { var thisScratcher = this; // "this" is a Scratcher function mousedown_handler(e) { var local = getLocalCoords(c, getEventCoords(e)); thisScratcher.mouseDown = true; thisScratcher.scratchLine(local.x, local.y, true); thisScratcher.recompositeCanvases(); return false; };</pre><p>The closure makes the variables in the enclosing block available in local functions. So even though</p><pre>thisScratcher</pre>isn't declared in<pre>mousedown_handler()</pre>, it can still be referred to from within that function.<p>Even though</p><pre>this</pre>in<pre>mousedown_handler()</pre>is bound to the DOM element creating the event,<pre>thisScratcher</pre>has been assigned a reference to the<pre>Scratcher</pre>object in question. And<pre>mousedown_handler()</pre>can refer to that.<p>One gotcha with this last approach is that</p><pre>mousedown_handler()</pre>holds a reference to the<pre>Scratcher</pre>instance. If you ever need the instance to be garbage collected, all references must be dropped. This means you need to unbind (or call<pre>.off()</pre>in jQuery) all the event handlers that refer to the<pre>thisScratcher</pre>so that the reference is dropped.</blockquote><p>For this conversion, I'll just go ahead and use the <pre>bind()</pre> call; since
+we're using <pre>&lt;canvas&gt;</pre>, modern browsers are assumed, and really should
+support it. Right, iOS and Android?</p><h3>Step 3B: The Loading Code</h3><p>This stuff is an annoyance. In the old version, we just wouldn't start the demo until the images were loaded, but now each canvas is doing its own loading of images.</p><p>Again, there are options. We could just ignore the issue, but we might be curious about when the scratchers are ready to go. (For example, do not enable the "reset" button until all scratchers are ready!)</p><p>One solution would be to use the event system, and fire a JavaScript
+event (say, the <pre>load</pre> event) from the <pre>Scratcher</pre> object.  Interested
+parties could subscribe to that event.  jQuery even has functions to
+make this work cross-browser (see
+<a href="http://api.jquery.com/trigger/"> trigger()</a>.)</p><p>Another jQuery-esque solution would be to use its
+<a href="http://api.jquery.com/category/deferred-object/"> Deferred</a> mechanism
+which avoids the race conditions that might occur with events.</p><p>Another common solution is to pass a
+<a href="http://en.wikipedia.org/wiki/Callback_(computer_programming)">callback</a>
+into the constructor. This callback would be called when the <pre>Scratcher</pre>
+object had finished loading. If the object creator was interested in
+knowing when it was done, it could pass a callback. I used this method
+in my code.</p><h2>Step 4: Presentation Layer</h2><p>Now that we have the guts reworked, we have to deal with the topmost level. This means we need to change the HTML page to have multiple canvases, and we need to change the page initialization code to deal with the new object construction and loading scheme.</p><p>I got rid of the old global "Loading" stuff, and put a new one in that would get turned off when all canvases finished loading. I can tell when this happens when all callbacks return (I simply count the number of callbacks that have occurred.)</p><p>Finally, I call <pre>new Scratcher(...)</pre> to create scratchers attached to
+canvases.  I call it three times, one for each canvas in question.</p><h2>Further Work</h2><p>Like I said before, this was originally set up to demo a specific piece of HTML canvas functionality, and wasn't meant for production. The code here is definitely a step up, but there's more to go for proper packaging. Here are a few ideas:</p><ul><li>Move the Scratcher object out of and away from from page control code.</li><li>Add error handling if image loading fails.</li><li>Fix a number of inefficiencies in the code (it was optimized for code clarity, not speed.)</li></ul><p>Resist the urge to blindly cut-n-paste the code; you're just selling yourself short!</p><blockquote><p/><graphic>That said, a gentleman in Copenhagen offered free food and pints in exchange for a function that would tell you how much of the canvas had been scratched off. Astute observers might have noticed that the lower canvas in the demo has its scratch percentage displayed below it.</graphic><p>So for a brief diversion, here's how that works in a nutshell. Since the drawing canvas is just red lines that you paint (see</p><a href="">my previous blog entry</a>for details), what we do is get all the pixels, and count the red ones. The red pixels divided by the total number of pixels is the full percentage.<p>Counting all the pixels can be a little bit hard on the CPU for large canvases on underpowered devices. To overcome this, we can just count every _n_th pixel instead of every pixel. Of course, this is less accurate, but can be much faster, and might be good enough for government work.</p><p>So I've added a</p><pre>fullAmount()</pre>method to the<pre>Scratcher</pre>. It takes an optional parameter of the number of pixels to skip (i.e. the n from "every _n_th pixel", above), the value of which defaults to 1 (count every pixel).<p>(There are definitely more robust ways to do this fractional test, but none are as easy to code as this one, and this one is probably good enough.)</p><p>But how do you know when the canvas has been drawn on so you can do something with the full percentage? I opted to add an ad hoc event delivery system, very similar to the DOM event system. (It's not the same; it just looks the same, sort of.) You can listen on the</p><pre>Scratcher</pre>with<pre>addEventListener()</pre>, and the<pre>Scratcher</pre>dispatches the following events:<ul/><li/><pre>scratch</pre>: any time any scratch occcurs<li/><pre>scratchesbegan</pre>: on mouse down<li/><pre>scratchesended</pre>: on mouse up<li/><pre>reset</pre>: when reset is called on the scratcher<li/><pre>imagesloaded</pre>: when the scratcher's images have loaded<p>See the</p><pre>scratcher3Changed</pre>function in<a href="">for details.</a><pre>main.js</pre><p>No, I am not usually so cheap to work for food and beer; I was planning to do this, anyway. 😀</p></blockquote></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

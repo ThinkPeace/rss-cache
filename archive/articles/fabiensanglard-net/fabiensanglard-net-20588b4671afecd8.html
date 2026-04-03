@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quake Engine Indicators | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Quake Engine Indicators</h1>
+        <div class="meta">Fabien Sanglard 2025-11-24T00:00:00Z</div>
+        <div class="links">
+          <a href="https://fabiensanglard.net/quake_indicators/index.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/fabiensanglard-net/fabiensanglard-net-20588b4671afecd8.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body>
+    <p>I was working on a <a href="https://github.com/Henrique194/chocolate-quake/issues/59">bug</a> in Chocolate Quake netcode. The issue was an edge case where starting two clients on the same machine resulted in the second one zombifying the first one. When the bug occurred there was no disconnection but the client could no longer move. Instead the screen would show an "indicator" looking like an unplugged Ethernet cable  in the upper left corner.</p>
+    <p>As I dug into the code, I learned there were more of these. Located inside <pre>pak0.pak</pre> and nested in <pre>gfx.wad</pre> are files TURTLE, DISC, RAM, and NET. I could not find anything about these "indicators" so I documented them here.</p>
+    <p>The TURTLE indicator shows up on screen when the framerate goes below 10 fps. It is unlikely to have been intended for players but rather for people at id Software during development. Programmers could see where the engine was not fast enough. More importantly map designers could see if they had too many polygons in specific areas of their map.</p>
+    <p>The TURTLE indicator can be enabled/disabled with command <pre>showturtle 1/0</pre>. The code is all in function <a href="https://github.com/id-Software/Quake/blob/bf4ac424ce754894ac8f1dae6a3981954bc9852d/WinQuake/screen.c#L362">SCR_DrawTurtle</a>, where <pre>host_frametime</pre> is the time in seconds it took to draw the last frame.</p>
+    <p>There is a <a href="https://github.com/id-Software/Quake-2/blob/372afde46e7defc9dd2d719a1732b8ace1fa096e/client/cl_scrn.c#L412C30-L412C44">scr_showturtle</a> in Quake 2 source code  but it does not do anything.</p>
+    <p>The icon doesn't actually depict a turtle but a tortoise. A turtle swims in the water while a tortoise walks on land.</p>
+    <p>Quake does not render polygons using directly a texture and a lightmap. Instead it combines these two into a "surface" which is then fed to the rasterizer. After being used surfaces are not discarded but cached because the next frame is likely to need the same surface again.</p>
+    <p>The RAM indicator is here to warn when the engine evicts from the cache surfaces that were generated and cached on the same frame. This means the geometry of the map forces the engine to operate beyond its surface cache capacity. Under this condition, the renderer enters a catastrophic "death spiral" where it evicts surfaces that will be needed later in the frame. Needless to say the framerate suffers greatly.</p>
+    <p>This was likely a feature intended for map designers to warn them of scenes going beyond the amount of surface cache memory Quake <a href="https://github.com/id-Software/Quake/blob/bf4ac424ce754894ac8f1dae6a3981954bc9852d/WinQuake/d_surf.c#L35">provisioned</a>. See <a href="https://github.com/id-Software/Quake/blob/bf4ac424ce754894ac8f1dae6a3981954bc9852d/WinQuake/d_surf.c#L130">D_SCAlloc</a> where thrashing is detected to learn more about it.</p>
+    <p>Alike the turtle one, this indicator can also be enabled/disabled with command <pre>showram 1/0</pre>.</p>
+    <p>The DISC indicator <a href="https://github.com/id-Software/Quake/blob/bf4ac424ce754894ac8f1dae6a3981954bc9852d/WinQuake/common.c#L1574">wraps HDD access</a> done via <pre>Sys_FileRead</pre>. It is unlikely it was used by developers to diagnose anything since its screen location overlaps with the TURTLE indicator. It is just here to give feedback to players that the game is loading.</p>
+    <p>Because the icon is hidden when <pre>Sys_FileRead</pre> returns, it is normal to see it flicker on the screen (and it also looks kinda cool). The code for this indicator is in <a href="https://github.com/id-Software/Quake/blob/bf4ac424ce754894ac8f1dae6a3981954bc9852d/WinQuake/draw.c#L882">Draw_BeginDisc</a>.</p>
+    <p>The NET indicator is displayed when a client has not received any packets from the server in the last 300ms. This was likely aimed at players to help them determine how bad their connection was (a distant server would easily have a 500ms ping in these dial-up over PPP modem days) or if they had plainly lost connection to the server.</p>
+    <p>The code for this indicator is in <a href="https://github.com/id-Software/Quake/blob/bf4ac424ce754894ac8f1dae6a3981954bc9852d/WinQuake/screen.c#L387">SCR_DrawNet</a>.</p>
+    <p>The NET indicator is present and active in Quake 2. The code is still in <a href="https://github.com/id-Software/Quake-2/blob/372afde46e7defc9dd2d719a1732b8ace1fa096e/client/cl_scrn.c#L442">SCR_DrawNet</a> but the image is no longer in a wad. It is stored in <pre>pak0.pak</pre> at <pre>pics/net.pcx</pre>.</p>
+    <p>Below, a terrible user experience where the frame made the engine thrash its surface cache, the framerate dropped below 10fps, and the engine last received packets from the server more than 300ms ago.</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

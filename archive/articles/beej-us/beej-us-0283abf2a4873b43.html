@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Writing a NodeJS webserver | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Writing a NodeJS webserver</h1>
+        <div class="meta">Beej&#x27;s Bit Bucket 2015-11-09T00:00:00Z</div>
+        <div class="links">
+          <a href="http://beej.us/blog/data/nodejs-httpserver/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/beej-us/beej-us-0283abf2a4873b43.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">An exploration into building an HTTP server in NodeJS, and a look into what a webserver is, anyway.</div>
+        <div class="content">
+          <html>
+  <body><p>2015-11-09</p><h1>A NodeJS Webserver</h1><p><graphic src="images/node-logo.png" alt="NodeJS Logo"/></p><p>Let's write our own webserver using NodeJS!</p><p>This is only a stepping-stone on the route to building a
+<a href="https://en.wikipedia.org/wiki/WebSocket">WebSockets</a>-based chat server
+in this multipart series.</p><ul><li>Part 0: A NodeJS Webserver</li><li><a href="http://beej.us/websockets/">Part 1: Intro to WebSockets, conceptually</a></li><li><a href="http://beej.us/websockets2/">Part 2: Writing the client side chat code for the browser in JavaScript</a></li><li><a href="http://beej.us/websockets3/">Part 3: Writing the server-side chat code in NodeJS</a></li></ul><p>If you want to jump right on in, <a href="https://github.com/beejjorgensen/websockets-demo">get the full source on
+GitHub</a>.</p><h2>Prerequisites</h2><p>Since we're going to be using <a href="https://nodejs.org/">NodeJS</a> for this
+project, pop on over to that site and get 'er installed.</p><p>Basic familiarity with JavaScript is also assumed, notably comfort with asynchronous functions and callbacks.</p><p>And we'll be running the server from the command line.</p><h2>What is a webserver, anyway?</h2><p>An animation's worth a thousand pictures, right?</p><p>It's a program that sits there waiting for connections from web
+clients. These clients are usually web browsers, but can be a variety
+of things, including <a href="http://curl.haxx.se/">curl</a> or
+<a href="https://www.gnu.org/software/wget/">wget</a>.  Basically anything that
+speaks the <a href="https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol">HTTP
+protocol</a> can
+connect to a web server (because the server also speaks HTTP.)</p><p>Once connected, the client makes an HTTP request, and the server
+provides an HTTP response. For example, a client might say, "Give me
+goats.jpg", and the server might respond, "Here is goats.jpg," followed
+by the data. Or the server might respond,
+"<a href="https://en.wikipedia.org/wiki/List_of_HTTP_status_codes#4xx_Client_Error">404</a>
+goats.jpg not found!"</p><p>In the simple case, the client receives the data, and the connection is closed, completing the transaction. (HTTP has a lot of features, some of which don't conform to the previous sentence, but we won't be going into those here.) The client then displays the image, or saves it, or whatever the client is programmed to do.</p><p>Once you run this webserver on your computer, you'll be able to connect to it from your web browser and have it serve web pages and images to your browser.</p><h2>A quick note on the Right Thing™</h2><p>Although we're implementing this in NodeJS, we're actually doing it the difficult, improper way. We're reinventing the wheel for learning and demonstration purposes.</p><p>For real life, there are libraries that help writing webservers in
+NodeJS, and those are what you'd be more likely to use. (See
+<a href="https://www.npmjs.com/package/connect">Connect</a> and <a href="https://github.com/expressjs/serve-static">Serve
+Static</a>.) But using those is
+too simple to learn anything from, so we'll roll our own for fun.</p><h2>General attack plan</h2><p>The basic approach is this:</p><ul><li>Listen for incoming connections.</li><li>When one arrives, examine it to determine the file that is requested.</li><li>Make sure the file exists. If not, return a
+<a href="https://en.wikipedia.org/wiki/List_of_HTTP_status_codes#4xx_Client_Error">404</a>.</li><li>As a bonus, check if the file is a directory. If it is, try adding a "/index.html" to the end to see if that file exists. If not, return a 404.</li><li>If the file exists, look at its extension (e.g. ".html" or ".js") and
+determine it's <a href="https://en.wikipedia.org/wiki/Media_type">MIME type</a>for the response (e.g.<pre>text/html</pre>or<pre>application/javascript</pre>).</li><li>Read the file into memory.</li><li>Write a 200 (success) response header with the MIME type, and write the file into the response.</li><li>Kick up your heels and have a pint for a job well-done.</li><li>Return to step 1.</li></ul><p>And just keep doing that forever.</p><blockquote><p/><graphic>I mentioned the HTTP header, above. This is some data that's sent at the beginning of the request and response to give more information about the contents of the data, or of the connection itself. The bulk of what HTTP is is dealing with HTTP headers.</graphic><p>There are a bazillion values you can set in the headers. Some are set automatically by the web server library, and some we have to set.</p><p>In this case, we're only going to set one header value for the response:</p><pre>Content-Type</pre>. In particular, we're going to set it to the MIME type of the file we're returning. E.g.<pre>text/html</pre>.<p>What this does is it allows the client (the browser) to figure out what to do with this data. Since data is data, it can be hard for the browser to tell if the data that came back is an image, or text, or XML, or JSON, or video, or audio, or... So the web server shares the data's MIME type explicitly in the</p><pre>Content-Type</pre>, so the browser knows if it should show an image, bring up a video player, or just render HTML text, and so on.</blockquote><h2>NodeJS: synchronous vs. asynchronous</h2><p>A large number of NodeJS's I/O functions come in two flavors: synchronous and asynchronous. The code is a lot more simple if you use synchronous calls because they return the result right there. Asynchronous calls return the result later in a callback, making the code more convoluted.</p><p>You do get what you pay for, however. Async calls don't tie up the NodeJS engine while they execute, unlike sync calls. So if you're going to be handling a lot of requests, async is the way to go.</p><p>Because async is Harder and Righter, we'll be coding this up all async.</p><h2>The Webserver, skeleton</h2><p>The first part of the webserver just listens and calls a handler when a request comes in:</p><pre><pre>const http = require('[http](https://nodejs.org/api/http.html)');
+
+function httpHandler(request, response) {
+    // This gets called for each web request
+
+    // *** Magic happens in here ***
+}
+
+// Listen for requests on port 3490
+http.createServer(httpHandler).listen(3490);
+</pre></pre>
+<p>This will accept connections, read a request, and then... do nothing.  A
+web browser wouldn't know what to make of it. We have to have the server
+deal with the <pre>request</pre> and <pre>response</pre> objects that were passed in to
+<pre>httpHandler()</pre>.</p><blockquote><p/><graphic>In NodeJS,</graphic><pre>require()</pre>is the way you bring in other modules.<pre>require('http')</pre>loads the<a href="">HTTP module</a>, which is what we are going to use to write the web server.</blockquote><h2>Request and response</h2><p>Then, in the <pre>httpHandler()</pre> code, we want to get the requested file
+name from the request, and try to locate it on disk.  We'll write
+another helper function, <pre>getFilenameFromPath()</pre>, to wrap up that
+functionality. (Since it's also async, it'll call the <pre>onGotFilename()</pre>
+callback once it completes.)</p><pre><pre>const url = require('[url](https://nodejs.org/api/url.html)');
+
+function httpHandler(request, response) {
+
+    /**
+     * Called when the filename has been ascertained
+     */
+    function onGotFilename(err, filename) {
+        // *** In here we'll actually handle the response
+    }
+
+    // Extract the part of the URL after the host:port. This is the
+    // filename the browser is looking for:
+    let path = url.parse(request.url).pathname;
+
+    // Try to find the actual file associated with this path:
+    getFilenameFromPath(path, onGotFilename);   // [MARK 1]
+}
+</pre></pre>
+<p>So far, so good. Let's assume the <pre>getFilenameFromPath()</pre> call was
+successful, and fill in that <pre>onGotFilename()</pre> callback. This is where
+we're going to write the HTTP headers and response for the web server to
+send back to the browser.</p><p>If the <pre>err</pre> parameter is set, something went wrong (we'll assume the
+file wasn't found), and we need to report it. So you'll see the famous
+<pre>404</pre> being returned in that block of code, below.</p><p>But if <pre>err</pre> is unset, then we got an actual file, and the filename is
+in the <pre>filename</pre> parameter. We want to read the file using
+<pre>fs.readFile()</pre>, figure out what the MIME type is so that we can pass it
+out in the <pre>Content-Type</pre> header, and then write the file out to the
+response.</p><blockquote><p/><graphic>This pattern of a callback taking an</graphic><pre>err</pre>argument followed by other result arguments is a common NodeJS pattern.</blockquote><pre><pre>     /**
+     * Called when the filename has been ascertained
+     */
+    function onGotFilename(err, filename) {
+
+        /**
+         * Helper function to return errors in the response
+         */
+        function writeError(err) {
+            if (err.code == 'ENOENT') {
+                // File not found
+                response.writeHead(404, { 'Content-Type': 'text/plain' });
+                response.write('404 Not Found\n');
+                response.end();
+                console.log("Not Found: " + filename);
+            } else {
+                // Any other error
+                response.writeHead(500, { 'Content-Type': 'text/plain' });
+                response.write('500 Internal Server Error\n');
+                response.end();
+                console.log("Internal Server Error: " + filename +
+                    ": " + err.code);
+            }
+        }
+
+        if (err) {
+            writeError(err);
+        } else {
+            // No errors getting the filename, so go ahead and read it.
+            fs.readFile(filename, "binary", function (err, file) {   // [MARK 2]
+                if (err) {
+                    writeError(err);
+                } else {
+                    // No errors reading the file, so write the response
+
+                    // Get the MIME type first
+                    let mimeType = getMIMEType(filename);  // [MARK 3]
+                    response.writeHead(200, { 'Content-Type': mimeType }); // [MARK 4]
+                    response.write(file, "binary");  // [MARK 5]
+                    response.end();  // [MARK 6]
+                    console.log("Sending file: " + filename);
+                }
+            });
+        }
+    }
+</pre></pre>
+<p>As you can see, the general idea is to first check to see that <pre>err</pre> is
+set, and if it is, call <pre>writeError()</pre> to return an error to the client.</p><p>Assuming there's no error, we go ahead and try to read the entire file
+into memory, sending it to the anonymous function callback at <pre>[MARK 2]</pre>.</p><p>Of course, the call to <pre>fs.readFile()</pre> could create an error, too, for
+whatever reason. So we also check for that.</p><p>But assuming all went well, we now have the file data in hand, and all that's left is to write back the response to the client.</p><p>Well, almost all. We still need to be able to tell the client what
+type the file is. So we call <pre>getMimeType()</pre> at <pre>[MARK 3]</pre> with the
+filename. It will return an appropriate MIME type for the file, such as
+<pre>text/html</pre> or <pre>image/jpg</pre>.</p><p>We need that MIME type for the <pre>Content-Type</pre> header, which we send over
+in the <pre>writeHead()</pre> call at <pre>[MARK 4]</pre>. The first argument is the HTTP
+status code. 200 is success, 404 is "not found", 500 is a general server
+error, and so on. You can find them all in <a href="https://en.wikipedia.org/wiki/List_of_HTTP_status_codes">the complete
+list</a>.</p><p>After that, we write the file contents to the body of the response with
+<pre>write()</pre> at <pre>[MARK 5]</pre>.</p><p>And finally, we complete the response by calling <pre>end()</pre> at <pre>[MARK 6]</pre>.
+The client gets it back and shows it to the user (or whatever it's coded
+to do.)</p><h2>MIME types</h2><p>In this server, there's a tiny function called <pre>getMIMEType()</pre>. It looks
+at the extension on the file name and matches it up to a <a href="https://en.wikipedia.org/wiki/Media_type">MIME
+type</a>.</p><p>This is really not an industrial way to do things at all, and is just
+here for learning purposes. There are several packages already written,
+such as NodeJS's <a href="https://www.npmjs.com/package/mime">mime</a>, that are
+far more powerful and robust than this, and you should definitely use
+one of those instead. (Extra credit: convert the server to use that
+instead.)</p><p>But what we have here does show the basic idea.</p><pre><pre>const path = require('[path](https://nodejs.org/api/path.html)');
+
+function getMIMEType(filename) {
+    let mimeTypes = {
+        '.js': 'application/javascript',
+        '.jpg': 'image/jpg',
+        '.png': 'image/png',
+        '.html': 'text/html'
+    };
+
+    // Get the file extension, .html, .js, etc.
+    let ext = path.extname(filename);
+
+    if (ext in mimeTypes) {
+        return mimeTypes[ext];
+    }
+
+    // If we don't recognize it, just return this default
+    return 'text/plain';
+}
+</pre></pre>
+<h2>Finding a file on disk for a given request</h2><p>The only piece left is the elephant in the room of
+<pre>getFilenameFromPath()</pre> (which you might remember from <pre>[MARK 1]</pre>
+above). This function does all the heavy lifting of trying to find the
+file on disk that corresponds to the one requested in the URL by the
+client.</p><p>When the client requests a URL, the path portion is the stuff at the
+end. For example, the path of <pre>http://www.example.com/foo/index.html</pre> is
+<pre>/foo/index.html</pre>, and the path of <pre>http://www.example.com/</pre> is <pre>/</pre>.
+We'll be appending that path onto our "base directory" to get the path
+to the file on disk.</p><p>The powerhouse function is <pre>fs.stat()</pre> which takes a filename and tries
+to determine if it exists, what kind of file it is, how big it is, etc.</p><p>Our basic approach is:</p><ul><li>
+<p>Convert all</p><a href="https://en.wikipedia.org/wiki/Percent-encoding">percent escapes</a>(e.g.<pre>%20</pre>) and other special characters (e.g.<pre>+</pre>) in the requested path.</li><li>
+<p>Verify that the path is in our base path (and that a malicious user can't retrieve files that are above our base path).</p></li><li>
+<p>Call</p><pre>fs.stat()</pre>on the requested filename.</li><li>
+<p>If error, return error.</p></li><li>
+<p>If the file is a directory, attach</p><pre>/index.html</pre>to the end of the path, and<a href="https://en.wikipedia.org/wiki/Goto">goto</a>step 1.</li><li>
+<p>If the file is a normal file, congratulations, you've delivered a healthy bouncing baby file, and the success callback can be made.</p></li><li>
+<p>Otherwise something else is wrong. We return an error.</p></li></ul><blockquote><p/><graphic/><a href="">DANGER, Will Robinson!</a>We're taking a request for a file from somewhere in the world, and then delivering that file back to whomever asked for it. There are a lot of bad people in the world. Some of them might do something like request this URL:<p/><pre>http://example.com/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd</pre><p/><a href="">, in case you don't recognize it, is a</a><pre>%2e</pre><a href="">period</a>. If you do like we do in this server and decode the URL to replace those and append the result onto our base directory, it'll change the path to:<p/><pre>/home/beej/myserver/../../../../etc/passwd</pre><p>where</p><a href="">is your password file!</a><pre>/etc/passwd</pre><p>And that's not something we want to hand back to the client.</p><p>We have to sterilize the path from the request to make sure it fits in our little "sandboxed" part of the file system.</p><p>Our server starts serving files from the current directory, which we will define as the "base directory". So we make sure that no one can request anything in any parent directory above the base directory.</p><p>But what if the user has a</p><a href="">symbolic link</a>as a child directory that leads back up past the base directory? Our implementation will actually follow that. Should it? Maybe. Maybe not. In servers like Apache, you can set a "FollowSymlinks" option to decide to follow or not follow them. (Extra credit: improve our implementation to allow this kind of control.)<p>In general, you have to validate every piece of data in the the request that you are going to respond to. Any of it can be malicious.</p></blockquote><p>Without much further ado, let's take a look at the code:</p><pre><pre>const path = require('[path](https://nodejs.org/api/path.html)'),
+    fs = require('[fs](https://nodejs.org/api/fs.html)');
+
+// Use current directory as base directory for all file serving
+let basedir = process.cwd();
+
+/**
+ * Locate a filename for a specific path
+ */
+function getFilenameFromPath(filepath, callback) {
+    // Get all those %20s, +s, and stuff out of there:
+    filepath = decodeURI(filepath.replace(/\+/g, '%20'));
+
+    // Normalize will translate out all the ./ and ../ parts out of the
+    // path and turn it into a plain, absolute path.
+    let filename = path.normalize(basedir + path.sep + filepath);
+    let st;
+
+    /**
+     * Called when the fs.stat() call completes
+     */
+    function onStatComplete(err, stats) {
+        if (err) {
+            return callback(err, filename);
+        }
+
+        // If it's a directory, try looking for index.html:
+        if (stats.isDirectory()) {
+            filename = path.normalize(filename + path.sep + 'index.html');
+            fs.stat(filename, onStatComplete);
+            return;
+        }
+
+        // If the result's a file, return the name
+        if (stats.isFile()) {
+            return callback(null, filename)
+        } else {
+            return callback(new Error("Unknown file type"), filename);
+        }
+    }
+
+    // First make sure the file is still in the base directory
+    // for security reasons:
+    if (filename.substring(0, basedir.length) != basedir) {
+        // If not, 404 it
+        let err = new Error("Not Found");
+        err.code = 'ENOENT';
+        return callback(err, filename);
+    }
+
+    // Now see if we can find the file:
+    fs.stat(filename, onStatComplete);
+}
+</pre></pre>
+<p>Notice the code that looks for <pre>index.html</pre> if the destination is a
+directory. For extra credit, modify the code to show a directory listing
+if the path is a directory and <pre>index.html</pre> is not found. (Most
+webservers offer this functionality as an option.)</p><p>And that's the webserver.  Here's a <a href="http://beej.us/beej-httpserver-demo.zip">link to the complete
+code</a>.</p><p>To run it, unpack it, and type the following on the command line:</p><pre><pre>$ cd beej-httpserver-demo
+$ node httpserver.js
+</pre></pre>
+<blockquote><p/><graphic>If you get an error about an address already being in use, first make sure you're not already running the server in another window. If you aren't, then go into the</graphic><pre>httpserver.js</pre>source and change the port number at the top from<pre>3490</pre>to something else, like<pre>4000</pre>or<pre>8000</pre>. You just need a port that's not currently used on your machine, and most of them are free.</blockquote><p>And then point your browser to
+<a href="http://localhost:3490"> http://localhost:3490</a>. It should say "Hello,
+World!" back!</p><h2>Testing with <pre>curl</pre></h2>
+<p>You can also test it from the command line if you have
+<a href="http://curl.haxx.se/"> curl</a> installed. If you run with the "</p><pre>-D -</pre>"
+options, it'll also dump the HTTP header to
+<p><a href="https://en.wikipedia.org/wiki/Standard_streams#Standard_output_.28stdout.29">stdout</a>so you can see it. Here's an example:</p><pre><pre>$ curl -D - http://localhost:3490
+HTTP/1.1 200 OK
+Content-Type: text/html
+Date: Sun, 08 Nov 2015 18:33:54 GMT
+Connection: keep-alive
+Transfer-Encoding: chunked
+
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+        &lt;head&gt;
+        &lt;/head&gt;
+
+        &lt;body&gt;
+                &lt;img src="goat100.png"&gt;&lt;br&gt;
+                Hello, World!
+        &lt;/body&gt;
+&lt;/html&gt;
+</pre></pre>
+<p>You can see our computed MIME type coming back in the <pre>Content-Type</pre>
+header, too!</p><p>Let's try getting the file <pre>goat100.png</pre> for fun:</p><pre><pre>$ curl -D - http://localhost:3490/goat100.png
+HTTP/1.1 200 OK
+Content-Type: image/png
+Date: Sun, 08 Nov 2015 18:45:10 GMT
+Connection: keep-alive
+Transfer-Encoding: chunked
+
+�PNG
+&#xFFFD;
+IHDR&#xFFFD;���K
+CiCCPICC profilexڝSwX��&#xFFFD;&gt;��eVB����l�"#�&#xFFFD;Y�&#xFFFD;�a�&#xFFFD;&#xFFFD;@Ņ�
+
+[etc...]
+</pre></pre>
+<p><pre>Content-Type</pre> is <pre>image/png</pre>, which is what it should be. And sure
+enough, there's the PNG data. It's a binary format, so it looks pretty
+bad when it come back out on the terminal. But there you have it.</p><p>Congratulations! You wrote your own webserver!</p><p><a href="http://beej.us/websockets/">Continue to Part 1: Intro to WebSockets</a></p><h2>Links</h2><h2>License</h2><p>The code attached to this article is licensed under the <a href="http://www.opensource.org/licenses/mit-license.php">MIT open source
+license</a>.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Writing a jQuery plugin to create scrolling regions in HTML | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Writing a jQuery plugin to create scrolling regions in HTML</h1>
+        <div class="meta">Beej&#x27;s Bit Bucket 2012-07-10T00:00:00Z</div>
+        <div class="links">
+          <a href="http://beej.us/blog/data/jquery-plugin-scrollregion/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/beej-us/beej-us-2f39cafb8bee0981.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">How to make a scrolling pane in HTML/CSS; in particular, how to wrap it all in a jQuery plugin for easy reuse.</div>
+        <div class="content">
+          <html>
+  <body><p>2012-07-10, 2013-01-30</p><h1>jQuery Plugins and Scrolling Regions</h1><p>On smaller screens, you can grab the border of the app, below, and scroll it to the right. Yes, I know it should be rebuilt to be responsive...</p><p>How do you make scrolling panes, like the one above? Also, how do you make them easy to code and reuse?</p><p>I use <a href="http://jquery.com/">jQuery</a> a lot since it's a great library for
+keeping things working cross-browser. One of the cool things about it is
+you can write plugins to extend the functionality, and we'll use that
+extensibility here to help bring the scrolling region to web pages.</p><blockquote><p>Note: there are jQuery plugins for just about everything, including this. This is just an exercise for fun and learning!</p></blockquote><p>This post assumes you're familiar with jQuery. If you're not, you might
+want to <a href="http://docs.jquery.com/Tutorials">read some of the many
+tutorials</a> and get some practice
+before coming back here.  But don't let me dissuade you in any case!</p><h2>Scrolling Regions</h2><p>Let's tackle the HTML/CSS side first.</p><p>Basically what we have is CSS and nested <pre>div</pre>s. The outermost we'll
+call the “frame”, which is the unmoving window on the screen through
+which you peer down on the “container”; the container slides around
+under the frame so it appears to move, and it holds all the content.</p><p><graphic src="usmap-small.jpg" alt="Masked Map"/></p><p>The setup is something like this (excuse the HTML and CSS crammed together):</p><pre><pre>.scrollregion-frame {
+    position: relative;
+    overflow: hidden;
+}
+
+.scrollregion-container {
+    position: absolute;
+    /* top: -20px;  */  /* &lt;- set these to make it scroll */
+    /* left: -40px; */
+}
+</pre></pre>
+<pre><pre>&lt;div class="scrollregion-frame"&gt;
+    &lt;div class="scrollregion-container"&gt;I can be scrolled around!&lt;/div&gt;
+&lt;/div&gt;
+</pre></pre>
+<p>And with that, we can “scroll” the inner <pre>div</pre> by setting its <pre>left</pre> and
+<pre>top</pre> CSS properties!  Imagine the container is a sheet of paper you're
+sliding around below the window of the surrounding frame; this is why we
+need to set <pre>top</pre> and <pre>left</pre> to negative values to shift the container
+up and left.</p><p>There are a few CSS forces at play, here. The easy one is <pre>overflow: hidden</pre>. This causes anything that would normally either be outside the
+parent container (or cause scrollbars to appear) simply gets cropped
+off, instead. The rest of the map in the demo, above, is still there;
+it's just hidden away outside the parent container.</p><p>The other thing is in <pre>.scrollregion-container</pre>, we have <pre>position: absolute</pre>. This allows us to move the <pre>div</pre> around "out of flow", which
+means you can move it independently of the rest of the items that are
+being automatically positioned on the page. Despite the fact that it is
+called "absolute", it is still absolute relative to the parent container
+(in this case, the scroll frame.)</p><blockquote><p>And you might notice a</p><pre>position: relative</pre>in the<pre>.scrollregion-frame</pre>. This is because the<pre>position: absolute</pre>in the container<pre>div</pre>won't work unless the position is relative (or absolute) on the parent container.</blockquote><p>Lastly, you'll want to explicitly set the width and height of the scroll frame in CSS. Since the inner scroll container is out of flow, the outer container won't consider it when deciding what size to make itself; it will default to zero height and 100% width.</p><blockquote><p>Another thing you do is have a</p><a href="">CSS reset</a>for your stuff, and make sure you have a valid<a href="">DOCTYPE</a>on your HTML. Without these things, potentially Weird Things can happen.</blockquote><p>At this point, you can just use jQuery's <pre>animate()</pre> method to change
+the CSS <pre>left</pre> and <pre>top</pre> to pan the map around, like in the demo!</p><p>But what if you want to make that code reusable? Read on!</p><h2>jQuery Plugin Functionality</h2><p>The basic concept here is that we're going to <a href="http://en.wikipedia.org/wiki/Monkeypatch">monkey
+patch</a> jQuery to do our
+bidding. When we've done that, we'll be able to use our functionality in
+the JQuery Way, and other people will be able to, as well!</p><p>What is our bidding? Well, I'd like to take the HTML in the previous section, and make it so you can write that with a few lines of JavaScript and have a full-on scrolling region.</p><p>For example:</p><pre><pre>&lt;style type="text/css"&gt;
+
+#scrollregion1 {
+    width: 400px;  /* set size of region */
+    height: 300px;
+    border: 1px solid gray;
+}
+
+&lt;/style&gt;
+
+&lt;!-- set up container and thing to be scrolled, usmap.jpg --&gt;
+
+&lt;div id="scrollregion1"&gt;
+    &lt;div&gt;&lt;img src="usmap.jpg"&gt;&lt;/div&gt;
+&lt;/div&gt;
+
+&lt;script type="text/javascript"&gt;
+
+$(function() {
+
+    // init scroll region and set position in pixels
+
+    $('#scrollregion1').scrollregion('init');  // [MARK 1]
+    $('#scrollregion1').scrollregion('setPosition', -250, -200);  // [MARK 2]
+});
+
+&lt;/script&gt;
+</pre></pre>
+<p>That's how we set up a scrolling region and set the position in the demo
+at the top of the page (basically). Note that at points <pre>[MARK 1]</pre> and
+<pre>[MARK 2]</pre> in the listing, above, it looks like we've added a new
+method, <pre>scrollregion()</pre> to the jQuery library, with maybe an argument
+to tell it what function to perform! How do we do that?</p><h2>Writing a jQuery Plugin</h2><p>Assuming you're familiar with jQuery, before we begin, read <a href="http://docs.jquery.com/Plugins/Authoring">jQuery
+plugin authoring
+best-practices</a>.  It's short
+and has lots of good info. I'm just going to expand on it a tiny bit.</p><p>Back already?  Did you really read it just now? <pre>};-)</pre></p><p>In order to get along with jQuery and other plugins, plugins are expected to follow certain rules, which we'll tackle here.</p><h3>Namespace your JavaScript</h3><p>As a seasoned JS dev, you know you're not supposed to pollute the global namespace, and you sagely wrap your stuff up in a function to hide it from the outside world.</p><p>A cute little trick is that you can pass an argument to that function.
+In this case, it's convenient to pass the jQuery main object in as an
+argument. It's even more convenient to name the parameter <pre>$</pre> so you can
+use it in regular jQuery fashion in your code inside the plugin:</p><pre><pre>// Inside the plugin
+
+(function($) {
+
+    // entire plug-in goes here
+
+})(jQuery);
+</pre></pre>
+<p>As long as you include the jQuery source JavaScript in your HTML before you include the plugin, this will work fine.</p><h3>Adding a new method</h3><p>jQuery keeps virtually all the methods is knows in <pre>$.fn</pre>. So we'll add
+it the plugin:</p><pre><pre>// Inside the plugin
+
+(function($) {
+
+    $.fn.scrollregion = function(methodName) {
+
+        // this gets called with $('#foo').scrollregion()
+
+    };
+
+})(jQuery);
+</pre></pre>
+<h3>Returning a value</h3><p>Here's one option for returning a value from the plugin:</p><pre><pre>// Inside the plugin
+
+(function($) {
+    $.fn.scrollregion = function() {
+        return 4;
+    };
+})(jQuery);
+</pre></pre>
+<p>That would make this true:</p><pre><pre>$('#foo').scrollregion() === 4; // TRUE
+</pre></pre>
+<p>Totally valid, but not very exciting.</p><p>Here's a slightly more exciting option that returns the width of the
+element using the jQuery <pre>width()</pre> function:</p><pre><pre>// Inside the plugin
+
+(function($) {
+    $.fn.scrollregion = function() {
+        return this.width();
+    };
+})(jQuery);
+</pre></pre>
+<p>It's important to notice that <pre>this</pre> in this context refers to the
+jQuery object in question that have been matched by the selector. So if
+we have this:</p><pre><pre>// Outside the plugin
+
+$('div').scrollregion();
+</pre></pre>
+<p>then <pre>this</pre> in the plugin will refer to the set of all <pre>div</pre>s in the
+document. (However, the <pre>width()</pre> method is programmed to only return
+the width of the first element in the set.)</p><h3>Chaining calls</h3><p>One of the gorgeous things about jQuery is that you can chain calls on
+the same line, like in this example where we call <pre>css()</pre> followed by
+<pre>on()</pre>. Both methods are applied to every <pre>div</pre>, since that's what's in
+the selector:</p><pre><pre>// Outside the plugin
+
+$('div').css('top':'0px').on('click', clickHandler);
+</pre></pre>
+<p>Not all methods chain like this.  Obviously the <pre>width()</pre> method returns
+a width and that's the end of it.  But lots of them do chain like this,
+so how do we code the plugin to allow it?</p><p>When you call <pre>$('div')</pre>, that function returns a jQuery object that
+represents all the <pre>div</pre>s in your document.  That jQuery object has a
+number of methods, like <pre>css()</pre> or <pre>on()</pre> that can be called.  And each
+of the chainable methods returns that same jQuery object! This is why,
+in the example above, we were able to call <pre>on()</pre> directly, because
+<pre>css()</pre> returned the same jQuery object as it was operating on, namely
+the one originally created with <pre>$('div')</pre>!</p><p>Let's make a chainable jQuery method that does nothing:</p><pre><pre>// Inside the plugin
+
+(function($) {
+    $.fn.nop = function() {
+        return this;
+    };
+})(jQuery);
+</pre></pre>
+<p>And we that we can:</p><pre><pre>// Outside the plugin
+
+$('div').nop().css('top':'0px');
+</pre></pre>
+<p>Since <pre>nop()</pre> just returns the same jQuery object as <pre>$('div')</pre>, the
+<pre>css()</pre> method uses it as though <pre>nop()</pre> weren't even there.</p><p>If you want your plugin call to be chainable, return the jQuery object
+(namely, <pre>this</pre>) so that the next method in the chain can be applied to
+it.</p><h3>Working with sets of elements</h3><p>Sometimes jQuery objects match a set of DOM objects, not just one. For instance:</p><pre><pre>var foo = $('div');
+</pre></pre>
+<p>there <pre>foo</pre> is a jQuery object that refers to all the <pre>div</pre>s in the
+document. You can iterate through all of them with the jQuery method
+<pre>each()</pre>, which calls a function for every member in the set of DOM
+elements:</p><pre><pre>var divs = $('div');
+
+divs.each(function() {
+    // Note that inside the each() handler function, "this"
+    // refers to the individual DOM element, not a jQuery
+    // object. But you can always make a jQuery object from
+    // a DOM element using $() as follows, where jElement is
+    // a jQuery object representing this single DOM element:
+
+    var jElement = $(this);
+
+    // do complicated plugin stuff here to each div
+});
+</pre></pre>
+<p>And we can make this chainable, too, since the <pre>each()</pre> method
+conveniently returns the jQuery object!  So you'll commonly see
+something like this:</p><pre><pre>// Inside the plugin
+
+function jQueryPluginFunction() {
+    return this.each(function() {
+        // do complicated plugin stuff here to each element
+    });
+}
+</pre></pre>
+<h3>Naming methods with the first parameter</h3><p>jQuery best-practices recommend strongly against adding multiple
+functions to <pre>$.fn</pre> for the same plugin. The plugin should define one
+function, and the first parameter to that function should dictate what
+the method is and what the plugin should do.  Like we've already seen,
+here is something that sets up a scroll region on a <pre>div</pre> with ID
+<pre>myscrollarea</pre>:</p><pre><pre>// Outside the plugin
+
+$('#myscrollarea').scrollregion('init');
+</pre></pre>
+<p>That says, "Hey, scrollregion plugin! Call your <pre>init</pre> method on these
+elements I've selected.</p><p>In order to make this work, we'll follow <a href="http://docs.jquery.com/Plugins/Authoring#Plugin_Methods">the template outlined in the
+best-practices
+document</a>:</p><pre><pre>// Inside the plugin
+
+var methods = {
+    "init": initHandler,
+    "options": optionsHandler,
+    "getContainer": getContainerHandler,
+    "setPosition": setPositionHandler,
+    "setPositionPercent": setPositionPercentHandler,
+    "destroy": destroyHandler
+};
+
+// stolen from jQuery's sample code:
+
+$.fn.scrollregion = function(method) {
+    if (methods[method]) {
+        return methods[method].apply(this,
+            Array.prototype.slice.call(arguments, 1));
+
+    } else if (typeof method === 'object' || !method) {
+        return methods.init.apply(this, arguments);
+
+    } else {
+        $.error('Method ' + method +
+            ' does not exist on jQuery.scrollregion');
+    }
+};
+</pre></pre>
+<p>The first part of the code defines a <pre>methods</pre> object. This matches the
+human-readable name of a method (such as <pre>'init'</pre>) to its handler (such
+as <pre>initHandler</pre>.)</p><p>Then, at the “stolen from” section of code, we set up our plugin
+function, <pre>scrollregion()</pre>. This function takes a single named
+parameter, which will be a string that is the method to call, such as
+<pre>'init'</pre>.</p><p>The code below that looks up the method, and calls it with the remaining
+arguments in the
+<a href="https://developer.mozilla.org/en/JavaScript/Reference/Functions_and_function_scope/arguments"> arguments</a>
+array.  Or it calls </p><pre>'init'</pre> by default.  Else it throws an error.<p>We can use this state of affairs to set up an <pre>'init'</pre> call that takes
+some options, so we could call it like this:</p><pre><pre>// Outside the plugin
+
+var options = { 'stayCool': true };
+
+$('#myscrollbar').scrollbar('init', options);
+</pre></pre>
+<p>It's a common technique to pass options in an object like that.</p><p>And since the boilerplate, above, just passes all remaining arguments
+(after the first one which is <pre>'init'</pre>) to <pre>initHandler</pre>, that function
+would look like the following, which would be called when the method
+<pre>scrollbar('init')</pre> was executed:</p><pre><pre>// Inside the plugin
+
+function initHandler(options) {
+    // do something with the options and init
+};
+</pre></pre>
+<h3>Setting Plugin Options</h3><p>As we saw in the previous section, we can lump all the options for a
+particular plugin into the same object, and pass that object in to the
+<pre>'init'</pre> method, or later in some kind of <pre>'setOptions'</pre> method.</p><p>Internally, we can store that object and just refer to it when we need it.</p><p>Where is a good place to store it?</p><p>Well, since we tend to operate on DOM elements, it might actually be good to store the data on the DOM element to which it belongs. This beats storing it globally since each DOM element can have its own state. For example, some scrolling regions might support a certain optional behavior, but other ones on the same page do not. In that case we can't just save the option globally, and must store along with the DOM element.</p><p>Fortunately, jQuery provides a very useful method for storing a data
+object in a DOM element: <pre>data()</pre>.  We can use this to our advantage:</p><pre><pre>// Outside the plugin
+
+var options = { 'stayCool': true };
+
+$('#myscrollbar').scrollbar('init', options);
+</pre></pre>
+<pre><pre>// Inside the plugin
+
+function initHandler(options) {
+    return this.each(function() {
+        var jelement = $(this);
+        jelement.data(options); // store options on the element
+    });
+};
+</pre></pre>
+<p>And, actually, we can do it a bit better than that. Let's say you have default values you want in your options, and you'd like the user-specified values to override your default values. What you need is a way to merge the user options object into your default options object.</p><p>And again, jQuery has a method for you, this time built on the base
+<pre>jQuery</pre> object (AKA <pre>$</pre>): <pre>$.extend()</pre>.</p><pre><pre>// Inside the plugin
+
+function initHandler(user_options) {
+    return this.each(function() {
+        var jelement = $(this);
+        var options = {
+            'animal': 'goat',
+            'color': 'orange'
+        };
+
+        $.extend(options, user_options); // fold user_options into options
+
+        jelement.data(options); // store options on the element
+    });
+};
+</pre></pre>
+<h3>Other Plugin Considerations</h3><p>In <a href="http://docs.jquery.com/Plugins/Authoring">the best practices doc</a>,
+they talk about <a href="http://docs.jquery.com/Plugins/Authoring#Events">namespacing your
+events</a>. So do that.</p><p>Also, one common way of naming jQuery plugin sources is
+<pre>jquery.plugInName.js</pre> or <pre>jquery.plugInName-version.js</pre>.  This way
+people know that's what it is.</p><p>You should also google for "jquery plugin pluginname" and make sure it doesn't exist yet. When the official plugin site is operational, this will be much easier to check.</p><h2>Scrolling Regions</h2><p>Oh yeah, that's what we're talking about. Let's put it to practice, and make a plugin that takes this HTML:</p><pre><pre>&lt;div id="scrollregion1"&gt;
+    &lt;div id="scrollcontainer1"&gt;
+        I can be scrolled around!
+    &lt;/div&gt;
+&lt;/div&gt;
+</pre></pre>
+<p>and turns it into this when the user runs
+<pre>$("scrollregion1").scrollregion('init')</pre>:</p><pre><pre>&lt;div id="scrollregion1" class="scrollregion-frame"&gt;
+    &lt;div id="scrollcontainer1" class="scrollregion-container"&gt;
+        I can be scrolled around!
+    &lt;/div&gt;
+&lt;/div&gt;
+</pre></pre>
+<p>All we're doing is adding the class for some CSS, but as we saw at the beginning of the document, a little CSS was all it took for a scrolling region to exist. We'll define the CSS in an external file that must be included by the end user.</p><p>And here's how:</p><pre><pre>// Inside the plugin
+
+(function($) {  // [MARK 1]
+
+/**
+ * Initialize the scrolling region
+ */
+function initHandler(options) {     // [MARK 2]
+    return this.each(function() {   // [MARK 3]
+        var frame = $(this);
+
+        frame.addClass('jquery-scrollregion-frame'); // [MARK 4]
+        var container = frame.children().first();
+        container.addClass('jquery-scrollregion-container');
+    });
+};
+
+// list of registered methods this plugin supports:
+var methods = {   // [MARK 5]
+    "init": initHandler,
+};
+
+$.fn.scrollregion = function(method) {  // boilerplate [MARK 6]
+    if (methods[method]) {
+        return methods[method].apply(this,
+            Array.prototype.slice.call(arguments, 1));
+    } else if (typeof method === 'object' || !method) {
+        return methods.init.apply(this, arguments);
+    } else {
+        $.error('Method ' + method +
+            ' does not exist on jQuery.scrollregion');
+    }
+};
+
+})(jQuery);  // [MARK 7]
+</pre></pre>
+<p>Here are some of the highlights, marked by numbers in the code, above:</p><ul><li>
+<p>Here's our namespace closure, with</p><pre>$</pre>as a handy parameter for accessing jQuery functionality.</li><li>
+<p>I allow an</p><pre>options</pre>parameter to be passed in to<pre>'init'</pre>; it's unused in this snippet.</li><li>
+<p>Here's the common</p><pre>return this.each()</pre>line.</li><li>
+<p>This is where we add the CSS classes to the elements in question.</p></li><li>
+<p>Everything from here down is boilerplate from</p><a href="http://docs.jquery.com/Plugins/Authoring#Plugin_Methods">the best practices doc</a>.</li><li>
+<p>When we add a property to jQuery's method list in</p><pre>$.fn</pre>is really the moment the plugin is born.</li><li>
+<p>And lastly, here we call our namespace closure function, passing in</p><pre>jQuery</pre>, which will be in the<pre>$</pre>parameter in the plugin.</li></ul><p>Here is a complete use case:</p><pre><pre>&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+
+&lt;!-- include jQuery first, then the plugins --&gt;
+&lt;script src="jquery-1.7.2.min.js" type="text/javascript"&gt;&lt;/script&gt;
+
+&lt;script src="jquery.scrollregion.js" type="text/javascript"&gt;&lt;/script&gt;
+&lt;link href="jquery.scrollregion.css" rel="stylesheet" type="text/css"/&gt;
+
+&lt;script type="text/javascript"&gt;
+(function() {
+
+$(function() { // on ready
+    $('scrollregion1').scrollregion('init');
+});
+
+})();
+&lt;/script&gt;
+
+&lt;/head&gt;
+
+&lt;body&gt;
+
+&lt;div id="scrollregion1"&gt;
+    &lt;div id="scrollcontainer1"&gt;
+        I can be scrolled!
+    &lt;/div&gt;
+&lt;/div&gt;
+
+&lt;/body&gt;
+
+&lt;/html&gt;
+</pre></pre>
+<p>You're going to want to set up some CSS on <pre>scrollregion1</pre> so that it
+has a width and height and border or whatever.  Also you're going to
+want some on <pre>scrollcontainer1</pre> so that it has a bigger width and height
+and can be scrolled around.</p><p>Scroll it how, though?  You'll want to add a new method to the plugin
+called <pre>'setPosition'</pre> that takes an \(x\) and \(y\) value and uses
+them to set the <pre>left</pre> and <pre>top</pre> CSS properties of <pre>scrollcontainer1</pre>.
+A sample call would be like this:</p><pre><pre>// Outside the plugin
+
+$('scrollregion1').scrollregion('setPosition', 80, 90);
+</pre></pre>
+<p>And I'll leave it as an exercise to the reader to implement it.</p><p>You might also notice the scroll region at the top of this page supports mouse motion, touch events, and animated scrolling. So there are more exercises for the reader.</p><p>Oh, ok. I'll <a href="https://github.com/beejjorgensen/jquery-goatscroller">put it all on
+github</a>, too. I've
+named my variant GoatScroller.</p><h2>Sharing your Plugin</h2><p>But after you've made it, how do you share it?  The jQuery guys used to
+have a whole system set up, but they ditched it and have set up <a href="http://plugins.jquery.com/">a new
+one</a>.  This new system for the future uses
+<a href="http://github.com/">github</a>, and has its own <a href="http://plugins.jquery.com/docs/publish/">set up procedures and
+protocols to use</a>, roughly
+outlined below.</p><ul><li>
+<p>Get a</p><a href="https://github.com/">github</a>account. The new system will be tied to it, and you really should have an account, anyway.</li><li>
+<p>`Put your project in a github repo](https://help.github.com/) (you can start with it there, or add it later).</p></li><li>
+<p>Follow</p><a href="http://plugins.jquery.com/docs/publish/">the steps in the publishing documentation</a>, and add a<a href="https://help.github.com/articles/post-receive-hooks">post-receive hook</a>on your repo to hit<pre>http://plugins.jquery.com/postreceive-hook</pre>.</li><li>
+<p>Choose a version number for this release. It must be in the form X.Y.Z, a conformant</p><a href="http://semver.org/">semantic version number</a>.</li><li>
+<p>Create a</p><a href="https://github.com/jquery/plugins.jquery.com/blob/master/docs/manifest.md">manifest</a>which is a<a href="http://en.wikipedia.org/wiki/Json">JSON</a>file describing the characteristics of your plugin.</li><li></li><li>
+<p>Commit and push!</p></li></ul><p>The jQuery folks will track your commits, check out your manifest, and add your plugin to the master list.</p><h2>Links and References</h2><h2>License</h2><p>The code attached to this article is licensed under the <a href="http://www.opensource.org/licenses/mit-license.php">MIT open source
+license</a>.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How can I change a dialog box’s message loop to do a Msg­Wait­For­Multiple­Objects instead of Get­Message? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How can I change a dialog box’s message loop to do a Msg­Wait­For­Multiple­Objects instead of Get­Message?</h1>
+        <div class="meta">The Old New Thing 2026-03-25T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260325-00/?p=112165">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-10b66c34220fd35a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The dialog box lets you change how it waits. The post How can I change a dialog box’s message loop to do a &lt;CODE&gt;Msg­Wait­For­Multiple­Objects&lt;/CODE&gt; instead of &lt;CODE&gt;Get­Message&lt;/CODE&gt;? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>A customer wanted to know how to change a dialog box&#8217;s message loop so that it used <code>Msg­Wait­For­Multiple­Objects</code> instead of <code>Get­Message</code>. (I&#8217;m guessing that they had a handle that they wanted to wait on while the dialog was up.) The standard dialog box message loop checks only for messages, not kernel handles.</p>
+<p>One way to do it is to replace the modal dialog box with a modeless one and <a title="The dialog manager, part 4: The dialog loop" href="https://devblogs.microsoft.com/oldnewthing/20050401-00/?p=35993"> run your own message loop</a>. However, there&#8217;s a key piece missing from the do-it-yourself, which is that there is no way to know whether the dialog procedure has called <code>End­Dialog</code>, and if so, what result code it passed.</p>
+<p>So maybe you&#8217;re displaying somebody else&#8217;s dialog box and therefore cannot alter the dialog procedure to set a different flag when it wants to end the dialog. What can you do to customize the dialog loop from the outside?</p>
+<p>Dialog boxes send their owner the <code>WM_<wbr />ENTER­IDLE</code> message when they have run out of work to do and are about to block waiting for a message. if the handler of the <code>WM_<wbr />ENTER­IDLE</code> message returns, and there is no posted message in the queue, then the dialog box goes to sleep and waits for a message to come in.</p>
+<p>As the name of the message suggests, one way to use the <code>WM_<wbr />ENTER­IDLE</code> message is to handle the message by doing do background idle-time activity, and then return when there is a message for the dialog box to process. For example, maybe you want to do spell checking when the user is idle.</p>
+<p>Another way to use the <code>WM_<wbr />ENTER­IDLE</code> message is to take over how the dialog message loop waits for a message. You can do your own thing, and return when there is a posted message that needs processing.</p>
+<p>So let&#8217;s try it. Just for demonstration purposes, we&#8217;ll create a waitable timer that beeps every two seconds while a common file open dialog is up.</p>
+<p>Start with our <a title="The scratch program" href="https://devblogs.microsoft.com/oldnewthing/20030723-00/?p=43073"> scratch program</a> and make these changes. Remember that error checking has been elided for expository purposes.</p>
+<pre>#include &lt;commdlg.h&gt;
+
+HANDLE hTimer;
+
+void OnChar(HWND hwnd, TCHAR ch, int cRepeat)
+{
+    if (ch != ' ') return;
+
+    hTimer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+
+    LARGE_INTEGER twoSeconds;
+    twoSeconds.QuadPart = -2 * wil::filetime_duration::one_second;
+    SetWaitableTimer(h, &amp;twoSeconds, 2000, nullptr, nullptr, FALSE);
+
+    TCHAR buffer[MAX_PATH]{};
+    OPENFILENAME ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = TEXT("All Files\0*.*\0");
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile = buffer;
+    ofn.nMaxFile = ARRAYSIZE(buffer);
+    GetOpenFileName(&amp;ofn);
+
+    CloseHandle(hTimer);
+    hTimer = nullptr;
+}
+</pre>
+<p>Our <code>WM_<wbr />CHAR</code> handler ignores all characters other than the space bar. But if you press the space bar, it creates a waitable timer that triggers every two seconds, and then it displays a dialog: In this case, it&#8217;s the common file open dialog. When the dialog is finished, we close the timer since we don&#8217;t need it any more. This is just setting up the environment for our <code>WM_<wbr />ENTER­IDLE</code> handler to do its magic.</p>
+<p>The interesting work happens in the next function.</p>
+<pre>void OnEnterIdle(HWND hwnd, UINT source, HWND hwndSource)
+{
+    if (!hTimer) return;
+
+    MSG msg;
+    while (true) {
+        DWORD result = MsgWaitForMultipleObjects(1, &amp;hTimer,
+                                FALSE, INFINITE, QS_ALLINPUT);
+        switch (result) {
+        case WAIT_OBJECT_0:
+            MessageBeep(~0);
+            break;
+
+        case WAIT_OBJECT_0 + 1:
+            if (PeekMessage(&amp;msg, nullptr, 0, 0, PM_NOREMOVE)) {
+                return;
+            }
+            break;
+
+        default:
+            FAIL_FAST_HR(E_UNEXPECTED);
+        }
+    }
+}
+</pre>
+<p>When we get a <code>WM_<wbr />ENTER­IDLE</code> message and there is no timer handle, then just return without doing anything, allowing the dialog box message loop to go idle.</p>
+<p>But if we have a timer handle, then we use the <code>Msg­Wait­For­Multiple­Obcjets</code> function to wait for either the timer handle to be signaled or for a message to arrive. If it was the timer handle, we beep. If it was a message, we call <code>Peek­Message</code> to process any inbound <code>Send­Message</code> calls and see if there&#8217;s a posted message waiting. if so, then we leave it in the message queue (<code>PM_<wbr />NO­REMOVE</code>) for the dialog loop to pick up and return. If we get any other code, then something went horrible wrong, and we fail fast.</p>
+<p>Now we can hook these up to our window procedure.</p>
+<pre>    HANDLE_MSG(hwnd, WM_CHAR, OnChar);
+    HANDLE_MSG(hwnd, WM_ENTERIDLE, OnEnterIdle);
+</pre>
+<p>When the common dialog box goes idle, the internal dialog message pump sends a <code>WM_<wbr />ENTER­IDLE</code> message to the owner (which is us), and we do our handle stuff until a posted message is ready.</p>
+<p>When you run this program, press the space bar, and you get a happy common dialog box, accompanied by some annoying beeping.</p>
+<p>I pulled a trick here. Maybe you noticed it. We&#8217;ll look at it next time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260325-00/?p=112165">How can I change a dialog box&#8217;s message loop to do a &lt;CODE&gt;Msg&shy;Wait&shy;For&shy;Multiple&shy;Objects&lt;/CODE&gt; instead of &lt;CODE&gt;Get&shy;Message&lt;/CODE&gt;?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

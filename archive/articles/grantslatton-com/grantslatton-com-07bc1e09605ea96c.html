@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rust Macros: Zero to Hero | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Rust Macros: Zero to Hero</h1>
+        <div class="meta">Grant Slatton&#x27;s Blog 2024-09-01T17:45:17Z</div>
+        <div class="links">
+          <a href="https://grantslatton.com/rust-macros">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/grantslatton-com/grantslatton-com-07bc1e09605ea96c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A comprehensive guide on Rust macros</div>
+        <div class="content">
+          <h1>Rust Macros</h1>
+<h2>Introduction</h2>
+<p>In programming, a <a href="https://en.wikipedia.org/wiki/Macro_(computer_science)">macro</a> is code that writes code (typically, but not always, at compile-time).</p>
+<p>Macros were invented in the 1950s. Writing raw binary computer code is a pain, so programmers quickly invented "assemblers" to convert more human-readable code into binary. But writing raw assembly is <em>also</em> tedious. So programmers invented macros.</p>
+<p>The first macros were just text-substitutions. Suppose your code had a ton of instances of "add register 1 to register 2 and store the result in register 3, then multiply by register 4 and store back in register 1". You could label this sequence <code>do_the_thing</code> and then start using that meta-instruction in your code. The assembler would expand it to its constituent instructions.</p>
+<p>Then, you get function-like macros that are still just text-substitutions, but with variable inputs. With these, you can write macros like "add the constant N to register 1 and store in register 2, then multiply that by the constant Y and store in register 3". You'd invoke this macro like <code>my_macro(5, 8)</code> where 5 and 8 are X and Y, respectively.</p>
+<p>This style of macro is still used in languages like C. Here are some example C macros:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="kw">#define</span></span><span class="id"> <span class="const">PI</span></span><span class="id"> <span class="num">3.14159</span></span></span>
+<span class="line"><span class="id"><span class="kw">#define</span></span><span class="id"> <span class="fn">SQUARE</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">x</span><span class="punct">)</span></span></span><span class="id"> <span class="id"><span class="punct">(</span><span class="id"><span class="punct">(</span>x<span class="punct">)</span></span> <span class="kw">*</span> <span class="id"><span class="punct">(</span>x<span class="punct">)</span></span><span class="punct">)</span></span></span></span></span></code></pre>
+<p>The first is just a constant definition. All instances of the string <code>PI</code> will be replaced by the numeric literal at compile-time. The second is more function-like. <code>SQUARE(5)</code> will be replaced by <code>((5) * (5))</code>.</p>
+<p>Why does the <code>SQUARE</code> example have those extra parentheses? They aren't necessary in the <code>SQUARE(5)</code> case. But consider <code>SQUARE(3+2)</code>. Without the extra parentheses around the <code>x</code> argument, this would expand to <code>(3 + 2 * 2 + 3)</code>. This evaluates to 10 instead of the expected 25.</p>
+<p>This example should highlight how bug-prone simple string-replacement macros are. Here's an even trickier example:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="type">int</span> x <span class="kw">=</span> <span class="num">5</span><span class="punct">;</span></span>
+<span class="line"><span class="type">int</span> y <span class="kw">=</span> <span class="id"><span class="var">SQUARE</span><span class="id"><span class="punct">(</span></span></span><span class="id"><span class="id">x<span class="kw">+</span><span class="kw">+</span></span></span><span class="id"><span class="id"><span class="punct">)</span></span></span><span class="punct">;</span></span></span></code></pre>
+<p>After this code is executed, what are the values of <code>x</code> and <code>y</code>? Naively, you might think <code>x</code> is 6 (because the <code>++</code> increments it) and <code>y</code> is 25 (because the increment happens <em>after</em> reading the value of <code>x</code>).</p>
+<p>But in reality, <code>x</code> will be 7 and <code>y</code> will be 30. Because the macro invocation expands to <code>((x++) * (x++))</code>. Even though <code>SQUARE</code> <em>looks</em> like a function, it is <em>not</em> a function! It just expands to code! So we increment <code>x</code> <em>twice</em>, and we multiply after <code>x</code> has already been incremented once.</p>
+<p>Macros in C have a bad reputation for being a perpetual source of bugs, and are a common exploit in the <a href="https://en.wikipedia.org/wiki/Underhanded_C_Contest">Underhanded C Contest</a>.</p>
+<p>Here are a few examples from that content:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="kw">#define</span></span><span class="id"> <span class="fn">BYTESPERPIXEL</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">fits8bits</span><span class="punct">)</span></span></span><span class="id"> <span class="id"><span class="punct">(</span><span class="num">3</span> <span class="kw">&lt;&lt;</span> <span class="id"><span class="punct">(</span><span class="kw">!</span>fits8bits<span class="punct">)</span></span><span class="punct">)</span></span></span></span></span></code></pre>
+<p>Note that lack of parentheses around <code>fits8bits</code> — the underhanded code invokes the macro like <code>BYTESPERPIXEL(256 &gt; max)</code> which will expand to <code>3 &lt;&lt; (!256 &gt; max)</code>. <code>!256</code> will evaluate to a very large integer that will always be <code>&gt; max</code>.</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="kw">#define</span></span><span class="id">  <span class="fn">__isleap</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">year</span><span class="punct">)</span></span></span><span class="id">  <span class="id"><span class="punct">(</span><span class="id"><span class="punct">(</span>year<span class="punct">)</span></span> <span class="kw">%</span> <span class="num">4</span> <span class="kw">==</span> <span class="num">0</span> <span class="kw">&amp;&amp;</span> <span class="id"><span class="punct">(</span><span class="id"><span class="punct">(</span>year<span class="punct">)</span></span> <span class="kw">%</span> <span class="num">100</span> <span class="kw">!=</span> <span class="num">0</span> <span class="kw">||</span> <span class="id"><span class="punct">(</span>year<span class="punct">)</span></span> <span class="kw">%</span> <span class="num">400</span> <span class="kw">==</span> <span class="num">0</span><span class="punct">)</span></span><span class="punct">)</span></span></span></span></span></code></pre>
+<p>This one has all the parentheses in the right place, but takes advantage of the fact that <code>year</code> will be evaluated up to 3 times. So if you were to do something like:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="var">__isleap</span><span class="id"><span class="punct">(</span></span></span><span class="id"><span class="id">current_year<span class="kw">+</span><span class="kw">+</span></span><span class="id"><span class="punct">)</span></span></span></span></span></code></pre>
+<p>You might increment the year up to 3 times instead of 1. <a href="https://underhanded-c.org/_page_id_26.html">The actual code</a> is even more devious and invokes it like:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="var">__isleap</span><span class="id"><span class="punct">(</span></span></span><span class="id"><span class="id">curr_year <span class="kw">=</span> <span class="id"><span class="var">AUDIT</span><span class="id"><span class="punct">(</span></span></span><span class="id"><span class="id">…</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"><span class="punct">)</span></span></span></span></span></code></pre>
+<p>Where <code>AUDIT</code> is <em>another</em> macro that also has side-effects.</p>
+<h2>Towards saner macros</h2>
+<p>A lot of modern languages try to bring some order to this situation. Lisp started this trend. Rather than being simple string-replacement like assembler and C, Lisp macros operate on the <a href="https://en.wikipedia.org/wiki/Abstract_syntax_tree">abstract syntax tree</a> itself.</p>
+<p>But there are still pitfalls. Consider this pseudocode:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id">x <span class="kw">=</span> <span class="num">123</span></span>
+<span class="line"><span class="id"><span class="var">some_macro</span><span class="id"><span class="punct">(</span></span></span><span class="id"></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span>
+<span class="line"><span class="id"><span class="var">print</span><span class="id"><span class="punct">(</span></span></span><span class="id"><span class="id">x</span><span class="id"><span class="punct">)</span></span></span></span></span></code></pre>
+<p>What gets printed? 123? What if <code>some_macro()</code> generates the code <code>x = 456</code>?</p>
+<p>In the 1980s, a variant of Lisp called Scheme fixed this problem by introducing <a href="https://en.wikipedia.org/wiki/Hygienic_macro">hygienic macros</a>. The basic idea is to bring the ideas of <a href="https://en.wikipedia.org/wiki/Scope_(computer_science)">scope</a> to macros.</p>
+<p>In the code above, <code>some_macro</code> is defined in some other scope, and <code>x</code> is not passed into it as an argument, so in a hygienic macro system, we have a guarantee that <code>x</code> will not be modified by <code>some_macro</code>.</p>
+<p>Even if <code>some_macro</code> contains the code <code>x = 456</code>, the <code>x</code> it's assigning to is in a different namespace than the original <code>x</code> with value 123. You can imagine the macro's <code>x</code> having the name <code>x2</code>, so conceptually the resultant code, after the macro is expanded, is:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id">x <span class="kw">=</span> <span class="num">123</span></span>
+<span class="line">x2 <span class="kw">=</span> <span class="num">456</span></span>
+<span class="line"><span class="id"><span class="var">print</span><span class="id"><span class="punct">(</span></span></span><span class="id"><span class="id">x</span><span class="id"><span class="punct">)</span></span></span></span></span></code></pre>
+<p>Hygienic macros are a lot easier to reason about from the callsite, and a lot harder to write surprising, underhanded code.</p>
+<p>You can do even better by adding on a type system to the macro language. Just like <code>fn foo(x: int, y: String)</code> specifies that it takes an integer and a string arguments, some languages have macros that specify what type of abstract syntax tree node they accept. Maybe the macro only accepts variable names as arguments. Maybe it only accepts numeric constants.</p>
+<h2>Rust Macros</h2>
+<p>Rust macros are hygienic and have a type system. Let's just jump into an example.</p>
+<h3>Basics</h3>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">bail_if</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$condition</span><span class="punct">:</span><span class="type">expr</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="kw">if</span> <span class="var">$condition</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">            <span class="kw">return</span> <span class="id">None</span><span class="punct">;</span></span>
+<span class="line">        </span><span class="id"><span class="punct">}</span></span></span>
+<span class="line">    <span class="punct">}</span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>This macro can be invoked like <code>bail_if!(x &lt; 123)</code> and will return <code>None</code> if the condition is true. If you have a function that has 10 places where you want to return <code>None</code> if a condition is true, this kind of macro can make such a function a lot more readable.</p>
+<p>Let's break down the syntax.</p>
+<ul>
+<li><code>macro_rules!</code> says "we are declaring a macro — like the <code>fn</code> keyword declares a function, or the <code>let</code> keyword declares a variable</li>
+<li><code>bail_if</code> is the name of the macro</li>
+<li><code>($condition:expr)</code> is the <em>pattern</em> the macro matches — this macro only has 1 pattern, but macros can have multiple, we'll cover that later</li>
+<li><code>$condition</code> is the name of the argument — all rust macro arguments start with <code>$</code> to disambiguate them from normal Rust identifiers</li>
+<li><code>expr</code> is the <em>type</em> of abstract syntax tree node the argument is — just like normal functions might use <code>int</code> or <code>String</code>, macros can accept expressions (<code>expr</code>) or identifiers (<code>ident</code>) and many more.</li>
+<li>Then the body of the pattern is just Rust code, but with the macro variables <code>$condition</code> used rather than a normal Rust variable</li>
+</ul>
+<p>This example also shows one of the primary motivators for macros as opposed to just normal functions. <em>Macros can contain control flow</em>. A normal function can't do a <code>return</code> or <code>break</code> or <code>continue</code> from the scope of the callsite.</p>
+<p>Let's add a feature to our knowledge of macros. Repetition. Sometimes you want a macro to take an arbitrary number of arguments. Consider this code:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="type">trait</span> <span class="id">CastToF64</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">cast_to_f64</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> <span class="id"><span class="punct">-&gt;</span> <span class="type">f64</span></span></span><span class="punct">;</span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"><span class="id"><span class="type">impl</span> </span><span class="id">CastToF64 <span class="kw">for</span></span><span class="id"> <span class="id">i32</span> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">cast_to_f64</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> <span class="id"><span class="punct">-&gt;</span> <span class="type">f64</span></span> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="var">self</span> <span class="kw">as</span> <span class="type">f64</span></span>
+<span class="line">    </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"><span class="id"><span class="type">impl</span> </span><span class="id">CastToF64 <span class="kw">for</span></span><span class="id"> <span class="id">u64</span> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">cast_to_f64</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> <span class="id"><span class="punct">-&gt;</span> <span class="type">f64</span></span> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="var">self</span> <span class="kw">as</span> <span class="type">f64</span></span>
+<span class="line">    </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"><span class="com"><span class="com">/*</span> all the other numerics <span class="com">*/</span></span></span></span></code></pre>
+<p>Here I have a trait that represents the ability to convert the implementor to a floating point number. Implementing it for every numeric type is tedious and boilerplate.</p>
+<p>Generating boilerplate is another primary use-case for macros. Boilerplate code gets a bad connotation, but I think this isn't deserved so long as you have macros to do the actual code generation. My friend Sebastian Bensusan wrote <a href="https://blog.sbensu.com/posts/industrial-macros/">an excellent post</a> about this.</p>
+<p>Here's how we can use a macro to generate this boilerplate. First, let's do it with the tools we already know:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="type">trait</span> <span class="id">CastToF64</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">cast_to_f64</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> <span class="id"><span class="punct">-&gt;</span> <span class="type">f64</span></span></span><span class="punct">;</span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"><span class="id"><span class="fn">macro_rules!</span> <span class="id">impl_cast_to_f64</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$t</span><span class="punct">:</span><span class="type">ty</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id"><span class="type">impl</span> </span><span class="id">CastToF64 <span class="kw">for</span></span><span class="id"> <span class="var">$t</span> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">            <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">cast_to_f64</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> <span class="id"><span class="punct">-&gt;</span> <span class="type">f64</span></span> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">                <span class="kw">*</span><span class="var">self</span> <span class="kw">as</span> <span class="type">f64</span></span>
+<span class="line">            </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">        </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">    <span class="punct">}</span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"><span class="id">impl_cast_to_f64!</span><span class="id"><span class="punct">(</span><span class="type">i16</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">impl_cast_to_f64!</span><span class="id"><span class="punct">(</span><span class="type">u16</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">impl_cast_to_f64!</span><span class="id"><span class="punct">(</span><span class="type">i32</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">impl_cast_to_f64!</span><span class="id"><span class="punct">(</span><span class="type">u32</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">impl_cast_to_f64!</span><span class="id"><span class="punct">(</span><span class="type">i64</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">impl_cast_to_f64!</span><span class="id"><span class="punct">(</span><span class="type">u64</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">impl_cast_to_f64!</span><span class="id"><span class="punct">(</span><span class="type">f32</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span></span></code></pre>
+<p>We introduced a new AST node type — the <code>ty</code> keyword which pattern-matches any type name. Then we just call our macro for each type we want to implement the trait for. But we can do better! Why do we need to invoke the macro once per type? Why not just give the macro a list of types? We can do just that.</p>
+<h3>Repetition</h3>
+<p>The syntax for this is <code>$(pattern)*</code>, where <code>pattern</code> is any other macro pattern, but inside the <code>$(..)*</code> repetition markers. We repeat the <code>$(..)*</code> repetition in the code as well:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">impl_cast_to_f64</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="punct">(</span><span class="var">$t</span>:ty<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="kw">$</span><span class="id"><span class="punct">(</span></span>
+<span class="line">        <span class="id"><span class="type">impl</span> </span><span class="id">CastToF64 <span class="kw">for</span></span><span class="id"> <span class="var">$t</span> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">            <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">cast_to_f64</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="kw">&amp;</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> <span class="id"><span class="punct">-&gt;</span> <span class="type">f64</span></span> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">                <span class="kw">*</span><span class="var">self</span> <span class="kw">as</span> <span class="type">f64</span></span>
+<span class="line">            </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">        </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">        </span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"><span class="id">impl_cast_to_f64!</span><span class="id"><span class="punct">(</span><span class="type">i16</span> <span class="type">u16</span> <span class="type">i32</span> <span class="type">u32</span> <span class="type">i64</span> <span class="type">u64</span> <span class="type">f32</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span></span></code></pre>
+<p>A few things to note here:</p>
+<ul>
+<li>The <code>CastToF64</code> impls inside the <code>$(..)*</code> block will get stamped out once for each type. While there is some conceptual relation between <code>$(..)*</code> and a for-loop in normal programming, you must always keep in mind that <code>$(..)*</code> is a loop <em>at compile-time</em>.</li>
+<li>You can't use <code>$t</code> except inside of a surrounding <code>$(..)*</code> — otherwise, which <code>$t</code> would you be referring to?</li>
+<li>The pattern inside the <code>$(..)*</code> can truly be anything, for example if we had made it <code>$($t:ty,)*</code> we would be defining a comma-separated list instead of whitespace-separated, because the pattern now demands a trailing comma after each term.</li>
+</ul>
+<h3>Multiple patterns</h3>
+<p>I mentioned above that Rust macros can have multiple patterns. Let's make a trivial example.</p>
+<p>Rust iterators have a method called <code>zip</code> that takes two iterators, and fuses them into a single iterator that returns 2-tuples of their elements.</p>
+<p>For example:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="type">let</span> xs <span class="kw">=</span> <span class="id"><span class="punct">[</span><span class="num">1</span><span class="punct">,</span><span class="num">2</span><span class="punct">,</span><span class="num">3</span><span class="punct">]</span></span><span class="punct">;</span></span>
+<span class="line"><span class="type">let</span> ys <span class="kw">=</span> <span class="id"><span class="punct">[</span><span class="num">4</span><span class="punct">,</span><span class="num">5</span><span class="punct">,</span><span class="num">6</span><span class="punct">]</span></span><span class="punct">;</span></span>
+<span class="line"><span class="kw">for</span> <span class="id"><span class="punct">(</span>x<span class="punct">,</span> y</span><span class="id"><span class="punct">)</span></span> <span class="kw">in</span> xs.<span class="fn">zip</span><span class="id"><span class="punct">(</span>ys</span><span class="id"><span class="punct">)</span></span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id">println!</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="str"><span class="str">&quot;</span><span class="const">{x}</span> <span class="const">{y}</span><span class="str">&quot;</span></span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></code></pre>
+<p>This will print <code>1 4</code> then <code>2 5</code> then <code>3 6</code>. But sometimes you want to zip <em>three</em> iterators and get 3-tuples. Or <em>four</em> iterators and get 4-tuples. You can do this a bit hackily like:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id">for ((x, y), z) in xs.zip(ys).zip(zs) {</span></span></code></pre>
+<p>It's zipping the 2-tuple result of the first zip with another iterator to get a 2-tuple whose first element is a 2-tuple. It's isomorphic to a 3-tuple, just uglier.</p>
+<p>Because Rust doesn't allow you to easily abstract over different N-tuples (and does not have variadic functions in general), this is a great use-case for macros.</p>
+<p>We want a macro we can invoke like:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="kw">for</span> <span class="id"><span class="punct">(</span>x<span class="punct">,</span> y<span class="punct">,</span> z</span><span class="id"><span class="punct">)</span></span> <span class="kw">in</span> <span class="id">zip!</span><span class="id"><span class="punct">(</span>xs<span class="punct">,</span> ys<span class="punct">,</span> zs</span><span class="id"><span class="punct">)</span></span> <span class="id"><span class="punct">{</span></span></span></span></code></pre>
+<p>For any (reasonable) number of arguments.</p>
+<p>We can define it like this:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">zip</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$x0</span><span class="punct">:</span><span class="type">expr</span>, <span class="var">$x1</span><span class="punct">:</span><span class="type">expr</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="var">$x0</span>.<span class="fn">iter</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span>.<span class="fn">zip</span><span class="id"><span class="punct">(</span><span class="var">$x1</span>.<span class="fn">iter</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$x0</span><span class="punct">:</span><span class="type">expr</span>, <span class="var">$x1</span><span class="punct">:</span><span class="type">expr</span>, <span class="var">$x2</span><span class="punct">:</span><span class="type">expr</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="var">$x0</span>.<span class="fn">iter</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span>.<span class="fn">zip</span><span class="id"><span class="punct">(</span><span class="var">$x1</span>.<span class="fn">iter</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span></span><span class="id"><span class="punct">)</span></span>.<span class="fn">zip</span><span class="id"><span class="punct">(</span><span class="var">$x2</span>.<span class="fn">iter</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span></span><span class="id"><span class="punct">)</span></span>.<span class="fn">map</span><span class="id"><span class="punct">(</span><span class="id"><span class="id"><span class="punct">|</span></span></span><span class="id"><span class="id"><span class="id"><span class="punct">(</span></span><span class="id">(<span class="var">a</span><span class="punct">,</span> <span class="var">b</span></span><span class="id"><span class="punct">)</span></span><span class="punct">,</span> c</span></span></span><span class="id"><span class="punct">)</span></span><span class="kw">|</span> <span class="id"><span class="punct">(</span>a<span class="punct">,</span> b<span class="punct">,</span> c</span><span class="id"><span class="punct">)</span></span>)</span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$x0</span><span class="punct">:</span><span class="type">expr</span>, <span class="var">$x1</span><span class="punct">:</span><span class="type">expr</span>, <span class="var">$x2</span><span class="punct">:</span><span class="type">expr</span>, <span class="var">$x3</span><span class="punct">:</span><span class="type">expr</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="var">$x0</span>.<span class="fn">iter</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span>.<span class="fn">zip</span><span class="id"><span class="punct">(</span><span class="var">$x1</span>.<span class="fn">iter</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span></span><span class="id"><span class="punct">)</span></span>.<span class="fn">zip</span><span class="id"><span class="punct">(</span><span class="var">$x2</span>.<span class="fn">iter</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span></span><span class="id"><span class="punct">)</span></span>.<span class="fn">zip</span><span class="id"><span class="punct">(</span><span class="var">$x3</span>.<span class="fn">iter</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span></span><span class="id"><span class="punct">)</span></span>.<span class="fn">map</span><span class="id"><span class="punct">(</span><span class="id"><span class="id"><span class="punct">|</span></span></span><span class="id"><span class="id"><span class="id"><span class="punct">(</span></span><span class="id">((<span class="var">a</span><span class="punct">,</span> <span class="var">b</span></span><span class="id"><span class="punct">)</span></span><span class="punct">,</span> c</span></span></span><span class="id"><span class="punct">)</span></span><span class="punct">,</span> d)<span class="kw">|</span> <span class="id"><span class="punct">(</span>a<span class="punct">,</span> b<span class="punct">,</span> c<span class="punct">,</span> d</span><span class="id"><span class="punct">)</span></span>)</span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    ...</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>Here we've defined up to 4-tuples, but you can go as far as you want. We'll look at how to improve and generalize this implementation later with recursive macros, but first, a few notes:</p>
+<ul>
+<li>Note the semicolons at the end of each pattern, this is just some required syntax that isn't required in the single-pattern case</li>
+<li>The compile checks for a pattern match in sequential order. Order doesn't matter for this case, since all the patterns are mutually exclusive, but order will matter for patterns where you have a catch-all case at the bottom.</li>
+</ul>
+<h3>Recursion</h3>
+<p>Macros can call themselves or other macros recursively. This is an <em>extremely</em> powerful ability. It actually allows the macro language to be <a href="https://en.wikipedia.org/wiki/Turing_completeness">Turing complete</a>. Let's dip our toes into the power by implementing a macro that computes the <a href="https://en.wikipedia.org/wiki/Collatz_conjecture">Collatz number</a> for a value at compile time.</p>
+<p>If you aren't familiar, the Collatz process is: take any number <code>N</code>, if it's even, return <code>N/2</code>, if odd, <code>3N+1</code> — repeat until you get to 1. The number of steps this takes is <code>N</code>'s Collatz number.</p>
+<p>In normal code, it looks like:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">collatz</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">n</span><span class="punct">:</span> <span class="type">u64</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> <span class="id"><span class="punct">-&gt;</span> <span class="type">u64</span></span> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="kw">if</span> n <span class="kw">=</span><span class="kw">=</span> <span class="num">1</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">1</span></span>
+<span class="line">    </span><span class="id"><span class="punct">}</span></span> <span class="kw">else</span> <span class="kw">if</span> n <span class="kw">%</span> <span class="num">2</span> <span class="kw">=</span><span class="kw">=</span> <span class="num">0</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">1</span> <span class="kw">+</span> <span class="fn">collatz</span><span class="id"><span class="punct">(</span>n<span class="kw">/</span><span class="num">2</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    </span><span class="id"><span class="punct">}</span></span> <span class="kw">else</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">1</span> <span class="kw">+</span> <span class="fn">collatz</span><span class="id"><span class="punct">(</span><span class="num">3</span><span class="kw">*</span>n <span class="kw">+</span> <span class="num">1</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    </span><span class="id"><span class="punct">}</span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>This is all kind of academic since Rust has compile time <code>const</code> functions, so we could actually just declare the above function <code>const</code> and call it at compile time, but let's not let pragmatism get in the way of fun.</p>
+<p>Pattern-oriented macros like Rust are interesting because you can't do dynamic <em>evaluation</em> at compile time. So you can't do <em>math</em> on normal programming integer literals. For that reason, we'll represent the number N as just N arbitrary tokens — we'll use an <code>x</code> token, but it could be any token — a semicolon, a comma, a period, the word <code>foo</code>, whatever.</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">collatz</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="com"><span class="com">//</span> Base case</span>
+<span class="line"></span>    <span class="id"><span class="punct">(</span><span class="var">$a</span><span class="punct">:</span><span class="type">tt</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">1</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="com"><span class="com">//</span> Even number case</span>
+<span class="line"></span>    <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="punct">(</span><span class="var">$a</span>:tt <span class="var">$b</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">1</span> <span class="kw">+</span> <span class="id">collatz!</span><span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$a</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="com"><span class="com">//</span> Catch-all, i.e. odd number case</span>
+<span class="line"></span>    <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="punct">(</span><span class="var">$a</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">1</span> <span class="kw">+</span> <span class="id">collatz!</span><span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$a</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$a</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$a</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span> x</span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>Let's break it down.</p>
+<p>The base case matches a single token, i.e. our representation of the number 1. That has a Collatz number of 1.</p>
+<p>The next case matches an even number of tokens with a repetition pattern that contains 2 tokens as the inner pattern. So it can only match inputs that have a multiple of 2 tokens, i.e. even numbers of tokens. We divide the number of tokens by 2 in the recursive step by just emitting 1 of the 2 inner tokens.</p>
+<p>We could have defined the final case like <code>$a:tt $($b:tt $c:tt)*</code> for a more proper, discrete mathematics definition of odd numbers, i.e. any number that can be represented by <code>2N+1</code>, but since we have already covered the base case and even case, we can be sloppier with a simple catch-all rule that matches any number of tokens.</p>
+<p>We multiply it by 3 by just expanding all the inputs 3 times, then adding a final <code>x</code> onto the end.</p>
+<p>If you do <code>let x = collatz!(x x x x x x x x x)</code>, i.e. the 9th Collatz number, <code>x</code> will be equal to 20. If you're in VSCode, you can right-click the macro invocation, click <code>Command Palette</code> then <code>Expand Macro Recursively</code> to see what final code the macro actually expands to. This feature is <em>incredibly useful</em> for debugging.</p>
+<p>In this case, the code expands to <code>let x = 1 + 1 + 1 + … + 1</code> with 20 ones — not very interesting, but neat that we can do it!</p>
+<p>Note: the <code>tt</code> type we use here means "token tree" and it is the most general token type that is a superset of all other token types. In practice, you mainly use it when you don't care to enforce a more specific type, such as throwaway tokens here, or when you maintain a queue of unprocessed tokens as we'll see below.</p>
+<h3>Advanced recursion: Token Munching</h3>
+<p>We can apply our recursion skills to an even more general form of computation. We process the input tokens just 1 (or a few) at a time, and then recurse to process the rest.</p>
+<p>To illustrate, let's make a macro that converts any number of binary digits to a mathematical expression that evaluates to the binary number. i.e. <code>1 0 1 1</code> evaluates to some expression that equals 11.</p>
+<p>This is <em>very</em> easy if the tokens are fed to us backwards. The fact that our numeral system is big-endian is a constant source of headaches.</p>
+<p>Here's what it would look like if we got the tokens backwards:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">binary</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">0</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>1 <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">1</span> <span class="kw">+</span> <span class="num">2</span> <span class="kw">*</span> <span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>0 <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">2</span> <span class="kw">*</span> <span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>You can see why this method is called <em>token munching</em>. We munch off 1 token from the stream at a time, and process the rest of the stream recursively.</p>
+<p>If we expand the macro for the input <code>1 1 0 1</code> (i.e. <code>1 0 1 1</code> backwards), we see it expands to <code>(2 * (2 * (2 * (2 * 0 + 1)) + 1) + 1)</code> which equals 11 as expected.</p>
+<p>This method is just the macro implementation of this code:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="type">let</span> <span class="id">mut</span> result <span class="kw">=</span> <span class="num">0</span><span class="punct">;</span></span>
+<span class="line"><span class="kw">for</span> c <span class="kw">in</span> s.<span class="fn">chars</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span>.<span class="fn">rev</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    result <span class="kw">*</span><span class="kw">=</span> <span class="num">2</span><span class="punct">;</span></span>
+<span class="line">    <span class="kw">if</span> c <span class="kw">=</span><span class="kw">=</span> <span class="str"><span class="str">&#39;</span>1<span class="str">&#39;</span></span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        result <span class="kw">+</span><span class="kw">=</span> <span class="num">1</span><span class="punct">;</span></span>
+<span class="line">    </span><span class="id"><span class="punct">}</span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></code></pre>
+<p>But how to parse in the normal direction? Without having the user put the digits in backwards for us? This is trickier! Because you don't know the total value of the leftmost digit without knowing at least how many digits come to the right of it. If you're parsing 123 and you see the first 1, you don't know if it's 1, 10, 100, 1000, etc without knowing how many digits are to the right of it.</p>
+<p>Whereas parsing from right to left, you can just keep recursively multiplying by 10. We did the same thing in binary, but multiplying by 2.</p>
+<p>So how to resolve this? There are a lot of ways. Let's just cover a bunch, all of which will add tools to our macro toolkit and demonstrate the flexibility of macros.</p>
+<h4>Algebraic output</h4>
+<p>The base 10 number 284 can be represented as 2*10^2 + 8*10^1 + 4*10^0. That is, 2*100 + 8*10 + 4*1.</p>
+<p>Similarly, the base 2 number 1011 can be represented as 1*2^3 + 0*2^2 + 1*2^1 + 1*2^0, i.e. 8 + 0 + 2 + 1 = 11.</p>
+<p>But how to implement this? We need to know the index of each digit, i.e. how many digits are to the right of it. Here's the trick:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">count_digits</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">0</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$x</span><span class="punct">:</span><span class="type">tt</span> <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">1</span> <span class="kw">+</span> <span class="id">count_digits!</span><span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>This macro will return an expression that equals the number of tokens put into it. So now we can implement:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">binary</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">0</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$x</span><span class="punct">:</span><span class="type">tt</span> <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="var">$x</span> <span class="kw">*</span> <span class="num">2</span><span class="type">u64</span>.<span class="fn">pow</span><span class="id"><span class="punct">(</span><span class="id">count_digits!</span><span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span><span class="id"><span class="punct">)</span></span> <span class="kw">+</span> <span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>For the input <code>1 0 1 1</code>, the <code>Expand Macro Recursively</code> feature outputs:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="num">1</span> <span class="kw">*</span> <span class="num">2</span><span class="type">usize</span>.<span class="fn">pow</span><span class="id"><span class="punct">(</span><span class="num">1</span> <span class="kw">+</span> <span class="num">1</span> <span class="kw">+</span> <span class="num">1</span> <span class="kw">+</span> <span class="num">0</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="kw">+</span> <span class="num">1</span> <span class="kw">*</span> <span class="num">2</span><span class="type">usize</span>.<span class="fn">pow</span><span class="id"><span class="punct">(</span><span class="num">1</span> <span class="kw">+</span> <span class="num">1</span> <span class="kw">+</span> <span class="num">0</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="kw">+</span> <span class="num">0</span> <span class="kw">*</span> <span class="num">2</span><span class="type">usize</span>.<span class="fn">pow</span><span class="id"><span class="punct">(</span><span class="num">1</span> <span class="kw">+</span> <span class="num">0</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="kw">+</span> <span class="num">1</span> <span class="kw">*</span> <span class="num">2</span><span class="type">usize</span>.<span class="fn">pow</span><span class="id"><span class="punct">(</span><span class="num">0</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="kw">+</span> <span class="num">0</span></span></span></code></pre>
+<p>And this evaluates to the expected value of 11. If you do implement a macro in production that uses some of these tricks, don't worry about math like this — the compiler will optimize it all away.</p>
+<h4>Reverse, then process</h4>
+<p>If we need the tokens in reverse order for the original solution to work, why not just reverse them and then do the initial solution?</p>
+<p>It's simple enough to make a macro that reverses its input:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">reverse</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span><span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$x</span><span class="punct">:</span><span class="type">tt</span> <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">reverse!</span><span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span> <span class="var">$x</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>The base case does nothing, the general case peels off the first token and moves it to the end of the reversed tokens. Invoking <code>reverse!(1 a 2 foo)</code> expands to <code>foo 2 a 1</code>.</p>
+<p>But how to pass these tokens into our original <code>binary</code> macro? You might think we just do <code>binary!(reverse!(1 0 1 1))</code>. Unfortunately, macros are not like expressions that evaluate from innermost out. Macros operate on the tokens they are given.</p>
+<p>In this case, all that happens is the tokens <code>['reverse', '!', '(', '1', '0', '1', '1', ')']</code> are sent into <code>binary</code>. And we just get a compile error saying that <code>binary</code> doesn't have any patterns that match (since it only expects 1s and 0s, not words like 'reverse').</p>
+<p>There are a lot of reasons why you <em>want</em> macros to behave this way, but it's getting in our way right now! How to overcome this limitation? What we really need is a form of memory to build up a list of reversed tokens in. What memory do we have in macros? It's tokens all the way down.</p>
+<p>It's hard to incrementally reveal the trick on how to implement memory in a sane way, so I'll just jump right to the solution and explain afterwards:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">binary</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span>[]<span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">0</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>[1 <span class="kw">$</span><span class="punct">(</span><span class="var">$reversed</span>:tt<span class="punct">)</span><span class="kw">*</span>]<span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="num">1</span> <span class="kw">+</span> <span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$reversed</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span><span class="punct">]</span></span></span><span class="id"><span class="punct">)</span></span> <span class="kw">*</span> <span class="num">2</span> </span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>[0 <span class="kw">$</span><span class="punct">(</span><span class="var">$reversed</span>:tt<span class="punct">)</span><span class="kw">*</span>]<span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$reversed</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span><span class="punct">]</span></span></span><span class="id"><span class="punct">)</span></span> <span class="kw">*</span> <span class="num">2</span> </span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>[<span class="kw">$</span><span class="punct">(</span><span class="var">$reversed</span>:tt<span class="punct">)</span><span class="kw">*</span>] <span class="var">$x</span><span class="punct">:</span><span class="type">tt</span> <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="var">$x</span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$reversed</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span><span class="punct">]</span></span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="punct">]</span></span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>What's going on here? What are the <code>[ ]</code> brackets for? We store a new, reversed list of tokens inside the <code>[ ]</code>. We surround it by <code>[ ]</code> to give some structure to pattern-match on. If we didn't have the <code>[ ]</code>, it would just be a soup of tokens with no organization.</p>
+<p>So on the initial call, none of the <code>[ ]</code> patterns match, because the input is all 1s and 0s. So we fall through to the last case that matches everything. All we do in that case is recursively call ourselves with some empty <code>[ ]</code> brackets followed by all the tokens.</p>
+<p>The top 3 cases only match if there are no tokens after the <code>[ ]</code> containing our reversed tokens — i.e. they only match if we have consumed the input which we're storing at the right end of the invocation. These top 3 cases are just our original <code>binary!</code> macro we wrote above — munching 1s and 0s, doing 2N and 2N+1, until empty.</p>
+<p>It's the 4th case that's new — the one where we are actually reversing the list. In this case we store the first token of the input into <code>$x</code> and the rest into <code>$rest</code>. We place <code>$x</code> at the front of <code>$reversed</code> inside the square brackets, and recurse on <code>$rest</code> — eventually we'll process all of <code>$rest</code> and start converting the binary in the first 3 cases.</p>
+<p>It may be helpful to do an example manually. Let's do <code>1 1 0</code>. The expansion, step by step, will be:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="num">1</span> <span class="num">1</span> <span class="num">0</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="punct">]</span></span> <span class="num">1</span> <span class="num">1</span> <span class="num">0</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="num">1</span><span class="punct">]</span></span> <span class="num">1</span> <span class="num">0</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="num">1</span> <span class="num">1</span><span class="punct">]</span></span> <span class="num">0</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="num">0</span> <span class="num">1</span> <span class="num">1</span><span class="punct">]</span></span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id"><span class="punct">(</span><span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="num">1</span> <span class="num">1</span><span class="punct">]</span></span></span><span class="id"><span class="punct">)</span></span> <span class="kw">*</span> <span class="num">2</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id"><span class="punct">(</span><span class="id"><span class="punct">(</span><span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="num">1</span><span class="punct">]</span></span></span><span class="id"><span class="punct">)</span></span> <span class="kw">*</span> <span class="num">2</span> <span class="kw">+</span> <span class="num">1</span></span><span class="id"><span class="punct">)</span></span> <span class="kw">*</span> <span class="num">2</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id"><span class="punct">(</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">(</span><span class="id">binary!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="punct">]</span></span></span><span class="id"><span class="punct">)</span></span> <span class="kw">*</span> <span class="num">2</span> <span class="kw">+</span> <span class="num">1</span></span><span class="id"><span class="punct">)</span></span> <span class="kw">*</span> <span class="num">2</span> <span class="kw">+</span> <span class="num">1</span></span><span class="id"><span class="punct">)</span></span> <span class="kw">*</span> <span class="num">2</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id"><span class="punct">(</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">(</span><span class="num">0</span> <span class="kw">*</span> <span class="num">2</span> <span class="kw">+</span> <span class="num">1</span></span><span class="id"><span class="punct">)</span></span> <span class="kw">*</span> <span class="num">2</span> <span class="kw">+</span> <span class="num">1</span></span><span class="id"><span class="punct">)</span></span> <span class="kw">*</span> <span class="num">2</span></span><span class="id"><span class="punct">)</span></span></span></span></code></pre>
+<p>I've added the parentheses in the latter lines even though they aren't present in the macro — the macro technically doesn't need them because the results of macros are implicitly scoped to prevent some of the pitfall bugs we mentioned with C macros.</p>
+<p>That is, if you have a macro that expands to <code>2+2</code>, and you do <code>3 * the_macro!()</code>, the result will be 12 instead of 8, i.e. 3*(2+2), not 3*2+2.</p>
+<p>By the way, the <code>[ ]</code> is just a convention for holding these kinds of "memory" groups — you can use whatever delimiters you want.</p>
+<p>With this one technique, we have basically unlocked a huge world of what's possible with macros. You can implement a Turing machine now if you wanted.</p>
+<p>You can munch tokens from the input, store them in relevant <code>[ ]</code> groups as you go, and then once you've got all your pre-processing done, churn through the memory recursively until your problem is solved.</p>
+<p>You just have to break down the problem to express it in terms of queues or sets that you build during the input consumption phase, and consume in the computation phase.</p>
+<p>It's possible you need to break the problem down into multiple phases where you build up, consume, build up, consume. One common pattern if you need even more organization is to use meaningless pattern tags, e.g:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">example</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span>@phase1 [...] [...]<span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span> … <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>@phase2 [...]<span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span> … <span class="punct">}</span></span>;</span>
+<span class="line">    </span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="punct">(</span><span class="var">$all</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">example!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>phase1 <span class="id"><span class="punct">[</span><span class="punct">]</span></span> <span class="id"><span class="punct">[</span><span class="punct">]</span></span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$all</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>In this trivial little example, the initial invocation will hit the bottom-catch-all case, which just immediately sets up some empty memory containers and recurses, but sticks in the tokens <code>@phase1</code>.</p>
+<p>There is nothing magic about these! They are just arbitrary symbols that make reasoning about what pattern you're matching obvious. You can only match patterns that also start with <code>@phase1</code>. So you can use arbitrary labels like this as another organization tool.</p>
+<h2>Reflection</h2>
+<p>Now we have the basics of "advanced macros" down. If you can understand everything above this paragraph, you can implement anything you imagine in a macro. The solutions may be <code>O(N^3)</code>, but it all happens at compile time! And your N is hopefully small.</p>
+<p>All you have to do is break down the problem into sets and queues and use recursive macro invocations with tokens as memory.</p>
+<p>In our whirlwind tour to the big idea, we skipped over some important intermediate techniques. Let's backtrack and cover those now in a haphazard fashion.</p>
+<h2>Random additional techniques</h2>
+<h3>Full syntax guidance</h3>
+<p>Like <code>$(pattern)*</code> means to repeat the pattern 0-N times, you can use <code>$(pattern)+</code> to mean 1-N times. You can also use <code>$(pattern)?</code> to mean 0 or 1 times.</p>
+<p><code>$(pattern),*</code> means comma separated values, e.g. <code>a,b,c</code> — note that there are only commas <em>between</em> values. This means the following invocation:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id">example!</span><span class="id"><span class="punct">(</span></span>
+<span class="line">    <span class="num">1</span><span class="punct">,</span></span>
+<span class="line">    <span class="num">2</span><span class="punct">,</span></span>
+<span class="line">    <span class="num">3</span><span class="punct">,</span></span>
+<span class="line"></span><span class="id"><span class="punct">)</span></span></span></span></code></pre>
+<p>Will not match, because of the trailing comma after the 3. The common way to work around this is something like <code>$(pattern),* *(,)?</code> which uses the <code>?</code> to allow for up to 1 trailing comma.</p>
+<p>Personally, I just always use <code>$(pattern,)*</code> and <em>force</em> there to be a trailing comma, but all my macros are for personal consumption, not pretty public libraries.</p>
+<p>All the pattern types I use on a regular basis are:</p>
+<ul>
+<li><code>tt</code> - the most general pattern, a token tree — any single token <em>or</em> group of tokens surrounded by matching delimiters (<code>[]</code> <code>()</code> <code>{}</code>)</li>
+<li><code>expr</code> — any expression, i.e. anything that could be in the blank in a <code>let x = ____</code> statement</li>
+<li><code>ident</code> — any identifier, e.g. <code>foo</code>, <code>my_function</code>, <code>SomeStruct</code></li>
+<li><code>ty</code> — any type, e.g. <code>u32</code>, <code>Vec&lt;(u32, String)&gt;</code></li>
+<li><code>literal</code> — any literal, e.g. <code>123</code>, <code>"string literal"</code>, <code>true</code></li>
+</ul>
+<p>Here's <a href="https://doc.rust-lang.org/reference/macros-by-example.html#metavariables">the full list</a> if you need the rest, though.</p>
+<h3>Treating collections as single token trees</h3>
+<p>The definition of <code>tt</code> above enables a useful pattern. The <code>tt</code> pattern type can match any single token, but also many <code>tt</code> <em>inside</em> delimiters such as <code>[ ]</code>.</p>
+<p>This means if we are building up some collection that could be represented like <code>[$($x:tt)*]</code>, if we happen to have a phase of macro computation where we don't need to operate on this collection and just need to pass it along to the next recursive call, we can instead just refer to the whole unit as <code>$x:tt</code> which will match the <code>[ ]</code> and everything inside them.</p>
+<p>E.g. consider this macro</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">example</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span>[<span class="kw">$</span><span class="punct">(</span><span class="var">$x</span>:tt<span class="punct">)</span><span class="kw">*</span>] [<span class="kw">$</span><span class="punct">(</span><span class="var">$y</span>:tt<span class="punct">)</span><span class="kw">*</span>] <span class="var">$next</span><span class="punct">:</span><span class="type">tt</span> <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">example!</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$x</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span><span class="punct">]</span></span> <span class="id"><span class="punct">[</span><span class="var">$next</span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$y</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span><span class="punct">]</span></span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span><span class="punct">:</span>tt</span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span></span>
+<span class="line">    …</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>We're peeling tokens off the input and putting them into the <code>$y</code> collection, but we're otherwise just passing <code>$x</code> through as-is. We can rewrite this to:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">example</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$x</span><span class="punct">:</span><span class="type">tt</span> [<span class="kw">$</span><span class="punct">(</span><span class="var">$y</span>:tt<span class="punct">)</span><span class="kw">*</span>] <span class="var">$next</span><span class="punct">:</span><span class="type">tt</span> <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">example!</span><span class="id"><span class="punct">(</span><span class="var">$x</span> <span class="id"><span class="punct">[</span><span class="var">$next</span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$y</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span><span class="punct">]</span></span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span><span class="punct">:</span>tt</span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span></span>
+<span class="line">    …</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>Because <code>tt</code> can match the whole <code>[ ]</code> and its contents.</p>
+<h3>Beware early-binding patterns</h3>
+<p>Some pattern types like <code>ty</code> can consume multiple tokens. For example:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">first</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$x</span><span class="punct">:</span><span class="type">tt</span> <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="var">$x</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>If you call <code>first!(Vec&lt;u32&gt;)</code>, then <code>$x</code> will be the token <code>Vec</code> and <code>$rest</code> will be 3 separate tokens: <code>&lt;</code>, <code>u32</code>, and <code>&gt;</code>.</p>
+<p><strong>However</strong> if we bind those tokens to a <code>ty</code> pattern at any point, they become "glued together" and can't be broken apart again. For example:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">first</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$x</span><span class="punct">:</span><span class="type">tt</span> <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">stringify!</span><span class="id"><span class="punct">(</span><span class="var">$x</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"><span class="id"><span class="fn">macro_rules!</span> <span class="id">force_ty</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$x</span><span class="punct">:</span><span class="type">ty</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">first!</span><span class="id"><span class="punct">(</span><span class="var">$x</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>So <code>force_ty</code> just passes its argument on to <code>first</code>, but it binds the input with <code>ty</code>. And <code>force_ty!(Vec&lt;u32&gt;)</code> will expand to the full <code>Vec&lt;u32&gt;</code>, because all those tokens got parsed as a single type token.</p>
+<p>So, sometimes you want this behavior, but other times it can be really confusing if you expect to be able to munch each individual token. In the latter case, you want to stick with the more general <code>tt</code> instead of <code>ty</code>. You can always turn sequences of <code>tt</code> into a <code>ty</code> later.</p>
+<h3>Implementing traits for tuples, hygienic variable creation</h3>
+<p>Most of the examples in this article are of contrived stuff you should never do. Don't abuse macros to do stupid stuff just because you can.</p>
+<p>The main reason I would ever use a recursive macro is to implement a trait for every N-tuple up to some maximum N, e.g. 16. This is really useful, because Rust doesn't have variadic generics (i.e. allow you to be generic over N-tuples at the language level).</p>
+<p>Suppose we had this trait:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="type">trait</span> <span class="id">ConsistencyCheck</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">check</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="kw">&amp;</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="punct">;</span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>All this trait does is some kind of self-check for some invariant properties. E.g. <code>BalancedBinaryTree</code> might implement this trait and the <code>check</code> method would verify that it's actually balanced. This kind of trait is useful for things like <a href="https://crates.io/crates/proptest">property-based testing</a>.</p>
+<p>So suppose we want to implement it for all tuples whose constituent members all implement <code>ConsistencyCheck</code>. The implementation will just call <code>check</code> on every member.</p>
+<p>e.g. for 2-tuples:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="type">impl</span></span><span class="id"><span class="id"><span class="punct">&lt;</span>T0<span class="punct">:</span> ConsistencyCheck, T1<span class="punct">:</span> ConsistencyCheck<span class="punct">&gt;</span></span></span><span class="id"> ConsistencyCheck <span class="kw">for</span></span><span class="id"> (<span class="id">T0</span>, <span class="id">T1</span>) </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">check</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="kw">&amp;</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="type">let</span> <span class="id"><span class="punct">(</span>x0<span class="punct">,</span> x1</span><span class="id"><span class="punct">)</span></span> <span class="kw">=</span> <span class="var">self</span><span class="punct">;</span></span>
+<span class="line">        x0.<span class="fn">check</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">        x1.<span class="fn">check</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">    </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>You can see how we could pretty mechanically create these impls. Let's take a first stab at it:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">impl_check</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="punct">(</span><span class="var">$t</span>:tt <span class="var">$x</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">         <span class="id"><span class="type">impl</span></span><span class="id"><span class="id"><span class="punct">&lt;</span>$<span class="punct">(</span><span class="var">$t</span>: ConsistencyCheck,<span class="punct">)</span><span class="id">*</span></span></span><span class="id">&gt; <span class="id">ConsistencyCheck</span> <span class="id">for</span> ($(<span class="var">$t</span>,)*) </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">            <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">check</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="kw">&amp;</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">                <span class="type">let</span> <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$x</span><span class="punct">,</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span> <span class="kw">=</span> <span class="var">self</span><span class="punct">;</span></span>
+<span class="line">                <span class="kw">$</span><span class="id"><span class="punct">(</span></span>
+<span class="line">                <span class="var">$x</span>.<span class="fn">check</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">                </span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span>
+<span class="line">            </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">        </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">    <span class="punct">}</span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>Now, invoking like <code>impl_check!(T0 x0 T1 x1)</code> will exactly reproduce our manual implementation above.</p>
+<p>This is great, but it's still annoying to type:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="const">T0</span> x0 <span class="const">T1</span> x1</span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="const">T0</span> x0 <span class="const">T1</span> x1 <span class="const">T2</span> x2</span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="const">T0</span> x0 <span class="const">T1</span> x1 <span class="const">T2</span> x2 <span class="const">T3</span> x3</span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="const">T0</span> x0 <span class="const">T1</span> x1 <span class="const">T2</span> x2 <span class="const">T3</span> x3 <span class="const">T4</span> x4</span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">…</span></span></code></pre>
+<p>For all 16 impls we want. But we notice that each line is a subset of the line before. Can we do some kind of peeling recursion thing? We sure can:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">impl_check</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span>@peel<span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span><span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>@peel <span class="var">$t</span><span class="punct">:</span><span class="type">tt</span> <span class="var">$x</span><span class="punct">:</span><span class="type">tt</span> <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>make <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>@make <span class="kw">$</span><span class="punct">(</span><span class="var">$t</span>:tt <span class="var">$x</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">         <span class="id"><span class="type">impl</span></span><span class="id"><span class="id"><span class="punct">&lt;</span>$<span class="punct">(</span><span class="var">$t</span>: ConsistencyCheck,<span class="punct">)</span><span class="id">*</span></span></span><span class="id">&gt; <span class="id">ConsistencyCheck</span> <span class="id">for</span> ($(<span class="var">$t</span>,)*) </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">            <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">check</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="kw">&amp;</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">                <span class="type">let</span> <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$x</span><span class="punct">,</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span> <span class="kw">=</span> <span class="var">self</span><span class="punct">;</span></span>
+<span class="line">                <span class="kw">$</span><span class="id"><span class="punct">(</span></span>
+<span class="line">                <span class="var">$x</span>.<span class="fn">check</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">                </span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span>
+<span class="line">            </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">        </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">        <span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>peel <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$t</span> <span class="var">$x</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="punct">(</span><span class="var">$t</span>:ident <span class="var">$x</span>:ident<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>make <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$t</span> <span class="var">$x</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>So this macro has two @-labeled patterns: <code>@peel</code> and <code>@make</code>. What happens is <code>make</code> spits out the impl for <em>all</em> the tokens it receives. Then it recurses into <code>peel</code>, which either terminates if we're out of tokens, or strips off the first pair of <code>T x</code> and recurses into <code>make</code> with the rest.</p>
+<p>So if you call <code>impl_check!(T0 x0 T1 x1 … T15 x15)</code>, this macro will spit out every tuple impl from 0 to 16.</p>
+<p>It would be nice if we didn't need to pass <code>T0 x0 T1 x1…</code> though — it's redundant to specify 2 things for each 1 impl. It'd be nicer if we could just do <code>impl_check!(T0 T1 T2 T3…)</code>.</p>
+<p>But what would be our <code>$x</code> in the line <code>let ($($x,)*) = self</code>, where we unpack the tuple into its constituent fields?</p>
+<p>Thanks to Rust's hygienic macros, we can just conjure an identifier out of nowhere and even if we reuse it, it won't collide so long as it's in a different macro scope. Let me demonstrate:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">impl_check</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span>@peel []<span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span><span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>@peel [$_:tt <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span>]<span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>make <span class="id"><span class="punct">[</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span><span class="punct">]</span></span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>@make [<span class="kw">$</span><span class="punct">(</span>[<span class="var">$T</span>:ident <span class="var">$x</span>:ident]<span class="punct">)</span><span class="kw">*</span>]<span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id"><span class="type">impl</span></span><span class="id"><span class="id"><span class="punct">&lt;</span>$<span class="punct">(</span><span class="var">$T</span>: ConsistencyCheck,<span class="punct">)</span><span class="id">*</span></span></span><span class="id">&gt; <span class="id">ConsistencyCheck</span> <span class="id">for</span> ($(<span class="var">$T</span>,)*) </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">            <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">check</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="kw">&amp;</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">                <span class="type">let</span> <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$x</span><span class="punct">,</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span> <span class="kw">=</span> <span class="var">self</span><span class="punct">;</span></span>
+<span class="line">                <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$x</span>.<span class="fn">check</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span>
+<span class="line">            </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">        </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">        <span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>peel <span class="id"><span class="punct">[</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="id"><span class="punct">[</span><span class="var">$T</span> <span class="var">$x</span><span class="punct">]</span></span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span><span class="punct">]</span></span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span>@make [<span class="kw">$</span><span class="punct">(</span><span class="var">$pair</span>:tt<span class="punct">)</span><span class="kw">*</span>] <span class="var">$T</span><span class="punct">:</span><span class="type">ident</span> <span class="kw">$</span><span class="punct">(</span><span class="var">$rest</span>:tt<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>make <span class="id"><span class="punct">[</span><span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$pair</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span> <span class="id"><span class="punct">[</span><span class="var">$T</span> x<span class="punct">]</span></span><span class="punct">]</span></span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$rest</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="kw">$</span><span class="punct">(</span><span class="var">$T</span>:ident<span class="punct">)</span><span class="kw">*</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>make <span class="id"><span class="punct">[</span><span class="punct">]</span></span> <span class="kw">$</span><span class="id"><span class="punct">(</span><span class="var">$T</span></span><span class="id"><span class="punct">)</span></span><span class="kw">*</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">    <span class="punct">}</span></span>;</span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>In this implementation, we have a few more things going on. We have a consume-input phase, and then a construction phase. During the input consumption phase, we read a single token <code>$T</code> off the input. Then we append that token <em>and</em> the variable <code>x</code> to our queue.</p>
+<p>We notably enclose this pair in a <code>[ ]</code> which enables us to treat all the other pairs in the queue as a single token for convenience. This means when we match on the pair in the upper <code>make</code>, we need to include <code>[ ]</code> in the inner pattern.</p>
+<p>To walk through the expansion of this macro for the first 3 tuples:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="const">T0</span> <span class="const">T1</span> <span class="const">T2</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>make <span class="id"><span class="punct">[</span><span class="punct">]</span></span> <span class="const">T0</span> <span class="const">T1</span> <span class="const">T2</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>make <span class="id"><span class="punct">[</span><span class="id"><span class="punct">[</span><span class="const">T0</span> x<span class="punct">]</span></span><span class="punct">]</span></span> <span class="const">T1</span> <span class="const">T2</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>make <span class="id"><span class="punct">[</span><span class="id"><span class="punct">[</span><span class="const">T0</span> x<span class="punct">]</span></span> <span class="id"><span class="punct">[</span><span class="const">T1</span> x<span class="punct">]</span></span><span class="punct">]</span></span> <span class="const">T2</span></span><span class="id"><span class="punct">)</span></span></span>
+<span class="line"><span class="id">impl_check!</span><span class="id"><span class="punct">(</span><span class="kw">@</span>make <span class="id"><span class="punct">[</span><span class="id"><span class="punct">[</span><span class="const">T0</span> x<span class="punct">]</span></span> <span class="id"><span class="punct">[</span><span class="const">T1</span> x<span class="punct">]</span></span> <span class="id"><span class="punct">[</span><span class="const">T2</span> x<span class="punct">]</span></span><span class="punct">]</span></span></span><span class="id"><span class="punct">)</span></span></span></span></code></pre>
+<p>Now we've consumed all the input and we start producing impls and peeling. But wait, what's going on with the variable names? They are all <code>x</code>! But because they were created in different invocation scopes, they are actually all "different". You can imagine them actually being named <code>x0</code>, <code>x1</code>, etc. This is really convenient when we need to conjure a variable name for each item in a list!</p>
+<h3>Capturing local variables</h3>
+<p>Rust macros are hygienic, which means they cannot mutate variables that are not in their scope.</p>
+<p>For example, this code:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="fn">macro_rules!</span> <span class="id">foo</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="type">let</span> x <span class="kw">=</span> <span class="num">123</span><span class="punct">;</span></span>
+<span class="line">    <span class="punct">}</span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"><span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">main</span></span><span class="id"><span class="id"><span class="punct">(</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="type">let</span> x <span class="kw">=</span> <span class="num">555</span><span class="punct">;</span></span>
+<span class="line">    <span class="id">foo!</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">    <span class="id">println!</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="str"><span class="str">&quot;</span><span class="const">{x}</span><span class="str">&quot;</span></span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>Will still print <code>555</code>. The macro did not overwrite the value of <code>x</code>. The macro can't see the <code>x</code> in <code>main</code> scope. The <code>x</code> it creates is in a different namespace — you can think of it as if it's named <code>x2</code> or something.</p>
+<p><strong>However</strong> if we were to rewrite the code like this:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">main</span></span><span class="id"><span class="id"><span class="punct">(</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> </span><span class="id"><span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="type">let</span> <span class="id">mut</span> x <span class="kw">=</span> <span class="num">555</span><span class="punct">;</span></span>
+<span class="line">    <span class="id"><span class="fn">macro_rules!</span> <span class="id">foo</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="id"><span class="punct">(</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">           x <span class="kw">=</span> <span class="num">123</span><span class="punct">;</span></span>
+<span class="line">        <span class="punct">}</span></span></span>
+<span class="line">    </span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line">    <span class="id">foo!</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">    <span class="id">println!</span><span class="id"><span class="punct">(</span></span><span class="id"><span class="str"><span class="str">&quot;</span><span class="const">{x}</span><span class="str">&quot;</span></span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p><em>Now</em>, we can touch <code>x</code>. This will print <code>123</code>. Because <code>foo</code> is defined in a scope that has access to <code>x</code>. It "captures" <code>x</code>.</p>
+<p>This ability can be really useful when you have a function that does the same mutations repeatedly. For example, consider this code:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="type">let</span> <span class="id">mut</span> strikes <span class="kw">=</span> <span class="num">0</span><span class="punct">;</span></span>
+<span class="line"><span class="id"><span class="fn">macro_rules!</span> <span class="id">strike_if</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="id"><span class="punct">(</span><span class="var">$condition</span><span class="punct">:</span><span class="type">expr</span><span class="punct">)</span></span> <span class="kw">=&gt;</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">        <span class="kw">if</span> <span class="var">$condition</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">            strikes <span class="kw">+</span><span class="kw">=</span> <span class="num">1</span><span class="punct">;</span></span>
+<span class="line">            <span class="kw">if</span> strikes <span class="kw">=</span><span class="kw">=</span> <span class="num">3</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">                <span class="kw">return</span> <span class="id">Err</span><span class="id"><span class="punct">(</span><span class="str"><span class="str">&quot;</span>Too many strikes<span class="str">&quot;</span></span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line">            </span><span class="id"><span class="punct">}</span></span></span>
+<span class="line">        </span><span class="id"><span class="punct">}</span></span></span>
+<span class="line">    <span class="punct">}</span></span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span>
+<span class="line"><span class="id">strike_if!</span><span class="id"><span class="punct">(</span>age <span class="kw">&lt;</span> <span class="num">18</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">strike_if!</span><span class="id"><span class="punct">(</span>name.<span class="fn">starts_with</span><span class="id"><span class="punct">(</span><span class="str"><span class="str">&quot;</span>W<span class="str">&quot;</span></span></span><span class="id"><span class="punct">)</span></span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">strike_if!</span><span class="id"><span class="punct">(</span>name.<span class="fn">ends_with</span><span class="id"><span class="punct">(</span><span class="str"><span class="str">&quot;</span>y<span class="str">&quot;</span></span></span><span class="id"><span class="punct">)</span></span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">strike_if!</span><span class="id"><span class="punct">(</span>accent <span class="kw">=</span><span class="kw">=</span> <span class="str"><span class="str">&quot;</span>Pittsburgh<span class="str">&quot;</span></span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span>
+<span class="line"><span class="id">strike_if!</span><span class="id"><span class="punct">(</span>age <span class="kw">&gt;</span> <span class="num">120</span></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span></span></code></pre>
+<p>Rather than repeating the <code>strike</code> incrementing logic, condition checking, and early-return many times, we let the macro repeat it for us. The code is the same as if we had written 5 if-statements, 5 increments, 5 early returns, etc. But much more tidy.</p>
+<p>Note how the macro captures the scope of <code>strikes</code>, so it is allowed to increment it! If the macro were defined <em>above</em> the <code>let mut strikes = 0</code> line, it would not have access, or if it was defined outside of this function, etc.</p>
+<h2>Conclusion</h2>
+<p>This post contains most of the tricks needed to become a macro master. <strong>However</strong>, with great power comes great responsibility. If you work on a team, your team will hate you if you make macro monstrosities.</p>
+<p>The most complicated macro in this post I would recommend actually doing is the one where we implement a trait for all the N-tuples. You put a nice comment explaining how it works above it, and it's not too bad.</p>
+<p>Something I learned after getting really good at macros is that a lot of the time, you can take the code you want to use a macro to deduplicate, and instead hide that logic behind a trait interface, and then use a simpler macro to help implement that trait for the relevant types.</p>
+<p>To give a concrete example, I once worked on a codebase that defined a custom <a href="https://en.wikipedia.org/wiki/Remote_procedure_call">RPC</a> format. Think like an extension of HTTP that has weird verbs and custom headers.</p>
+<p>A request might look something like</p>
+<pre class="code"><code class="code"><span class="line"><span class="id">COMPUTECHECKSUM filename:&quot;foo.txt&quot; timeout_ms:123</span></span></code></pre>
+<p>There were a few dozen of these requests, they all accepted different headers, etc. I thought I'd be cute and define a macro that was invoked like:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id">make_request_handler!</span><span class="id"><span class="punct">(</span></span>
+<span class="line">    <span class="const">COMPUTECHECKSUM</span> filename<span class="punct">:</span><span class="type">str</span> timeout_ms<span class="punct">:</span><span class="type">u64</span> <span class="punct">;</span></span>
+<span class="line">    <span class="const">ANOTHERREQUEST</span> header<span class="punct">:</span><span class="type">bool</span> names<span class="punct">:</span><span class="id">Vec<span class="punct">&lt;</span>String<span class="punct">&gt;</span></span> <span class="punct">;</span></span>
+<span class="line">    …</span>
+<span class="line"></span><span class="id"><span class="punct">)</span></span><span class="punct">;</span></span></span></code></pre>
+<p>And that macro created the entire request parser, created a struct for each request (e.g. <code>ComputeChecksumRequest</code> with the <code>filename</code> and <code>timeout_ms</code> fields), a dispatcher, etc.</p>
+<p>That macro was a horrific dumpster fire implementation! It built up so many datastructures and craziness while munching those tokens. I feel awful for making anyone ever read that thing. But that's the kind of mistake you make when you lack experience! Upwards and onwards.</p>
+<p>What I realized years later — and did go back and update the code — is I could break up the different bits into different, smaller, more manageable macros and traits.</p>
+<p>For instance, you could define a common trait like:</p>
+<pre class="code"><code class="code"><span class="line"><span class="id"><span class="id"><span class="type">trait</span> <span class="id">Request</span> <span class="id"><span class="punct">{</span></span>
+<span class="line">    <span class="type">const</span> <span class="const">VERB</span><span class="punct">:</span> <span class="kw">&amp;</span><span class="type">str</span><span class="punct">;</span></span>
+<span class="line">    <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">parse</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">s</span><span class="punct">:</span> <span class="kw">&amp;</span><span class="type">str</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="id"> <span class="id"><span class="punct">-&gt;</span> <span class="id">Result<span class="punct">&lt;</span><span class="type">Self</span>, Error<span class="punct">&gt;</span></span></span></span><span class="punct">;</span></span>
+<span class="line">    <span class="id"><span class="id"><span class="type">fn</span> </span><span class="fn">serve</span></span><span class="id"><span class="id"><span class="punct">(</span><span class="var">self</span></span><span class="id"><span class="id"><span class="punct">)</span></span></span></span><span class="punct">;</span></span>
+<span class="line"></span><span class="id"><span class="punct">}</span></span></span></span></span></code></pre>
+<p>Then just make <em>normal Rust structs</em> for all your requests, e.g. <code>struct ComputeChecksumRequest</code> with their fields, but then use a macro to automatically implement the <code>Request</code> trait.</p>
+<p>Then make a different macro that takes a bunch of type names that all implement the <code>Request</code> trait, and that macro spits out just the dispatcher.</p>
+<p>Etc. Just break it up into a bunch of manageable pieces. Keep at much of the logic in normal Rust code. Only go into macro-land to deduplicate truly shared logic. This is a ton more manageable than mega-macros!</p>
+<p>This post does not cover procedural macros, which are even more powerful. The macros in this post are called <em>declarative</em> macros. Declarative macros are basically like a simple token-shunting Lisp executed at compile time.</p>
+<p>Procedural macros are full-on Rust code that outputs more Rust code. They are much more powerful — you can do arbitrary Rust computations at compile time — but also a ton more complicated.</p>
+<p>Libraries like <code>serde</code> use procedural macros to automatically implement serialization for rust structs, and web frameworks like <code>rocket</code> use procedural macros for setting up webserver path dispatch. We'll save that article for another day!</p>
+<p>If there is anything in this article that's confusing and could be clarified, email me and I'll update it. Happy macroing!</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

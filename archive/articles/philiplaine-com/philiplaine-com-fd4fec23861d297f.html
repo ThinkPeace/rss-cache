@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cross Compiling Docker Images | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Cross Compiling Docker Images</h1>
+        <div class="meta">Philip Laine 2019-09-20T18:00:00Z</div>
+        <div class="links">
+          <a href="https://philiplaine.com/posts/cross-compiling-docker-images/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/philiplaine-com/philiplaine-com-fd4fec23861d297f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">It has been an issue for a long time to run Docker images on multiple architectures. I remember the first time I got the idea to install Docker on my Raspberry Pi and I realized quickly that what I was trying to do would not work. The issue of course was that I was trying to use an AMD64 compiled Docker image on a ARM 32 bit CPU. Anyone who works with any l…</div>
+        <div class="content">
+          <html>
+  <body>
+    <p>It has been an issue for a long time to run Docker images on multiple architectures. I remember the first time I got the idea to install Docker on my Raspberry Pi and I realized quickly that what I was trying to do would not work. The issue of course was that I was trying to use an AMD64 compiled Docker image on a ARM 32 bit CPU. Anyone who works with any lower level languages would call me an idiot for realizing this sooner than later. I would agree with them. Docker just seems to work like magic, running on most machines without any issue, like running Linux containers on Windows. One thing that has not been easy though is building Docker images on one type of CPU and running them on another.</p>
+    <p>Some of you might ask the question why even bother? Its a fair question as most consumer desktops and cloud VM instances run on AMD64 based processors. My first answer would be why not? We live in a world where a lot of languages have excellent support for cross compiling for different architectures, like <a href="https://github.com/mitchellh/gox">go</a> and <a href="https://github.com/rust-embedded/cross">rust</a>. While the other are platform agnostic (for the most part) like python and javascript. So the barrier of entry to the multi architecture docker image seems to be very low right now. On a more serious note we are seeing a shift in the computing world that could take us away from the single dominating architecture with some competition in the form of <a href="https://appleinsider.com/articles/19/04/08/steve-jobs-predicted-the-macs-move-from-intel-to-arm-processors">Apple</a> and <a href="https://aws.amazon.com/blogs/aws/new-ec2-instances-a1-powered-by-arm-based-aws-graviton-processors/">AWS</a>. I can’t predict if this will actually happen or even succeed, but what I can say is that it will be interesting.</p>
+    <h1>You don’t have to convince me anymore! How do I get started?</h1>
+    <p>The simplest answer is making sure you have downloaded <a href="https://docs.docker.com/engine/release-notes/#19030">Docker CE 19.03</a> or later. This is because it includes <a href="https://github.com/docker/buildx">buildx</a> as part of the experimental CLI. Buildx is as “Docker CLI plugin for extended build capabilities with BuildKit” according to its own README. What it allows you to do is to easily build Docker images for multiple architectures/platforms at the same time, but this only gets you half way there as you will not be able to build ARM Docker images on your AMD64 machine. The easies way to solve this is with QEMU emulation to allow execution of multiple architectures on the same node.</p>
+    <h1>Give me the commands already!</h1>
+    <p>So if you want to build a ARM Docker image on your AMD64 machine, all you need to do is to enable QEMU emulation, create a builder instance, and build the image. Say you have the following main.go and Dockefile that you want to build for ARM on a AMD64 machine.</p>
+    <p>main.go</p>
+    <pre>
+      <pre>package main
+import "fmt"
+func main() {
+	fmt.Println("hello world")
+}
+</pre>
+    </pre>
+    <p>Dockerfile</p>
+    <pre>
+      <pre>FROM golang:latest
+WORKDIR /app
+COPY main.go .
+RUN go build -o main .
+CMD ["./main"]
+</pre>
+    </pre>
+    <p>Then you need to run the following commands.</p>
+    <pre>
+      <pre>docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+docker buildx create --use --name cross --platform "linux/arm"
+docker buildx build --platform linux/arm -t demo --load .
+</pre>
+    </pre>
+    <p>This will build a ARM Docker image and load it into your local Docker daemon. Say you have a CI pipeline and you want to build and push docker images for multiple architectures with minimal configuration. Well then you can push directly to your registry given that you are authenticated.</p>
+    <pre>
+      <pre>docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+docker buildx create --use --name cross --platform "linux/arm64,linux/arm,linux/amd64"
+docker buildx build --platform "linux/arm64,linux/arm,linux/amd64" -t demo --push .
+</pre>
+    </pre>
+    <p>This will build and push a Docker image for ARM64, ARM, and AMD64. It will also push a manifest to the registry so that when you pull an image to your ARM node the correct image will be fetched. Note that 3 independent images will be pushed to the registry, but the experience should be seamless across machines with different architectures. If you want to read more about how Docker manifests <a href="https://stackoverflow.com/a/47023753/1322872">here is a good StackOverflow answer</a> to get you started, otherwise have fun building multi arch Docker images!</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How the SNES Graphics System works | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How the SNES Graphics System works</h1>
+        <div class="meta">Fabien Sanglard 2024-08-09T00:00:00Z</div>
+        <div class="links">
+          <a href="https://fabiensanglard.net/snes_ppus_how/index.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/fabiensanglard-net/fabiensanglard-net-9c3060aa855d9849.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body>
+    <p>Last week's article discussed how the <a href="https://fabiensanglard.net/snes_video">Super Nintendo's Video system</a> feeds the TV's CRT. Today I'll summarize what I understand of the hardware generating these graphics.</p>
+    <p>A precious resource is Jonathon Donaldson's schematics of the SNES. If you have a large monitor, I recommend to take a minute and <a href="https://fabiensanglard.net/snes_schematic_color.pdf">look at it in fullscreen</a> to appreciate it in all its glory.</p>
+    <p>I find this schematics so beautiful that I printed it in A1 size and framed it!</p>
+    <p>If we zoom into the graphic system, we find four chips. One is called the Pixel Processing Unit 1 (PPU1), labeled 5C77. Another is called the Pixel Processing Unit 2 (PPU2), labeled 5C78. The two remaining are 8-bit 32KiB SRAM chips.</p>
+    <p>In later revisions, Nintendo fused the CPU, the PPU1, and PPU2 into one massive ASIC. These 1-CHIP versions were less prone to failure but came with their own set of issues<a href="https://fabiensanglard.net#footnote_1">[1]</a>.</p>
+    <p>Jonathon grouped the lines with color code so we can convert the schematic into a drawing.</p>
+    <p>We can infer a lot just by looking at the labels.</p>
+    <p>This design with one chip making the decision via the address lines and a compositor chip blindly displaying what is coming on the data lines is similar to how Capcom designed their arcade CPS-1, responsible for SF2, Final Fight, Ghouls 'n Ghosts, and many more.<br/>
+<br/>
+
+<graphic>
+Capcom PPUs, the CPS-A and CPS-B (from </graphic><a href="https://fabiensanglard.net/cpsb_paper">The Book of CP-System</a>)
+
+</p>
+    <p>There are three RAMs in the graphic system<a href="https://fabiensanglard.net#footnote_2">[2]</a>.
+
+</p>
+    <p>The address lines from the PPU1 to the VRAM are weird. This is not a standard arrangement. If you are not well-versed in RAM chips (like me) here is a quick summary to understand the weirdness.</p>
+    <p>The VRAM chips in the SNES are LH5P832. The datasheet<a href="https://fabiensanglard.net#footnote_6">[6]</a> describes standard pinouts.</p>
+    <p>Nintendo engineers could have built a system by using the two RAM chips in serial mode, with A15 from the PPU used to CS the chips. This would have resulted in an 8-bit data bus.</p>
+    <p>Because they wanted more throughput, they could have created an interleave to build a 16-bit data bus.</p>
+    <p>But they went further than a 16-bit data bus. They created a system where the RAM chips can be addressed individually...yet shared the pin A14. What is going on here?</p>
+    <p>The reason for this weird design is that the VRAM is accessed differently, depending on the graphic mode.</p>
+    <p>In mode 0-6, the PPU1 always accesses two consecutive 8-bit values. That means both the address buses hold the same value on each chip.</p>
+    <p>Things are different in Mode 7. Because in this mode the background can be rotated and scaled (see animation on the right), the data access is no longer linear.</p>
+    <p>Since the PPU1 can no longer "predict" where the data to access will be, and bulk retrieve it 16-bit at a time, it needs the flexibility of two address bus.</p>
+    <p> Moreover, in Mode 7 only 16KiB in each VRAM chip are used, which means A14 is always set to 0<a href="https://fabiensanglard.net#footnote_7">[7]</a>.</p>
+    <p>John McMaster decapped and scanned the PPUs in Oct 2020<a href="https://fabiensanglard.net#footnote_8">[8]</a>.</p>
+    <table>
+      <row><cell><p/><graphic/></cell>
+</row>
+    </table>
+    <p>Members of the snesdev.org community have started to identify areas<a href="https://fabiensanglard.net#footnote_9">[9]</a><a href="https://fabiensanglard.net#footnote_10">[10]</a> .</p>
+    <table>
+      <row><cell><p/><graphic/></cell>
+</row>
+    </table>
+    <p>So far only five areas have been attributed.</p>
+    <p>Some of these guesses look off (shouldn't CGRAM be 512 bytes?). When I was researching the topic I was surprised that so little of the internals of the PPUs was known. Given the popularity of the SNES, I expected someone with the time and the skills would have done it by now. That hero has yet to show up.</p>
+    <p>In the <a href="https://fabiensanglard.net/snes_ppus_why">next article</a>, we study how tilemap and sprites are rendered.</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

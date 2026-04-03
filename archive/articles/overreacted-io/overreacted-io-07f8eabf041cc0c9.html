@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Before You memo() | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Before You memo()</h1>
+        <div class="meta">overreacted — A blog by Dan Abramov 2021-02-23T00:00:00Z</div>
+        <div class="links">
+          <a href="https://overreacted.io/before-you-memo/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/overreacted-io/overreacted-io-07f8eabf041cc0c9.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Rendering optimizations that come naturally.</div>
+        <div class="content">
+          <html>
+  <body><h1>Before You memo()</h1><p>February 23, 2021</p><p>There are many articles written about React performance optimizations. In general, if some state update is slow, you need to:</p><ul><li>Verify you’re running a production build. (Development builds are intentionally slower, in extreme cases even by an order of magnitude.)</li><li>Verify that you didn’t put the state higher in the tree than necessary. (For example, putting input state in a centralized store might not be the best idea.)</li><li>Run React DevTools Profiler to see what gets re-rendered, and wrap the most expensive subtrees with <pre>memo()</pre>. (And add<pre>useMemo()</pre>where needed.)</li></ul><p>This last step is annoying, especially for components in between, and ideally a compiler would do it for you. In the future, it might.</p><p>In this post, I want to share two different techniques. They’re surprisingly basic, which is why people rarely realize they improve rendering performance.</p><p>These techniques are complementary to what you already know! They don’t replace <pre>memo</pre> or <pre>useMemo</pre>, but they’re often good to try first.</p><h2><a href="https://overreacted.io#an-artificially-slow-component"/> An (Artificially) Slow Component</h2>
+<p>Here’s a component with a severe rendering performance problem:</p><pre><pre>import { useState } from 'react';
+ 
+export default function App() {
+  let [color, setColor] = useState('red');
+  return (
+    &lt;div&gt;
+      &lt;input value={color} onChange={(e) =&gt; setColor(e.target.value)} /&gt;
+      &lt;p style={{ color }}&gt;Hello, world!&lt;/p&gt;
+      &lt;ExpensiveTree /&gt;
+    &lt;/div&gt;
+  );
+}
+ 
+function ExpensiveTree() {
+  let now = performance.now();
+  while (performance.now() - now &lt; 100) {
+    // Artificial delay -- do nothing for 100ms
+  }
+  return &lt;p&gt;I am a very slow component tree.&lt;/p&gt;;
+}</pre></pre><p>The problem is that whenever <pre>color</pre> changes inside <pre>App</pre>, we will re-render <pre>&lt;ExpensiveTree /&gt;</pre> which we’ve artificially delayed to be very slow.</p><p>I could <a href="https://codesandbox.io/s/amazing-shtern-61tu4?file=/src/App.js">put  memo() on it</a> and call it a day, but there are many existing articles about it so I won’t spend time on it. I want to show two different solutions.</p><h2><a href="https://overreacted.io#solution-1-move-state-down"/> Solution 1: Move State Down</h2>
+<p>If you look at the rendering code closer, you’ll notice only a part of the returned tree actually cares about the current <pre>color</pre>:</p><pre><pre>export default function App() {
+  let [color, setColor] = useState('red');
+  return (
+    &lt;div&gt;
+      &lt;input value={color} onChange={(e) =&gt; setColor(e.target.value)} /&gt;
+      &lt;p style={{ color }}&gt;Hello, world!&lt;/p&gt;
+      &lt;ExpensiveTree /&gt;
+    &lt;/div&gt;
+  );
+}</pre></pre><p>So let’s extract that part into a <pre>Form</pre> component and move state down into it:</p><pre><pre>export default function App() {
+  return (
+    &lt;&gt;
+      &lt;Form /&gt;
+      &lt;ExpensiveTree /&gt;
+    &lt;/&gt;
+  );
+}
+ 
+function Form() {
+  let [color, setColor] = useState('red');
+  return (
+    &lt;&gt;
+      &lt;input value={color} onChange={(e) =&gt; setColor(e.target.value)} /&gt;
+      &lt;p style={{ color }}&gt;Hello, world!&lt;/p&gt;
+    &lt;/&gt;
+  );
+}</pre></pre><p>Now if the <pre>color</pre> changes, only the <pre>Form</pre> re-renders. Problem solved.</p><h2><a href="https://overreacted.io#solution-2-lift-content-up"/> Solution 2: Lift Content Up</h2>
+<p>The above solution doesn’t work if the piece of state is used somewhere above the expensive tree. For example, let’s say we put the <pre>color</pre> on the parent <pre>&lt;div&gt;</pre>:</p><pre><pre>export default function App() {
+  let [color, setColor] = useState('red');
+  return (
+    &lt;div style={{ color }}&gt;
+      &lt;input value={color} onChange={(e) =&gt; setColor(e.target.value)} /&gt;
+      &lt;p&gt;Hello, world!&lt;/p&gt;
+      &lt;ExpensiveTree /&gt;
+    &lt;/div&gt;
+  );
+}</pre></pre><p>Now it seems like we can’t just “extract” the parts that don’t use <pre>color</pre> into another component, since that would include the parent <pre>&lt;div&gt;</pre>, which would then include <pre>&lt;ExpensiveTree /&gt;</pre>. Can’t avoid <pre>memo</pre> this time, right?</p><p>Or can we?</p><p>Play with this sandbox and see if you can figure it out.</p><p>…</p><p>…</p><p>…</p><p>The answer is remarkably plain:</p><pre><pre>export default function App() {
+  return (
+    &lt;ColorPicker&gt;
+      &lt;p&gt;Hello, world!&lt;/p&gt;
+      &lt;ExpensiveTree /&gt;
+    &lt;/ColorPicker&gt;
+  );
+}
+ 
+function ColorPicker({ children }) {
+  let [color, setColor] = useState("red");
+  return (
+    &lt;div style={{ color }}&gt;
+      &lt;input value={color} onChange={(e) =&gt; setColor(e.target.value)} /&gt;
+      {children}
+    &lt;/div&gt;
+  );
+}</pre></pre><p>We split the <pre>App</pre> component in two. The parts that depend on the <pre>color</pre>, together with the <pre>color</pre> state variable itself, have moved into <pre>ColorPicker</pre>.</p><p>The parts that don’t care about the <pre>color</pre> stayed in the <pre>App</pre> component and are passed to <pre>ColorPicker</pre> as JSX content, also known as the <pre>children</pre> prop.</p><p>When the <pre>color</pre> changes, <pre>ColorPicker</pre> re-renders. But it still has the same <pre>children</pre> prop it got from the <pre>App</pre> last time, so React doesn’t visit that subtree.</p><p>And as a result, <pre>&lt;ExpensiveTree /&gt;</pre> doesn’t re-render.</p><h2><a href="https://overreacted.io#whats-the-moral"/> What’s the moral?</h2>
+<p>Before you apply optimizations like <pre>memo</pre> or <pre>useMemo</pre>, it might make sense to look if you can split the parts that change from the parts that don’t change.</p><p>The interesting part about these approaches is that they don’t really have anything to do with performance, per se. Using the <pre>children</pre> prop to split up components usually makes the data flow of your application easier to follow and reduces the number of props plumbed down through the tree. Improved performance in cases like this is a cherry on top, not the end goal.</p><p>Curiously, this pattern also unlocks more performance benefits in the future.</p><p>For example, when <a href="https://reactjs.org/blog/2020/12/21/data-fetching-with-react-server-components.html">Server Components</a> are stable and ready for adoption, our <pre>ColorPicker</pre> component could receive its <pre>children</pre> <a href="https://youtu.be/TQQPAU21ZUw?t=1314">from the server</a>. Either the whole <pre>&lt;ExpensiveTree /&gt;</pre> component or its parts could run on the server, and even a top-level React state update would “skip over” those parts on the client.</p><p>That’s something even <pre>memo</pre> couldn’t do! But again, both approaches are complementary. Don’t neglect moving state down (and lifting content up!)</p><p>Then, where it’s not enough, use the Profiler and sprinkle those memo’s.</p><h2><a href="https://overreacted.io#didnt-i-read-about-this-before"/> Didn’t I read about this before?</h2>
+
+<p>This is not a new idea. It’s a natural consequence of React composition model. It’s simple enough that it’s underappreciated, and deserves a bit more love.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

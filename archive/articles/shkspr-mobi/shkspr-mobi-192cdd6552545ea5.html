@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Random File Format | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Random File Format</h1>
+        <div class="meta">Terence Eden’s Blog 2026-04-01T11:34:57Z</div>
+        <div class="links">
+          <a href="https://shkspr.mobi/blog/2026/04/random-file-format/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/shkspr-mobi/shkspr-mobi-192cdd6552545ea5.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">This was an idea I had back in the days of Naptster. At the turn of the century, it was common to listen to an &quot;acquired&quot; music file only to find it was missing a few seconds at the end due to a prematurely stopped download. Some video formats would refuse to play at all if the moov atom at the end of the file was missing. I wondered if it would be possible…</div>
+        <div class="content">
+          <p>This was an idea I had back in the days of Naptster.</p>
+
+<p>At the turn of the century, it was common to listen to an "acquired" music file only to find it was missing a few seconds at the end due to a prematurely stopped download.  Some video formats would refuse to play at all if the <a href="https://www.cnwrecovery.com/manual/Fragmented3GPMP4Files.html"><code>moov</code> atom at the end of the file was missing</a>.</p>
+
+<p>I wondered if it would be possible to make a file format which was close to impossible to read unless the <em>entire</em> file was intact. I don't mean including a checksum to detect download errors - I mean a layout which was <strong>intrinsically fragile</strong> to corruption.</p>
+
+<p>While digging through an old backup CD, I found my original notes. I'm rather impressed at what neophyte-me had constructed.  My outline was:</p>
+
+<ul>
+<li>The file ends with a 32 bit pointer. This points to the location of the first information block.</li>
+<li>The information block describes the length of the data block which follows it.</li>
+<li>At the end of the data block is another 32 bit pointer. This points to the location of the next information block.</li>
+<li>The start of the file may be a pointer, or it may be padded with random data.</li>
+<li>There may be random data padded between the data blocks.</li>
+</ul>
+
+<p>This ensures that a file which has been only partially downloaded - whether truncated at the end or missing pieces elsewhere - cannot be successfully read.</p>
+
+<p>Here's a worked example. Start at the end and follow the thread.</p>
+
+<ol start="0">
+<li>Random data.</li>
+<li>Data block size is 2.</li>
+<li>Data</li>
+<li>Data</li>
+<li>EOF.</li>
+<li>Data block size is 1.</li>
+<li>Data.</li>
+<li>Go to location 1.</li>
+<li>Random data.</li>
+<li>Go to location 5.</li>
+</ol>
+
+<p>There are, of course, a few downsides to this idea.</p>
+
+<p>Most prominently, it bloats file size. If the data block size was a constant 1MB, that would pad the size a negligible amount. But with variable data block size, it could increase it significantly. Random padding also increases the size.</p>
+
+<p>If the block size is consistent and there's no random padding data, the files can be mostly reconstructed.</p>
+
+<p>Depending on which parts of the file are missing, it may be possible to recover the majority of the file.</p>
+
+<p>A location block size of 32 bits restricts the file-size to less than 4GB. A 64 bit pointer might be excessive or might be future-proof!</p>
+
+<p>Highly structured files with predictable patterns, or text files, may be easy to recover large bits of information.</p>
+
+<p>A malformed file could contain an infinite loop of pointers.</p>
+
+<p>Perhaps a <a href="https://en.wikipedia.org/wiki/File_format#Magic_number">magic number</a> should be at the start (or end) of the file?</p>
+
+<p>While reading the file is as simple as following the pointers, <em>constructing</em> the file is more complex, especially if blocks have variable lengths.</p>
+
+<h2 id="code"><a href="https://shkspr.mobi/blog/2026/04/random-file-format/#code">Code</a></h2>
+
+<p>Here's a trivial encoder. It reads a file in consistently sized chunks of 1,024 bytes. It shuffles them up and writes them to a new file. The last 4 bytes contain a pointer to the first block, which says the data length is 1,024. After that, there is a 4 byte pointer to the next block location.</p>
+
+<pre><code class="language-python">import random
+
+#   Size of data, headers, and pointers.
+data_length = 1024
+header_length  = 4
+pointer_length = 4
+
+#   Read the file into a data structure.
+original_blocks = list()
+with open( "test.jpg", "rb") as file:
+    for data in iter( lambda: file.read( data_length ), b"" ):
+        #   Add padding if length is less than the desired length.
+        padding = data_length - len( data )
+        data += b"\0" * padding
+        original_blocks.append( data )
+
+#   How many blocks are there?
+original_length = len( original_blocks )
+
+#   Create a random order of blocks.
+order = list( range( 0, original_length ) )
+random.shuffle( order )
+
+#   Where is the start of the file?
+first_block_index = order.index( 0 )
+first_block_pointer = first_block_index * ( header_length + data_length + pointer_length )
+
+#   Loop through the order and write to a new file.
+i = 0
+#   Open as binary file to add the pointers correctly.
+with open( "output.rff", "wb" ) as output:
+    while i &lt; original_length:
+        #   Where are we?
+        current_block = i
+        current_block_value = order[i]
+        #   Write length of data in little-endian 32 bytes.
+        output.write( data_length.to_bytes( header_length, "little") )
+        #   Write data
+        output.write( original_blocks[ current_block_value ] )
+        i = i+1
+        #   Last block. Write an EOF header.
+        if ( current_block_value + 1 &gt;= original_length ):
+            eof = 4294967295
+            output.write( eof.to_bytes( header_length, "little") )
+        else:
+            next_block = order.index( current_block_value + 1 )
+            #   Write pointer to next block
+            next_block_location = next_block * ( header_length + data_length + pointer_length )
+            output.write( next_block_location.to_bytes( pointer_length, "little" ) )
+    #   At the end of the file, write the pointer to block 0.
+    output.write( first_block_pointer.to_bytes( pointer_length, "little" ) )
+</code></pre>
+
+<p>And here is a similarly trivial decoder. It reads the last 32 bits, moves to that location, reads the block size, reads the data and writes it to a new file, then reads the next pointer.</p>
+
+<pre><code class="language-python">import os
+#   Size of data, headers, and pointers.
+header_length  = 4
+pointer_length = 4
+#   File name to write to.
+decoded_file = "decoded.bin"
+
+#   Create an empty file.
+with open( decoded_file, "w") as file:
+    pass
+
+#   Function to loop through the blocks.
+def read_block( position, i ):
+    #   Move to the position in the file.
+    input_file.seek( position, 0 )
+    #   Read the data length header.
+    data_length = int.from_bytes( input_file.read( header_length ), "little" )
+    #   Move to the data block.
+    input_file.seek( position + header_length, 0 )
+    #   Read the data.
+    data = input_file.read( data_length )
+    #   Read the pointer header.
+    next_position = int.from_bytes( input_file.read( pointer_length ), "little" )
+    #   If this is the final block, it may have null padding. Remove it.
+    if ( next_position == 4294967295 ) :
+        data = data.rstrip(b"\0")
+    #   Append the data to the decoded file.
+    with open( decoded_file, "ab" ) as file:
+        file.write( data )
+    #   If this is the final block, finish searching.
+    if ( next_position == 4294967295 ) :
+         print("File decoded.")
+    else:
+        #   Move to the next position.
+        read_block( next_position, i+1 )
+
+#   Open the file as binary.
+input_file = open( "output.rff", "rb" )
+
+#   Read the last 4 bytes.
+input_file.seek( -4, 2 )
+
+#   Get position of first block
+first_block = int.from_bytes( input_file.read(), "little" )
+
+#   Start reading the file.
+seek_to = first_block
+read_block( seek_to, 0 )
+</code></pre>
+
+<p>As I said, these are both trivial. They are a bit buggy and contain some hardcoded assumptions.</p>
+
+<p>Here are two files encoded as "RFF" - Random File Format - <a href="https://shkspr.mobi/blog/wp-content/uploads/2026/03/output.jpg.rff">an image</a> by Maria Sibylla Merian, and the <a href="https://shkspr.mobi/blog/wp-content/uploads/2026/03/output.txt.rff">text of Romeo and Juliet</a>.</p>
+
+<p>Have fun decoding them!</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

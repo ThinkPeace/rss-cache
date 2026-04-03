@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SIMD City: Auto-vectorisation | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>SIMD City: Auto-vectorisation</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-20T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/20-simd-city?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-7f390445e3c27baa.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Doing more with less: vectorising can speed your code up 8x or more!</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p>It's time to look at one of the most sophisticated optimisations compilers can do: autovectorisation. Most "big data" style problems boil down to "do this maths to huge arrays", and the limiting factor isn't the maths itself, but the feeding of instructions to the CPU, along with the data it needs.</html:p>
+
+<html:p>To help with this problem, CPU designers came up with SIMD: "Single Instruction, Multiple Data". One instruction tells the CPU what to do with a whole chunk of data. These chunks could be 2, 4, 8, 16 or similar units of integers or floating point values, all treated individually. Initially<html:sup id="fnref:games"><html:a class="footnote-ref" href="#fn:games">1</html:a></html:sup> the only way to use this capability was to write assembly language directly, but luckily for us, compilers are now able to help.</html:p>
+
+<html:p>To take advantage of SIMD we need to ensure our data is laid out in a nice long line, like an array, or vector<html:sup id="fnref:vectorisation"><html:a class="footnote-ref" href="#fn:vectorisation">3</html:a></html:sup>. It's also much better to store different "fields" of the data in separate arrays<html:sup id="fnref:acton"><html:a class="footnote-ref" href="#fn:acton">2</html:a></html:sup>. We're going to start with some integer maths - let's update an array <html:code>x</html:code> to be element-wise the max of <html:code>x</html:code> and <html:code>y</html:code>:</html:p>
+
+<html:p>In this <html:code>-O2</html:code>-compiled code<html:sup id="fnref:temp"><html:a class="footnote-ref" href="#fn:temp">4</html:a></html:sup>, we don't see any vectorisation, just the nice tight loop code we've come to expect:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">.L3:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">edx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">DWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rsi</html:span><html:span class="err">+</html:span><html:span class="no">rax</html:span><html:span class="p">*</html:span><html:span class="mi">4</html:span><html:span class="p">]</html:span><html:span class="w">    </html:span><html:span class="c1">; read y[i]</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">edx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">DWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="err">+</html:span><html:span class="no">rax</html:span><html:span class="p">*</html:span><html:span class="mi">4</html:span><html:span class="p">]</html:span><html:span class="w">    </html:span><html:span class="c1">; compare with x[i]</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jle</html:span><html:span class="w"> </html:span><html:span class="no">.L2</html:span><html:span class="w">                           </html:span><html:span class="c1">; if less, skip next instr</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">DWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="err">+</html:span><html:span class="no">rax</html:span><html:span class="p">*</html:span><html:span class="mi">4</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="no">edx</html:span><html:span class="w">    </html:span><html:span class="c1">; x[i] = y[i]</html:span>
+<html:span class="nl">.L2:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">1</html:span><html:span class="w">                        </html:span><html:span class="c1">; ++i</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">65536</html:span><html:span class="w">                    </html:span><html:span class="c1">; are we at 65536?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.L3</html:span><html:span class="w">                           </html:span><html:span class="c1">; keep looping if not</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>To ramp up to the next level, we'll need to add two flags: first we need to turn up the optimiser to <html:code>-O3</html:code><html:sup id="fnref:or"><html:a class="footnote-ref" href="#fn:or">5</html:a></html:sup>, and then we need to tell the compiler to target a CPU that has the appropriate SIMD instruction<html:sup id="fnref:most"><html:a class="footnote-ref" href="#fn:most">6</html:a></html:sup> with something like <html:code>-march=skylake</html:code>.</html:p>
+
+<html:p>Our inner loop has gotten a little more complex, but spot the cool part:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">.L4:</html:span>
+<html:span class="w">  </html:span><html:span class="c1">; Reads 8 integers into ymm1, y[i..i+7]</html:span>
+<html:span class="w">  </html:span><html:span class="nf">vmovdqu</html:span><html:span class="w"> </html:span><html:span class="no">ymm1</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">YMMWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rsi</html:span><html:span class="err">+</html:span><html:span class="no">rax</html:span><html:span class="p">]</html:span>
+<html:span class="w">  </html:span><html:span class="c1">; Compares that with 8 integers x[i..i+7]</html:span>
+<html:span class="w">  </html:span><html:span class="nf">vpcmpgtd</html:span><html:span class="w"> </html:span><html:span class="no">ymm0</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">ymm1</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">YMMWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="err">+</html:span><html:span class="no">rax</html:span><html:span class="p">]</html:span>
+<html:span class="w">  </html:span><html:span class="c1">; Were all 8 values less or equal?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">vptest</html:span><html:span class="w"> </html:span><html:span class="no">ymm0</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">ymm0</html:span>
+<html:span class="w">  </html:span><html:span class="c1">; if so, skip the write</html:span>
+<html:span class="w">  </html:span><html:span class="nf">je</html:span><html:span class="w"> </html:span><html:span class="no">.L3</html:span>
+<html:span class="w">  </html:span><html:span class="c1">; mask move x[i..i+7] with the y values that were greater</html:span>
+<html:span class="w">  </html:span><html:span class="nf">vpmaskmovd</html:span><html:span class="w"> </html:span><html:span class="no">YMMWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="err">+</html:span><html:span class="no">rax</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="no">ymm0</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">ymm1</html:span>
+<html:span class="nl">.L3:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">32</html:span><html:span class="w">           </html:span><html:span class="c1">; move forward 32 bytes</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">262144</html:span><html:span class="w">       </html:span><html:span class="c1">; are we at the end? (4*65536)</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.L4</html:span><html:span class="w">               </html:span><html:span class="c1">; keep looping if not</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>With a very similar number of instructions we're now processing 8 integers at a time! This is the power of SIMD - we'd likely be limited by the bandwidth to memory rather than the housekeeping of working out what to do with them.</html:p>
+
+<html:p>There are a couple of things to talk about though. Firstly, what's all this "mask move" stuff? Well, with SIMD we can act on "multiple data" but only with a "single instruction". Our original code has a conditional update: not every array element is necessarily processed in the same way. The compiler has cleverly used a "mask move" to let it <html:em>conditionally</html:em> write back only the elements that are "greater than", which is pretty clever of it. We can help it if we don't mind unconditionally writing to memory:</html:p>
+
+<html:p>By unconditionally writing to <html:code>x[i]</html:code><html:sup id="fnref:ok"><html:a class="footnote-ref" href="#fn:ok">7</html:a></html:sup> we can reduce the loop to:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">.L3:</html:span>
+<html:span class="w">  </html:span><html:span class="c1">; Read 8 integers from x[i..i+7]</html:span>
+<html:span class="w">  </html:span><html:span class="nf">vmovdqu</html:span><html:span class="w"> </html:span><html:span class="no">ymm0</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">YMMWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="err">+</html:span><html:span class="no">rax</html:span><html:span class="p">]</html:span>
+<html:span class="w">  </html:span><html:span class="c1">; "max" the integers with y[i..i+7]</html:span>
+<html:span class="w">  </html:span><html:span class="nf">vpmaxsd</html:span><html:span class="w"> </html:span><html:span class="no">ymm0</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">ymm0</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">YMMWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rsi</html:span><html:span class="err">+</html:span><html:span class="no">rax</html:span><html:span class="p">]</html:span>
+<html:span class="w">  </html:span><html:span class="c1">; Store them back</html:span>
+<html:span class="w">  </html:span><html:span class="nf">vmovdqu</html:span><html:span class="w"> </html:span><html:span class="no">YMMWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="err">+</html:span><html:span class="no">rax</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="no">ymm0</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">32</html:span><html:span class="w">       </html:span><html:span class="c1">; move forward 32 bytes</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">262144</html:span><html:span class="w">   </html:span><html:span class="c1">; are we at the end?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.L3</html:span><html:span class="w">           </html:span><html:span class="c1">; keep looping if not</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>The compiler has spotted our ternary operator is actually exactly the same as the built-in vector "max" instruction! No explicit comparisons or branches now - fantastic.</html:p>
+
+<html:p>There's one last thing to cover - the eagle-eyed amongst you might have spotted the fact there are actually <html:em>two</html:em> loops, one using vector instructions, and one doing regular one-at-a-time operations. The regular loop is jumped to conditionally after this check:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="w">  </html:span><html:span class="nf">lea</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi-4</html:span><html:span class="p">]</html:span><html:span class="w">      </html:span><html:span class="c1">; rax = x - 4</html:span>
+<html:span class="w">  </html:span><html:span class="nf">sub</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rsi</html:span><html:span class="w">          </html:span><html:span class="c1">; rax = x - 4 - y</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">24</html:span><html:span class="w">           </html:span><html:span class="c1">; compare rax with 24</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">0</html:span><html:span class="w">            </html:span><html:span class="c1">; (set up loop counter for below)</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jbe</html:span><html:span class="w"> </html:span><html:span class="no">.L2</html:span><html:span class="w">               </html:span><html:span class="c1">; if rax &lt;= 24; jump to the slow case</html:span>
+<html:span class="c1">; falls through to the vectorised loop here</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>So what's going on here? We're checking <html:code>x</html:code> and <html:code>y</html:code> - not the <html:em>values</html:em> of the two arrays, but the addresses. That somewhat awkward sequence is essentially saying "do the two arrays overlap with each other in a way that would prevent us being able to vectorise". If they overlap by 28 or more bytes, then we can't read and write in 8 <html:code>int</html:code> (32-byte) chunks: working in batches like this would give different results as the overlap means writing to <html:code>x[i]</html:code> might affect <html:code>y[i+2]</html:code> (or similar). So, the compiler has to add this check <html:em>and</html:em> generate a fall-back case that does one at a time.</html:p>
+
+<html:p>With some non-standard trickery we tell the compiler to ignore vector dependencies for the loop<html:sup id="fnref:restrict"><html:a class="footnote-ref" href="#fn:restrict">8</html:a></html:sup>:</html:p>
+
+<html:p>That's it for today: with the right flags and a little care about data layout, the compiler can turn your one-at-a-time loops into batch-processing powerhouses! Tomorrow we'll look at floating point vectorisation and its own peculiar quirks.</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/d68x8TF7XJs">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 20 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/19-tail-call-optimisation">Chasing your tail</html:a> | <html:a href="/202512/21-vectorising-floats">When SIMD Fails: Floating Point Associativity</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:games">
+<html:p>I spent some of the late 90s and early 2000s writing video games, whose main rendering loops need to do a lot of matrix maths on a lot of 3d points. Writing big chunks of SIMD-like assembly code was a big part of that. You can see some of my code from that era in the <html:a href="https://github.com/mattgodbolt/reddog">Red Dog source</html:a>. <html:a class="footnote-backref" href="#fnref:games" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:acton">
+<html:p>See Mike Acton's seminal video on <html:a href="https://www.youtube.com/watch?v=rX0ItVEVjHc">Data Oriented Design</html:a> <html:a class="footnote-backref" href="#fnref:acton" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:vectorisation">
+<html:p>I mean, it's also called "vectorisation" for a reason, eh? This has great benefits for caching too: a long sequence is best-case for the automatic prefetchers in modern CPUs. <html:a class="footnote-backref" href="#fnref:vectorisation" title="Jump back to footnote 3 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:temp">
+<html:p>In "real" code we'd make <html:code>Size</html:code> a template parameter, but without an instantiation we'd see no code. To keep things brief, I'm hardcoding it to a constant here. <html:a class="footnote-backref" href="#fnref:temp" title="Jump back to footnote 4 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:or">
+<html:p>Or, more targetedly, use <html:code>-ftree-loop-vectorize</html:code> <html:a class="footnote-backref" href="#fnref:or" title="Jump back to footnote 5 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:most">
+<html:p>Almost every CPU made in the last decade supports it, but the default target of GCC doesn't have the masked instructions the compiler wants to use. <html:a class="footnote-backref" href="#fnref:most" title="Jump back to footnote 6 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:ok">
+<html:p>This <html:em>might</html:em> be OK if we think we'll need to update many of the x array elements anyway. If we expect not to update much of <html:code>x</html:code> then this could be a pessimisation as we unconditionally write to the whole array now. <html:a class="footnote-backref" href="#fnref:ok" title="Jump back to footnote 7 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:restrict">
+<html:p>Ideally we'd have a way in standard to say "these don't overlap". Try as I might, without making things a lot more complex, neither <html:code>__restrict</html:code> on pointers derived from the span nor <html:code>[[assume(...)]]</html:code> could convince the compiler that it didn't need to be conservative. Splitting the function into two, one taking <html:code>__restrict__</html:code> pointers and the other passing <html:code>x.data()</html:code> did work but was horrible. <html:a class="footnote-backref" href="#fnref:restrict" title="Jump back to footnote 8 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

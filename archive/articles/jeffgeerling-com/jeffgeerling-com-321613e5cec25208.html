@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Frigate with Hailo for object detection on a Raspberry Pi | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Frigate with Hailo for object detection on a Raspberry Pi</h1>
+        <div class="meta">Jeff Geerling 2026-02-18T20:50:00Z</div>
+        <div class="links">
+          <a href="https://www.jeffgeerling.com/blog/2026/frigate-with-hailo-for-object-detection-on-a-raspberry-pi/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jeffgeerling-com/jeffgeerling-com-321613e5cec25208.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I run Frigate to record security cameras and detect people, cars, and animals when in view. My current Frigate server runs on a Raspberry Pi CM4 and a Coral TPU plugged in via USB. Raspberry Pi offers multiple AI HAT+&#x27;s for the Raspberry Pi 5 with built-in Hailo-8 or Hailo-8L AI coprocessors, and they&#x27;re useful for low-power inference (like for image object…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>Frigate with Hailo for object detection on a Raspberry Pi</h1>
+    <p>I run <a href="https://frigate.video">Frigate</a> to record security cameras and detect people, cars, and animals when in view. My <a href="https://www.jeffgeerling.com/blog/2024/building-pi-frigate-nvr-axzezs-interceptor-1u-case/">current Frigate server</a> runs on a Raspberry Pi CM4 and a <a href="https://amzn.to/4aWdOpQ">Coral TPU</a> plugged in via USB.</p>
+    <p>Raspberry Pi offers <a href="https://www.raspberrypi.com/products/ai-hat/">multiple AI HAT+'s</a> for the Raspberry Pi 5 with built-in Hailo-8 or Hailo-8L AI coprocessors, and they're useful for low-power inference (like for image object detection) on the Pi. Hailo coprocessors can be used with other SBCs and computers too, if you buy an <a href="https://www.waveshare.com/hailo-8.htm">M.2 version</a>.</p>
+    <graphic src="/blog/2026/frigate-with-hailo-for-object-detection-on-a-raspberry-pi/exaviz-cruiser-mini-rack-nas-nvr-build.jpg" alt="Exaviz Cruiser 10 inch mini rack NVR NAS build"/>
+    <p>Frigate offers Hailo support, but getting it working on my new build (pictured above—full writeup coming soon) threw me for a loop, so I'm documenting the process for my build here, for my own future reference.</p>
+    <p>Assuming you have a fresh Pi OS install on a Pi 5 or CM5, and you have the Hailo module connected via PCIe (either a HAT+ module, or via an M.2 slot), do the following:</p>
+    <ul>
+      <li>Follow <a href="https://docs.frigate.video/frigate/installation/#hailo-8">Frigate's guide to install the Hailo-8 driver from source</a>.</li>
+      <li>Follow <a href="https://docs.frigate.video/configuration/object_detectors/#hailo-8">Frigate's guide for setting up Hailo as an object detector</a>in your Frigate<pre>config.yml</pre>(note: I use my open source<a href="https://github.com/geerlingguy/pi-nvr">Pi NVR project</a>).</li>
+      <li>Start Frigate.</li>
+    </ul>
+    <p>If you see a message like:</p>
+    <pre>
+      <pre>WARNING : CPU detectors are not recommended and should only be used for testing or for trial purposes.
+</pre>
+    </pre>
+    <p>Then your detector configuration is likely wrong. Check back through your <pre>model</pre> and <pre>detectors</pre> config in <pre>frigate.yml</pre> and try again :)</p>
+    <h2>PCIe <pre>force_desc_page_size</pre> issue</h2>
+    <p>Outside of configuration issues that took a few tries to fix, I ran into this error message when running <pre>docker logs frigate</pre>:</p>
+    <pre>
+      <pre>[HailoRT] [error] CHECK failed - max_desc_page_size given 16384 is bigger than hw max desc page size 4096
+...
+RuntimeError: HailoRT inference thread has stopped, restart required.
+</pre>
+    </pre>
+    <p>That error led me to <a href="https://community.hailo.ai/t/pcie-max-desc-page-size-issue/136/15">this forum thread</a>, which suggested a fix:</p>
+    <p>Create a file <pre>/etc/modprobe.d/hailo_pci.conf</pre> (e.g. with <pre>sudo nano</pre>), with the following contents:</p>
+    <pre>
+      <pre>options hailo_pci force_desc_page_size=4096
+</pre>
+    </pre>
+    <p>Then either reboot the Pi, or run the following commands to unload, then reload, the hailo driver:</p>
+    <pre>
+      <pre>sudo modprobe -r hailo_pci 
+sudo modprobe hailo_pci 
+</pre>
+    </pre>
+    <p>The Frigate container logs should report the Hailo detector is now in use:</p>
+    <pre>
+      <pre>[2026-02-18 14:14:35] detector.hailo  INFO: Starting detection process: 621
+</pre>
+    </pre>
+    <p>And now, the system dashboard is showing <pre>hailo</pre> as running at around 12ms inference speed, with very low CPU usage overall (this was testing with two cameras):</p>
+    <graphic src="/blog/2026/frigate-with-hailo-for-object-detection-on-a-raspberry-pi/hailo-frigate-detector-inference-cpu-usage.png" alt="Hailo 8 object detection on Raspberry Pi CM5 with Frigate"/>
+    <p>The nice thing is, this works on the cheaper Hailo-8L that you can find in the $70 AI HAT+ (the 'base model'), which is often much cheaper than the now-ancient <a href="https://amzn.to/4aWdOpQ">Google Coral TPU</a>—at least the USB version that's more broadly compatible.</p>
+    <p>I'm still at a loss as to why Google abandoned Coral after one generation. It seems like they could've dominated the 'edge TPU' market, but they kinda gave it up after hitting 4 TOPS.</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

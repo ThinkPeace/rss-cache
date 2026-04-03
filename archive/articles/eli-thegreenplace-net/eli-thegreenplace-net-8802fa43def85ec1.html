@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rewriting pycparser with the help of an LLM | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Rewriting pycparser with the help of an LLM</h1>
+        <div class="meta">Eli Bendersky&#x27;s website 2026-02-05T03:35:00Z</div>
+        <div class="links">
+          <a href="https://eli.thegreenplace.net/2026/rewriting-pycparser-with-the-help-of-an-llm/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/eli-thegreenplace-net/eli-thegreenplace-net-8802fa43def85ec1.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">pycparser is my most widely used open source project (with ~20M daily downloads from PyPI [1] ). It&#x27;s a pure-Python parser for the C programming language, producing ASTs inspired by Python&#x27;s own . Until very recently, it&#x27;s been using PLY: Python Lex-Yacc for the core parsing. In this post, I&#x27;ll describe how …</div>
+        <div class="content">
+          <p><a class="reference external" href="https://github.com/eliben/pycparser">pycparser</a> is my most widely used open
+source project (with ~20M daily downloads from PyPI <a class="footnote-reference" href="#footnote-1" id="footnote-reference-1">[1]</a>). It's a pure-Python
+parser for the C programming language, producing ASTs inspired by <a class="reference external" href="https://docs.python.org/3/library/ast.html">Python's
+own</a>. Until very recently, it's
+been using <a class="reference external" href="https://www.dabeaz.com/ply/ply.html">PLY: Python Lex-Yacc</a> for
+the core parsing.</p>
+<p>In this post, I'll describe how I collaborated with an LLM coding agent (Codex)
+to help me rewrite pycparser to use a hand-written recursive-descent parser and
+remove the dependency on PLY. This has been an interesting experience and the
+post contains lots of information and is therefore quite long; if you're just
+interested in the final result, check out the latest code of pycparser - the
+<tt class="docutils literal">main</tt> branch already has the new implementation.</p>
+<img alt="meme picture saying &quot;can't come to bed because my AI agent produced something slightly wrong&quot;" class="align-center" src="https://eli.thegreenplace.net/images/2026/cantcometobed.png" />
+<div class="section" id="the-issues-with-the-existing-parser-implementation">
+<h2>The issues with the existing parser implementation</h2>
+<p>While pycparser has been working well overall, there were a number of nagging
+issues that persisted over years.</p>
+<div class="section" id="parsing-strategy-yacc-vs-hand-written-recursive-descent">
+<h3>Parsing strategy: YACC vs. hand-written recursive descent</h3>
+<p>I began working on pycparser in 2008, and back then using a YACC-based approach
+for parsing a whole language like C seemed like a no-brainer to me. Isn't this
+what everyone does when writing a serious parser? Besides, the K&amp;R2 book
+famously carries the entire grammar of the C99 language in an appendix - so it
+seemed like a simple matter of translating that to PLY-yacc syntax.</p>
+<p>And indeed, it wasn't <em>too</em> hard, though there definitely were some complications
+in building the ASTs for declarations (C's <a class="reference external" href="https://eli.thegreenplace.net/2008/10/18/implementing-cdecl-with-pycparser">gnarliest part</a>).</p>
+<p>Shortly after completing pycparser, I got more and more interested in compilation
+and started learning about the different kinds of parsers more seriously. Over
+time, I grew convinced that <a class="reference external" href="https://eli.thegreenplace.net/tag/recursive-descent-parsing">recursive descent</a> is the way to
+go - producing parsers that are easier to understand and maintain (and are often
+faster!).</p>
+<p>It all ties in to the <a class="reference external" href="https://eli.thegreenplace.net/2017/benefits-of-dependencies-in-software-projects-as-a-function-of-effort/">benefits of dependencies in software projects as a
+function of effort</a>.
+Using parser generators is a heavy <em>conceptual</em> dependency: it's really nice
+when you have to churn out many parsers for small languages. But when you have
+to maintain a single, very complex parser, as part of a large project - the
+benefits quickly dissipate and you're left with a substantial dependency that
+you constantly grapple with.</p>
+</div>
+<div class="section" id="the-other-issue-with-dependencies">
+<h3>The other issue with dependencies</h3>
+<p>And then there are the usual problems with dependencies; dependencies get
+abandoned, and they may also develop security issues. Sometimes, both of these
+become true.</p>
+<p>Many years ago, pycparser forked and started vendoring its own version of PLY.
+This was part of transitioning pycparser to a dual Python 2/3 code base when PLY
+was slower to adapt. I believe this was the right decision, since PLY &quot;just
+worked&quot; and I didn't have to deal with active (and very tedious in the Python
+ecosystem, where packaging tools are replaced faster than dirty socks)
+dependency management.</p>
+<p>A couple of weeks ago <a class="reference external" href="https://github.com/eliben/pycparser/issues/588">this issue</a>
+was opened for pycparser. It turns out the some old PLY code triggers security
+checks used by some Linux distributions; while this code was fixed in a later
+commit of PLY, PLY itself was apparently abandoned and archived in late 2025.
+And guess what? That happened in the middle of a large rewrite of the package,
+so re-vendoring the pre-archiving commit seemed like a risky proposition.</p>
+<p>On the issue it was suggested that &quot;hopefully the dependent packages move on to
+a non-abandoned parser or implement their own&quot;; I originally laughed this idea
+off, but then it got me thinking... which is what this post is all about.</p>
+</div>
+<div class="section" id="growing-complexity-of-parsing-a-messy-language">
+<h3>Growing complexity of parsing a messy language</h3>
+<p>The original K&amp;R2 grammar for C99 had - famously - a single shift-reduce
+conflict having to do with dangling <tt class="docutils literal">else</tt>s belonging to the most recent
+<tt class="docutils literal">if</tt> statement. And indeed, other than the famous <a class="reference external" href="https://en.wikipedia.org/wiki/Lexer_hack">lexer hack</a>
+used to deal with <a class="reference external" href="https://eli.thegreenplace.net/2011/05/02/the-context-sensitivity-of-cs-grammar-revisited">C's type name / ID ambiguity</a>,
+pycparser only had this single shift-reduce conflict.</p>
+<p>But things got more complicated. Over the years, features were added that
+weren't strictly in the standard but were supported by all the industrial
+compilers. The more advanced C11 and C23 standards weren't beholden to the
+promises of conflict-free YACC parsing (since almost no industrial-strength
+compilers use YACC at this point), so all caution went out of the window.</p>
+<p>The latest (PLY-based) release of pycparser has many reduce-reduce conflicts
+<a class="footnote-reference" href="#footnote-2" id="footnote-reference-2">[2]</a>; these are a severe maintenance hazard because it means the parsing rules
+essentially have to be tie-broken by order of appearance in the code. This is
+very brittle; pycparser has only managed to maintain its stability and quality
+through its comprehensive test suite. Over time, it became harder and harder to
+extend, because YACC parsing rules have all kinds of spooky-action-at-a-distance
+effects. The straw that broke the camel's back was <a class="reference external" href="https://github.com/eliben/pycparser/pull/590">this PR</a> which again proposed to
+increase the number of reduce-reduce conflicts <a class="footnote-reference" href="#footnote-3" id="footnote-reference-3">[3]</a>.</p>
+<p>This - again - prompted me to think &quot;what if I just dump YACC and switch to
+a hand-written recursive descent parser&quot;, and here we are.</p>
+</div>
+</div>
+<div class="section" id="the-mental-roadblock">
+<h2>The mental roadblock</h2>
+<p>None of the challenges described above are new; I've been pondering them for
+many years now, and yet biting the bullet and rewriting the parser didn't feel
+like something I'd like to get into. By my private estimates it'd take at least
+a week of deep heads-down work to port the gritty 2000 lines of YACC grammar
+rules to a recursive descent parser <a class="footnote-reference" href="#footnote-4" id="footnote-reference-4">[4]</a>. Moreover, it wouldn't be a
+particularly <em>fun</em> project either - I didn't feel like I'd learn much new and
+my interests have shifted away from this project. In short, the <a class="reference external" href="https://en.wikipedia.org/wiki/Potential_well">Potential well</a> was just too deep.</p>
+</div>
+<div class="section" id="why-would-this-even-work-tests">
+<h2>Why would this even work? Tests</h2>
+<p>I've definitely noticed the improvement in capabilities of LLM coding
+agents in the past few months, and many reputable people online rave about using
+them for increasingly larger projects. That said, would an LLM agent really be
+able to accomplish such a complex project on its own? This isn't just a toy,
+it's thousands of lines of dense parsing code.</p>
+<p>What gave me hope is the concept of <a class="reference external" href="https://simonwillison.net/2025/Dec/31/the-year-in-llms/#the-year-of-conformance-suites">conformance suites mentioned by
+Simon Willison</a>.
+Agents seem to do well when there's a very clear and rigid
+goal function - such as a large, high-coverage conformance test suite.</p>
+<p>And pycparser has an <a class="reference external" href="https://github.com/eliben/pycparser/blob/main/tests/test_c_parser.py">very extensive one</a>.
+Over 2500 lines of test code parsing various C snippets to ASTs with expected
+results, grown over a decade and a half of real issues and bugs reported by
+users.</p>
+<p>I figured the LLM can either succeed or fail and throw its hands up in despair,
+but it's quite unlikely to produce a <em>wrong</em> port that would still pass all
+the tests. So I set it to run.</p>
+</div>
+<div class="section" id="the-initial-port">
+<h2>The initial port</h2>
+<p>I fired up Codex in pycparser's repository, and wrote this prompt just to
+make sure it understands me and can run the tests:</p>
+<div class="highlight"><pre><span></span>This repository implements a Python parser producing an AST. It has a very
+extensive test suite; can you first verify you successfully run all the tests?
+(with python3 -m unittest discover, from the root dir)
+</pre></div>
+<p>Codex figured it out (I gave it the exact command, after all!); my next
+prompt was the real thing <a class="footnote-reference" href="#footnote-5" id="footnote-reference-5">[5]</a>:</p>
+<div class="highlight"><pre><span></span>pycparser uses the PLY library for its lexer and parser, and its own AST
+package for the ASTs created by the parser. I want to explore replacing the
+Parser component (leaving the Lexer alone for now) with a hand written
+recursive descent parser that will pass all the same tests. Can you try that?
+</pre></div>
+<p>Here Codex went to work and churned <em>for over an hour</em>. Having never
+observed an agent work for nearly this long, I kind of assumed it went off
+the rails and will fail sooner or later. So I was rather surprised and skeptical
+when it eventually came back with:</p>
+<div class="highlight"><pre><span></span>Replaced the PLY parse path with a handwritten recursive‑descent parser while
+keeping the existing lexer and AST helpers intact; CParser now points to the
+new RD implementation, with the old PLY version preserved as PLYCParser in
+pycparser/c_parser.py. The RD parser includes a token stream, declarator/type
+parsing, expression precedence handling, pragmas, and statement parsing to
+match the previous AST output and coordinate behavior.
+</pre></div>
+<p>It took me a while to poke around the code and run it until I was convinced - it
+had actually done it! It wrote a new recursive descent parser with only
+ancillary dependencies on PLY, and that parser passed the test suite. After a
+few more prompts, we've removed the ancillary dependencies and made the
+structure clearer. I hadn't looked too deeply into code quality at this point,
+but at least on the functional level - it succeeded. This was very impressive!</p>
+</div>
+<div class="section" id="a-quick-note-on-reviews-and-branches">
+<h2>A quick note on reviews and branches</h2>
+<p>A change like the one described above is impossible to code-review as one PR in
+any meaningful way; so I used a different strategy. Before embarking on this
+path, I created a new branch and once Codex finished the initial rewrite, I
+committed this change, knowing that I will review it in detail, piece-by-piece
+later on.</p>
+<p>Even though coding agents have their own notion of history and can &quot;revert&quot;
+certain changes, I felt much safer relying on Git. In the worst case if all of
+this goes south, I can nuke the branch and it's as if nothing ever happened.
+I was determined to only merge this branch onto <tt class="docutils literal">main</tt> once I was fully
+satisfied with the code. In what follows, I had to <tt class="docutils literal">git reset</tt> several times
+when I didn't like the direction in which Codex was going. In hindsight, doing
+this work in a branch was absolutely the right choice.</p>
+</div>
+<div class="section" id="the-long-tail-of-goofs">
+<h2>The long tail of goofs</h2>
+<p>Once I've sufficiently convinced myself that the new parser is actually working,
+I used Codex to similarly rewrite the lexer and get rid of the PLY dependency
+entirely, deleting it from the repository. Then, I started looking more deeply
+into code quality - reading the code created by Codex and trying to wrap my head
+around it.</p>
+<p>And - oh my - this was quite the journey. Much has been written about the code
+produced by agents, and much of it seems to be true. Maybe it's a setting I'm
+missing (I'm not using my own custom <tt class="docutils literal">AGENTS.md</tt> yet, for instance), but
+Codex seems to be that eager programmer that wants to get from A to B whatever
+the cost. Readability, minimalism and code clarity are very much secondary
+goals.</p>
+<p>Using <tt class="docutils literal"><span class="pre">raise...except</span></tt> for control flow? Yep. Abusing Python's weak typing
+(like having <tt class="docutils literal">None</tt>, <tt class="docutils literal">false</tt> and other values all mean different things
+for a given variable)? For sure. Spreading the logic of a complex function
+all over the place instead of putting all the key parts in a single switch
+statement? You bet.</p>
+<p>Moreover, the agent is hilariously <em>lazy</em>. More than once I had to convince it
+to do something it initially said is impossible, and even insisted again in
+follow-up messages. The anthropomorphization here is mildly concerning, to be
+honest. I could never imagine I would be writing something like the following to
+a computer, and yet - here we are: &quot;Remember how we moved X to Y before? You
+can do it again for Z, definitely. Just try&quot;.</p>
+<p>My process was to see how I can instruct Codex to fix things, and intervene
+myself (by rewriting code) as little as possible. I've <em>mostly</em> succeeded in
+this, and did maybe 20% of the work myself.</p>
+<p>My branch grew <em>dozens</em> of commits, falling into roughly these categories:</p>
+<ol class="arabic simple">
+<li>The code in X is too complex; why can't we do Y instead?</li>
+<li>The use of X is needlessly convoluted; change Y to Z, and T to V in all
+instances.</li>
+<li>The code in X is unclear; please add a detailed comment - with examples - to
+explain what it does.</li>
+</ol>
+<p>Interestingly, after doing (3), the agent was often more effective in giving
+the code a &quot;fresh look&quot; and succeeding in either (1) or (2).</p>
+</div>
+<div class="section" id="the-end-result">
+<h2>The end result</h2>
+<p>Eventually, after many hours spent in this process, I was reasonably pleased
+with the code. It's far from perfect, of course, but taking the essential
+complexities into account, it's something I could see myself maintaining (with
+or without the help of an agent). I'm sure I'll find more ways to improve it
+in the future, but I have a reasonable degree of confidence that this will be
+doable.</p>
+<p>It passes all the tests, so I've been able to release a new version (3.00)
+without major issues so far. The only issue I've discovered is that some of
+CFFI's tests are overly precise about the phrasing of errors reported by
+pycparser; this was <a class="reference external" href="https://github.com/python-cffi/cffi/pull/224">an easy fix</a>.</p>
+<p>The new parser is also faster, by about 30% based on my benchmarks! This is
+typical of recursive descent when compared with YACC-generated parsers, in my
+experience. After reviewing the initial rewrite of the lexer, I've spent a while
+instructing Codex on how to make it faster, and it worked reasonably well.</p>
+</div>
+<div class="section" id="followup-static-typing">
+<h2>Followup - static typing</h2>
+<p>While working on this, it became quite obvious that static typing would make the
+process easier. LLM coding agents really benefit from closed loops with strict
+guardrails (e.g. a test suite to pass), and type-annotations act as such.
+For example, had pycparser already been type annotated, Codex would probably not
+have overloaded values to multiple types (like <tt class="docutils literal">None</tt> vs. <tt class="docutils literal">False</tt> vs.
+others).</p>
+<p>In a followup, I asked Codex to type-annotate pycparser (running checks using
+<tt class="docutils literal">ty</tt>), and this was also a back-and-forth because the process exposed some
+issues that needed to be refactored. Time will tell, but hopefully it will make
+further changes in the project simpler for the agent.</p>
+<p>Based on this experience, I'd bet that coding agents will be somewhat more
+effective in strongly typed languages like Go, TypeScript and especially Rust.</p>
+</div>
+<div class="section" id="conclusions">
+<h2>Conclusions</h2>
+<p>Overall, this project has been a really good experience, and I'm impressed with
+what modern LLM coding agents can do! While there's no reason to expect that
+progress in this domain will stop, even if it does - these are already very
+useful tools that can significantly improve programmer productivity.</p>
+<p>Could I have done this myself, without an agent's help? Sure. But it would have
+taken me <em>much</em> longer, assuming that I could even muster the will and
+concentration to engage in this project. I estimate it would take me at least
+a week of full-time work (so 30-40 hours) spread over who knows how long to
+accomplish. With Codex, I put in an order of magnitude less work into this
+(around 4-5 hours, I'd estimate) and I'm happy with the result.</p>
+<p>It was also <em>fun</em>. At least in one sense, my professional life can be described
+as the pursuit of focus, deep work and <em>flow</em>. It's not easy for me to get into
+this state, but when I do I'm highly productive and find it very enjoyable.
+Agents really help me here. When I know I need to write some code and it's
+hard to get started, asking an agent to write a prototype is a great catalyst
+for my motivation. Hence the meme at the beginning of the post.</p>
+<div class="section" id="does-code-quality-even-matter">
+<h3>Does code quality even matter?</h3>
+<p>One can't avoid a nagging question - does the quality of the code produced
+by agents even matter? Clearly, the agents themselves can understand it (if not
+today's agent, then at least next year's). Why worry about future
+maintainability if the agent can maintain it? In other words, does it make sense
+to just go full vibe-coding?</p>
+<p>This is a fair question, and one I don't have an answer to. Right now, for
+projects I maintain and <em>stand behind</em>, it seems obvious to me that the code
+should be fully understandable and accepted by me, and the agent is just a tool
+helping me get to that state more efficiently. It's hard to say what the future
+holds here; it's going to interesting, for sure.</p>
+<hr class="docutils" />
+<table class="docutils footnote" frame="void" id="footnote-1" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-1">[1]</a></td><td>pycparser has a fair number of <a class="reference external" href="https://deps.dev/pypi/pycparser/3.0.0/dependents">direct dependents</a>,
+but the majority of downloads comes through <a class="reference external" href="https://github.com/python-cffi/cffi">CFFI</a>,
+which itself is a major building block for much of the Python ecosystem.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="footnote-2" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-2">[2]</a></td><td>The table-building report says 177, but that's certainly an
+over-dramatization because it's common for a single conflict to
+manifest in several ways.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="footnote-3" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-3">[3]</a></td><td>It didn't help the PR's case that it was almost certainly vibe coded.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="footnote-4" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-4">[4]</a></td><td><p class="first">There was also the lexer to consider, but this seemed like a much
+simpler job. My impression is that in the early days of computing,
+<tt class="docutils literal">lex</tt> gained prominence because of strong regexp support which wasn't
+very common yet. These days, with excellent regexp libraries
+existing for pretty much every language, the added value of <tt class="docutils literal">lex</tt> over
+a <a class="reference external" href="https://eli.thegreenplace.net/2013/06/25/regex-based-lexical-analysis-in-python-and-javascript">custom regexp-based lexer</a>
+isn't very high.</p>
+<p class="last">That said, it wouldn't make much sense to embark on a journey to rewrite
+<em>just</em> the lexer; the dependency on PLY would still remain, and besides,
+PLY's lexer and parser are designed to work well together. So it wouldn't
+help me much without tackling the parser beast.</p>
+</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="footnote-5" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-5">[5]</a></td><td>I've decided to ask it to the port the parser first, leaving the lexer
+alone. This was to split the work into reasonable chunks. Besides, I
+figured that the parser is the hard job anyway - if it succeeds in that,
+the lexer should be easy. That assumption turned out to be correct.</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

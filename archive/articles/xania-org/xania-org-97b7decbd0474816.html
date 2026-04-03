@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Calling all arguments | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Calling all arguments</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-16T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/16-calling-conventions?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-97b7decbd0474816.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Knowing how compilers call functions can help with design - and optimisation</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p>Today we're looking at calling conventions<html:sup id="fnref:jason"><html:a class="footnote-ref" href="#fn:jason">1</html:a></html:sup> - which aren't purely optimisation related but are important to understand. The calling convention is part of the ABI (Application Binary Interface), and varies from architecture to architecture and even OS to OS. Today I'll concentrate on the System V ABI for x86 on Linux, as (to me) it's the most sane ABI.</html:p>
+
+<html:p>Before we go on: I'd be remiss if I didn't point out that I can <html:em>never</html:em> remember which register has what in it, and for years I had a Post It note on my monitor with a hand-written crib sheet of the ABI. While on holiday I had an idea: Why not put the ABI on a mug! I created these ABI mugs and you can get your own one - and support Compiler Explorer - at the <html:a href="https://shop.compiler-explorer.com/">Compiler Explorer shop</html:a>.</html:p>
+
+<html:p class="picture">
+<html:a href="https://shop.compiler-explorer.com">
+<html:img src="16-mugs.jpeg" alt="Some Compiler Explorer mugs with ABI information on them" width="655" height="330" />
+</html:a>
+<html:br />The Compiler Explorer ABI mug: Get yours at the <html:a href="https://shop.compiler-explorer.com">CE Shop!</html:a>
+</html:p>
+
+
+<html:p>We've already touched on calling conventions as I've commented the assembly in previous days, but concretely, for x86 Linux, the first couple of parameters go in <html:code>rdi</html:code> and <html:code>rsi</html:code><html:sup id="fnref:smaller"><html:a class="footnote-ref" href="#fn:smaller">2</html:a></html:sup>. This makes sense for discrete integer types, and even pointers. What about structures? Let's compare two functions:</html:p>
+
+<html:p>With <html:code>ArgType</html:code> set to <html:code>long</html:code> it might surprise you that the body of those two functions are identical! Both are just <html:code>lea rax, [rdi+rsi]</html:code>: We expect the separate arguments to be in <html:code>rdi</html:code> and <html:code>rsi</html:code>, but passing that larger structure by value <html:em>also</html:em> got placed in <html:code>rdi</html:code> and <html:code>rsi</html:code>. Neat!</html:p>
+
+<html:p>If you explore by changing the <html:code>ArgType</html:code> you'll see that the compiler has to do more work if we don't (conveniently) use <html:code>long</html:code>s here. For example, changing to <html:code>int</html:code> changes the separate argument version to <html:code>lea eax...</html:code> to reflect the 32-bit return value, but the body of the structure version becomes:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="c1">; structure is _packed_ into rdi as "y&lt;&lt;32 | x"</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rdi</html:span><html:span class="w">      </html:span><html:span class="c1">; rax = args.y&lt;&lt;32 | args.x</html:span>
+<html:span class="w">  </html:span><html:span class="nf">shr</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">32</html:span><html:span class="w">       </html:span><html:span class="c1">; rax &gt;&gt;= 32; rax is now 'y'</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">edi</html:span><html:span class="w">      </html:span><html:span class="c1">; y += x;</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ret</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>It's a little tricky to follow as the compiler is cunningly switching between the 64-bit <html:code>r</html:code> prefixed register names and the 32-bit <html:code>e</html:code> versions, but you can see that, for the cost of a couple more instructions we still passed the structure pretty efficiently, and in a single register.</html:p>
+
+<html:p>It gets more interesting when we pass <html:em>lots</html:em> of arguments<html:sup id="fnref:dont"><html:a class="footnote-ref" href="#fn:dont">3</html:a></html:sup>. Even on System V ABI, only the first 6 parameters are passed in registers. After that, it spills to the stack. Let's update our example to pass many arguments to show this:</html:p>
+
+<html:p>In this case we can see the separate args version adding all the registers, and then having to get some off the stack: <html:code>add rax, QWORD PTR [rsp+8]</html:code> and so on. On the structure side, the whole structure<html:sup id="fnref:value"><html:a class="footnote-ref" href="#fn:value">5</html:a></html:sup> is copied to the stack, which seems bad<html:sup id="fnref:vec"><html:a class="footnote-ref" href="#fn:vec">4</html:a></html:sup>.</html:p>
+
+<html:p>However! Changing <html:code>ArgType</html:code> to <html:code>char</html:code> and you'll see an interesting difference. The separate args version is similar, though it can't use <html:code>lea</html:code> any more, and has to sign-extend all the values its getting from its registers. The struct args version has no stack spillage: our entire <html:code>StructArgs</html:code> structure fits into one register! The compiler has a bit of a time shifting it around to extract each <html:code>char</html:code>, but it's not having to spill to the stack at least. In my testing, different compilers used different tricks, so play around with the <html:code>ArgType</html:code> and compiler (e.g. clang) and get a sense of what it can do<html:sup id="fnref:explain"><html:a class="footnote-ref" href="#fn:explain">6</html:a></html:sup>.</html:p>
+
+<html:p>So, all this is pretty abstract: why is this important? Sometimes knowing the ABI, and how the compiler can optimise around it can inform your design. There was some debate about the design of <html:code>std::string_view</html:code> and <html:code>std::optional</html:code> and their usefulness<html:sup id="fnref:windows"><html:a class="footnote-ref" href="#fn:windows">8</html:a></html:sup>: these are types that are convenient to pass <html:em>by value</html:em>, and so their footprint in registers is important<html:sup id="fnref:svlayout"><html:a class="footnote-ref" href="#fn:svlayout">7</html:a></html:sup>.</html:p>
+
+<html:p>Overall, knowing the calling convention helps you make smart decisions about layout and parameter passing that give the compiler the best shot at generating efficient code.</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/Yaw8AMoP4sI">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 16 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/15-aliasing-in-general">Aliasing</html:a> | <html:a href="/202512/17-inlining-the-ultimate-optimisation">Inlining - the ultimate optimisation</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:jason">
+<html:p>Big thanks to <html:a href="https://articles.emptycrate.com/">Jason Turner</html:a> for suggesting this topic and providing some fun examples. <html:a class="footnote-backref" href="#fnref:jason" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:smaller">
+<html:p>Or their smaller siblings <html:code>edi</html:code>/<html:code>esi</html:code>, <html:code>di</html:code>/<html:code>si</html:code> etc <html:a class="footnote-backref" href="#fnref:smaller" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:dont">
+<html:p>Which in general is a <html:em>bad</html:em> idea anyway. Don't pass lots of arguments, use structures and well defined types, not a load of bools and ints and whatnot. <html:a class="footnote-backref" href="#fnref:dont" title="Jump back to footnote 3 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:vec">
+<html:p>Though the compiler does a decent job of using vector operations here. Which I promise we'll talk about eventually! <html:a class="footnote-backref" href="#fnref:vec" title="Jump back to footnote 4 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:value">
+<html:p>Remember we're passing by <html:em>value</html:em> here, and typically you might normally pass by const reference. Experiment with the code and see the difference it makes. <html:a class="footnote-backref" href="#fnref:value" title="Jump back to footnote 5 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:explain">
+<html:p>If you get confused, pop out the view with the "Edit on Compiler Explorer" button and consider trying the Claude Explain AI explanation panel from the "Add new..." drop down. <html:a class="footnote-backref" href="#fnref:explain" title="Jump back to footnote 6 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:svlayout">
+<html:p>A <html:code>std::string_view</html:code> is essentially a pointer and a length - two values that fit neatly into two registers, just like the two-<html:code>long</html:code> struct example above. <html:a class="footnote-backref" href="#fnref:svlayout" title="Jump back to footnote 7 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:windows">
+<html:p>The Windows ABI in particular only has four register arguments and so only two <html:code>string_view</html:code>s can be passed before things end up on the stack. <html:a class="footnote-backref" href="#fnref:windows" title="Jump back to footnote 8 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Unswitching loops for fun and profit | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Unswitching loops for fun and profit</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-12T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/12-loop-unswitching?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-c518c71eec387069.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Duplicating loops around can yield some decent optimisations</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p>Sometimes the compiler decides the best way to optimise your loop is to... write it twice. Sounds counterintuitive? Let's change our <html:code>sum</html:code> <html:a href="/202512/10-loop-unrolling">example from before</html:a> to optionally return a sum-of-squares<html:sup id="fnref:armagain"><html:a class="footnote-ref" href="#fn:armagain">1</html:a></html:sup>:</html:p>
+
+<html:p>At <html:code>-O2</html:code> the compiler turns the ternary into: <html:code>sum += value * (squared ? value : 1);</html:code> - using a multiply and add (<html:code>mla</html:code>) instruction to do the multiply and add, and conditionally picking either <html:code>value</html:code> or the constant <html:code>1</html:code> to avoid a branch inside the loop.</html:p>
+
+<html:p>However, if we turn the optimisation level up, the compiler uses a new approach:</html:p>
+
+<html:p>Here the compiler realises the <html:code>bool squared</html:code> value doesn't change throughout the loop, and decides to duplicate the loop: one copy that squares each time unconditionally, and one where it never multiplies at all. This is called "loop unswitching".</html:p>
+
+<html:p>The check of <html:code>squared</html:code> is moved out of the loop, and the appropriate loop is then selected, either <html:code>.LBB0_4</html:code> (non-squaring) or continuing to <html:code>.LBB0_2</html:code> (the squaring version).</html:p>
+
+<html:p>Each loop is perfectly optimised for its duties, and it's as if you had written:</html:p>
+
+<html:p>By duplicating the loop this way, the compiler makes sure that the multiplication doesn't happen unless you specifically asked for it. In the <html:code>-O2</html:code> code, the compiler bet on doing the multiply-and-add each time<html:sup id="fnref:bpu"><html:a class="footnote-ref" href="#fn:bpu">2</html:a></html:sup> even when it wasn't needed. In the loop unswitching case, we do pay a code size penalty (<html:em>some</html:em> code is duplicated, after all), and that's why loop unswitching didn't occur on the lower optimisation setting.</html:p>
+
+<html:p>As always, it's good to trust your compiler's decisions, but know the kinds of trade-offs it's making at various optimisation levels. You can always verify what it's doing with <html:a href="https://godbolt.org">Compiler Explorer</html:a>, after all!</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/-VCrYshE7iQ">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 12 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/11-pop-goes-the-weasel-er-count">Pop goes the...population count?</html:a> | <html:a href="/202512/13-licking-licm">Loop-Invariant Code Motion</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:armagain">
+<html:p>We're using ARMv7 again here for simplicity and to yet again avoid vectorisation that we'll get to later in this series. <html:a class="footnote-backref" href="#fnref:armagain" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:bpu">
+<html:p>In this case the compiler determined that just doing the multiply every time would be cheaper than a branch on every iteration to avoid it. Branch predictors do help this in general, but it's still better to do one branch at the beginning and specialise each loop individually. <html:a class="footnote-backref" href="#fnref:bpu" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Windows stack limit checking retrospective: arm64, also known as AArch64 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Windows stack limit checking retrospective: arm64, also known as AArch64</h1>
+        <div class="meta">The Old New Thing 2026-03-20T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260320-00/?p=112154">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-d6a1304fe9425d7f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Wrapping things up. The post Windows stack limit checking retrospective: arm64, also known as AArch64 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Our survey of stack limit checking wraps up with arm64, also known as AArch64.</p>
+<p>The stack limit checking takes two forms, one simple version for pure arm64 processes, and a more complex version for Arm64EC. I&#8217;m going to look at the simple version. The complex version differs in that it has to check whether the code is running on the native arm64 stack or the emulation stack before calculating the stack limit. That part isn&#8217;t all that interesting.</p>
+<pre>; on entry, x15 is the number of paragraphs to allocate
+;           (bytes divided by 16)
+; on exit, stack has been validated (but not adjusted)
+; modifies x16, x17
+
+chkstk:
+    subs    x16, sp, x15, lsl #4
+                            ; x16 = sp - x15 * 16
+                            ; x16 = desired new stack pointer
+    csello  x16, xzr, x16   ; clamp to 0 on underflow
+
+    mov     x17, sp
+    and     x17, x17, #-PAGE_SIZE   ; round down to nearest page
+    and     x16, x16, #-PAGE_SIZE   ; round down to nearest page
+
+    cmp     x16, x17        ; on the same page?
+    beq     done            ; Y: nothing to do
+
+probe:
+    sub     x17, x17, #PAGE_SIZE ; move to next page¹
+    ldr     xzr, [x17]      ; probe
+    cmp     x17, x16        ; done?
+    bne     probe           ; N: keep going
+
+done:
+    ret
+</pre>
+<p>The inbound value in <code>x15</code> is the number of bytes desired <i>divided by 16</i>. Since the arm64 stack must be kept 16-byte aligned, we know that the division by 16 will not produce a remainder. Passing the amount in paragraphs expands the number of bytes expressible in a single constant load from <code>0xFFF0</code> to <code>0x0FFF0</code> (via the <code>movz</code> instruction), allowing convenient allocation of stack frames up to just shy of a megabyte in size. Since the default stack size is a megabyte, this is sufficient to cover all typical usages.</p>
+<p>Here&#8217;s an example of how a function might use <code>chkstk</code> in its prologue:</p>
+<pre>    mov     x15, #17328/16      ; desired stack frame size divided by 16
+    bl      chkstk              ; ensure enough stack space available
+    sub     sp, sp, x15, lsl #4 ; reserve the stack space
+</pre>
+<p>Okay, so let&#8217;s summarize all of the different stack limit checks into a table, because people like tables.</p>
+<table class="cp3" border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th> </th>
+<th>x86-32</th>
+<th>MIPS</th>
+<th>PowerPC</th>
+<th>Alpha AXP</th>
+<th>x86-64</th>
+<th>AArch64</th>
+</tr>
+<tr>
+<td>unit requested</td>
+<td>Bytes</td>
+<td>Bytes</td>
+<td>Negative bytes</td>
+<td>Bytes</td>
+<td>Bytes</td>
+<td>Paragraphs</td>
+</tr>
+<tr>
+<td>adjusts stack pointer before returning</td>
+<td>Yes</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td>detects stack placement at runtime</td>
+<td>No</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>short-circuits</td>
+<td>No</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td>probe operation</td>
+<td>Read</td>
+<td>Write</td>
+<td>Read</td>
+<td>Write</td>
+<td>Either</td>
+<td>Read</td>
+</tr>
+</tbody>
+</table>
+<p>As we discussed earlier, if the probe operation is a write, then short-circuiting is mandatory.</p>
+<p>¹ If you&#8217;re paying close attention, you may have noticed that <code>PAGE_SIZE</code> is too large to fit in a 12-bit immediate constant. No problem, because the assembler rewrites it as</p>
+<pre>    sub x17, x17, #PAGE_SIZE/4096, lsl #12
+</pre>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260320-00/?p=112154">Windows stack limit checking retrospective: arm64, also known as AArch64</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

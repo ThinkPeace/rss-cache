@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Android privacy improvements break key attestation | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Android privacy improvements break key attestation</h1>
+        <div class="meta">Matthew Garrett 2024-12-12T12:16:06Z</div>
+        <div class="links">
+          <a href="https://mjg59.dreamwidth.org/70630.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/mjg59-dreamwidth-org/mjg59-dreamwidth-org-35edff7f4f0f0b9b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Sometimes you want to restrict access to something to a specific set of devices - for instance, you might want your corporate VPN to only be reachable from devices owned by your company. You can&#x27;t really trust a device that self attests to its identity, for instance by reporting its MAC address or serial number, for a couple of reasons: These aren&#x27;t fixed -…</div>
+        <div class="content">
+          Sometimes you want to restrict access to something to a specific set of devices - for instance, you might want your corporate VPN to only be reachable from devices owned by your company. You can't really trust a device that self attests to its identity, for instance by reporting its MAC address or serial number, for a couple of reasons:<br /><ul><li> These aren't fixed - MAC addresses are trivially reprogrammable, and serial numbers are typically stored in reprogrammable flash at their most protected<br /><li> A malicious device could simply lie about them<br /></li></li></ul>If we want a high degree of confidence that the device we're talking to really is the device it claims to be, we need something that's much harder to spoof. For devices with a TPM this is the TPM itself. Every TPM has an Endorsement Key (EK) that's associated with a certificate that chains back to the TPM manufacturer. By verifying that certificate path and having the TPM prove that it's in posession of the private half of the EK, we know that we're communicating with a genuine TPM[1].<br /><br />Android has a broadly equivalent thing called ID Attestation. Android devices can generate a signed attestation that they have certain characteristics and identifiers, and this can be chained back to the manufacturer. Obviously providing signed proof of the device identifier is kind of problematic from a privacy perspective, so the short version[2] is that only apps installed using a corporate account rather than a normal user account are able to do this.<br /><br />But that's still not ideal - the device identifiers involved included the IMEI and serial number of the device, and those could potentially be used to correlate devices across privacy boundaries since they're static[3] identifiers that are the same both inside a corporate work profile and in the normal user profile, and also remains static if you move between different employers and use the same phone[4]. So, since Android 12, ID Attestation includes an "Enterprise Specific ID" or ESID. The ESID is based on a hash of device-specific data plus the enterprise that the corporate work profile is associated with. If a device is enrolled with the same enterprise then this ID will remain static, if it's enrolled with a different enterprise it'll change, and it just doesn't exist outside the work profile at all. The other device identifiers are no longer exposed.<br /><br />But device ID verification isn't enough to solve the underlying problem here. When we receive a device ID attestation we know that someone at the far end has posession of a device with that ID, but we don't know that that device is where the packets are originating. If our VPN simply has an API that asks for an attestation from a trusted device before routing packets, we could pass that on to said trusted device and then simply forward the attestation to the VPN server[5]. We need some way to prove that the the device trying to authenticate is actually that device.<br /><br />The answer to this is key provenance attestation. If we can prove that an encryption key was generated on a trusted device, and that the private half of that key is stored in hardware and can't be exported, then using that key to establish a connection proves that we're actually communicating with a trusted device. TPMs are able to do this using the attestation keys generated in the Credential Activation process, giving us proof that a specific keypair was generated on a TPM that we've previously established is trusted.<br /><br />Android again has an equivalent called Key Attestation. This doesn't quite work the same way as the TPM process - rather than being tied back to the same unique cryptographic identity, Android key attestation chains back through a separate cryptographic certificate chain but contains a statement about the device identity - including the IMEI and serial number. By comparing those to the values in the device ID attestation we know that the key is associated with a trusted device and we can now establish trust in that key.<br /><br />"But Matthew", those of you who've been paying close attention may be saying, "Didn't Android 12 remove the IMEI and serial number from the device ID attestation?" And, well, congratulations, you were apparently paying more attention than Google. The key attestation no longer contains enough information to tie back to the device ID attestation, making it impossible to prove that a hardware-backed key is associated with a specific device ID attestation and its enterprise enrollment.<br /><br />I don't think this was any sort of deliberate breakage, and it's probably more an example of shipping the org chart - my understanding is that device ID attestation and key attestation are implemented by different parts of the Android organisation and the impact of the ESID change (something that appears to be a legitimate improvement in privacy!) on key attestation was probably just not realised. But it's still a pain.<br /><br />[1] Those of you paying attention may realise that what we're doing here is proving the identity of the TPM, not the identity of device it's associated with. Typically the TPM identity won't vary over the lifetime of the device, so having a one-time binding of those two identities (such as when a device is initially being provisioned) is sufficient. There's actually a spec for distributing Platform Certificates that allows device manufacturers to bind these together during manufacturing, but I last worked on those a few years back and don't know what the current state of the art there is<br /><br />[2] Android has a bewildering array of different profile mechanisms, some of which are apparently deprecated, and I can never remember how any of this works, so you're not getting the long version<br /><br />[3] Nominally, anyway. Cough.<br /><br />[4] I wholeheartedly encourage people not to put work accounts on their personal phones, but I am a filthy hypocrite here<br /><br />[5] Obviously if we have the ability to ask for attestation from a trusted device, we have access to a trusted device. Why not simply use the trusted device? The answer there may be that we've compromised one and want to do as little as possible on it in order to reduce the probability of triggering any sort of endpoint detection agent, or it may be because we want to run on a device with different security properties than those enforced on the trusted device.<br /><br /><img src="https://www.dreamwidth.org/tools/commentcount?user=mjg59&ditemid=70630" width="30" height="12" alt="comment count unavailable"/> comments
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Post-quantum public-key encryption: what’s it all about? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Post-quantum public-key encryption: what’s it all about?</h1>
+        <div class="meta">Simon Tatham&#x27;s quasi-blog 2025-01-02T00:00:00Z</div>
+        <div class="links">
+          <a href="https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/pq-kem/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/chiark-greenend-org-uk-sgtatham/chiark-greenend-org-uk-sgtatham-6cd936611e61f350.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">An explanation of some post-quantum public-key cryptosystems, simplified to the level of pop-science.</div>
+        <div class="content">
+          <html>
+  <body>
+    <p>[Simon Tatham, 2025-01-02]</p>
+    <p>Public-key cryptography has been in widespread use for decades, and mostly we’ve stuck to the well-known systems like RSA encryption and Diffie-Hellman key exchange.</p>
+    <p>A lot of people who aren’t actual cryptographers have a basic understanding of these systems, because it doesn’t take too much mathematics to make sense of them, and the systems themselves can be described in very few sentences. I know that RSA in particular is used as an example in introductory number theory courses, because it brings together several topics that were in the main course material and demonstrates a practical use of them.</p>
+    <p>When I say ‘a basic understanding’, I mean the kind of understanding that knows this much about RSA:</p>
+    <blockquote>Private key: a pair of prime numbers p,q.<br/>Public key: their product n = pq.<br/>Encryption: turn the message into an integer m, and raise it to a well-known power mod n.<br/>Decryption: raise the encrypted message to another power which you can work out by knowing p and q, and which recovers the input m.<br/>Why it’s supposed to be secure: factoring a large number takes a lot of work for a computer, so if someone only knows n it’s very hard for them to recover p and q.</blockquote>
+    <p>I call this a ‘basic’ understanding because real RSA encryption, as used in serious applications, involves a lot of fiddly details and refinements on top of this basic idea, like padding and encoding schemes, performance optimisations, implementation techniques that avoid side channels, and the idea that you almost always use RSA to encrypt a secondary ‘session key’ rather than the message itself, and then encrypt the message in turn by using that session key with an ordinary symmetric cipher like AES. But that doesn’t make the above information inaccurate, only incomplete: it’s good enough to convey a general understanding of what’s going on, even if it’s not enough information to write a full working implementation.</p>
+    <p>We’re starting to move away from these algorithms now, because of the threat that maybe someone might develop a working quantum computer big enough to run the algorithm that breaks both RSA and Diffie-Hellman. So there are some new public-key systems around, and they’re not so well known. I think there might be quite a lot of people who have a lay understanding of RSA as I describe above, but only know of the replacement ‘post-quantum’ systems as black boxes with strange names. (And perhaps not even that – I don’t think even the names have become nearly as famous as RSA yet.)</p>
+    <p>I’ve recently read the specifications of half a dozen different
+      examples of ‘post-quantum’ public-key systems,
+      because <a href="https://www.chiark.greenend.org.uk/~sgtatham/putty/">PuTTY</a>
+      is going to need to support some of them (in fact, already
+      supports two). So I thought perhaps I was in a good position to
+      try to convey a similar kind of ‘lay understanding’ of what a
+      typical PQ (for ‘post-quantum’) system is about.</p>
+    <p>Most of the various systems I’ve read about have quite a similar structure. So I’m going to present a small toy cryptosystem which illustrates that structure in the simplest way I can, and then list a bunch of ways in which the real systems are more complicated.</p>
+    <p>When I say I’m going to present a ‘toy cryptosystem’, I mean it’s not really a cryptosystem, in the same way that a child’s toy ambulance isn’t really an ambulance. It looks something like the real thing, and you can play with it in a way that resembles what adults do with the full-sized version. But a toy ambulance won’t really save a patient’s life, and this toy cryptosystem won’t really keep your data secret. It’s only a toy – don’t try to use it for real!</p>
+    <p>I can’t get away without any mathematics in this article. But I’m trying to keep it to a minimum. To understand my toy system, you’ll need a basic understanding of vectors, matrices and dot products, and also modular arithmetic: in particular, we’re going to combine the two, because the numbers in our vectors and matrices are going to be integers modulo a prime, instead of ordinary real numbers. When I start describing how real systems are more complicated, some more complicated maths will get involved – but if you can only understand the toy system by itself, then I hope I’ve still written something useful.</p>
+    <p>Public-key cryptosystems have more than one purpose. Some of them are used for signatures, rather than encryption. (And usually the encryption and signature systems are completely separate: RSA is very unusual in supporting both operations.) Today I’m only talking about encryption systems, not signature systems – for the excellent reason that I haven’t read up on the signature systems myself yet.</p>
+    <p>Finally: I’ve only just learned most of this stuff myself. So my presentation of the ideas might have misunderstandings (and will certainly have oversimplifications). But on the other hand, I’m hoping that this gives me an advantage in explaining it to a newcomer, because I can still remember what it was like to be that newcomer, and with any luck, I won’t use any of the overcomplicated jargon that the real experts in the field take for granted. Basically, this is going to be the explanation I wish I’d had myself before reading any of the full-sized specifications.</p>
+    <p>Without further ado, I’ll present my toy post-quantum public-key encryption system.</p>
+    <p>We begin by choosing a prime number p. We’re going to be working with numbers modulo p, and also with vectors and matrices made up of those numbers.</p>
+    <p>We also choose a positive integer n, which will be the dimension of our vectors. So we’ll be using vectors containing a column of n numbers mod p, and also we’ll need n × n matrices of numbers mod p.</p>
+    <p>These numbers p and n are parameters of the system: you can make bigger or smaller versions of the same system by choosing them differently. They’re the analogue of questions like “How big an RSA key should I generate?”, or “Which elliptic curve should I use?”, in classical cryptosystems.</p>
+    <p>Real PQ cryptosystems have variable parameters in a similar way, and specify the values of those parameters you should use to get particular levels of security. Generally, if you want more security, you increase the size of everything – just like using a bigger RSA key.</p>
+    <p>(But since this toy system is only a toy, choosing bigger parameters probably won’t really make it more secure – it’ll only make it bigger!)</p>
+    <p>To generate a private key, we invent two vectors, which I’ll call a0 and a1. As I’ve just discussed in the previous section, each of these is a vector of n elements, and each element is an integer mod p.</p>
+    <p>But there’s one more constraint: every element of each of these vectors is small. For this system, I’m going to say that “small” means that they’re all congruent mod p to one of −1, 0, or +1.</p>
+    <p>We also invent a public n × n matrix which I’ll call T. This matrix is completely random: each of its n2 elements is chosen by picking a value independently at random from 0 to p−1 inclusive.</p>
+    <p>Then, your public key is the vector A = a0 + Ta1. That is, you multiply one of your vectors by the matrix T, and add it to the other one.</p>
+    <p>Here’s an example. Suppose we take p = 7 and n = 4, and define a0, a1 and T as follows:</p>
+    <p>(Of course, I could have written the elements of a0 and a1 as 0, 1 and 6 instead of 0, +1 and −1. It makes no difference, because we’re working mod 7 throughout.)</p>
+    <p>Then we compute the public key like this:</p>
+    <p>So in this example, the public key is a single vector, containing the values 0, 5, 3, 2. You can see that, unlike the two private vectors, the public vector’s elements aren’t all small: after you transform one of the inputs using T, you can get any values at all mod p.</p>
+    <p>The first question, in any public-key cryptosystem, is: if an attacker gets hold of my public key, can they ‘invert’ it to recover the private vectors it’s based on?</p>
+    <p>In this system, just as in RSA, the private key consists of two separate pieces of data, and the public key is the result of combining them.</p>
+    <p>But the difference is that if someone tries to invert an RSA key, the hard problem is to find any pair of values that combine to give the public key. If you pick any pair of numbers about the right size and multiply them together to see if they give the right answer, then unless you get very lucky indeed, they won’t – you’ll find they have the wrong product.</p>
+    <p>Whereas here, it’s supremely easy to find pairs of candidate vectors u,v with the property that u + Tv = A. In fact, there’s a whole n-dimensional space of them! You can make up any v you like, and then calculate u = A − Tv, and that’s a pair of vectors which sum to the right thing.</p>
+    <p>But the problem with doing that is that your guessed vectors u and v won’t have small values in them. They’ll just be random-looking residues mod p.</p>
+    <p>Of course, you can improve your search technique by making up v so that at least that vector has small values in it. But you’ll still find that when you compute the other vector u = A − Tv, that won’t in general have small values. In order to find the real private vectors by this search technique, you’d have to try all the small vectors v until you found one that also gives you a small vector u, and then maybe your u and v might be the same as the real a0 and a1.</p>
+    <p>So the security is somewhere a bit different here. Instead of struggling to find any values at all that combine to give the public key, an attacker has the opposite problem: a huge haystack of possible values, and the hard problem is to find the one useful needle among all the useless strands of hay.</p>
+    <p>(Of course, this is only a very superficial treatment of the hardness argument. I’m not even promising that this toy cryptosystem is hard to invert at all – for all I know there could be an efficient search algorithm that zeroes in immediately on a pair of small vectors related in the correct way. All I’m showing here is why the most obvious way of trying to invert the public key runs into a problem. Proving that the grown-up versions of this idea are really, genuinely hard – not only against the obvious brute-force search but against whatever more sophisticated search algorithm anyone can dream up, including quantum ones – is a much bigger problem, which I’m happy to leave to someone else.)</p>
+    <p>I called the key
+      components a0, a1
+      and A because they’re all owned by our old
+      friend <a href="https://en.wikipedia.org/wiki/Alice_and_Bob">Alice</a>,
+      who has generated a key pair in order to let her colleague Bob
+      send her a private message.</p>
+    <p>So Bob knows the matrix T and Alice’s public vector A. What does he do?</p>
+    <p>The first thing Bob does is to make up a key pair of his own, which looks very like Alice’s. Bob invents two private vectors b0 and b1 with all their elements small, and computes a public vector by combining them.</p>
+    <p>But Bob’s public vector isn’t computed in quite the same way. Where Alice computed A = a0 + Ta1, Bob uses the transposed version of the matrix T – reflected about the leading diagonal, so that the rows become columns and the columns become rows. We write this as TT. So Bob computes B = b0 + TTb1.</p>
+    <p>Continuing our example from above, Bob might make up these values:</p>
+    <p>(You can see that the matrix TT shown here is
+      the transposed version of the T in
+      the <a href="https://www.chiark.greenend.org.uk#keypair">previous section</a>: its first column
+      matches T’s first row, and vice versa, and
+      similarly for all the other rows and columns.)</p>
+    <p>Part of Bob’s transmission to Alice will be his public vector B. But he hasn’t actually sent a message yet!</p>
+    <p>In this toy system, Bob’s actual message m is going to be a single scalar: not a vector or a matrix at all, just a single integer mod p. And the ‘ciphertext’ c he sends to Alice is going to be m + b1 · A, where the · operator means the dot product of those two vectors.</p>
+    <p>Let’s suppose that Bob’s message m was the integer 4. Then he would compute and send</p>
+    <p>Alice receives Bob’s public vector B, and the scalar ciphertext c. What does she do to decrypt it?</p>
+    <p>She has c = m + b1 · A, and she wants to recover m itself. But she can’t just subtract off the term b1 · A, because she doesn’t know b1: that’s one of Bob’s private vectors, which he kept to himself and didn’t send over the network.</p>
+    <p>What does Alice have that an eavesdropper doesn’t have? Only her own private vectors, a0 and a1. She’s going to have to do something that uses one or both of those.</p>
+    <p>Here’s the trick: Alice computes d = c − B · a1. That is, Bob modified the original message m by adding the dot product b1 · A of one of his private vectors with Alice’s public one, and Alice is trying to cancel that out by subtracting B · a1, the product of Bob’s public vector with one of Alice’s private ones.</p>
+    <p>Why does that help?</p>
+    <p>Expanding everything in terms of Alice and Bob’s four private vectors, we find that</p>
+    <table>
+      <row span="8">
+        <cell>Bob added</cell>
+        <cell>b1 · A</cell>
+        <cell>=</cell>
+        <cell>b1 · (a0 + Ta1)</cell>
+        <cell>=</cell>
+        <cell>b1 · a0</cell>
+        <cell>+</cell>
+        <cell>b1 · (Ta1)</cell>
+      </row>
+      <row>
+        <cell>and Alice subtracted</cell>
+        <cell>B · a1</cell>
+        <cell>=</cell>
+        <cell>(b0 + TTb1) · a1</cell>
+        <cell>=</cell>
+        <cell>b0 · a1</cell>
+        <cell>+</cell>
+        <cell>(TTb1) · a1</cell>
+      </row>
+    </table>
+    <p>And the terms with T in them are equal, because b1 · (Ta1) = (TTb1) · a1. (That may not be immediately obvious, but the way to see it is to rewrite the vector dot product u · v as the matrix product uTv, treating those column vectors as tall thin matrices, and transposing one of them into a row. Then use the fact that transposing a product of matrices reverses the order of multiplication, that is, (UV)T = VTUT.)</p>
+    <p>So Alice hasn’t completely cancelled the value Bob added to the message m. But she’s cancelled the most difficult term – the one that involved a vector transformed by T – and now what she has left is m + b1 · a0 − b0 · a1.</p>
+    <p>And each of those two terms is the dot product of a pair of vectors containing only small values. So it’s a fairly small value itself!</p>
+    <p>So this doesn’t allow Alice to recover a completely arbitrary scalar m, with perfect accuracy. All she gets back is m plus some ‘noise’.</p>
+    <p>But when Bob chose his message in the first place, he promised to choose m from a small set of widely separated values, so that the likely amount of noise added during encryption and decryption is still small enough that Alice can tell which of those values Bob had originally intended to send.</p>
+    <p>Let’s finish working through our running example. Bob’s ciphertext was the integer c = 5. Alice decrypts it by computing</p>
+    <p>and the result is the same as if an omniscient observer, knowing all the private vectors, had instead computed</p>
+    <p>So you can see that the original message 4 wasn’t modified by very much. We added a total of 8 noise terms, each the product of two vector elements that were either −1, 0 or +1; so each noise term itself was also either −1, 0 or +1. So we could have modified the input message by up to +8 or −8, if we’d got really unlucky. But we didn’t: five of those eight noise terms were zero, and of the remaining three, one had the opposite sign from the other two. So the noise mostly cancelled itself out, and we ended up only adjusting the input by 1.</p>
+    <p>So, supposing that Bob had promised to only ever send message values of 0 or 4 (those being two values as far apart as possible when you’re working mod 7), Alice would have no difficulty guessing here that Bob’s intended message was 4 rather than 0.</p>
+    <p>Now I’m going to repeat more loudly a thing I just said in the previous section.</p>
+    <p>The process of encryption and decryption adds a certain amount of noise to the true message. In this example, the noise could in principle have added up to any value from −8 to +8 inclusive. But we’re only working mod 7. So that amount of noise could have turned the input value m into any of the possible values!</p>
+    <p>But it didn’t, because you’d have to get very unlucky for that to happen. On average you expect fewer than half of the noise terms generated in this way to be nonzero at all, and of the rest, you expect a more or less even balance of signs. (And that’s exactly what happened in my actual example.)</p>
+    <p>So the bad cases, where the noise builds up enough to make Alice guess wrong about which message Bob had intended, are rare. But they’re not impossible. In a system like this, decryption can fail: you can get the wrong message as output, even if Alice and Bob followed the specification exactly, simply because between them, they got unlucky with the distribution of their random numbers.</p>
+    <p>I made my toy cryptosystem have this property on purpose,
+      because it’s shared by many of the real post-quantum systems
+      that I’ve read up on. Not all of them, but most. (Four out of
+      the six I list in the <a href="https://www.chiark.greenend.org.uk#references">references
+      section</a>.)</p>
+    <p>In real PQ algorithms with this property, the designers have carefully analysed the failure probability, and by choosing their parameters appropriately, they’ve made sure that it’s small enough that users shouldn’t worry about it. For example, they might arrange that the chance of a spurious decryption failure is at most 2−128 or even smaller. Then you’d be far more likely to suffer a failure because a bit of your network packet was accidentally flipped in transit by physical noise on the transmission line, or because the packet just never arrived at all, or any of a lot of other kinds of failure. In the real world, any encrypted network communication already has to take account of the fact that sometimes networks don’t work perfectly, and have some means of tolerating failure and trying again later. The very tiny chance of the cryptosystem being the cause of that failure isn’t treated any differently from the other causes – and it’s not even the biggest source of trouble, by a very long way.</p>
+    <p>Here’s another awkward property of a system like this.</p>
+    <p>If Bob is playing by the rules, he does what I described above: he makes up a pair of small-valued private vectors, combines them to make a public vector B, and sends that vector together with his scalar ciphertext c.</p>
+    <p>But what happens if Bob doesn’t play by the rules? For example, if Alice is not a person but some kind of server on the network (say, a web server or an SSH server), and accepts connection attempts from all comers, then she might have no reason to assume that any given connection is from a trustworthy person in the first place.</p>
+    <p>Suppose Bob is untrustworthy, and wants to try to find out something about Alice’s private key. He could not bother inventing private vectors at all, and instead, simply send the following values:</p>
+    <p>When Alice receives this pair of values, she computes d = c − B · a1. Because B has only one nonzero element, the dot product B · a1 picks out just the one corresponding element of Alice’s private vector a1. So she ends up taking Bob’s ciphertext c = 2, adjusting it by a single part of her private key, and then looking to see which of the possible message values 0 and 4 the result is closest to.</p>
+    <p>If this transaction is happening in an automated protocol, and Bob can somehow observe from the following network packet which message Alice decided on in the end, then he can find out something about that component (a1)1. If (a1)1 = +1 then Alice will compute c − (a1)1 = 1 and round downwards to 0; if (a1)1 = −1 then Alice will compute c − (a1)1 = 3 and round upwards to 4. So if Bob can tell which of those happened, he’s partially extracted Alice’s key!</p>
+    <p>(In this toy system, (a1)1 might also be 0. So Bob has three values to try to distinguish, and only two different responses he might get from Alice. So it probably takes him two tries to figure out (a1)1, because on the first attempt he might only rule out one of the three possible values. Even so, that’s more than he should be able to get.)</p>
+    <p>If Alice keeps the same key pair, and Bob gets to iterate this attack without Alice getting suspicious, he might be able to extract the whole of Alice’s private vector a1, one component at a time. And once he has a1, it’s trivial to compute a0 = A − Ta1, and then he’s got Alice’s entire private key.</p>
+    <p>How do you adapt the system to defend against this kind of attack?</p>
+    <p>A typical answer is to specify exactly how Bob makes up his private vectors at random, and arrange that Alice can check later that he really did.</p>
+    <p>Bob starts with some kind of input ‘seed’ string; then he puts that through a secure hash function to generate a stream of pseudo-random data, and uses that output stream as the randomness to generate his private vectors b0 and b1, in a prescribed way. And then he sends the original seed as part of (or perhaps even all of) the encrypted message.</p>
+    <p>That way, when Alice receives and decrypts the message, she can repeat Bob’s entire calculation. She’s just found out the same seed string that (he claims) he started with: she can hash it herself in the same way, to compute Bob’s private vectors and then his public vector. Then she can check that the public vector matches the one that Bob really sent. If it doesn’t, she assumes Bob isn’t playing fair, and arranges not to give him any useful information at all – including not even letting him know she’s on to him!</p>
+    <p>(It doesn’t matter that Alice now knows Bob’s private vectors. Bob wasn’t going to reuse them anyway. He generates a fresh pair for every encryption operation, so once Alice has received and decrypted this one message, they’re finished with.)</p>
+    <p>So now, if Malicious Bob wants to send that sneaky value of B, he can’t just make it up out of thin air. He has to find an input value he can feed into the randomising hash, which generates a pair of private vectors, which give a value of B that has few enough elements nonzero to be useful in this attack. And that’s a huge brute-force search with no structure, prohibitively expensive for him. It’s even harder than directly inverting Alice’s public key: in that attack he could at least try making up candidate private vectors directly according to a clever scheme, but here, he’s limited to getting them in pseudorandom fashion out of a hash function.</p>
+    <p>(In this toy system, I can’t demonstrate this defence being deployed, because Bob’s message is only able to convey a single bit of information. But in real systems the message size is big enough to make this defence work.)</p>
+    <p>I stress this again: this toy cryptosystem is only a toy. Don’t really use it to keep any secrets!</p>
+    <p>I designed it 100% for this article, with only the purpose of using it as a simplified illustration of the general structure of the real cryptosystems it mimics. I have made exactly zero effort to cryptanalyse it, or to assess its true security in any other way. (And even if I had, my cryptanalysis skills are so weak that you’d still have no reason to think it was secure. I’m an implementor, not an algorithm designer.)</p>
+    <p>That’s enough about my toy cryptosystem. You didn’t come here to learn about some random nonsense I just made up – you came to learn about the serious cryptosystems!</p>
+    <p>Three of the six cryptosystems I’ve been reading about have a very similar structure to each other, and to the toy system I’ve just presented:</p>
+    <p>Where they differ is in what space these ‘vectors’ are chosen from; what counts as a ‘small’ vector suitable for use as noise; what the widely separated (clean) message vectors look like.</p>
+    <p><a href="https://frodokem.org/">FrodoKEM</a> is perhaps the
+      closest match to my toy system. The biggest difference is that
+      everywhere I’ve used a plain column vector, FrodoKEM uses a tall
+      thin matrix, of dimensions n × 8, where n ranges
+      from about 600 to about 1300. Where I took the dot product of
+      vectors, FrodoKEM transposes one of those tall thin matrices to
+      make a short and very wide one, and multiplies it into the
+      other, in such a way that you get an 8 × 8 matrix as output
+      (rather than an n × n one). So my ridiculously
+      small ‘scalar’ message values, which can only carry a single bit
+      of information, now become those 8 × 8 matrices, which are big
+      enough to hold a sensibly large amount of data. Also, FrodoKEM
+      works modulo a small power of 2 (specifically, 215 or
+      216 depending on the parameter set), instead of using
+      a prime modulus.</p>
+    <p><a href="https://csrc.nist.gov/pubs/fips/203/ipd">ML-KEM</a>
+      also has a very similar structure, but using a different
+      algebraic system. In ML-KEM, we really do use simple column
+      vectors; also, the matrices and vectors have very
+      small dimension, only ranging from 2 to 4! But
+      the scalars are enormous: each element of each matrix
+      and vector is a polynomial with 256 coefficients, each of which
+      in turn is a value mod the prime 3329. (When these polynomials
+      are multiplied, the result is reduced mod another
+      polynomial x256+1, keeping the result the same
+      size as the inputs were.) So it doesn’t matter that the message
+      is a single scalar – scalars are huge, and there’s plenty of
+      room to store a useful amount of data in one.</p>
+    <p><a href="https://pqc-hqc.org/">HQC</a> also has this same form,
+      but it does things a bit differently. In HQC, the vectors
+      contain values mod 2, i.e. single bits. HQC defines a
+      multiplication on two vectors that gives another vector, by
+      treating them as polynomials and reducing the product
+      mod xn−1, so the ‘scalars’ in my toy
+      system are replaced by full-sized vectors; also, the
+      transformation T is just multiplication by another
+      randomised vector instead of a much larger square matrix. But
+      the biggest difference is that HQC is based
+      on error-correcting codes: instead of a ‘small’ noise
+      vector being defined by each element being limited in
+      size, it’s defined by having a limited number of the
+      elements being non-zero – known as a low Hamming
+      weight. Then the ‘widely separated’ vectors that represent
+      messages without any noise are chosen so that no two of them
+      have a low Hamming distance: that is, you have to flip
+      a lot of bits to turn one valid message into a
+      different one. So recovering the message from the noise is done
+      by the decoding algorithm of the error-correcting code, which
+      finds the clean codeword that differs from the input one by as
+      few bits as possible – so it can correct enough flipped bits in
+      a message that the cumulative noise almost never introduces an
+      error.</p>
+    <p>The next two systems I’ve studied vary the construction a little bit. In these systems, Alice still makes up a pair of ‘small’ private values a0 and a1, and then makes a public key by combining the two after doing a complicated transformation to a1. But the combination is multiplicative, rather than additive.</p>
+    <p>In other words, our ‘vectors’ need to have some kind of a multiplication defined on them, which gives another ‘vector’ as output. (This is also true of HQC, described in the previous section.) So you can also ask for the multiplicative inverse of a given vector v: some vector v−1 with the property that the product vv−1 = 1 (where ‘1’ in turn means the multiplicative identity – whatever value you can multiply a thing by to leave it the same as it started).</p>
+    <p>Then the randomised transformation T is replaced by inversion, and the two key components are combined by multiplication instead of addition. That is, instead of Alice computing A = a0 + Ta1, she computes A = a0a1−1, or something very similar. Just as before, this gives a public key which isn’t ‘small’, and which it’s hard to invert by finding a pair of ‘small’ values that give rise to it (even though it’s very easy to find pairs of arbitrary values giving the same A).</p>
+    <p>In <a href="https://bikesuite.org/">BIKE</a>, Bob’s side of the
+      exchange is still additive: he makes up private
+      values b0 and b1 as before,
+      and then sends the
+      ciphertext b0 + Ab1. Alice
+      multiplies this by a1, which only she knows,
+      and gets
+      out a1b0 + a0b1
+      (because A = a0a1−1,
+      so multiplying A by a1 cancels out
+      the a1−1 and gives you
+      just a0). And now we’re back to having a sum
+      of two ‘small’ terms.</p>
+    <p>In other respects, BIKE is similar to HQC: it works in vectors of single bits, treated as polynomials with multiplication mod xn−1, and its notion of ‘smallness’ is based on Hamming distance, so that recovering the inputs to encryption is done by means of an error-correcting code.</p>
+    <p>One other difference in BIKE, however, is that Bob’s private values b0 and b1 aren’t separate from the message, just used to introduce confusing noise. They are the message! The decoding algorithm finds two small values b0,b1 such that a1b0 + a0b1 equals the right thing – and having done that, b0 and b1 make a perfectly good output, with no need for a separate message.</p>
+    <p>(Typically, in public-key encryption, it doesn’t matter at all if the plaintext is some kind of really weird shape that you can’t easily represent a sensible message in, because you don’t normally directly encrypt the message using a public key in the first place. You encrypt a session key, and then use an ordinary symmetric cipher to encrypt the real message separately. So the plaintext can be anything at all, as long as you can invent plaintexts at random and put them through a hash function afterwards.)</p>
+    <p>Another system using multiplicative inversion
+      is <a href="https://ntruprime.cr.yp.to/">NTRU Prime</a>. But this
+      one is much less similar to my toy system.</p>
+    <p>To begin with, it works in two different but related algebraic structures. Sometimes it uses polynomials whose coefficients are integers mod 3, and sometimes they’re integers mod a larger prime q (which varies – it’s a system parameter). But in both structures, when polynomials are multiplied, they’re reduced mod the same polynomial, namely xp − x − 1 (for some integer p which is another parameter).</p>
+    <p>To generate a key pair, Alice still invents private values a0 and a1. This time her public key is A = a0(3a1)−1: one of the private values is multiplied by 3 before inverting it. (And the inversion happens in the larger ring, mod q.)</p>
+    <p>But NTRU Prime is rather different when it comes to encryption. In this system, Bob doesn’t have to make up a key pair of his own at all. He just multiplies his plaintext by Alice’s public key A, and then he introduces noise by rounding the coefficients to the nearest multiple of 3. Alice is able to cancel out the rounding errors and recover the plaintext by a particularly confusing manoeuvre that involves multiplying by 3a1 in the larger mod-q ring, then reducing all the coefficients mod 3, and finally multiplying by the inverse of a0 in the smaller mod-3 ring. The effect is that the multiplication by 3 makes all the rounding errors into multiples of 3, and then the reduction mod 3 makes them disappear, leaving just the plaintext – but you can’t do the reduction mod 3 in between the two stages unless you have the private key in its two halves.</p>
+    <p>So one big difference with NTRU Prime is that encryption is deterministic: if Bob encrypts the same plaintext twice, he’ll get the same ciphertext. In all the other systems I’ve discussed, Bob makes up a new ephemeral key pair every time.</p>
+    <p>Another big difference is that NTRU Prime doesn’t have the ‘decryption can fail’ oddity. The decryption operation really is a mathematical inverse of encryption, and reliably recovers the plaintext!</p>
+    <p>Here are a few more details of the real systems which I’ve left out of this simplified explanation:</p>
+    <p>The public matrix is regenerated from a seed by Bob. In principle, Alice’s public key consists of the matrix T and the public vector A; but real systems are under pressure to keep the amount of network traffic small, and since T was generated from a random seed in the first place, it’s cheaper to just transmit the seed itself as part of the public key than the whole matrix. So Alice just sends the seed she made T from, and Bob re-runs the identical random sampling algorithm to construct his own copy of T. (This also prevents Alice from generating a significantly non-random matrix T, although I don’t know whether the risk is that she does that by accident or on purpose.)</p>
+    <p>Not all noise is equal. In my toy system there’s only one kind of ‘small’ vector; in real systems there might be several different grades of ‘smallness’, and various vectors, matrices and scalars used in the algorithms might be invented at random in different ways, making some of them smaller than others. The algorithm might also carefully specify a particular probability distribution for each random generation, as part of tuning the noise threshold to get as much noise into the ciphertext as possible while still allowing decryption to work.</p>
+    <p>Extra noise added on purpose during encryption. In my toy system, encryption is a matter of calculating m + b1 · A. In real systems, there’s often an additional term added to this calculation, adding even more noise, so you’d compute something more like m + b1 · A + ε, where ε is an extra value whose entire job is to add more noise.</p>
+    <p>The ciphertext might be compressed lossily. In ML-KEM, for example, after computing m + b1 · A + ε, Bob doesn’t even send it in full back to Alice: he rounds off the low-order part of each coefficient, and sends only the high-order part. And he does similar lossy compression to his own public-key value B. The effect is to introduce even more noise into the value Alice gets back after decryption (but still not enough to make the failure probability too high). I’m not sure whether the purpose of this is to add security, or to keep the ciphertexts small. Perhaps it does both at once.</p>
+    <p>There are probably more complications along these lines that I’ve forgotten, or failed to take in in the first place. But I think this is enough to be going on with, and illustrates that there are a lot of ways in which the real systems are bigger and hairier than my very simplified toy one.</p>
+    <p>I’ve now said something about five of the six PQ systems I’ve been reading up on. Three of them match my toy system pretty closely in structure; another one (BIKE) looks like only a minor variation on the same theme; another (NTRU Prime) is significantly more different, but at least has some things vaguely in common with the structure I’ve discussed.</p>
+    <p>But there’s one more on my list, and it has nothing at all to do with this ‘combining two private vectors with one transformed’ structure.</p>
+    <p>The remaining system on my list
+      is <a href="https://classic.mceliece.org/">Classic McEliece</a>.
+      This is another system based on error-correcting codes, but with
+      a big difference from HQC and BIKE.</p>
+    <p>In HQC and BIKE, the error-correcting code is public knowledge. Alice decrypts by converting the ciphertext into a noisy code word, and running the decoding algorithm to separate the noise from the signal; but the part where she uses her private key is to make the noisy code word in the first place, and once she’s made it, the algorithm that locates the error bits is public.</p>
+    <p>But in Classic McEliece, the error-correcting code itself is the private key!</p>
+    <p>Classic McEliece works with linear error-correcting codes, which are also widely studied for non-cryptographic purposes: they’re a generally convenient way to transmit information over a noisy but non-adversarial channel, which corrupts some fraction of the bits you send (but at random, rather than deliberately selecting the target bits).</p>
+    <p>To recap linear codes briefly: you have two matrices full of integers mod 2 (i.e. single bits), one for encoding and one for decoding. For encoding, you have a ‘generator matrix’, taller than it is wide: you start with a vector of meaningful message bits you want to send, and multiply by the generator matrix to get a longer ‘codeword’ vector. For decoding, you multiply the bit string you received by a ‘check matrix’, which gives you an output called the ‘syndrome’ because it tells you what’s wrong with the data: the syndrome is the zero vector precisely when the codeword has no errors. If the code is able to correct up to t errors, then any two outputs from the generator matrix must differ in more than 2t bits, and any two vectors with at most t bits set (i.e. possible patterns of errors) must give different syndromes when you multiply them by the check matrix.</p>
+    <p>So if you have a normally sized code that you’re using for non-cryptographic purposes, then as part of your setup, you can just run every possible pattern of errors through your check matrix, and make a lookup table indexed by the resulting ‘syndrome’ vectors, mapping each syndrome back to the input error pattern. Then decoding each codeword is a matter of looking up the syndrome in your table to find the errors, and flipping those bits to get back to the clean version of the codeword.</p>
+    <p>But what if the code is really, really large? Classic McEliece deals with linear codes so enormous that you can’t run through every possible pattern of errors to make that lookup table – there are far too many of them. (In its smallest variant, you have a 3488-bit codeword with 64 errors in it, which gives you more than 2456 possible error patterns.) With a code that huge, if all you have is the generator matrix, it’s actually a really hard problem to figure out an efficient algorithm for correcting the errors!</p>
+    <p>Of course, that doesn’t help unless somebody has an efficient algorithm. Classic McEliece is based on a particular subclass of linear codes called ‘binary Goppa codes’. There’s a large family of equivalent ones of these (all with the same size and correcting the same number of errors), and they do admit a reasonably fast algorithm for decoding – but it’s hard to derive that algorithm from just the generator matrix. You invent it the other way round, starting from a set of data items that the decoding algorithm is based on, and then deriving the generator matrix from that.</p>
+    <p>So, to generate a key pair, Alice randomly chooses one of this large family of binary Goppa codes. Her private key is the knowledge of how she invented the code, with all the data that the fast decoding algorithm needs; her public key is the generator matrix by itself, which she sends to Bob.</p>
+    <p>Bob invents a plaintext by making up a set of errors small enough for the code to correct, and encrypts it by multiplying it into the generator matrix. (The errors themselves are the plaintext; there’s no need for Bob to also invent a separate message.)</p>
+    <p>And then Alice runs her efficient decoding algorithm to find the error locations.</p>
+    <p>In this system, again, decryption can’t fail. The Goppa code really can reliably identify any set of error bits of at most the specified size. So as long as Bob’s plaintext was validly constructed, Alice can’t fail to recover it.</p>
+    <p>The biggest problem with this system is that Alice’s public key is enormous – anything from 300Kb to 1.7Mb. In all the other systems, public keys look like a vector, with maybe also a random seed for generating a matrix from. In Classic McEliece, there’s no way to get around the fact that Alice has to send her whole matrix more or less in full, because the details of how she calculated it are precisely her secret – she can’t just send a smaller amount of data and let Bob reconstruct it, or else he’d know how to decrypt as well, and so would all the eavesdroppers!</p>
+    <p>But Classic McEliece also has a pretty good reputation for security, because it’s based on ideas that have been around since the 1970s, and no show-stopping attacks have been found in all that time. This public-key cryptosystem hasn’t been invented in a sudden hurry, as a hasty response to the threat of quantum computers: it existed (or at least its ancestor did) around the same time RSA and Diffie-Hellman were being thought up. I have to assume that RSA out-competed it at the time because it didn’t have those huge public keys (which were even more of a problem in the 1970s, when networks were so much slower). But now maybe its time has come at last. I’ve heard people say that Classic McEliece is the ‘conservative’ option out of all these cryptosystems: if you can live with its practical disadvantages, then it’s the one least likely to turn out to have a serious flaw.</p>
+    <p>Here’s the complete list of post-quantum cryptosystems that I read about before writing this article:</p>
+    <p>I chose that set to read about because they’re the algorithms
+      implemented
+      by <a href="https://github.com/open-quantum-safe/openssh.git">OQS
+      OpenSSH</a>, an experimental fork of OpenSSH. So if there are
+      other systems widely used in a context other than SSH, I don’t
+      know about them – and if they’re significantly different from
+      the things I’ve talked about in this article, then I apologise
+      for missing them out!</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

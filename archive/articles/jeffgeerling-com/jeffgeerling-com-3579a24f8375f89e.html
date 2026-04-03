@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A PTP Wall Clock is impractical and a little too precise | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A PTP Wall Clock is impractical and a little too precise</h1>
+        <div class="meta">Jeff Geerling 2026-03-06T15:00:00Z</div>
+        <div class="links">
+          <a href="https://www.jeffgeerling.com/blog/2026/ptp-wall-clock-impractical-too-precise/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jeffgeerling-com/jeffgeerling-com-3579a24f8375f89e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">After seeing Oliver Ettlin&#x27;s 39C3 presentation Excuse me, what precise time is It? , I wanted to replicate the PTP ( Precision Time Protocol ) clock he used live to demonstrate PTP clock sync: I pinged him on LinkedIn inquiring about the build (I wasn&#x27;t the only one!), and shortly thereafter, he published Gemini2350/ptp-wallclock , a repository with rough i…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>A PTP Wall Clock is impractical and a little too precise</h1>
+    <p>After seeing Oliver Ettlin's 39C3 presentation <a href="https://media.ccc.de/v/39c3-excuse-me-what-precise-time-is-it">Excuse me, what precise time is It?</a>, I wanted to replicate the PTP (<a href="https://en.wikipedia.org/wiki/Precision_Time_Protocol">Precision Time Protocol</a>) clock he used live to demonstrate PTP clock sync:</p>
+    <graphic src="/blog/2026/ptp-wall-clock-impractical-too-precise/39c3-oliver-ettlin-ptp-clock.jpg" alt="Oliver Ettlin with PTP wallclock at 39C3"/>
+    <p>I pinged him on LinkedIn inquiring about the build (I wasn't the only one!), and shortly thereafter, he published <a href="https://github.com/Gemini2350/ptp-wallclock">Gemini2350/ptp-wallclock</a>, a repository with rough instructions for the build, and his C++ application to display PTP time (if available on the network) on a set of two LED matrix displays, using a Raspberry Pi.</p>
+    <p>A Pi is useful because it meets the two requirements for a PTP Clock:</p>
+    <ul>
+      <li>It's easy to interface with LED matrix displays (via GPIO and a HAT)</li>
+      <li>It's Broadcom NIC has <a href="https://www.jeffgeerling.com/blog/2022/ptp-and-ieee-1588-hardware-timestamping-on-raspberry-pi-cm4/">PTP hardware timestamping capabilities</a>.</li>
+    </ul>
+    <p>I wanted to rebuild his clock for my own amusement, and to have a visual aid for upcoming videos about PTP. And I was successful!</p>
+    <p>In this post, I'll detail the hardware used, the physical build, and how to get from a fresh Pi OS installation to displaying PTP time on a 128x32 RGB LED Matrix!</p>
+    <p>I also published a YouTube video of the process, in case you want a more visual guide:</p>
+    <h2>Required Hardware</h2>
+    <graphic src="/blog/2026/ptp-wall-clock-impractical-too-precise/ptp-wallclock-parts-on-desk.jpg" alt="Parts assembled loosely for PTP Wallclock"/>
+    <p>The required hardware costs around $120-150, depending on what part of the AI bubble we're in:</p>
+    <ul>
+      <li><a href="https://www.raspberrypi.com/products/raspberry-pi-4-model-b/">Raspberry Pi 4 model B</a>(the<a href="https://github.com/hzeller/rpi-rgb-led-matrix/issues/1603">Pi 5 doesn't yet work with the RGB matrix</a>)</li>
+      <li>
+        <a href="https://www.adafruit.com/product/2345">Adafruit RGB Matrix HAT + RTC for Raspberry Pi</a>
+      </li>
+      <li><a href="https://www.waveshare.com/RGB-Matrix-P3-64x32.htm">Waveshare 64x32 pixel LED Matrix Panel</a>(x2)</li>
+      <li><a href="https://www.adafruit.com/product/1466">Adafruit 5V 4A power supply</a>(or equivalent)</li>
+      <li>
+        <a href="https://www.raspberrypi.com/products/sd-cards/">32GB microSD card</a>
+      </li>
+    </ul>
+    <p>Any Pi 4 should work fine; you don't need a lot of RAM.</p>
+    <p>And if it isn't obvious, you also need a <a href="https://www.timebeat.app/post/understanding-precision-time-protocol-the-guide-to-ptp-grandmaster-boundary-and-transparent-clocks">PTP grandmaster</a> somewhere on your network, which should be broadcasting to the standard PTP multicast IPv4 address, <pre>224.0.1.129</pre>. You could also have multiple PTP grandmasters, allowing the Pi to use PTP's <a href="https://blog.meinbergglobal.com/2013/11/14/makes-master-best/">Best Master Clock Algorithm (BMCA)</a> to select the best time source.</p>
+    <h2>Hardware Setup</h2>
+    <p>The Adafruit RGB Matrix HAT requires some soldering. There's 2x20 female pin header that fits on the Pi's GPIO header, a ribbon cable connector on the top side, and a 5V DC power output screw terminal header to supply power to the two LED matrices.</p>
+    <graphic src="/blog/2026/ptp-wall-clock-impractical-too-precise/soldering-adafruit-rgb-matrix-hat.jpg" alt="Soldering Adafruit's RGB Matrix HAT"/>
+    <p>Once that's done, it's a matter of plugging cables supplied with the two Waveshare LED Matrix Panels into the header on the Adafruit HAT. One ribbon cable goes from the HAT to the 'right' LED matrix (when viewed from the front). Then the right matrix plugs into the left matrix using the other ribbon cable.</p>
+    <p>The power cable is already split for two matrix displays, so plug the 4-pin plugs into the power inputs, and screw the screw terminals into the positive and negative screw terminals on the HAT. They will be halfway-out, so... don't short anything across them. Alternatively, snip the ends off and strip a little wire to screw into the screw terminals directly.</p>
+    <p>A picture is worth a thousand words:</p>
+    <graphic src="/blog/2026/ptp-wall-clock-impractical-too-precise/led-matrix-wiring-with-pi-hat.jpg" alt="RGB Matrix HAT plugged into Pi HAT"/>
+    <p>Plugged into the 5V DC input jack (5.5mm x 2.5mm, center positive) is a 5V 4A power supply.</p>
+    <p>In the picture above I'm using a <a href="https://werewolf.us/collections/werewolf-products/products/x-cable-5-5mm-od-2-5mm-id-barrel-jack">Werewolf VFLEX</a> adapter with a Raspberry Pi USB-C power supply, but a dedicated 5V 4A supply is best, to prevent voltage drop when driving the display (which causes flickering).</p>
+    <h2>Software Setup</h2>
+    <p>Assuming you have a fresh install of Raspberry Pi OS on your microSD card, there are a few stages to the software setup.</p>
+    <p>The first step is to configure the Pi for optimal performance refreshing the LED matrix. Disable general CPU core scheduling (so threads can better pin themselves to a single core), and disable the built-in audio output:</p>
+    <pre>
+      <pre># Edit `/boot/firmware/cmdline.txt` and put this at the end of the line:
+isolcpus=3
+
+# Disable audio by switching the parameter to 'off' in `/boot/firmware/config.txt`:
+dtparam=audio=off
+</pre>
+    </pre>
+    <p><a href="https://github.com/hzeller/rpi-rgb-led-matrix?tab=readme-ov-file#bad-interaction-with-sound">Blacklist the  snd_bcm2835 kernel module</a>:</p>
+    <pre>
+      <pre>cat &lt;&lt;EOF | sudo tee /etc/modprobe.d/blacklist-rgb-matrix.conf
+blacklist snd_bcm2835
+EOF
+
+sudo update-initramfs -u
+</pre>
+    </pre>
+    <p>Reboot the Pi to apply the changes above:</p>
+    <pre>
+      <pre>sudo reboot
+</pre>
+    </pre>
+    <p>After the reboot, make sure the audio module is not loaded (this command should return nothing):</p>
+    <pre>
+      <pre>lsmod | grep snd_bcm2835
+</pre>
+    </pre>
+    <p>Now it's time to install the RGB LED Matrix library, to allow the Pi to interface with the display through it's GPIO pins:</p>
+    <pre>
+      <pre># Install RGB LED matrix library.
+cd ~/Downloads
+git clone https://github.com/hzeller/rpi-rgb-led-matrix
+cd rpi-rgb-led-matrix
+make
+pip install .
+</pre>
+    </pre>
+    <p>The <pre>make</pre> and <pre>pip install .</pre> commands will both take a while, especially on the older Pi 4's anemic CPU. Once compilation is finished, test to make sure the LED matrix is working:</p>
+    <pre>
+      <pre># Make sure the RGB LED matrix is working with a demo (Conway's Game of Life).
+make -C examples-api-use
+sudo examples-api-use/demo -D7 --led-rows=32 --led-cols=128 --led-chain=1 --led-gpio-mapping="adafruit-hat"
+</pre>
+    </pre>
+    <p>If that worked, then you're golden! If not, you either have a hardware or a software issue you'll need to debug.</p>
+    <p>Now it's time to set up the PTP Wallclock application. First, copy over the font the application uses, from the RGB LED Matrix project you cloned earlier (make sure you're in that project's directory still):</p>
+    <pre>
+      <pre># Copy over the font used by the PTP wallclock app.
+sudo mkdir -p /usr/share/fonts/rpi-rgb-led-matrix
+sudo cp fonts/6x13B.bdf /usr/share/fonts/rpi-rgb-led-matrix/
+</pre>
+    </pre>
+    <p>Finally, it's time to build the PTP Wallclock app:</p>
+    <pre>
+      <pre># Clone the PTP wallclock app.
+cd ~/Downloads
+git clone https://github.com/Gemini2350/ptp-wallclock.git
+cd ptp-wallclock
+</pre>
+    </pre>
+    <blockquote><p>Until</p><a href="">PR #8</a>and<a href="">PR #11</a>are merged, you need to apply those patches to the project to make it work correctly:<pre>curl -sL https://github.com/Gemini2350/ptp-wallclock/pull/8.patch | git apply - curl -sL https://github.com/Gemini2350/ptp-wallclock/pull/11.patch | git apply -</pre></blockquote>
+    <p>To compile the app, copy the <pre>ptp-clock.cpp</pre> file into the <pre>rpi-rgb-led-matrix</pre> directory, and then run this command in there:</p>
+    <pre>
+      <pre># Compile the PTP wallclock app.
+g++ -O2 -std=c++17 ptp-clock.cpp -o ptp-clock \
+    -I./include -I./bindings \
+    -L./lib -lrgbmatrix -lpthread
+</pre>
+    </pre>
+    <p>Now, you can run the following command to start the compiled <pre>ptp-clock</pre> app:</p>
+    <pre>
+      <pre>$ sudo ./ptp-clock
+Listening for PTP Messages...
+</pre>
+    </pre>
+    <p>If you don't see any time on the LED matrix, here are some PTP debugging steps:</p>
+    <ul>
+      <li>Do you see PTP traffic on the network from the Pi running <pre>ptp-clock</pre>? Install<pre>tcpdump</pre>and run<pre>sudo tcpdump -i eth0 -nn -v port 319 or port 320</pre>. You should see some messages with timestamping information.</li>
+      <li>Look at the <pre>msg type</pre>field in the output of the above<pre>tcpdump</pre>command. If you only see<pre>sync msg</pre>messages, and no<pre>follow up msg</pre>messages, the PTP server may be configured in one-step mode. On your PTP server, check that<pre>twoStepFlag</pre>is set to<pre>1</pre>in the ptp4l configuration.</li>
+    </ul>
+    <p>I posted an issue in the <pre>ptp-wallclock</pre> repository with some of my own debugging steps, which may be helpful if you're still having issues: <a href="https://github.com/Gemini2350/ptp-wallclock/issues/7">Can't get PTP time to display on my network</a>.</p>
+    <p>But if everything's working correctly, you should see the current PTP time:</p>
+    <graphic src="/blog/2026/ptp-wall-clock-impractical-too-precise/ptp-wallclock-running.jpg" alt="PTP Wallclock running on desk"/>
+    <blockquote><p>NOTE: Until</p><a href="">this PR is merged</a>, you might need to apply a patch to the<pre>ptp-clock.cpp</pre>file before compiling. If you get an error, or no output, and you know PTP is working on your network, run these commands:<pre>cd ~/Downloads/ptp-wallclock curl -L https://patch-diff.githubusercontent.com/raw/Gemini2350/ptp-wallclock/pull/8.patch | git apply -v cp ptp-clock.cpp ../rpi-rgb-led-matrix cd ../rpi-rgb-led-matrix g++ -O2 -std=c++17 ptp-clock.cpp -o ptp-clock \ -I./include -I./bindings \ -L./lib -lrgbmatrix -lpthread</pre></blockquote>
+    <h2>3D Printed bracket / stand</h2>
+    <p>It's a bit messy without any support, and the two halves of the display don't stay together well, unless you attach them to something. There are four magnetic screws for each display, so if you attached them to a flat metal surface, you could get them to line up that way.</p>
+    <graphic src="/blog/2026/ptp-wall-clock-impractical-too-precise/ptp-wallclock-3d-printed-mount.jpeg" alt="PTP Wallclock 3D printed bracket to hold displays together"/>
+    <p>I designed this 3D printable bracket, which attaches the two displays with a tiny bit of wiggle room, to account for manufacturing variances. I put it up on Printables if you want to replicate my build: <a href="https://www.printables.com/model/1624778-ptp-wall-clock-bracket-waveshare-rgb-matrix-connec">PTP Wall Clock Bracket (Waveshare RGB Matrix connector)</a>.</p>
+    <p>In the future I may also tie in the Raspberry Pi somehow, maybe in a desk stand base. But my mounting bracket keeps the magnetic screws at the same height as the others, so you could mount this to a fridge or other ferrous surface, with the Pi dangling below. Or tucked away behind with a hole cut in the metal for the data and power cables.</p>
+    <h2>Conclusion</h2>
+    <p>Now that I have this nice PTP time display, I need to figure out why my GPS-derived time is driving +/- a few seconds from UTC every couple days. I think the Intel i226 NIC I'm using is handling the PPS time input incorrectly, and <a href="https://github.com/geerlingguy/time-pi/issues/28">I'll keep working on that in this issue</a>. I may also switch to another Pi time server, as the i226 driver has been generally frustrating.</p>
+    <p>I'd like to give a huge thanks to Oliver Ettlin for sharing his work—and for his excellent <a href="https://media.ccc.de/v/39c3-excuse-me-what-precise-time-is-it">39C3 presentation on PTP</a>! Watch it if you have any interest in PTP or network timing.</p>
+    <p>And if you want to build your own PTP wall clock, I hope this blog post has helped :)</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cleaning old GPG RPM keys that your Fedora install is keeping around | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Cleaning old GPG RPM keys that your Fedora install is keeping around</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-03-17T01:56:30Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/FedoraCleaningOldGpgRPMKeys">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-90e2d7bfac878787.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Approximately all RPM packages are signed by GPG keys (or maybe they&#x27;re supposed to be called PGP keys), which your system stores in the RPM database as pseudo-packages (because why not). If your Fedora install has been around long enough, as mine have, you will have accumulated a drift of old keys and sometimes you either want to clean them up or something…</div>
+        <div class="content">
+          <div class="wikitext"><p>Approximately all RPM packages are signed by GPG keys (or maybe
+they're supposed to be called PGP keys), which your system stores
+in the RPM database as pseudo-packages (because why not). If your
+Fedora install has been around long enough, as mine have, you will
+have accumulated a drift of old keys and sometimes you either want
+to clean them up or something unfortunate will happen to one of
+those keys (I'll get to one case for it).</p>
+
+<p>One basic command to see your collection of GPG keys in the RPM
+database is (taken from <a href="https://gist.github.com/denys-source/f386a7bae35519b6b6d5d3be3a6150ba">this gist</a>):</p>
+
+<blockquote><pre>
+rpm -q gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n'
+</pre>
+</blockquote>
+
+<p>On some systems this will give you a nice short list of keys. On others,
+your list may be very long.</p>
+
+<p>Since Fedora 42 (<a href="https://fedoraproject.org/wiki/Changes/Dnf5ExpiredPGPKeys">cf</a>), DNF
+has functionality (I believe more or less built in) that should
+offer to remove old GPG keys that have actually expired. This is
+in the '<a href="https://dnf5.readthedocs.io/en/latest/libdnf5_plugins/expired-pgp-keys.8.html">expired PGP keys plugin</a>'
+which comes from the 'libdnf5-plugin-expired-pgp-keys' if you don't
+have it installed (with a brief manpage that's called
+'libdnf5-expired-pgp-keys'). I believe there was a similar DNF4
+plugin. However, there are two situations where this seems to not
+work correctly.</p>
+
+<p>The first situation is now-obsolete GPG keys that haven't expired
+yet, for various reasons; these may be for past versions of Fedora,
+for example. These days, the metadata for every DNF repository you
+use should list a URL for its GPG keys (see the various .repo files
+in <code>/etc/yum.repos.d/</code> and look for the 'gpgkey=' lines). So one
+way to clean up obsolete keys is to fetch all of the current keys
+for all of your current repositories (or at least the enabled ones),
+and then remove anything you have that isn't among the list. This
+process is automated for you by the '<code>clean-rpm-gpg-pubkey</code>' command
+and package, which <a href="https://docs.fedoraproject.org/en-US/quick-docs/upgrading-fedora-offline/#sect-clean-up-old-keys">is mentioned in some Fedora upgrade instructions</a>.
+This will generally clean out most of your obsolete keys, although
+<a href="https://mastodon.social/@cks/114388053102323620">rare people will have keys that are so old that it chokes on them</a>.</p>
+
+<p>The second situation is apparently a repository operator who is
+sufficiently clever to have re-issued an expired key using the same
+key ID and fingerprint but a new expiry date in the future; this
+fools RPM and related tools and everything chokes. This is unfortunate,
+since it will often stall all DNF updates unless you disable the
+repo. One repository operator who has done this is Google, for their
+Fedora Chrome repository. To fix this you'll have to manually
+remove the relevant GPG key or keys. Once you've used
+<code>clean-rpm-gpg-pubkey</code> to reduce your list of GPG keys to a reasonable
+level, you can use the RPM command I showed above to list all your
+remaining keys, spot the likely key or keys (based on who owns it,
+for example), and then use '<code>rpm -e --allmatches
+gpg-pubkey-d38b4796-570c8cd3</code>' (or some other appropriate gpg-pubkey
+name) to manually scrub out the GPG key. Doing a DNF operation
+such as installing or upgrading a package from the repository should
+then re-import the current key.</p>
+
+<p>(This also means that it's theoretically harmless to overshoot and
+remove the wrong key, because it will be fetched back the next time
+you need it.)</p>
+
+<p>(When I wrote <a href="https://mastodon.social/@cks/114388053102323620">my Fediverse post about discovering clean-rpm-gpg-pubkey</a>, I apparently
+thought I would remember it without further prompting. This was
+wrong, and in fact I didn't even remember to use it when I upgraded
+my home desktop. This time it will hopefully stick, and if not, I
+have it written down here where it will probably be easier to find.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

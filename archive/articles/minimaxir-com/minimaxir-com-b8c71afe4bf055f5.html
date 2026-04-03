@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Predicting Average IMDb Movie Ratings Using Text Embeddings of Movie Metadata | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Predicting Average IMDb Movie Ratings Using Text Embeddings of Movie Metadata</h1>
+        <div class="meta">Max Woolf&#x27;s Blog 2025-06-30T17:00:00Z</div>
+        <div class="links">
+          <a href="https://minimaxir.com/2025/06/movie-embeddings/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/minimaxir-com/minimaxir-com-b8c71afe4bf055f5.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Don’t try this in your data science interviews.</div>
+        <div class="content">
+          <p>Months ago, I saw a post titled &ldquo;<a href="https://www.reddit.com/r/datascience/comments/1eykil7/rejected_from_ds_role_with_no_feedback/">Rejected from DS Role with no feedback</a>&rdquo; on Reddit&rsquo;s <a href="https://www.reddit.com/r/datascience/">Data Science subreddit</a>, in which a prospective job candidate for a data science position provided a <a href="https://colab.research.google.com/drive/1Ud2tXW2IAw_dXA5DONvNpPmmlL1foSwK">Colab Notebook</a> documenting their submission for a take-home assignment and asking for feedback as to why they were rejected. Per the Reddit user, the assignment was:</p>
+<blockquote>
+<p>Use the publicly available <a href="https://developer.imdb.com/non-commercial-datasets/">IMDB Datasets</a> to build a model that predicts a movie&rsquo;s average rating. Please document your approach and present your results in the notebook. Make sure your code is well-organized so that we can follow your modeling process.</p>
+</blockquote>
+<p><a href="https://www.imdb.com/">IMDb</a>, the Internet Movie Database owned by Amazon, allows users to rate movies on a scale from 1 to 10, wherein the average rating is then displayed prominently on the movie&rsquo;s page:</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/shawshank_hu12434579650565701701.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/shawshank_hu10921369558183391039.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/shawshank_hu12118631235309274952.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/shawshank.webp 1082w" src="shawshank.webp"
+         alt="The Shawshank Redemption is currently the highest-rated movie on IMDb with an average rating of 9.3 derived from 3.1 million user votes."/> <figcaption>
+            <p><a href="https://www.imdb.com/title/tt0111161/?ref_=sr_t_1">The Shawshank Redemption</a> is currently the <a href="https://www.imdb.com/search/title/?groups=top_100&amp;sort=user_rating,desc">highest-rated movie on IMDb</a> with an average rating of 9.3 derived from 3.1 million user votes.</p>
+        </figcaption>
+</figure>
+
+<p>In their notebook, the Redditor identifies a few intuitive features for such a model, including the year in which the movie was released, the genre(s) of the movies, and the actors/directors of the movie. However, the model they built is a <a href="https://www.tensorflow.org/">TensorFlow</a> and <a href="https://keras.io/">Keras</a>-based neural network, with all the bells-and-whistles such as <a href="https://en.wikipedia.org/wiki/Batch_normalization">batch normalization</a> and <a href="https://en.wikipedia.org/wiki/Dilution_%28neural_networks%29">dropout</a>. The immediate response by other data scientists on /r/datascience was, at its most polite, &ldquo;why did you use a neural network when it&rsquo;s a <a href="https://en.wikipedia.org/wiki/Black_box">black box</a> that you can&rsquo;t explain?&rdquo;</p>
+<p>Reading those replies made me nostalgic. Way back in 2017, before my first job as a data scientist, neural networks using frameworks such as TensorFlow and Keras were all the rage for their ability to &ldquo;<a href="https://en.wikipedia.org/wiki/Universal_approximation_theorem">solve any problem</a>&rdquo; but were often seen as lazy and unskilled compared to traditional statistical modeling such as ordinary least squares linear regression or even gradient boosted trees. Although it&rsquo;s funny to see that perception against neural networks in the data science community hasn&rsquo;t changed since, nowadays the black box nature of neural networks can be an acceptable business tradeoff if the prediction results are higher quality and interpretability is not required.</p>
+<p>Looking back at the assignment description, the objective is only &ldquo;predict a movie&rsquo;s average rating.&rdquo; For data science interview take-homes, this is unusual: those assignments typically have an extra instruction along the lines of &ldquo;explain your model and what decisions stakeholders should make as a result of it&rdquo;, which is a strong hint that you need to use an explainable model like linear regression to obtain feature coefficients, or even a middle-ground like gradient boosted trees and its <a href="https://stats.stackexchange.com/questions/332960/what-is-variable-importance">variable importance</a> to quantify relative feature contribution to the model. <sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup> In absence of that particular constraint, it&rsquo;s arguable that anything goes, including neural networks.</p>
+<p>The quality of neural networks have improved significantly since 2017, even moreso due to the massive rise of LLMs. Why not try just feeding a LLM all raw metadata for a movie and encode it into a text embedding and build a statistical model based off of that? Would a neural network do better than a traditional statistical model in that instance? Let&rsquo;s find out!</p>
+<h2 id="about-imdb-data">About IMDb Data</h2>
+<p>The <a href="https://developer.imdb.com/non-commercial-datasets/">IMDb Non-Commercial Datasets</a> are famous sets of data that have been around for nearly a decade <sup id="fnref:2"><a href="#fn:2" class="footnote-ref" role="doc-noteref">2</a></sup> but are still updated daily. Back in 2018 as a budding data scientist, I performed a <a href="https://minimaxir.com/2018/07/imdb-data-analysis/">fun exporatory data analysis</a> using these datasets, although the results aren&rsquo;t too surprising.</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/imdb-4_hu16393258413625180940.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/imdb-4_hu2361684155542955917.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/imdb-4_hu5511852794587375111.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/imdb-4.png 1200w" src="imdb-4.png"
+         alt="The average rating for a movie is around 6 and tends to skew higher: a common trend in internet rating systems."/> <figcaption>
+            <p>The average rating for a movie is around 6 and tends to skew higher: a common trend in internet rating systems.</p>
+        </figcaption>
+</figure>
+
+<p>But in truth, these datasets are a terrible idea for companies to use for a take-home assignment. Although the datasets are released under a non-commercial license, IMDb doesn&rsquo;t want to give too much information to their competitors, which results in a severely limited amount of features that could be used to build a good predictive model. Here are the common movie-performance-related features present in the <code>title.basics.tsv.gz</code> file:</p>
+<ul>
+<li><strong>tconst</strong>: unique identifier of the title</li>
+<li><strong>titleType</strong>: the type/format of the title (e.g. movie, tvmovie, short, tvseries, etc)</li>
+<li><strong>primaryTitle</strong>: the more popular title / the title used by the filmmakers on promotional materials at the point of release</li>
+<li><strong>isAdult</strong>: 0: non-adult title; 1: adult title</li>
+<li><strong>startYear</strong>: represents the release year of a title.</li>
+<li><strong>runtimeMinutes</strong>: primary runtime of the title, in minutes</li>
+<li><strong>genres</strong>: includes up to three genres associated with the title</li>
+</ul>
+<p>This is a sensible schema for describing a movie, although it lacks some important information that would be very useful to determine movie quality such as production company, summary blurbs, granular genres/tags, and plot/setting — all of which are available on the IMDb movie page itself and presumably accessible through the <a href="https://developer.imdb.com/documentation/api-documentation/?ref_=/documentation/_PAGE_BODY">paid API</a>. Of note, since the assignment explicitly asks for a <em>movie</em>&rsquo;s average rating, we need to filter the data to only <code>movie</code> and <code>tvMovie</code> entries, which the original assignment failed to do.</p>
+<p>The ratings data in <code>title.ratings.tsv.gz</code> is what you&rsquo;d expect:</p>
+<ul>
+<li><strong>tconst</strong>: unique identifier of the title (which can therefore be mapped to movie metadata using a JOIN)</li>
+<li><strong>averageRating</strong>: average of all the individual user ratings</li>
+<li><strong>numVotes</strong>: number of votes the title has received</li>
+</ul>
+<p>In order to ensure that the average ratings for modeling are indeed stable and indicative of user sentiment, I will only analyze movies that have <em>atleast 30 user votes</em>: as of May 10th 2025, that&rsquo;s about 242k movies total. Additionally, I will not use <code>numVotes</code> as a model feature, since that&rsquo;s a metric based more on extrinsic movie popularity rather than the movie itself.</p>
+<p>The last major dataset is <code>title.principals.tsv.gz</code>, which has very helpful information on metadata such as the roles people play in the production of a movie:</p>
+<ul>
+<li><strong>tconst</strong>: unique identifier of the title (which can be mapped to movie data using a JOIN)</li>
+<li><strong>nconst</strong>: unique identifier of the principal (this is mapped to <code>name.basics.tsv.gz</code> to get the principal&rsquo;s <code>primaryName</code>, but nothing else useful)</li>
+<li><strong>category</strong>: the role the principal served in the title, such as <code>actor</code>, <code>actress</code>, <code>writer</code>, <code>producer</code>, etc.</li>
+<li><strong>ordering</strong>: the ordering of the principals within the title, which correlates to the order the principals appear on IMDb&rsquo;s movie cast pages.</li>
+</ul>
+<p>Additionally, because the datasets are so popular, it&rsquo;s not the first time someone has built a IMDb ratings predictor and it&rsquo;s easy to Google.</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/google_hu18413569500747605653.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/google_hu137269496741349045.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/google.webp 1000w" src="google.webp"/> 
+</figure>
+
+<p>Instead of using the official IMDb datasets, these analyses are based on the smaller <a href="https://www.kaggle.com/datasets/carolzhangdc/imdb-5000-movie-dataset/data">IMDB 5000 Movie Dataset</a> hosted on Kaggle, which adds metadata such as movie rating, budget, and further actor metadata that make building a model much easier (albeit &ldquo;number of likes on the lead actor&rsquo;s Facebook page&rdquo; is <em>very</em> extrinsic to movie quality). Using the official datasets with much less metadata is building the models on hard mode and will likely have lower predictive performance.</p>
+<p>Although IMDb data is very popular and very well documented, that doesn&rsquo;t mean it&rsquo;s easy to work with.</p>
+<h2 id="the-initial-assignment-and-feature-engineering">The Initial Assignment and &ldquo;Feature Engineering&rdquo;</h2>
+<p>Data science take-home assignments are typically 1/2 <a href="https://en.wikipedia.org/wiki/Exploratory_data_analysis">exploratory data analysis</a> for identifying impactful dataset features, and 1/2 building, iterating, and explaining the model. For real-world datasets, these are all very difficult problems with many difficult solutions, and the goal from the employer&rsquo;s perspective is seeing more <em>how</em> these problems are solved rather than the actual quantitative results.</p>
+<p>The initial Reddit post decided to engineer some expected features using <a href="https://pandas.pydata.org/">pandas</a>, such as <code>is_sequel</code> by checking whether a non-<code>1</code> number is present at the end of a movie title and <a href="https://en.wikipedia.org/wiki/One-hot">one-hot encoding</a> each distinct <code>genre</code> of a movie. These are fine for an initial approach, albeit sequel titles can be idiosyncratic and it suggests that a more <a href="https://www.ibm.com/think/topics/natural-language-processing">NLP</a> approach to identifying sequels and other related media may be useful.</p>
+<p>The main trick with this assignment is how to handle the principals. The common data science approach would be to use a sparse binary encoding of the actors/directors/writers, e.g. using a vector where actors present in the movie are <code>1</code> and every other actor is <code>0</code>, which leads to a large number of potential approaches to encode this data performantly, such as scikit-learn&rsquo;s <a href="https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.MultiLabelBinarizer.html">MultiLabelBinarizer</a>. The problem with this approach is that there are a <em>very</em> large number of unique actors / <a href="https://docs.honeycomb.io/get-started/basics/observability/concepts/high-cardinality/">high cardinality</a> — more unique actors than data points themselves — which leads to <a href="https://en.wikipedia.org/wiki/Curse_of_dimensionality">curse of dimensionality</a> issues and workarounds such as encoding only the top <em>N</em> actors will lead to the feature being uninformative since even a generous <em>N</em> will fail to capture the majority of actors.</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/actor_cum_dist_hu7838394884597660139.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/actor_cum_dist_hu6911949059791344276.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/actor_cum_dist_hu8019753894096138938.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/actor_cum_dist.png 1500w" src="actor_cum_dist.png"
+         alt="There are actually 624k unique actors in this dataset (Jupyter Notebook), the chart just becomes hard to read at that point."/> <figcaption>
+            <p>There are actually 624k unique actors in this dataset (<a href="https://github.com/minimaxir/imdb-embeddings/blob/main/actor_agg.ipynb">Jupyter Notebook</a>), the chart just becomes hard to read at that point.</p>
+        </figcaption>
+</figure>
+
+<p>Additionally, most statistical modeling approaches cannot account for the <code>ordering</code> of actors as they treat each feature as independent, and since the billing order of actors is generally correlated to their importance in the movie, that&rsquo;s an omission of relevant information to the problem.</p>
+<p>These constraints gave me an idea: why not use an LLM to encode <em>all</em> movie data, and build a model using the downstream embedding representation? LLMs have <a href="https://en.wikipedia.org/wiki/Attention_%28machine_learning%29">attention mechanisms</a>, which will not only respect the relative ordering of actors (to give higher predictive priority to higher-billed actors, along with actor cooccurrences), but also identify patterns within movie name texts (to identify sequels and related media semantically).</p>
+<p>I started by aggregating and denormalizing all the data locally (<a href="https://github.com/minimaxir/imdb-embeddings/blob/main/imdb_polars_etl_test.ipynb">Jupyter Notebook</a>). Each of the IMDb datasets are hundreds of megabytes and hundreds of thousands of rows at minimum: not quite <a href="https://en.wikipedia.org/wiki/Big_data">big data</a>, but enough to be more cognizant of tooling especially since computationally-intensive JOINs are required. Therefore, I used the <a href="https://pola.rs/">Polars</a> library in Python, which not only loads data super fast, but is also one of the <a href="https://duckdblabs.github.io/db-benchmark/">fastest libraries at performing JOINs</a> and other aggregation tasks. Polars&rsquo;s syntax also allows for some cool tricks: for example, I want to spread out and aggregate the principals (4.1 million rows after prefiltering) for each movie into directors, writers, producers, actors, and all other principals into nested lists while simultaneously having them sorted by <code>ordering</code> as noted above. This is much easier to do in Polars than any other data processing library I&rsquo;ve used, and on millions of rows, this takes <em>less than a second</em>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-py3" data-lang="py3"><span class="line"><span class="cl"><span class="n">df_principals_agg</span> <span class="o">=</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl">    <span class="n">df_principals</span><span class="o">.</span><span class="n">sort</span><span class="p">([</span><span class="s2">&#34;tconst&#34;</span><span class="p">,</span> <span class="s2">&#34;ordering&#34;</span><span class="p">])</span>
+</span></span><span class="line"><span class="cl">    <span class="o">.</span><span class="n">group_by</span><span class="p">(</span><span class="s2">&#34;tconst&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="o">.</span><span class="n">agg</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">        <span class="n">director_names</span><span class="o">=</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;primaryName&#34;</span><span class="p">)</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;category&#34;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&#34;director&#34;</span><span class="p">),</span>
+</span></span><span class="line"><span class="cl">        <span class="n">writer_names</span><span class="o">=</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;primaryName&#34;</span><span class="p">)</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;category&#34;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&#34;writer&#34;</span><span class="p">),</span>
+</span></span><span class="line"><span class="cl">        <span class="n">producer_names</span><span class="o">=</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;primaryName&#34;</span><span class="p">)</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;category&#34;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&#34;producer&#34;</span><span class="p">),</span>
+</span></span><span class="line"><span class="cl">        <span class="n">actor_names</span><span class="o">=</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;primaryName&#34;</span><span class="p">)</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">            <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;category&#34;</span><span class="p">)</span><span class="o">.</span><span class="n">is_in</span><span class="p">([</span><span class="s2">&#34;actor&#34;</span><span class="p">,</span> <span class="s2">&#34;actress&#34;</span><span class="p">])</span>
+</span></span><span class="line"><span class="cl">        <span class="p">),</span>
+</span></span><span class="line"><span class="cl">        <span class="n">principal_names</span><span class="o">=</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;primaryName&#34;</span><span class="p">)</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">            <span class="o">~</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;category&#34;</span><span class="p">)</span><span class="o">.</span><span class="n">is_in</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">                <span class="p">[</span><span class="s2">&#34;director&#34;</span><span class="p">,</span> <span class="s2">&#34;writer&#34;</span><span class="p">,</span> <span class="s2">&#34;producer&#34;</span><span class="p">,</span> <span class="s2">&#34;actor&#34;</span><span class="p">,</span> <span class="s2">&#34;actress&#34;</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">            <span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">),</span>
+</span></span><span class="line"><span class="cl">        <span class="n">principal_roles</span><span class="o">=</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;category&#34;</span><span class="p">)</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">            <span class="o">~</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&#34;category&#34;</span><span class="p">)</span><span class="o">.</span><span class="n">is_in</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">                <span class="p">[</span><span class="s2">&#34;director&#34;</span><span class="p">,</span> <span class="s2">&#34;writer&#34;</span><span class="p">,</span> <span class="s2">&#34;producer&#34;</span><span class="p">,</span> <span class="s2">&#34;actor&#34;</span><span class="p">,</span> <span class="s2">&#34;actress&#34;</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">            <span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">),</span>
+</span></span><span class="line"><span class="cl">    <span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span></code></pre></div><p>After some cleanup and field renaming, here&rsquo;s an example JSON document for <a href="https://www.imdb.com/title/tt0076759/">Star Wars: Episode IV - A New Hope</a>:</p>
+<!-- prettier-ignore-start -->
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;title&#34;</span><span class="p">:</span> <span class="s2">&#34;Star Wars: Episode IV - A New Hope&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;genres&#34;</span><span class="p">:</span> <span class="p">[</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Action&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Adventure&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Fantasy&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">],</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;is_adult&#34;</span><span class="p">:</span> <span class="kc">false</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;release_year&#34;</span><span class="p">:</span> <span class="mi">1977</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;runtime_minutes&#34;</span><span class="p">:</span> <span class="mi">121</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;directors&#34;</span><span class="p">:</span> <span class="p">[</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;George Lucas&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">],</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;writers&#34;</span><span class="p">:</span> <span class="p">[</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;George Lucas&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">],</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;producers&#34;</span><span class="p">:</span> <span class="p">[</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Gary Kurtz&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Rick McCallum&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">],</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;actors&#34;</span><span class="p">:</span> <span class="p">[</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Mark Hamill&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Harrison Ford&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Carrie Fisher&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Alec Guinness&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Peter Cushing&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Anthony Daniels&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Kenny Baker&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Peter Mayhew&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;David Prowse&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;Phil Brown&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">],</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;principals&#34;</span><span class="p">:</span> <span class="p">[</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="nt">&#34;John Williams&#34;</span><span class="p">:</span> <span class="s2">&#34;composer&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="nt">&#34;Gilbert Taylor&#34;</span><span class="p">:</span> <span class="s2">&#34;cinematographer&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="nt">&#34;Richard Chew&#34;</span><span class="p">:</span> <span class="s2">&#34;editor&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="nt">&#34;T.M. Christopher&#34;</span><span class="p">:</span> <span class="s2">&#34;editor&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="nt">&#34;Paul Hirsch&#34;</span><span class="p">:</span> <span class="s2">&#34;editor&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="nt">&#34;Marcia Lucas&#34;</span><span class="p">:</span> <span class="s2">&#34;editor&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="nt">&#34;Dianne Crittenden&#34;</span><span class="p">:</span> <span class="s2">&#34;casting_director&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="nt">&#34;Irene Lamb&#34;</span><span class="p">:</span> <span class="s2">&#34;casting_director&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="nt">&#34;Vic Ramos&#34;</span><span class="p">:</span> <span class="s2">&#34;casting_director&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">},</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="nt">&#34;John Barry&#34;</span><span class="p">:</span> <span class="s2">&#34;production_designer&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="p">]</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></div><!-- prettier-ignore-end -->
+<p>I was tempted to claim that I used zero feature engineering, but that wouldn&rsquo;t be accurate. The selection and ordering of the JSON fields here is itself feature engineering: for example, <code>actors</code> and <code>principals</code> are intentionally last in this JSON encoding because they can have wildly varying lengths while the prior fields are more consistent, which should make downstream encodings more comparable and consistent.</p>
+<p>Now, let&rsquo;s discuss how to convert these JSON representations of movies into embeddings.</p>
+<h2 id="creating-and-visualizing-the-movie-embeddings">Creating And Visualizing the Movie Embeddings</h2>
+<p>LLMs that are trained to output text embeddings are not much different from LLMs like <a href="https://chatgpt.com/">ChatGPT</a> that just predict the next token in a loop. Models such as BERT and GPT can generate &ldquo;embeddings&rdquo; out-of-the-box by skipping the prediction heads of the models and instead taking an encoded value from the last hidden state of the model (e.g. for BERT, the first positional vector of the hidden state representing the <code>[CLS]</code> token). However, text embedding models are more optimized for distinctiveness of a given input text document using <a href="https://lilianweng.github.io/posts/2021-05-31-contrastive/">contrastive learning</a>. These embeddings can be used for many things, from finding similar encoded inputs by identifying the similarity between embeddings, and of course, by building a statistical model on top of them.</p>
+<p>Text embeddings that leverage LLMs are typically generated using a GPU in batches due to the increased amount of computation needed. Python libraries such as <a href="https://huggingface.co/">Hugging Face</a> <a href="https://huggingface.co/docs/transformers/en/index">transformers</a> and <a href="https://sbert.net/">sentence-transformers</a> can load these embeddings models. For this experiment, I used the very new <a href="https://huggingface.co/Alibaba-NLP/gte-modernbert-base">Alibaba-NLP/gte-modernbert-base</a> text embedding model that is finetuned from the <a href="https://huggingface.co/answerdotai/ModernBERT-base">ModernBERT model</a> specifically for the embedding use case for two reasons: it uses the ModernBERT architecture which is <a href="https://huggingface.co/blog/modernbert">optimized for fast inference</a>, and the base ModernBERT model is trained to be more code-aware and should be able understand JSON-nested input strings more robustly — that&rsquo;s also why I intentionally left in the indentation for nested JSON arrays as it&rsquo;s semantically meaningful and <a href="https://huggingface.co/answerdotai/ModernBERT-base/blob/main/tokenizer_config.json">explicitly tokenized</a>. <sup id="fnref:3"><a href="#fn:3" class="footnote-ref" role="doc-noteref">3</a></sup></p>
+<p>The code (<a href="https://github.com/minimaxir/imdb-embeddings/blob/main/generate_imdb_embeddings.ipynb">Jupyter Notebook</a>) — with extra considerations to avoid running out of memory on either the CPU or GPU <sup id="fnref:4"><a href="#fn:4" class="footnote-ref" role="doc-noteref">4</a></sup> — looks something like this:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-py3" data-lang="py3"><span class="line"><span class="cl"><span class="n">device</span> <span class="o">=</span> <span class="s2">&#34;cuda:0&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="n">dataloader</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">DataLoader</span><span class="p">(</span><span class="n">docs</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">32</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                         <span class="n">shuffle</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                         <span class="n">pin_memory</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                         <span class="n">pin_memory_device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="n">dataset_embeddings</span> <span class="o">=</span> <span class="p">[]</span>
+</span></span><span class="line"><span class="cl"><span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">tqdm</span><span class="p">(</span><span class="n">dataloader</span><span class="p">,</span> <span class="n">smoothing</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="n">tokenized_batch</span> <span class="o">=</span> <span class="n">tokenizer</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">        <span class="n">batch</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mi">8192</span><span class="p">,</span> <span class="n">padding</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">truncation</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">return_tensors</span><span class="o">=</span><span class="s2">&#34;pt&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+</span></span><span class="line"><span class="cl">        <span class="n">outputs</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="o">**</span><span class="n">tokenized_batch</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="n">embeddings</span> <span class="o">=</span> <span class="n">outputs</span><span class="o">.</span><span class="n">last_hidden_state</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">    <span class="n">dataset_embeddings</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">embeddings</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="n">dataset_embeddings</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span><span class="n">dataset_embeddings</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="n">dataset_embeddings</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">dataset_embeddings</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+</span></span></code></pre></div><figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/featured_hu2198234201118138658.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/featured_hu16959787436821416614.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/featured_hu18091683031325768725.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/featured.webp 1318w" src="featured.webp"/> 
+</figure>
+
+<p>I used a Spot <a href="https://cloud.google.com/blog/products/compute/introducing-g2-vms-with-nvidia-l4-gpus">L4 GPU</a> on <a href="https://cloud.google.com/">Google Cloud Platform</a> at a pricing of $0.28/hour, and it took 21 minutes to encode all 242k movie embeddings: about $0.10 total, which is surprisingly efficient.</p>
+<p>Each of these embeddings is a set of 768 numbers (768D). If the embeddings are unit normalized (the <code>F.normalize()</code> step), then calculating the dot product between embeddings will return the <a href="https://en.wikipedia.org/wiki/Cosine_similarity">cosine similarity</a> of those movies, which can then be used to identify the most similar movies. But &ldquo;similar&rdquo; is open-ended, as there are many dimensions how a movie could be considered similar.</p>
+<p>Let&rsquo;s try a few movie similarity test cases where I calculate the cosine similarity between one query movie and <em>all</em> movies, then sort by cosine similarity to find the most similar (<a href="https://github.com/minimaxir/imdb-embeddings/blob/main/movie_embeddings_similarity.ipynb">Jupyter Notebook</a>). How about Peter Jackson&rsquo;s <a href="https://www.imdb.com/title/tt0120737/">Lord of the Rings: The Fellowship of the Ring</a>? Ideally, not only would it surface the two other movies of the original trilogy, but also its prequel Hobbit trilogy.</p>
+<table>
+  <thead>
+      <tr>
+          <th>title</th>
+          <th>cossim</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0120737/">The Lord of the Rings: The Fellowship of the Ring (2001)</a></td>
+          <td>1.0</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0167261/">The Lord of the Rings: The Two Towers (2002)</a></td>
+          <td>0.922</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0167260/">The Lord of the Rings: The Return of the King (2003)</a></td>
+          <td>0.92</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt10127200/">National Geographic: Beyond the Movie - The Lord of the Rings: The Fellowship of the Ring (2001)</a></td>
+          <td>0.915</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0301246/">A Passage to Middle-earth: The Making of &lsquo;Lord of the Rings&rsquo; (2001)</a></td>
+          <td>0.915</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0299105/">Quest for the Ring (2001)</a></td>
+          <td>0.906</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0077869/">The Lord of the Rings (1978)</a></td>
+          <td>0.893</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt2310332/">The Hobbit: The Battle of the Five Armies (2014)</a></td>
+          <td>0.891</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt1170358/">The Hobbit: The Desolation of Smaug (2013)</a></td>
+          <td>0.883</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0903624/">The Hobbit: An Unexpected Journey (2012)</a></td>
+          <td>0.883</td>
+      </tr>
+  </tbody>
+</table>
+<p>Indeed, it worked and surfaced both trilogies! The other movies listed are about the original work, so having high similarity would be fair.</p>
+<p>Compare these results to the &ldquo;<a href="https://help.imdb.com/article/imdb/discover-watch/what-is-the-more-like-this-section/GPE7SPGZREKKY7YN">More like this</a>&rdquo; section on the IMDb page for the movie itself, which has the two sequels to the original Lord of the Rings and two other suggestions that I am not entirely sure are actually related.</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/lotr_related_hu17064639687803828370.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/lotr_related_hu1280619247985278162.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/lotr_related_hu7536659721388908659.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/lotr_related.webp 1354w" src="lotr_related.webp"/> 
+</figure>
+
+<p>What about more elaborate franchises, such as the <a href="https://en.wikipedia.org/wiki/Marvel_Cinematic_Universe">Marvel Cinematic Universe</a>? If you asked for movies similar to <a href="https://www.imdb.com/title/tt4154796/">Avengers: Endgame</a>, would other MCU films be the most similar?</p>
+<table>
+  <thead>
+      <tr>
+          <th>title</th>
+          <th>cossim</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt4154796/">Avengers: Endgame (2019)</a></td>
+          <td>1.0</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt4154756/">Avengers: Infinity War (2018)</a></td>
+          <td>0.909</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0848228/">The Avengers (2012)</a></td>
+          <td>0.896</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt1217616/">Endgame (2009)</a></td>
+          <td>0.894</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt4154664/">Captain Marvel (2019)</a></td>
+          <td>0.89</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt2395427/">Avengers: Age of Ultron (2015)</a></td>
+          <td>0.882</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt3498820/">Captain America: Civil War (2016)</a></td>
+          <td>0.882</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0292502/">Endgame (2001)</a></td>
+          <td>0.881</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0118661/">The Avengers (1998)</a></td>
+          <td>0.877</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt1228705/">Iron Man 2 (2010)</a></td>
+          <td>0.876</td>
+      </tr>
+  </tbody>
+</table>
+<p>The answer is yes, which isn&rsquo;t a surprise since those movies share many principals. Although, there are instances of other movies named &ldquo;Endgame&rdquo; and &ldquo;The Avengers&rdquo; which are completely unrelated to Marvel and therefore implies that the similarities may be fixated on the names.</p>
+<p>What about movies of a smaller franchise but a specific domain, such as Disney&rsquo;s <a href="https://www.imdb.com/title/tt2294629/">Frozen</a> that only has one sequel? Would it surface other 3D animated movies by <a href="https://en.wikipedia.org/wiki/Walt_Disney_Animation_Studios">Walt Disney Animation Studios</a>, or something else?</p>
+<table>
+  <thead>
+      <tr>
+          <th>title</th>
+          <th>cossim</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt2294629/">Frozen (2013)</a></td>
+          <td>1.0</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt4520988/">Frozen II (2019)</a></td>
+          <td>0.93</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt1323045/">Frozen (2010)</a></td>
+          <td>0.92</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt1611845/">Frozen (2010)</a> [a different one]</td>
+          <td>0.917</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0125279/">Frozen (1996)</a></td>
+          <td>0.909</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt0376606/">Frozen (2005)</a></td>
+          <td>0.9</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt2363439/">The Frozen (2012)</a></td>
+          <td>0.898</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt4007494/">The Story of Frozen: Making a Disney Animated Classic (2014)</a></td>
+          <td>0.894</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt1071798/">Frozen (2007)</a></td>
+          <td>0.889</td>
+      </tr>
+      <tr>
+          <td><a href="https://www.imdb.com/title/tt4150316/">Frozen in Time (2014)</a></td>
+          <td>0.888</td>
+      </tr>
+  </tbody>
+</table>
+<p>&hellip;okay, it&rsquo;s definitely fixating on the name. Let&rsquo;s try a different approach to see if we can find more meaningful patterns in these embeddings.</p>
+<p>In order to visualize the embeddings, we can project them to a lower dimensionality with a dimensionality reduction algorithm such as <a href="https://en.wikipedia.org/wiki/Principal_component_analysis">PCA</a> or <a href="https://umap-learn.readthedocs.io/en/latest/">UMAP</a>: UMAP is preferred as it can simultaneously reorganize the data into more meaningful clusters. UMAP&rsquo;s <a href="https://umap-learn.readthedocs.io/en/latest/how_umap_works.html">construction of a neighborhood graph</a>, in theory, can allow the reduction to refine the similarities by leveraging many possible connections and hopefully avoid fixating on the movie name. However, with this amount of input data and the relatively high initial 768D vector size, the computation cost of UMAP is a concern as both factors each cause the UMAP training time to scale exponentially. Fortunately, NVIDIA&rsquo;s <a href="https://github.com/rapidsai/cuml">cuML library</a> recently <a href="https://github.com/rapidsai/cuml/releases/tag/v25.04.00">updated</a> and now you can run UMAP with very high amounts of data on a GPU at a very high number of epochs to ensure the reduction fully converges, so I did just that (<a href="https://github.com/minimaxir/imdb-embeddings/blob/main/imdb_embeddings_umap_to_2D.ipynb">Jupyter Notebook</a>). What patterns can we find? Let&rsquo;s try plotting the reduced points, colored by their user rating.</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/imdb_umap_rating_hu1492915703005840201.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/imdb_umap_rating_hu6629992580247465243.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/imdb_umap_rating_hu16082555486048612855.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/imdb_umap_rating.webp 1200w" src="imdb_umap_rating.webp"/> 
+</figure>
+
+<p>So there&rsquo;s a few things going on here. Indeed, most of the points are high-rating green as evident in the source data. But the points and ratings aren&rsquo;t <em>random</em> and there are trends. In the center giga cluster, there are soft subclusters of movies at high ratings and low ratings. Smaller discrete clusters did indeed form, but what is the deal with that extremely isolated cluster at the top? After investigation, that cluster only has movies released in 2008, which is another feature I should have considered when defining movie similarity.</p>
+<p>As a sanity check, I faceted out the points by movie release year to better visualize where these clusters are forming:</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/imdb_umap_rating_year_hu7116356964405708394.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/imdb_umap_rating_year_hu8146703284341815042.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/imdb_umap_rating_year_hu846190792878412761.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/imdb_umap_rating_year.webp 1200w" src="imdb_umap_rating_year.webp"/> 
+</figure>
+
+<p>This shows that even the clusters movies have their values spread, but I unintentionally visualized how <a href="https://arize.com/docs/ax/machine-learning/computer-vision/how-to-cv/embedding-drift">embedding drift</a> changes over time. 2024 is also a bizarrely-clustered year: I have no idea why those two years specifically are weird in movies.</p>
+<p>The UMAP approach is more for fun, since it&rsquo;s better for the downstream model building to use the raw 768D vector and have it learn the features from that. At the least, there&rsquo;s <em>some</em> semantic signal preserved in these embeddings, which makes me optimistic that these embeddings alone can be used to train a viable movie rating predictor.</p>
+<h2 id="predicting-average-imdb-movie-scores">Predicting Average IMDb Movie Scores</h2>
+<p>So, we now have hundreds of thousands of 768D embeddings. How do we get them to predict movie ratings? What many don&rsquo;t know is that all methods of traditional statistical modeling also work with embeddings — assumptions such as feature independence are invalid so the results aren&rsquo;t explainable, but you can still get a valid predictive model.</p>
+<p>First, we will shuffle and split the data set into a training set and a test set: for the test set, I chose 20,000 movies (roughly 10% of the data) which is more than enough for stable results. To decide the best model, we will be using the model that minimizes the <a href="https://en.wikipedia.org/wiki/Mean_squared_error">mean squared error</a> (MSE) of the test set, which is a standard approach to solving regression problems that predict a single numeric value.</p>
+<p>Here are three approaches for using LLMs for solving non-next-token-prediction tasks.</p>
+<h3 id="method-1-traditional-modeling-w-gpu-acceleration">Method #1: Traditional Modeling (w/ GPU Acceleration!)</h3>
+<p>You can still fit a linear regression on top of the embeddings even if feature coefficients are completely useless and it serves as a decent baseline (<a href="https://github.com/minimaxir/imdb-embeddings/blob/main/cuml_grid_search.ipynb">Jupyter Notebook</a>). The absolute laziest &ldquo;model&rdquo; where we just use the mean of the training set for every prediction results in a test MSE of <strong>1.637</strong>, but performing a simple linear regression on top of the 768D instead results in a more reasonable test MSE of <strong>1.187</strong>. We should be able to beat that handily with a more advanced model.</p>
+<p>Data scientists familiar with scikit-learn know there&rsquo;s a rabbit hole of model options, but most of them are CPU-bound and single-threaded and would take considerable amount of time on a dataset of this size. That&rsquo;s where cuML—the same library I used to create the UMAP projection—comes in, as cuML has <a href="https://docs.rapids.ai/api/cuml/stable/api/#regression-and-classification">GPU-native implementations</a> of most popular scikit-learn models with a similar API. This notably includes <a href="https://en.wikipedia.org/wiki/Support_vector_machine">support vector machines</a>, which play especially nice with embeddings. And because we have the extra compute, we can also perform a brute force hyperparameter <a href="https://www.dremio.com/wiki/grid-search/">grid search</a> to find the best parameters for fitting each model.</p>
+<p>Here&rsquo;s the results of MSE on the test dataset for a few of these new model types, with the hyperparameter combination for each model type that best minimizes MSE:</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/model_comparison_base_hu15554893264316830584.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/model_comparison_base_hu17868875622434026799.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/model_comparison_base_hu678178325412567485.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/model_comparison_base.png 1200w" src="model_comparison_base.png"/> 
+</figure>
+
+<p>The winner is the Support Vector Machine, with a test MSE of <strong>1.087</strong>! This is a good start for a simple approach that handily beats the linear regression baseline, and it also beats the model training from the Redditor&rsquo;s original notebook which had a test MSE of 1.096 <sup id="fnref:5"><a href="#fn:5" class="footnote-ref" role="doc-noteref">5</a></sup>. In all cases, the train set MSE was close to the test set MSE, which means the models did not overfit either.</p>
+<h3 id="method-2-neural-network-on-top-of-embeddings">Method #2: Neural Network on top of Embeddings</h3>
+<p>Since we&rsquo;re already dealing with AI models and already have PyTorch installed to generate the embeddings, we might as well try the traditional approach of training a <a href="https://en.wikipedia.org/wiki/Multilayer_perceptron">multilayer perceptron</a> (MLP) neural network on top of the embeddings (<a href="https://github.com/minimaxir/imdb-embeddings/blob/main/pytorch_model_train_mlp.ipynb">Jupyter Notebook</a>). This workflow sounds much more complicated than just fitting a traditional model above, but PyTorch makes MLP construction straightforward, and Hugging Face&rsquo;s <a href="https://huggingface.co/docs/transformers/en/main_classes/trainer">Trainer class</a> incorporates best model training practices by default, although its <code>compute_loss</code> function has to be tweaked to minimize MSE specifically.</p>
+<p>The PyTorch model, using a loop to set up the MLP blocks, looks something like this:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-py3" data-lang="py3"><span class="line"><span class="cl"><span class="k">class</span> <span class="nc">RatingsModel</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">linear_dims</span><span class="o">=</span><span class="mi">256</span><span class="p">,</span> <span class="n">num_layers</span><span class="o">=</span><span class="mi">6</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">dims</span> <span class="o">=</span> <span class="p">[</span><span class="mi">768</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="n">linear_dims</span><span class="p">]</span> <span class="o">*</span> <span class="n">num_layers</span>
+</span></span><span class="line"><span class="cl">        <span class="bp">self</span><span class="o">.</span><span class="n">mlp</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">ModuleList</span><span class="p">([</span>
+</span></span><span class="line"><span class="cl">            <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">                <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">dims</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">dims</span><span class="p">[</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">]),</span>
+</span></span><span class="line"><span class="cl">                <span class="n">nn</span><span class="o">.</span><span class="n">GELU</span><span class="p">(),</span>
+</span></span><span class="line"><span class="cl">                <span class="n">nn</span><span class="o">.</span><span class="n">BatchNorm1d</span><span class="p">(</span><span class="n">dims</span><span class="p">[</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">]),</span>
+</span></span><span class="line"><span class="cl">                <span class="n">nn</span><span class="o">.</span><span class="n">Dropout</span><span class="p">(</span><span class="mf">0.6</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">            <span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">dims</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">])</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="bp">self</span><span class="o">.</span><span class="n">output</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">dims</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">targets</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">        <span class="k">for</span> <span class="n">layer</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">mlp</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="n">x</span> <span class="o">=</span> <span class="n">layer</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">output</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze</span><span class="p">()</span>  <span class="c1"># return 1D output if batched inputs</span>
+</span></span></code></pre></div><p>This MLP is 529k parameters total: large for a MLP, but given the 222k row input dataset, it&rsquo;s not egregiously so.</p>
+<p>The real difficulty with this MLP approach is that it&rsquo;s <em>too effective</em>: even with less than 1 million parameters, the model will extremely overfit and converge to 0.00 train MSE quickly, while the test set MSE explodes. That&rsquo;s why <code>Dropout</code> is set to the atypically high probability of <code>0.6</code>.</p>
+<p>Fortunately, MLPs are fast to train: training for 600 epochs (total passes through the full training dataset) took about 17 minutes on the GPU. Here&rsquo;s the training results:</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/training_mlp_hu6953647346531955063.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/training_mlp_hu140101585897007593.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/training_mlp_hu2532838958893616187.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/training_mlp.png 1200w" src="training_mlp.png"/> 
+</figure>
+
+<p>The lowest logged test MSE was <strong>1.074</strong>: a slight improvement over the Support Vector Machine approach.</p>
+<h3 id="method-3-just-train-a-llm-from-scratch-dammit">Method #3: Just Train a LLM From Scratch Dammit</h3>
+<p>There is a possibility that using a pretrained embedding model that was trained on the entire internet could intrinsically contain relevant signal about popular movies—such as movies winning awards which would imply a high IMDb rating—and that knowledge could leak into the test set and provide misleading results. This may not be a significant issue in practice since it&rsquo;s such a small part of the <code>gte-modernbert-base</code> model which is too small to memorize exact information.</p>
+<p>For the sake of comparison, let&rsquo;s try training a LLM from scratch on top of the raw movie JSON representations to process this data to see if we can get better results without the possibility of leakage (<a href="https://github.com/minimaxir/imdb-embeddings/blob/main/pytorch_model_train_llm.ipynb">Jupyter Notebook</a>). I was specifically avoiding this approach because the compute required to train an LLM is much, much higher than a SVM or MLP model and generally leveraging a pretrained model gives better results. In this case, since we don&rsquo;t need a LLM that has all the knowledge of human existence, we can train a much smaller model that <em>only</em> knows how to work with the movie JSON representations and can figure out relationships between actors and whether titles are sequels itself. Hugging Face transformers makes this workflow surprisingly straightforward by not only having functionality to train your own custom tokenizer (in this case, from 50k vocab to 5k vocab) that encodes the data more efficiently, but also allowing the construction a ModernBERT model with any number of layers and units. I opted for a 5M parameter LLM (SLM?), albeit with less dropout since high dropout causes learning issues for LLMs specifically.</p>
+<p>The actual PyTorch model code is surprisingly more concise than the MLP approach:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-py3" data-lang="py3"><span class="line"><span class="cl"><span class="k">class</span> <span class="nc">RatingsModel</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">        <span class="bp">self</span><span class="o">.</span><span class="n">transformer_model</span> <span class="o">=</span> <span class="n">model</span>
+</span></span><span class="line"><span class="cl">        <span class="bp">self</span><span class="o">.</span><span class="n">output</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">hidden_size</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_ids</span><span class="p">,</span> <span class="n">attention_mask</span><span class="p">,</span> <span class="n">targets</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">transformer_model</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">            <span class="n">input_ids</span><span class="o">=</span><span class="n">input_ids</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">            <span class="n">attention_mask</span><span class="o">=</span><span class="n">attention_mask</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">            <span class="n">output_hidden_states</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">        <span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="n">x</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">last_hidden_state</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>  <span class="c1"># the &#34;[CLS] vector&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">output</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze</span><span class="p">()</span>  <span class="c1"># return 1D output if batched inputs</span>
+</span></span></code></pre></div><p>Essentially, the model trains its own &ldquo;text embedding,&rdquo; although in this case instead of an embedding optimized for textual similarity, the embedding is just a representation that can easily be translated into a numeric rating.</p>
+<p>Because the computation needed for training a LLM from scratch is much higher, I only trained the model for 10 epochs, which was still twice as slow than the 600 epochs for the MLP approach. Given that, the results are surprising:</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/training_llm_hu1134931058243592166.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/training_llm_hu1501183777955948774.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/training_llm_hu15284168120613731154.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/training_llm.png 1200w" src="training_llm.png"/> 
+</figure>
+
+<p>The LLM approach did much better than my previous attempts with a new lowest test MSE of <strong>1.026</strong>, with only 4 passes through the data! And then it definitely overfit. I tried other smaller configurations for the LLM to avoid the overfitting, but none of them ever hit a test MSE that low.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>Let&rsquo;s look at the model comparison again, this time adding the results from training a MLP and training a LLM from scratch:</p>
+<figure>
+
+    
+
+    <img loading="lazy" srcset="https://minimaxir.com/2025/06/movie-embeddings/model_comparison_all_hu335132529004452215.webp 320w,https://minimaxir.com/2025/06/movie-embeddings/model_comparison_all_hu15612616545449066274.webp 768w,https://minimaxir.com/2025/06/movie-embeddings/model_comparison_all_hu6896386428923644073.webp 1024w,https://minimaxir.com/2025/06/movie-embeddings/model_comparison_all.png 1200w" src="model_comparison_all.png"/> 
+</figure>
+
+<p>Coming into this post, I&rsquo;m genuinely thought that training the MLP on top of embeddings would have been the winner given the base embedding model&rsquo;s knowledge of everything, but maybe there&rsquo;s something to just YOLOing and feeding raw JSON input data to a completely new LLM. More research and development is needed.</p>
+<p>The differences in model performance from these varying approaches aren&rsquo;t dramatic, but some iteration is indeed interesting and it was a long shot anyways given the scarce amount of metadata. The fact that building a model off of text embeddings only didn&rsquo;t result in a perfect model doesn&rsquo;t mean this approach was a waste of time. The embedding and modeling pipelines I have constructed in the process of trying to solve this problem have already provided significant dividends on easier problems, such as identifying the efficiency of <a href="https://minimaxir.com/2025/02/embeddings-parquet/">storing embeddings in Parquet and manipulating them with Polars</a>.</p>
+<p>It&rsquo;s impossible and pointless to pinpoint the exact reason the original Reddit poster got rejected: it could have been the neural network approach or even something out of their control such as the original company actually stopping hiring and being too disorganized to tell the candidate. To be clear, if I myself were to apply for a data science role, I wouldn&rsquo;t use the techniques in this blog post (that UMAP data visualization would get me instantly rejected!) and do more traditional EDA and non-neural-network modeling to showcase my data science knowledge to the hiring manager. But for my professional work, I will definitely try starting any modeling exploration with an embeddings-based approach wherever possible: at the absolute worst, it&rsquo;s a very strong baseline that will be hard to beat.</p>
+<p><em>All of the Jupyter Notebooks and data visualization code for this blog post is available open-source in <a href="https://github.com/minimaxir/imdb-embeddings/">this GitHub repository</a>.</em></p>
+<div class="footnotes" role="doc-endnotes">
+<hr>
+<ol>
+<li id="fn:1">
+<p>I am not a fan of using GBT variable importance as a decision-making metric: variable importance does not tell you magnitude or <em>direction</em> of the feature in the real world, but it does help identify which features can be pruned for model development iteration.&#160;<a href="#fnref:1" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+<li id="fn:2">
+<p>To get a sense on how old they are, they are only available as <a href="https://en.wikipedia.org/wiki/Tab-separated_values">TSV files</a>, which is a data format so old and prone to errors that many data libraries have dropped explicit support for it. Amazon, please release the datasets as CSV or Parquet files instead!&#160;<a href="#fnref:2" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+<li id="fn:3">
+<p>Two other useful features of <code>gte-modernbert-base</code> but not strictly relevant to these movie embeddings are a) its a cased model so it can identify meaning from upper-case text and b) it does not require a prefix such as <code>search_query</code> and <code>search_document</code> as <a href="https://huggingface.co/nomic-ai/nomic-embed-text-v1.5">nomic-embed-text-v1.5 does</a> to guide its results, which is an annoying requirement for those models.&#160;<a href="#fnref:3" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+<li id="fn:4">
+<p>The trick here is the <code>detach()</code> function for the computed embeddings, otherwise the GPU doesn&rsquo;t free up the memory once moved back to the CPU. I may or may not have discovered that the hard way.&#160;<a href="#fnref:4" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+<li id="fn:5">
+<p>As noted earlier, minimizing MSE isn&rsquo;t a competition, but the comparison on roughly the same dataset is good for a sanity check.&#160;<a href="#fnref:5" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

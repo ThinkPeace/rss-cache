@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Porting MiniJinja to Go With an Agent | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Porting MiniJinja to Go With an Agent</h1>
+        <div class="meta">Armin Ronacher&#x27;s Thoughts and Writings 2026-01-14T00:00:00Z</div>
+        <div class="links">
+          <a href="https://lucumr.pocoo.org/2026/1/14/minijinja-go-port/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/lucumr-pocoo-org/lucumr-pocoo-org-aa4bd665a4e876bf.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Turns out you can just port things now. I already attempted this experiment in the summer, but it turned out to be a bit too much for what I had time for. However, things have advanced since. Yesterday I ported MiniJinja (a Rust Jinja2 template engine) to native Go, and I used an agent to do pretty much all of the work. In fact, I barely did anything beyond…</div>
+        <div class="content">
+          <p>Turns out you can just port things now.  I already attempted this experiment in
+the summer, but it turned out to be a bit too much for what I had time for.
+However, things have advanced since.  Yesterday I ported
+<a href="https://github.com/mitsuhiko/minijinja">MiniJinja</a> (a Rust Jinja2 template
+engine) to native Go, and I used an agent to do pretty much all of the work.  In
+fact, I barely did anything beyond giving some high-level guidance on how I
+thought it could be accomplished.</p>
+<p>In total I probably spent around 45 minutes actively with it.  It worked for
+around 3 hours while I was watching, then another 7 hours alone.  This post is a
+recollection of what happened and what I learned from it.</p>
+<p>All prompting was done by voice using <a href="https://buildwithpi.ai/">pi</a>, starting
+with Opus 4.5 and switching to GPT-5.2 Codex for the long tail of test fixing.</p>
+<ul>
+<li><a href="https://github.com/mitsuhiko/minijinja/pull/854">PR #854</a></li>
+<li><a href="https://shittycodingagent.ai/session/?29f75b708237ceead8b1c8cb55ea2305">Pi session transcript</a></li>
+<li><a href="https://www.youtube.com/watch?v=rqzY8Adxxns">Narrated video of the porting session</a></li>
+</ul>
+<h2>What is MiniJinja</h2>
+<p>MiniJinja is a re-implementation of Jinja2 for Rust. I originally wrote it
+because I wanted to do a infrastructure automation project in Rust and Jinja was
+popular for that.  The original project didn&#8217;t go anywhere, but MiniJinja itself
+continued being useful for both me and other users.</p>
+<p>The way MiniJinja is tested is with snapshot tests: inputs and expected outputs,
+using <a href="https://insta.rs/">insta</a> to verify they match.  These snapshot tests were
+what I wanted to use to validate the Go port.</p>
+<h2>Test-Driven Porting</h2>
+<p>My initial prompt asked the agent to figure out how to validate the port.
+Through that conversation, the agent and I aligned on a path: reuse the existing
+Rust snapshot tests and port incrementally (lexer -&gt; parser -&gt; runtime).</p>
+<p>This meant the agent built Go-side tooling to:</p>
+<ul>
+<li>Parse Rust&#8217;s test input files (which embed settings as JSON headers).</li>
+<li>Parse the reference insta <code>.snap</code> snapshots and compare output.</li>
+<li>Maintain a skip-list to temporarily opt out of failing tests.</li>
+</ul>
+<p>This resulted in a pretty good harness with a tight feedback loop.  The agent had
+a clear goal (make everything pass) and a progression (lexer -&gt; parser -&gt;
+runtime).  The tight feedback loop mattered particularly at the end where it was
+about getting details right.  Every missing behavior had one or more failing
+snapshots.</p>
+<h2>Branching in Pi</h2>
+<p>I used Pi&#8217;s branching feature to structure the session into phases.  I rewound
+back to earlier parts of the session and used the branch switch feature to
+inform the agent automatically what it had already done.  This is similar to
+compaction, but Pi shows me what it puts into the context.  When Pi switches
+branches it does two things:</p>
+<ol>
+<li>It stays in the same session so I can navigate around, but it makes a new
+branch off an earlier message.</li>
+<li>When switching, it adds a summary of what it did as a priming message into
+where it branched off.  I found this quite helpful to avoid the agent doing
+vision quests from scratch to figure out how far it had already gotten.</li>
+</ol>
+<p>Without switching branches, I would probably just make new sessions and have
+more plan files lying around or use something like Amp&#8217;s handoff feature which
+also allows the agent to consult earlier conversations if it needs more
+information.</p>
+<h2>First Signs of Divergence</h2>
+<p>What was interesting is that the agent went from literal porting to behavioral
+porting quite quickly.  I didn&#8217;t steer it away from this as long as the behavior
+aligned.  I let it do this for a few reasons.  First, the code base isn&#8217;t that
+large, so I felt I could make adjustments at the end if needed.  Letting the
+agent continue with what was already working felt like the right strategy.
+Second, it was aligning to idiomatic Go much better this way.</p>
+<p>For instance, on the runtime it implemented a tree-walking interpreter (not a
+bytecode interpreter like Rust) and it decided to use Go&#8217;s reflection for the
+value type.  I didn&#8217;t tell it to do either of these things, but they made more
+sense than replicating my Rust interpreter design, which was partly motivated by
+not having a garbage collector or runtime type information.</p>
+<h2>Where I Had to Push Back</h2>
+<p>On the other hand, the agent made some changes while making tests pass that I
+disagreed with.  It completely gave up on all the &#8220;must fail&#8221; tests because the
+error messages were impossible to replicate perfectly given the runtime
+differences.  So I had to steer it towards fuzzy matching instead.</p>
+<p>It also wanted to regress behavior I wanted to retain (e.g., exact HTML escaping
+semantics, or that <code>range</code> must return an iterator).  I think if I hadn&#8217;t steered
+it there, it might not have made it to completion without going down problematic
+paths, or I would have lost confidence in the result.</p>
+<h2>Grinding to Full Coverage</h2>
+<p>Once the major semantic mismatches were fixed, the remaining work was filling
+in all missing pieces: missing filters and test functions, loop extras, macros,
+call blocks, etc.  Since I wanted to go to bed, I switched to Codex 5.2 and
+queued up a few &#8220;continue making all tests pass if they are not passing yet&#8221;
+prompts, then let it work through compaction.  I felt confident enough that the
+agent could make the rest of the tests pass without guidance once it had the
+basics covered.</p>
+<p>This phase ran without supervision overnight.</p>
+<h2>Final Cleanup</h2>
+<p>After functional convergence, I asked the agent to document internal functions
+and reorganize (like moving filters to a separate file).  I also asked it to
+document all functions and filters like in the Rust code base.  This was also
+when I set up CI, release processes, and talked through what was created to come
+up with some finalizing touches before merging.</p>
+<h2>Parting Thoughts</h2>
+<p>There are a few things I find interesting here.</p>
+<p>First: these types of ports are possible now.  I know porting was already
+possible for many months, but it required much more attention.  This changes some
+dynamics.  I feel less like technology choices are constrained by ecosystem lock-in.
+Sure, porting NumPy to Go would be a more involved undertaking, and getting it
+competitive even more so (years of optimizations in there).  But still, it feels
+like many more libraries can be used now.</p>
+<p>Second: for me, the value is shifting from the code to the tests and
+documentation.  A good test suite might actually be worth more than the code.
+That said, this isn&#8217;t an argument for keeping tests secret &#8212; generating tests
+with good coverage is also getting easier.  However, for keeping code bases in
+different languages in sync, you need to agree on shared tests, otherwise
+divergence is inevitable.</p>
+<p>Lastly, there&#8217;s the social dynamic.  Once, having people port your code to other
+languages was something to take pride in.  It was a sign of accomplishment &#8212; a
+project was &#8220;cool enough&#8221; that someone put time into making it available
+elsewhere.  With agents, it doesn&#8217;t invoke the same feelings.  Will McGugan
+<a href="https://bsky.app/profile/willmcgugan.bsky.social/post/3mccn3l4qdk26">also called out this
+change</a>.</p>
+<h2>Session Stats</h2>
+<p>Lastly, some boring stats for the main session:</p>
+<ul>
+<li>Agent run duration: <del>10 hours (</del>3 hours supervised)</li>
+<li>Active human time: ~45 minutes</li>
+<li>Total messages: 2,698</li>
+<li>My prompts: 34</li>
+<li>Tool calls: 1,386</li>
+<li>Raw API token cost: $60</li>
+<li>Total tokens: 2.2 million</li>
+<li>Models: <code>claude-opus-4-5</code> and <code>gpt-5.2-codex</code> for the unattended overnight run</li>
+</ul>
+<p>This did not count the adding of doc strings and smaller fixups.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

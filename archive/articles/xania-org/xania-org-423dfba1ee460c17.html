@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clever memory tricks | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Clever memory tricks</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-22T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/22-memory-cunningness?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-423dfba1ee460c17.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">We learn that compilers have tricks to access memory efficiently</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p>After exploring SIMD vectorisation over the last <html:a href="/202512/20-simd-city">couple</html:a> of <html:a href="/202512/21-vectorising-floats">days</html:a>, let's shift gears to look at another class of compiler cleverness: memory access patterns. String comparisons seem straightforward enough - check the length, compare the bytes, done. But watch what Clang does when comparing against compile-time constants, and you'll see some rather clever tricks involving overlapping memory reads and bitwise operations. What looks like it should be a call to <html:code>memcmp</html:code> becomes a handful of inline instructions that exploit the fact that the comparison value is known at compile time<html:sup id="fnref:gcc"><html:a class="footnote-ref" href="#fn:gcc">1</html:a></html:sup>.</html:p>
+
+<html:p>I've set up nine functions that each compare a <html:code>std::string_view</html:code> against a constant string of increasing length, from one to nine characters. This gives us a chance to see how the compiler's approach changes based on the length of the comparison.</html:p>
+
+<html:p>As we learned when looking at <html:a href="/202512/16-calling-conventions">calling conventions</html:a>, a <html:code>std::string_view</html:code> is a pointer and a length, passed in two registers on x86 Linux. Each of these functions receives a <html:code>std::size_t</html:code> length in <html:code>rdi</html:code> and a <html:code>const char *</html:code> pointer in <html:code>rsi</html:code><html:sup id="fnref:yes"><html:a class="footnote-ref" href="#fn:yes">2</html:a></html:sup>. One might reasonably expect a call to <html:code>memcmp</html:code>, but the compiler has both <html:a href="/202512/17-inlining-the-ultimate-optimisation">inlined</html:a> and specialised the comparison for each constant string. Let's take a look at some of these comparison functions, starting with <html:code>t1</html:code>:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">t1:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rdi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">1</html:span><html:span class="w">                </html:span><html:span class="c1">; is length 1?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.LBB0_1</html:span><html:span class="w">               </html:span><html:span class="c1">; if not 1, goto "return false"</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">byte</html:span><html:span class="w"> </html:span><html:span class="no">ptr</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rsi</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="mi">65</html:span><html:span class="w">    </html:span><html:span class="c1">; is the byte 65 ('A')?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">sete</html:span><html:span class="w"> </html:span><html:span class="no">al</html:span><html:span class="w">                   </html:span><html:span class="c1">; set result to 0 or 1 accordingly</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ret</html:span><html:span class="w">                       </html:span><html:span class="c1">; return</html:span>
+<html:span class="nl">.LBB0_1:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">xor</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="w">              </html:span><html:span class="c1">; set result to false</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ret</html:span><html:span class="w">                       </html:span><html:span class="c1">; return</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>We see the length is checked first, and if it's not 1, then we return. Otherwise, we check the one character to see if it's <html:code>A</html:code> or not, and then set the return value accordingly. The compiler has used a conditional set <html:code>sete</html:code> instruction to avoid a second branch.</html:p>
+
+<html:p>The pattern holds for power-of-two sizes: Looking at <html:code>t2</html:code>, <html:code>t4</html:code> and <html:code>t8</html:code> we see that the compiler does the same length check, and then cleverly realises it can compare a 2, 4 or 8-byte value directly with a constant of either <html:code>AB</html:code>, <html:code>ABCD</html:code> or <html:code>ABCDEFGH</html:code> (mouse over the constants in the view to see Compiler Explorer interpret them as ASCII).</html:p>
+
+<html:p>Things get more interesting with the 7 character case, <html:code>t7</html:code>:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">t7:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rdi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">7</html:span><html:span class="w">                    </html:span><html:span class="c1">; is length 7?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.LBB6_1</html:span><html:span class="w">                   </html:span><html:span class="c1">; if not, goto "return false"</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">1145258561</html:span><html:span class="w">           </html:span><html:span class="c1">; set eax to "ABCD"</html:span>
+<html:span class="w">  </html:span><html:span class="nf">xor</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">dword</html:span><html:span class="w"> </html:span><html:span class="no">ptr</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rsi</html:span><html:span class="p">]</html:span><html:span class="w">      </html:span><html:span class="c1">; eax ^= first four chars of sv</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">ecx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">1195787588</html:span><html:span class="w">           </html:span><html:span class="c1">; set ecx to "DEFG"</html:span>
+<html:span class="w">  </html:span><html:span class="nf">xor</html:span><html:span class="w"> </html:span><html:span class="no">ecx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">dword</html:span><html:span class="w"> </html:span><html:span class="no">ptr</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rsi</html:span><html:span class="w"> </html:span><html:span class="err">+</html:span><html:span class="w"> </html:span><html:span class="mi">3</html:span><html:span class="p">]</html:span><html:span class="w">  </html:span><html:span class="c1">; ecx ^= chars 3,4,5,6 of sv</html:span>
+<html:span class="w">  </html:span><html:span class="nf">or</html:span><html:span class="w"> </html:span><html:span class="no">ecx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="w">                   </html:span><html:span class="c1">; ecx |= eax</html:span>
+<html:span class="w">  </html:span><html:span class="nf">sete</html:span><html:span class="w"> </html:span><html:span class="no">al</html:span><html:span class="w">                       </html:span><html:span class="c1">; result = 1 if "zero flag" else 0</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ret</html:span><html:span class="w">                           </html:span><html:span class="c1">; return</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>The check for the length is the same as the other cases, but once we know we're going to be comparing 7 bytes, some cunning tricks come into play. First, the compiler isn't directly comparing, as you might expect: It uses the fact that XORing identical values will result in a zero. Secondly, it has used two <html:em>overlapping</html:em> reads - reading bytes 0,1,2,3 and then 3,4,5,6. The redundant read of byte 3 doesn't matter, but doing two 32-bit reads is cheaper than having to read individual bytes.</html:p>
+
+<html:p>Once the two XORs have happened, we have "zero only if first four bytes match ABCD" in <html:code>eax</html:code> and "zero only if bytes 3,4,5,6 match DEFG" in <html:code>ecx</html:code>. Simply logical-ORing the two together gives us zero if and only if both were zero - only if all bytes matched. Then a simple <html:code>sete</html:code> turns the "zero flag" into either 0 or 1 for the <html:code>true</html:code>/<html:code>false</html:code> return value needed. Cute!</html:p>
+
+<html:p>This optimisation works well on x86 as reading unaligned 32-bit values is free. You can play around with the compiler choice and see what neat tricks are conjured up by different compilers and architecture choices.</html:p>
+
+<html:p>And that's what makes modern compilers remarkable - all this cleverness is conjured up from a simple <html:code>sv == "ABCDEFG"sv</html:code>. The overlapping reads, the XOR operations, the branchless conditionals - they're all applied automatically. Your job is to write clear code; the compiler's job is to make it fast. Leave it to do its thing, and try not to get in its way!</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/kXmqwJoaapg">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 22 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/21-vectorising-floats">When SIMD Fails: Floating Point Associativity</html:a> | <html:a href="/202512/23-switching-it-up">Switching it up a bit</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:gcc">
+<html:p>GCC generates more obvious, but slightly worse code, with some unnecessary logic operations. I <html:a href="https://gcc.gnu.org/bugzilla/show_bug.cgi?id=122315">filed a bug</html:a> to investigate. <html:a class="footnote-backref" href="#fnref:gcc" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:yes">
+<html:p>libstdc++'s <html:code>std::string_view</html:code> is defined as <html:a href="https://gcc.gnu.org/onlinedocs/gcc-15.2.0/libstdc++/api/a00227_source.html#l00102">length then pointer</html:a>, which is why we see length in <html:code>rdi</html:code> before pointer in <html:code>rsi</html:code>. <html:a class="footnote-backref" href="#fnref:yes" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

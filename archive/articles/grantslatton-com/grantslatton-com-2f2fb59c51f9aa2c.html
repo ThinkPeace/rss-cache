@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LLM Memory | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>LLM Memory</h1>
+        <div class="meta">Grant Slatton&#x27;s Blog 2025-05-19T15:07:00Z</div>
+        <div class="links">
+          <a href="https://grantslatton.com/llm-memory">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/grantslatton-com/grantslatton-com-2f2fb59c51f9aa2c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Some thoughts on implementations</div>
+        <div class="content">
+          <h1>LLM Memory</h1>
+<p>I've been thinking about LLM memory since GPT3 came out.</p>
+<p>Back then, my LLM side project was story generation (i.e. fiction). Context windows for LLMs were tiny back then: 4K tokens, input + output. So just a few pages of text. How to write a novella if your entire knowledge of the text is only a few pages, as if you were an amnesiac author?</p>
+<p>Suppose you're writing a scene. Where does the scene take place? Your description must match any previous description of the same place and be consistent with the setting at a whole.</p>
+<p>Who's in the scene? What's the emotional state of the characters given recent events? What's some sample dialogue for those characters so you know their speaking style? What are their motivations?</p>
+<p>You start to enumerate these things you need to know just to write the simplest scenes, and you pretty quickly blow your 4K token budget. This doesn't even get into the complexity of indexing and retrieving the relevant information.</p>
+<p>How do you store a character's hair color? What if they dye their hair in the middle of the story? What if they have a flashback to when they were a blonde baby, but it darkened with age?</p>
+<p>How do you represent that the character's new acquaintance can see their current hair color, but has no way of knowing they were a blonde baby?</p>
+<p>The more you think about these questions, the more you can find edge cases where any particular memory system is limited.</p>
+<p>This post contains a wandering train of thought through some of these systems.</p>
+<h2>Reference frames</h2>
+<p><em>All knowledge has an explicit or implicit reference frame for which it is valid.</em></p>
+<p>This observation didn't come close to first in this region of thought, but I think it's among the most important, so I'm putting it first in this document.</p>
+<p>You might think "Berlin is the capital of Germany" is a trivial piece of knowledge you could capture in a key-value store type repository. <code>capital(germany) = berlin</code>, or <code>country(berlin) = germany</code>.</p>
+<p>But what about from 1945-1990? The capital of West Germany was Bonn. And before German unification, the question is nonsensical, though Berlin was the capital of Prussia.</p>
+<p>But the capital of Germany is Flensburg in the sci-fi alternate history <a href="https://en.wikipedia.org/wiki/Colonization_%28series%29">Colonization</a> series. But only for some parts of the story, before Flensburg, it's still Berlin.</p>
+<p>If you wrote a naive knowledge-ingestion pipeline, and I fed that sci-fi book to it, it would naively create a key-value entry for the capital of Germany being Flensburg. And another one for Berlin.</p>
+<p>Temporal reference frames are the most common, i.e. facts associated with some span of time. Bonn is the capital of West Germany from 1945 to 1990. And then works of fiction essentially create alternate timelines.</p>
+<p>The other huge on is spatial reference frames. Animal brains like ours are evolved to store knowledge spatially.</p>
+<p>It's interesting that you don't have one global spatial reference frame. Like the floorplan of your house is a reference frame, but that reference frame is mostly disconnected from the reference frame of your neighborhood, and that one might be disconnected from the one of your city.</p>
+<p>You can kind of view temporal reference frames a sort of 1D spatial reference frame.</p>
+<p>You can also spatialize more abstract things, too. Imagine placing foods onto a 2D grid with saltiness on one axis and spiciness on the other axis.</p>
+<p>So there is probably a memory system out there where everything is reference frames, meta-reference frames (where the embedded objects are themselves reference frames), etc.</p>
+<p>This vein of thought is inspired by some of Jeff Hawkins' <a href="https://www.numenta.com/resources/books/a-thousand-brains-by-jeff-hawkins/">Thousand Brains book</a>. The book is worth reading despite it being possible it's entirely wrong.</p>
+<h2>Vector embeddings</h2>
+<p>For the uninitiated, a vector embedding is basically where you take some text and convert it to an N-dimensional point, with the property that semantically similar pieces of text map to closer points in the N-dimensional vector space.</p>
+<p>So if you were to compute the embedding for "I ate a sandwich" and find all the nearest neighbors to that vector in your database, you'd find other pieces of text about eating sandwiches, and then as you get a little further, you'll find stuff about eating in general, or perhaps sandwiches in general, and then even further you'll find sentences about doing things in the first person, etc.</p>
+<p>In the GPT3 era, when I started playing with LLMs, I thought vector databases were all you need to build AGI. I changed my mind as soon as I actually tried it.</p>
+<p>It's maybe possible with some extreme engineering, but I am pretty sure there are <em>much</em> better ways to do it.</p>
+<p>An example of something vector embeddings struggle with is episodic memories. That is, you want to remember a chain of memories in series-order. How do you store the link between the memories in your vector DB? Is it another memory? What text do you embed to query it?</p>
+<p>There's probably <em>some</em> way to do it, but it's a hell of a lot easier to just put an edge between two nodes in a knowledge graph.</p>
+<p>Another major downside of vector embeddings is they are just hard to reason about. If two vectors are anomalously close or far, you don't really have much recourse or explanation. Adjust the training data of your embedding network and try again? Use a different distance metric than cosine similarity? Something else?</p>
+<p>And we have just completely ignored the reference frame problem, and I have no idea how to bolt it on to vector DBs in a generalizable way.</p>
+<h2>Knowledge graphs</h2>
+<p>Knowledge graphs are a broad set of ideas, but the basic notion is you have memories that are somehow linked together, so "Berlin" is somehow connected to "Germany", and also to "List of world capitals", and also a million other things. Major European Cities. WW2. Cold war. Prussia. Brandenberg. Etc.</p>
+<p>There are a bunch of possible implementation details.</p>
+<p>Do edges have semantic value? e.g. is "Jerry Stiller" connected to "Ben Stiller" with a "father of" edge? And is there a reverse edge called "son of"?</p>
+<p>Or are edges unlabeled, indirected, just vague connections?</p>
+<p>The answers to these questions inform your design about how much goes in the nodes, too.</p>
+<p>If you have highly semantic edges, your nodes can be tiny. e.g. "Boston" and "1630" nodes connected by a "was-founded-in-year" edge.</p>
+<p>If you have unlabeled connections, this is no good, because "Boston" will be connected to tons of nodes that look like years. Instead, you really have to store whole documents that are useful individually.</p>
+<p>You'd have a document (or many!) about the founding of Boston, those are connected to other documents about Boston's history, they might be connected to documents like "Everything interesting that happened in 1630" or a "Big American Cities" document. All of those documents are individually useful.</p>
+<p>I tend to favor the document-based approach. I feel it's more <a href="http://www.incompleteideas.net/IncIdeas/BitterLesson.html">Bitter Lesson</a>-pilled. In the fullness of time, it won't be costly to deploy thousands of little cheap agents to crawl the unlabeled local graph looking for relevant information.</p>
+<p>The document approach can also pair well with vector embeddings, since you can embed the documents (or embed questions the document answers, etc) and use those embeddings to jump to a bunch of candidate nodes to start the graph traversal from.</p>
+<p>This isn't to say I hate semantic edges. Certain semantic edge feel very natural. Suppose you have two nodes that describe two events, and one event happened after another. It feels right to encode that "happened after" semantic information in the edge.</p>
+<p>To recover that information without that semantic edge, the nodes would need to internally contain ordering information such as the timestamp the event in the node occurred, or the latter node needs to explicitly refer to the events of the former node.</p>
+<p>In the case of AI systems, simply knowing the timestamp is probably always an option, but still feels wrong. Lots of human memories don't have timestamps but still have happens-before/after relationships for encoding episodic information.</p>
+<p>An alternative is to have both nodes connected to some document that is like "Timeline of events at..." that has an ordered list, a brief description of each event, and a connection to the document describing each event. So if you have any event, you can traverse up to the meta-document, and trace that through the chronology, etc.</p>
+<h2>Meta-documents</h2>
+<p>Over time, I think the majority of the items in your knowledge graph actually become meta-documents instead of "source" documents.</p>
+<p>Every time you run a query over the knowledge graph, you can store the results of that thing as a meta-document.</p>
+<p>Like suppose someone asks me what my 5 favorite European cities are. I've never considered that question before. I query my memory and conjure a large amount of information about European cities. Once I've loaded all this, I weight cities against each other and produce my list.</p>
+<p>I can now store that list, along with the reasoning process, as a new document! And connect it to the all those source documents.</p>
+<p>Now if someone asks me "what are your 5 favorite cities in the world" I can just use this document as a partial cache — it at least covers me for any European results.</p>
+<p>I've read that when you recall a memory, you actually recall the last time you recalled it (which can cause it to distort over time!). This process of producing and recalling meta-documents is kind of analogous.</p>
+<h2>Making connections</h2>
+<p>It's unclear to me if you want the connection-making process to be automatic, i.e. any documents you have in context when you produce a new document just automatically connect to the new document (and perhaps each other!), or you want something more explicit.</p>
+<p>A more explicit strategy: after producing a new document, take every pair of documents in context and ask the model if they should probably be connected. Ask what future queries could be helped by having those documents connected. Are those queries likely? If so, make the connection.</p>
+<h2>Forgetting</h2>
+<p>You actually don't want unbounded growth in connections, because then your graph becomes a lot harder to navigate.</p>
+<p>Since you will create spurious connections, because your connection-creator code won't be perfect, you need some way to garbage collect connections.</p>
+<p>There's probably a bunch of clever techniques here, but I bet you can get pretty far by just reinforcing connections you travel the most, and letting others decay and be deleted. The risk of this is there might be a few connections that always <em>look</em> promising to follow but never are. They'll get pointlessly reinforced.</p>
+<p>But don't humans do the same thing? There's stuff you just can't forget despite being useless?</p>
+<p>A smarter strategy might be to employ the LLM itself to somehow judge connections as being poor, unused, etc and just surgically excise them. If the network is getting too dense in a place, just visit a node and all its neighbors and ask "which connection do you predict will be the least useful in the future" and delete that one.</p>
+<p>If the graph is truly dense there, the deleted connection will just be one extra hop away through a sibling node, so the connection can always be remade if it turns out it was useful.</p>
+<p>You can also imagine some forgetting logic based on spaced-repetition type engineering. That is, the probability of a connection being deleted has some refreshable decay property.</p>
+<h2>Episodic Memory</h2>
+<p>Presumably the primary means of sensory-input document creation is the authoring of "episodes". Just a narrative of what happens to the agent as it happens, with some kind of narrative start and stop points to the document.</p>
+<p>Presumably, each document is connected to the episode before and after it, so you can traverse the leaf-level timeline of sensory input if needed.</p>
+<p>But also, when the day is done, the model might do a process that looks remarkably like sleep and mull through the last day's episodes. It'll create a meta-document that is "everything that happened on 2025-05-17" with a summary of all the episodes, connected to all those episodes, and the meta-document from yesterday. It might go update the document "Everything that has happened in 2025 so far" if something particularly notable happened.</p>
+<p>It might pull out some common themes from the last day's episodes and make meta-documents about synthesized learnings on just those specific topics. Then connect to past documents about related concepts.</p>
+<p>It's worth noting that querying memory can itself be an episode. You could probably engineer this system where the vast majority (all?) documents are episodes.</p>
+<p>For example, you don't have a document titled "List of European Cities I've Visited", instead, you have a document like "In May 2025, I was asked by Josh what European cities I've visited, and I compiled the following list". That is, the list is individually useful, but also embedded within an episode.</p>
+<h2>Traversal</h2>
+<p>As intelligence gets cheaper and context windows get larger, it makes sense to be really liberal with what you throw into context.</p>
+<p>This strategy is dead simple but probably surprisingly good:</p>
+<ul>
+<li>All the day's episodes are in context</li>
+<li>The last 15 daily summaries</li>
+<li>The last 15 weekly summaries</li>
+<li>The last 15 monthly summaries</li>
+<li>All the yearly summaries</li>
+<li>Identify all nodes connected to any of those within 2 jumps that look promising</li>
+</ul>
+<p>This would be super wasteful, so you can improve it by:</p>
+<p>As you scan stuff, you don't need to put the full document into context. You really want to scan the document and <em>extract</em> relevant quotes and context from it.</p>
+<p>You can make the node expansion more efficient with more of a priority queue type situation than a simple breadth-first search. Just maintain a numbered list and when you expand a node, ask the model to provide insert points for each node based on how promising it looks relative to what's in the queue.</p>
+<h2>The traversal agent</h2>
+<p>How to actually design the agent doing the traversal?</p>
+<p>Consider a situation where you're looking for information about the query "Which famous European queen was murdered by her nephew?". Suppose you find a document about a queen who was murdered, but it doesn't say anything about the murderer.</p>
+<p>Is this document important? Maybe! Maybe not. We need to traverse to adjacent documents now to learn more, see if anything mentions a nephew, etc.</p>
+<p>It's probably possible to do this in a straightforward agentic approach. You give the model context on what it's looking for, and it has tools to load documents, take notes, un-load documents (clear up context), can see its own action log, and can return query results when ready.</p>
+<p>You can imagine a more sophisticated system where query agents can themselves spin off sub-agents to answer sub-queries, e.g. "who was the nephew of Queen Whatever?". Each agent might be given a search budget that they can allocate to sub-agents (who themselves might delegate further!).</p>
+<h2>Databases</h2>
+<p>What about SQLite? A lot of memories would work great in an SQLite table. List of world capitals. The kings of England. German-Spanish bilingual dictionary.</p>
+<p>I think it's simplest to just model these as external tool uses rather than part of the core memory system. Similar to humans! You store a memory "I have an SQLite table with all the world capitals" and upon retrieving that memory into context, the agent stops querying memory and goes to use that tool.</p>
+<h2>Scratchpads</h2>
+<p>For certain applications, all the memory and state you could need fits in the context window. The simplest possible memory system is just a single scratchpad of text that you append new memories to. When it fills up, you ask the model to select irrelevant stuff to delete or compact.</p>
+<p>I think in the fullness of time, this will work for those applications. But today's models are mostly not smart enough to do it well yet. It's better to impose more structure on them.</p>
+<p>For example, suppose the agent tried some course of action to accomplish the goal, but failed. That failure goes in the flat log. But later on, the log must be pruned for space. Some models will decide to prune the failure log, after all, what good is it?</p>
+<p>But then they try the failed course of action again as soon as it's pruned. You can get really dumb, loopy behavior for non-trivial tasks with this system.</p>
+<p>I think most humans would not do well if they had admin edit access to their own memories. Delete some childhood trauma? Whoops there goes a core part of your personality, now you're a different person.</p>
+<h2>Layers</h2>
+<p>It's tempting to represent all knowledge in one system, and I bet it <em>is</em> possible eventually, but from an engineering point of view, it seems to good to separate some of these.</p>
+<p>Things core to identity, motivations, personality, temperament, etc feel fundamentally different than episodic memories. I feel like they should probably be represented differently, but at least separately.</p>
+<h2>Control</h2>
+<p>How much control should an agent have over <em>what</em> it remembers? Should memory be a <em>tool</em> the agent has control over? Or something that happens implicitly?</p>
+<p>I kind of lean towards preferring implicit. Both because that's how memory feels like it works in my own mind, but also because the models aren't smart enough to have explicit control of it yet.</p>
+<p>Models are prone to overestimating their own abilities. You ask them some historical fact, give them access to a memory tool, they are just as likely to conjure an answer from within the model weights as they are to make extensive use of the tool.</p>
+<p>This is mostly fine for a sufficiently large model and sufficiently well-established historical facts, but totally insufficient for recent events that aren't in the training data.</p>
+<h2>Neural methods</h2>
+<p>Of course, all of the techniques in this post will probably <em>eventually</em> be subsumed by some fully-learned, end-to-end memory approach that is somehow just represented in vectors/weights.</p>
+<p>I have no idea what this looks like. It might be some ultra-sparse mixture of experts where you can train new experts every night and plug them in the next day. Might be some recurrent thing. Who knows.</p>
+<p>I don't have a lot to say here, so instead focus more on the things I have line-of-sight on.</p>
+<h2>Conclusion</h2>
+<p>There's no grand thesis statement to this post, it's just a ramble. Email me if you have any other memory techniques to add.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

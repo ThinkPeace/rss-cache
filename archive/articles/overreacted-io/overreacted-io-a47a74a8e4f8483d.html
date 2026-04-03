@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why Does RSC Integrate with a Bundler? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why Does RSC Integrate with a Bundler?</h1>
+        <div class="meta">overreacted — A blog by Dan Abramov 2025-05-30T00:00:00Z</div>
+        <div class="links">
+          <a href="https://overreacted.io/why-does-rsc-integrate-with-a-bundler/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/overreacted-io/overreacted-io-a47a74a8e4f8483d.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">One does not simply serialize a module.</div>
+        <div class="content">
+          <html>
+  <body><h1>Why Does RSC Integrate with a Bundler?</h1><p>May 30, 2025</p><p>Fair warning—this one’s for the nerds.</p><p>React Server Components is a programming paradigm that <a href="https://overreacted.io/what-does-use-client-do/">extends the module system</a> to express a server/client application as a single program spanning two runtimes. Under the hood, the RSC implementation consists of two main pieces:</p><ul><li>A serializer for React trees (<a href="https://github.com/facebook/react/tree/main/packages/react-server"/>in the React repo).<pre>packages/react-server</pre></li><li>A deserializer for React trees (<a href="https://github.com/facebook/react/tree/main/packages/react-client"/>in the React repo).<pre>packages/react-client</pre></li></ul><p>The <pre>react-server</pre> and <pre>react-client</pre> packages are internal to the React repo.</p><p>They are fully open source, of course, but they don’t get published in their raw form to npm. This is because they’re missing a key ingredient—the module system integration. Unlike many (de)serializers, RSC concerns itself not only with sending data, but also with sending code. For example, consider this tree:</p><pre><pre>&lt;p&gt;Hello, world&lt;/p&gt;</pre></pre><p>If you want to turn this <pre>&lt;p&gt;</pre> tag into JSON, you could do it like this:</p><pre><pre>{
+  type: 'p',
+  props: {
+    children: 'Hello world'
+  }
+}</pre></pre><p>But now consider this <pre>&lt;Counter&gt;</pre> tag. How do you serialize it?</p><pre><pre>import { Counter } from './client';
+ 
+&lt;Counter initialCount={10} /&gt;</pre></pre><pre><pre>'use client';
+ 
+import { useState, useEffect } from 'react';
+ 
+export function Counter({ initialCount }) {
+  const [count, setCount] = useState(initialCount);
+  // ...
+}</pre></pre><p>How does one serialize a module?</p><h3><a href="https://overreacted.io#serializing-modules"/> Serializing Modules</h3>
+<p>Recall that we want to revive an actual <pre>&lt;Counter&gt;</pre> on the other side of the wire—so we don’t just want a snapshot of it. We want its entire logic for interactivity!</p><p>One way to serialize it is to literally embed the <pre>Counter</pre> code into our JSON:</p><pre><pre>{
+  type: `
+    import { useState, useEffect } from 'react';
+ 
+    export function Counter({ initialCount }) {
+      const [count, setCount] = useState(initialCount);
+      // ...
+    }
+  `,
+  props: {
+    initialCount: 10
+  }
+}</pre></pre><p>But that’s kind of bad, right? You don’t really want to send code as strings to <pre>eval</pre> on the client, and you don’t want to send the same component’s code many times. So instead it’s reasonable to assume its code is being served by our app as a static JS asset—which we can refer to in the JSON. It’s almost like a <pre>&lt;script&gt;</pre> tag:</p><pre><pre>{
+  type: '/src/client.js#Counter', // "Load src/client.js and grab Counter"
+  props: {
+    initialCount: 10
+  }
+}</pre></pre><p>In fact, on the client, you could load it by generating a <pre>&lt;script&gt;</pre> tag.</p><p>However, loading imports one by one from their source files over the network is inefficient. Recall that one file can import other files, and the client doesn’t know the import tree in advance. You don’t want to create a waterfall. We already know how to fix this from two decades of working on client-side applications: bundling.</p><h3><a href="https://overreacted.io#rsc-bundler-bindings"/> RSC Bundler Bindings</h3>
+<p>For this reason, RSC integrates with bundlers. RSC doesn’t require a bundler per se: here’s a <a href="https://github.com/facebook/react/tree/main/fixtures/flight-esm">bundler-less RSC ESM proof of concept</a>. But it exists mostly for posterity because of how inefficient it actually is to do naïvely without more optimizations.</p><p>Realistic RSC integrations are bundler-specific. Bindings for <a href="https://github.com/facebook/react/tree/main/packages/react-server-dom-parcel">Parcel</a>, <a href="https://github.com/facebook/react/tree/main/packages/react-server-dom-webpack">Webpack</a>, and (eventually) <a href="https://github.com/facebook/react/pull/33152">Vite</a> live in the React repo and specify how to send and load modules:</p><ul><li>First, during the build, their job is to find the files with <pre>'use client'</pre>and to actually create the bundle chunks for those entry points—a bit like<a href="https://docs.astro.build/en/concepts/islands/">Astro Islands</a>.</li><li>Then, on the server, these bindings teach React how to send modules to the client. For example, a bundler might refer to a module like <pre>'chunk123.js#Counter'</pre>.</li><li>On the client, they teach React how to ask the bundler runtime to load those modules. For example, the Parcel bindings <a href="https://github.com/facebook/react/blob/ee76351917106c6146745432a52e9a54a41ee181/packages/react-server-dom-parcel/src/client/ReactFlightClientConfigBundlerParcel.js#L80-L81">call a Parcel-specific function</a>for that.</li></ul><p>Thanks to these three things, React Server will know how to serialize a module when it encounters one—and the React Client will know how to deserialize it.</p><p>The API to serialize a tree with the React Server is exposed via bundler bindings:</p><pre><pre>import { serialize } from 'react-server-dom-yourbundler'; // Bundler-specific package
+ 
+const reactTree = &lt;Counter initialCount={10} /&gt;;
+const outputString = serialize(reactTree); // Something like the JSON above</pre></pre><p>Then one can store the <pre>outputString</pre> on the disk, or send it over the network, or cache it, whatever—and eventually feed it to the React Client. The React Client will deserialize the entire tree, loading code from the referenced modules as needed:</p><pre><pre>import { deserialize } from 'react-server-dom-yourbundler/client';  // Bundler-specific package
+ 
+const outputString = // ... received over network, read from disk, etc...
+const reactTree = deserialize(outputString); // &lt;Counter initialCount={10} /&gt;</pre></pre><p>And that, assuming everything worked correctly, will give you a normal piece of JSX, as if you wrote <pre>&lt;Counter initialCount={10} /&gt;</pre>  on the client yourself. You can do anything with that tree—render it, keep it in state, turn into HTML, etc.</p><pre><pre>const outputString = // ... received over network, read from disk, etc...
+const reactTree = deserialize(outputString); // &lt;Counter initialCount={10} /&gt;
+ 
+// You can do anything you'd do with a regular JSX tree, for example:
+const root = createRoot(domNode);
+root.render(reactTree);</pre></pre><p>That’s the APIs that RSC frameworks like Next.js use under the hood.</p><p>If you want to play with RSC using these lower-level APIs and see your React trees getting (de)serialized, the <a href="https://parceljs.org/recipes/rsc/">Parcel RSC implementation</a> is a good starting point.</p><p>(The <pre>serialize</pre> and <pre>deserialize</pre> names above are illustrative. The exact names are up to the bindings (and may have multiple overloads). For example, <pre>@parcel/rsc</pre> package, which is a thin wrapper over the underlying <pre>react-server-dom-parcel</pre> bindings, exposes serialization as <pre>renderRSC</pre> and deserialization as <pre>fetchRSC</pre>. Also, their actual implementations are non-blocking and support streaming on both sides.)</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

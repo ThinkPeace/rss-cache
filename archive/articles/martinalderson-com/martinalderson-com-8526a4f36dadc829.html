@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>I Finally Found a Use for IPv6 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>I Finally Found a Use for IPv6</h1>
+        <div class="meta">Martin Alderson 2025-11-25T00:00:00Z</div>
+        <div class="links">
+          <a href="https://martinalderson.com/posts/i-finally-found-a-use-for-ipv6/?utm_source=rss&amp;utm_medium=rss&amp;utm_campaign=feed">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/martinalderson-com/martinalderson-com-8526a4f36dadc829.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Using IPv6 with Cloudflare to run multiple services on a single server without a reverse proxy</div>
+        <div class="content">
+          <p>IPv6 has been a bit of a conundrum to me. While we've clearly ran out of IPv4 addresses, the penetration of IPv6 on client networks has been incredibly slow, making it unfeasible apart from niche use cases to serve pure IPv6-only. And like it or loathe it CG-NAT has really taken quite a lot of urgency out of the migration - residential ISPs are using it en masse to put tens of thousands of customers behind one IPv4 address.</p>
+<p>I haven't came across many places that treat IPv6 as a first class citizen in their web app infrastructure - if anything many places have it entirely firewalled as it's been a pain to configure and support.</p>
+<p>However, I have <em>finally</em> found an interesting use for it, which I thought I'd share.</p>
+<h2>The Problem: Running many apps on one server</h2>
+<p>I've been a huge fan of running bare metal servers for workloads. For very little money you can get a seriously powerful machine that can run dozens of applications at once, serving a surprisingly large amount of traffic. Equally some of the cheaper VPS offerings now come with many CPU cores and 16GB+ of memory - more than enough to run 10+ simpler webapps.</p>
+<p>This all works great until you need to access it from the internet and realise you might have (if you are lucky) 5 routable IP addresses - perhaps even only one.</p>
+<p>At this point you have a few options. The classic way is to put a reverse proxy on the server, and start doing virtual host routing to various ports internally. While this works, I've never been a huge fan of it - the config gets a bit messy especially with TLS termination and it also means if your reverse proxy fails for whatever reason, all of your apps behind it go down. There are some good options with Docker sidecars, but it doesn't really resolve the single point of failure.</p>
+<p>Or you could just get more IPv4 addresses, but they get expensive quickly and are sometimes hard to justify.</p>
+<h2>Using Cloudflare with IPv6</h2>
+<blockquote>
+<p>I'm aware that Cloudflare now becomes a huge single point of failure for this. However, most of these services I proxy through Cloudflare anyway, so it still reduces the risk of having a second level reverse proxy on the machine itself.</p>
+</blockquote>
+<p>While diagnosing a weird LetsEncrypt failure, I realised I did have an entire IPv6 /64 (18.4 quintillion addresses!) routed to the server and it gave me a thought. Could Cloudflare just communicate with the server via IPv6 and have each service listen on an IPv6 address, and expose it to the world via IPv4?</p>
+<p>The answer unsurprisingly is yes. All you need to do is add an AAAA (IPv6 version of an A) record to the DNS and it all just works. Cloudflare will handle the translation for users that don't support IPv6. Just make sure port 443 is open on IPv6 in ufw or iptables so traffic isn't firewalled in.</p>
+<p><img src="https://martinalderson.com/img/ipv6-cloudflare-dns.png" alt="Cloudflare DNS AAAA record configuration"></p>
+<p>You can use the <code>::</code> syntax in IPv6 to mean &quot;fill in with 0s&quot;. This makes it easy to do <code>2a01:4f9:c012:8cf2::1</code>, <code>2a01:4f9:c012:8cf2::2</code>, etc. The great thing about IPv6 is all of the subnet is routed automatically to you - you don't have to add each IPv6 address manually you want to use.</p>
+<h2>Ephemeral environments</h2>
+<p>You can take this one step further if you want by using the Cloudflare API as part of your CI/CD process if you are deploying ephemeral environments. Simply choose a random IPv6 address in your /64 (the chance of collision is incredibly low), tell your service to listen on that, and route it with the Cloudflare API.</p>
+<h2>Drawbacks (guess?)</h2>
+<p>The (major) drawback of all this is Docker's mediocre (at best) support for IPv6. If it's just for side projects that you're not too worried about security wise, you can just run:</p>
+<pre><code class="language-bash">docker run -d --network host yetanothersideproject --bind 2a01:4f9:c012:8cf2::2
+</code></pre>
+<p>and it will all work very smoothly. The downside of this is you don't have network isolation in Docker anymore, so be aware that you are losing quite a lot of the security isolation Docker provides.</p>
+<p>The other option I've found is <code>macvlan</code>:</p>
+<p>You need to create this network first (once only - not per Docker container). This effectively gives each Docker container a virtual NIC with its own MAC address.</p>
+<pre><code class="language-bash">docker network create -d macvlan --subnet=2a01:4f9:c012:8cf2::/64 --ipv6 -o parent=eth0 mynet
+</code></pre>
+<p>then run (and cross your fingers):</p>
+<pre><code class="language-bash">docker run -d --network mynet --ip6 2a01:4f9:c012:8cf2::2 yetanothersideproject
+</code></pre>
+<p>The problem here though is while it has proper isolation, the container itself won't have IPv4 support for <em>outgoing</em> connections. You may get away with this depending on what your server needs to access on the external internet, but I wouldn't recommend it if you want to retain your sanity.</p>
+<p>You can get round this by using NAT and giving it an IPv4 address as well:</p>
+<pre><code class="language-bash">iptables -t nat -A POSTROUTING -s 192.168.1.0/24 -o eth0 -j MASQUERADE
+</code></pre>
+<pre><code class="language-bash">docker network create -d macvlan \
+  --subnet=192.168.1.0/24 \
+  --gateway=192.168.1.1 \
+  --subnet=2a01:4f9:c012:8cf2::/64 \
+  --ipv6 \
+  -o parent=eth0 \
+  mynet
+</code></pre>
+<p>It does look like things are slowly getting better, with this <a href="https://github.com/moby/moby/pull/48271">IPv6 only API option</a> being another stepping stone towards it. Docker 28.0 added <code>EnableIPv4</code> as a network option, meaning you can create true IPv6-only networks (behind the <code>--experimental</code> flag for now).</p>
+<p>Unfortunately I found Docker by far the biggest issue. I really hope they have an easier way to support this workflow. I do want to look at Podman in the future, which apparently has much better support for IPv6. Let me know if you have any thoughts on this!</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

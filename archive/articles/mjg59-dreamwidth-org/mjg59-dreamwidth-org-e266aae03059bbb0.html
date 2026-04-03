@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Locally hosting an internet-connected server | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Locally hosting an internet-connected server</h1>
+        <div class="meta">Matthew Garrett 2025-06-17T05:17:40Z</div>
+        <div class="links">
+          <a href="https://mjg59.dreamwidth.org/72095.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/mjg59-dreamwidth-org/mjg59-dreamwidth-org-e266aae03059bbb0.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I&#x27;m lucky enough to have a weird niche ISP available to me, so I&#x27;m paying $35 a month for around 600MBit symmetric data. Unfortunately they don&#x27;t offer static IP addresses to residential customers, and nor do they allow multiple IP addresses per connection, and I&#x27;m the sort of person who&#x27;d like to run a bunch of stuff myself, so I&#x27;ve been looking for ways t…</div>
+        <div class="content">
+          I'm lucky enough to have a <a href="https://www.monkeybrains.net/">weird niche ISP</a> available to me, so I'm paying $35 a month for around 600MBit symmetric data. Unfortunately they don't offer static IP addresses to residential customers, and nor do they allow multiple IP addresses per connection, and I'm the sort of person who'd like to run a bunch of stuff myself, so I've been looking for ways to manage this.<br /><br />What I've ended up doing is renting a cheap VPS from a vendor that lets me add multiple IP addresses for minimal extra cost. The precise nature of the VPS isn't relevant - you just want a machine (it doesn't need much CPU, RAM, or storage) that has multiple world routeable IPv4 addresses associated with it and has no port blocks on incoming traffic. Ideally it's geographically local and peers with your ISP in order to reduce additional latency, but that's a nice to have rather than a requirement.<br /><br />By setting that up you now have multiple real-world IP addresses that people can get to. How do we get them to the machine in your house you want to be accessible? First we need a connection between that machine and your VPS, and the easiest approach here is <a href="https://wireguard.com">Wireguard</a>. We only need a point-to-point link, nothing routable, and none of the IP addresses involved need to have anything to do with any of the rest of your network. So, on your local machine you want something like:<tt><br /><br />[Interface]<br />PrivateKey = privkeyhere<br />ListenPort = 51820<br />Address = localaddr/32<br /><br />[Peer]<br />Endpoint = VPS:51820 <br />PublicKey = pubkeyhere <br />AllowedIPs = VPS/0</tt><br /><br />And on your VPS, something like:<tt><br /><br />[Interface]<br />Address = vpswgaddr/32<br />SaveConfig = true<br />ListenPort = 51820<br />PrivateKey = privkeyhere<br /><br />[Peer]<br />PublicKey = pubkeyhere<br />AllowedIPs = localaddr/32</tt><br /><br />The addresses here are (other than the VPS address) arbitrary - but they do need to be consistent, otherwise Wireguard is going to be unhappy and your packets will not have a fun time. Bring that interface up with <a href="https://www.wireguard.com/quickstart/">wg-quick</a> and make sure the devices can ping each other. Hurrah! That's the easy bit.<br /><br />Now you want packets from the outside world to get to your internal machine. Let's say the external IP address you're going to use for that machine is <tt>321.985.520.309</tt> and the wireguard address of your local system is <tt>867.420.696.005</tt>. On the VPS, you're going to want to do:<br /><br /><tt>iptables -t nat -A PREROUTING -p tcp -d 321.985.520.309 -j DNAT --to-destination 867.420.696.005</tt><br /><tt>iptables -t nat -A PREROUTING -p udp -d 321.985.520.309 -j DNAT --to-destination 867.420.696.005</tt><br /><br />Now, all incoming packets for <tt>321.985.520.309</tt> will be rewritten to head towards <tt>867.420.696.005</tt> instead (make sure you've set <tt>net.ipv4.ip_forward</tt> to 1 via <tt>sysctl</tt>!). Victory! Or is it? Well, no.<br /><br />What we're doing here is rewriting the destination address of the packets so instead of heading to an address associated with the VPS, they're now going to head to your internal system over the Wireguard link. Which is then going to ignore them, because the <tt>AllowedIPs</tt> statement in the config only allows packets coming from your VPS, and these packets still have their original source IP. We could rewrite the source IP to match the VPS IP, but then you'd have no idea where any of these packets were coming from, and that sucks. Let's do something better. On the local machine, in the peer, let's update <tt>AllowedIps</tt> to <tt>0.0.0.0/0</tt> to permit packets form any source to appear over our Wireguard link. But if we bring the interface up now, it'll try to route <em>all</em> traffic over the Wireguard link, which isn't what we want. So we'll add <tt>table = off</tt> to the <tt>interface</tt> stanza of the config to disable that, and now we can bring the interface up without breaking everything but still allowing packets to reach us. However, we do still need to tell the kernel how to reach the remote VPN endpoint, which we can do with <tt>ip route add vpswgaddr dev wg0</tt>. Add this to the <tt>interface</tt> stanza as:<tt><br /><br />PostUp = ip route add vpswgaddr dev wg0<br />PreDown = ip route del vpswgaddr dev wg0</tt><br /><br />That's half the battle. The problem is that they're going to show up there with the source address still set to the original source IP, and your internal system is (because Linux) going to notice it has the ability to just send replies to the outside world via your ISP rather than via Wireguard and nothing is going to work. Thanks, Linux. Thinux.<br /><br />But there's a way to solve this - policy routing. Linux allows you to have multiple separate routing tables, and define policy that controls which routing table will be used for a given packet. First, let's define a new table reference. On the local machine, edit <tt>/etc/iproute2/rt_tables</tt> and add a new entry that's something like:<tt><br /><br />1 wireguard</tt><br /><br />where "1" is just a standin for a number not otherwise used there. Now edit your wireguard config and replace <tt>table=off</tt> with <tt>table=wireguard</tt> - Wireguard will now update the <tt>wireguard</tt> routing table rather than the global one. Now all we need to do is to tell the kernel to push packets into the appropriate routing table - we can do that with <tt>ip rule add from localaddr lookup wireguard</tt>, which tells the kernel to take any packet coming from our Wireguard address and push it via the Wireguard routing table. Add that to your Wireguard interface config as:<tt><br /><br />PostUp = ip rule add from localaddr lookup wireguard<br />PreDown = ip rule del from localaddr lookup wireguard</tt><br />and now your local system is effectively on the internet.<br /><br />You can do this for multiple systems - just configure additional Wireguard interfaces on the VPS and make sure they're all listening on different ports. If your local IP changes then your local machines will end up reconnecting to the VPS, but to the outside world their accessible IP address will remain the same. It's like having a real IP without the pain of convincing your ISP to give it to you.<br /><br /><img src="https://www.dreamwidth.org/tools/commentcount?user=mjg59&ditemid=72095" width="30" height="12" alt="comment count unavailable"/> comments
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

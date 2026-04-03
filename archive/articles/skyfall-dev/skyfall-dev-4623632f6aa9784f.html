@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Getting Rails&#x27; ActiveStorage blob IDs from file URLs | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Getting Rails&#x27; ActiveStorage blob IDs from file URLs</h1>
+        <div class="meta">Mahad Kalam 2025-12-12T18:00:00Z</div>
+        <div class="links">
+          <a href="https://mahadk.com/posts/activestorage-file-id/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/skyfall-dev/skyfall-dev-4623632f6aa9784f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Learn how to extract ActiveStorage blob IDs from expiring ActiveStorage URLs.</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>Getting Rails' ActiveStorage blob IDs from file URLs</h1>
+    <p>When working with Rails’ ActiveStorage, you might encounter situations where you need to extract the blob ID from an expiring ActiveStorage URL. In my case, it was because I was scraping images from a Rails application that used ActiveStorage, but I wanted to be polite about it and not download hundreds of images every few minutes unnecessarily.</p>
+    <p>I ran into a problem though, where the URLs I was getting were expiring URLs that looked like this:</p>
+    <pre>
+      <pre>https://theapp.gg/rails/active_storage/representations/proxy/eyJfcmFpbHMiOnsiZGF0YSI6MzQwLCJwdXIiOiJibG9iX2lkIn19--8c59415975dbced2130a99575689db332f57b019/eyJfcmFpbHMiOnsiZGF0YSI6eyJmb3JtYXQiOiJ3ZWJwIiwicmVzaXplX3RvX2xpbWl0IjpbMzYwLG51bGxdLCJzYXZlciI6eyJzdHJpcCI6dHJ1ZSwicXVhbGl0eSI6NzV9fSwicHVyIjoidmFyaWF0aW9uIn19--d6a39ad4705dc76c8821affe402d334558212c92/image.png</pre>
+    </pre>
+    <p>The expiring URLs meant that I couldn’t just check equality with just the previous URL. That URL is a bit of a mess, right? However, hidden within that long string is a base64-encoded JSON object that contains a consistent blob ID we can use to identify the image and check inequalities with a previous URL.</p>
+    <pre>
+      <pre>use base64::prelude::*;use color_eyre::{Result, eyre::eyre};use reqwest::Url;use serde::Deserialize;
+#[derive(Deserialize, Debug)]struct BlobInfo {    #[serde(rename = "_rails")]    rails: RailsData,}
+#[derive(Deserialize, Debug)]struct RailsData {    #[serde(rename = "data")]    blob_id: usize,}
+pub fn get_rails_blob_id(url: &amp;Url) -&gt; Result&lt;usize&gt; {    let s3_info = url        .path()        .split('/')        .rev()        .nth(2) // Get the third element from the end (see the rev() above)        .ok_or_else(|| eyre!("can't find raw s3"))?;    let blob_info_b64 = s3_info        .split("--")        .next()        .ok_or_else(|| eyre!("can't find the blob info"))?;    let blob_info_bytes = BASE64_STANDARD.decode(blob_info_b64)?;    let blob_info_string = String::from_utf8(blob_info_bytes)?;    let blob_info: BlobInfo = serde_json::from_str(&amp;blob_info_string)?;    Ok(blob_info.rails.blob_id)}</pre>
+    </pre>
+    <p>In this example, <pre>get_rails_blob_id</pre> will spit out the blob ID (<pre>340</pre> in this case) from the provided ActiveStorage URL.</p>
+    <p>In case you’re curious, here’s a quick breakdown of how it works:</p>
+    <ul>
+      <li>We split the URL path by <pre>/</pre>and extract the third segment from the end, which contains the base64-encoded JSON.</li>
+      <li>We split that segment by <pre>--</pre>to isolate the base64 string. (in this case,<pre>eyJfcmFpbHMiOnsiZGF0YSI6MzQwLCJwdXIiOiJibG9iX2lkIn19</pre>)</li>
+      <li>We decode the base64 string to get the JSON representation.</li>
+      <li>And finally, we read <pre>_rails.data</pre>from the JSON to get the blob ID.</li>
+    </ul>
+    <p>Since ActiveStorage won’t reuse blob IDs, you can use this method to uniquely identify files even if the URLs change due to expiration. Bit of a niche use case, but hopefully this helps someone out there!</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

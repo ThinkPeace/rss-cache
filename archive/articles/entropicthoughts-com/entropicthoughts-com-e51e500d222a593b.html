@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Advent of Code in Dialog | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Advent of Code in Dialog</h1>
+        <div class="meta">Entropic Thoughts 2025-12-08T23:00:00Z</div>
+        <div class="links">
+          <a href="https://entropicthoughts.com/advent-of-code-in-dialog">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/entropicthoughts-com/entropicthoughts-com-e51e500d222a593b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body><h1>Advent of Code in Dialog</h1><p>
+Not long after I published the article on programming the Z-machine <a href="https://entropicthoughts.com/advent-of-code-on-z-machine.html">using plain
+Inform 6 with no standard library</a>, someone let me know I might like the Dialog
+language. What’s really cool about Dialog is that it takes the evaluation model
+of Inform 7, improves on it by being more consistent about it, and wraps it in a
+sensible syntax.1 Given the description, you might suspect that it’s a higher
+level language than Inform 6, which is true. For that reason, it will also not
+compile to version 3 of the Z-machine, but it does compile to version 5. I have
+discovered during the process of making a version 3 game that players really
+don’t like version 3. It’s too limited for modern sensibilities. In particular,
+the lack of an <pre>UNDO</pre> command annoys players.
+</p><p>I have toyed around with Dialog a little, and decided to try it on this year’s Advent of Code. Unfortunately I got knocked out in the flu halfway through the second day, and then I had to catch up with other things, so there won’t be too many solutions here. The flu is also the excuse for why the code for the second day isn’t refactored to look better, and why the presentation in this article isn’t as polished as it could be.</p><p>The more valuable part of this article, perhaps, is what’s below the code for this year: a brief tutorial^Wmy notes from learning the language, by warming up on an earlier Advent of Code problem.</p><h1><a href="https://entropicthoughts.com#day-1--2025">Day 1, 2025</a></h1>
+<p>The first half of this day is about implementing modular arithmetic and detecting when operations result in zero. Dialog is really not good at maths – it doesn’t have negative numbers – so we’ll have to use a workaround and implement subtraction as addition.</p><blockquote>%% We will need to keep track of the number %% of zeroes as well as increase them. (global variable (zeroes 0)) (incf-zeroes) (zeroes $Some) ($Some plus 1 into $More) (now) (zeroes $More) %% The main loop gets input and processes it. (program entry point) *(repeat forever) (get input $Words) (process $Words) %% Process the empty input by printing the %% number of zeroes found, then returning %% successfully. (process []) (zeroes $Some) Found $Some zeroes. %% Process instructions by splitting into %% direction and number, then performing the %% indicated rotation. (process [$Instruction | $]) (split word $Instruction into [$Direction | $Numbers]) (join words $Numbers into $Amount) (perform-rotation $Amount $Direction) %% Perform a rotation on the global position %% variable, increasing the zero count if it %% lands on a zero. (global variable (position 50)) (perform-rotation $Amount $Direction) (position $Current) (rotate $Current $Amount $Direction $Next) (now) (position $Next) { ($Next = 0) (incf-zeroes) } (fail) %% Left rotation. Find the actual effect by %% stripping away any full turns, and then %% implement the actual effect by returning %% the result of the equivalent right rotation. (rotate $Current $Amount @l $Next) ($Amount modulo 100 into $Actual) (100 minus $Actual into $Opposite) (rotate $Current $Opposite @r $Next) %% Right rotation. Find the actual effect by %% stripping away any full turns, and then %% return the result of that effect. If it %% still overshoots, first figure out where %% it lands. (rotate $Current $Amount @r $Next) ($Amount modulo 100 into $Actual) ($Current plus $Actual into $Result) (if) ($Result &gt; 99) (then) ($Result minus 100 into $Next) (else) ($Next = $Result) (endif)</blockquote><p>
+In the second half, we additionally need to keep track of when we pass zero as
+part of any operation, not just when zero is the result of an operation. At
+first this seemed difficult, but with the right additions it wasn’t too hard.
+The main difference is that the zero count needs to be managed in the low-level
+<pre>rotate</pre> queries rather than the higher-level <pre>perform-rotation</pre> query. This
+also makes the <pre>perform-rotation</pre> query somewhat redundant so the responsibility
+to maintain the global state is also shifted into the <pre>rotate</pre> queries.
+</p><p>The queries missing from below are the same as in the previous part.</p><blockquote>%% We may need to increase the zero count %% by more than one. (incf-zeroes $Amount) (zeroes $Some) ($Some plus $Amount into $More) (now) (zeroes $More) %% Process instructions by splitting into %% direction and number, then performing the %% indicated rotation. (process [$Instruction | $]) (split word $Instruction into [$Direction | $Numbers]) (join words $Numbers into $Amount) (rotate $Amount $Direction) (fail) %% Left rotation. Counts zeroes passed and %% updates global state variable. (rotate $Amount @l) %% Account for any zero-passings that %% happen as part of multi-turn rotations. ($Amount divided by 100 into $Turns) (incf-zeroes $Turns) %% Then perform the actual effect. ($Amount modulo 100 into $Actual) (position $Current) { %% If we are overturning, implement %% as the equivalent right rotation. ($Actual &gt; $Current) %% In case we start on zero, we have %% already counted this zero and we %% should not count it again. { ($Current = 0) (or) (incf-zeroes 1) } (100 minus $Actual into $Opposite) (rotate $Opposite @r) (or) %% If we are not overturning, we can %% subtract directly. ($Current minus $Actual into $Next) (now) (position $Next) %% If we landed on zero, we should %% count it. { ($Next &gt; 0) (or) (incf-zeroes 1) } } %% Right rotation. Counts zeroes passed and %% updates global state variable. (rotate $Amount @r) %% Account for any zero-passings that %% happen as part of multi-turn rotations. ($Amount divided by 100 into $Turns) (incf-zeroes $Turns) %% Then perform the actual effect. ($Amount modulo 100 into $Actual) (position $Current) ($Current plus $Actual into $Result) { ($Result &lt; 100) (now) (position $Result) (or) %% One more overturn detected. %% This also handles the case when %% we land on zero. (incf-zeroes 1) ($Result minus 100 into $Next) (now) (position $Next) }</blockquote><p>Despite the weirdnesses around arithmetic in Dialog, this worked surprisingly well. I suppose tomorrow might be too hard to even attempt.</p><h1><a href="https://entropicthoughts.com#day-2--2025">Day 2, 2025</a></h1>
+<p>I started by, very reluctantly, implementing big integer arithmetic2 The difference between long integer arithmetic and big integer arithmetic is that big integers are unbounded, whereas long integers are bounded, only at more than a machine integer. by representing big integers as lists of integers up to 10³, i.e. each group of three digits in the decimal representation of the number would be its own list item. The least significant thousands place is stored first to simplify addition-through-recursion.</p><blockquote>%% Parse a word into a big integer. (bigint-parse $Num $BigInt) (split word $Num into $Digits) (bigint-parse-internal $Digits [$Type | $Reversed]) (list-reverse $Reversed $BigInt) %% During parsing, this stores an additional piece of information %% at the head of the list, which is whether it has parsed the units, %% tens, or hundreds place of the most significant group of digits yet. %% That information is not needed after parsing, so it gets dropped. (bigint-parse-internal [] [nothing 0]) (bigint-parse-internal [$H | $T] $Data) (bigint-parse-internal $T [$Type $Intermediary | $More]) %% There's surely a better way to accomplish this switch %% statement but this was what I came up with. { ($Type = @hundreds) ($Data = [ones $H | [$Intermediary | $More]]) (or) ($Type = @nothing) ($Data = [ones $H | $More]) (or) ($Type = @ones) ($H times 10 into $Tens) ($Tens plus $Intermediary into $Next) ($Data = [tens $Next | $More]) (or) ($Type = @tens) ($H times 100 into $Hundreds) ($Hundreds plus $Intermediary into $Next) ($Data = [hundreds $Next | $More]) } %% Constructor of big integers from short integers. %% Used in addition to extract the carry position. (bigint-new $Short $BigInt) ($Short &lt; 1000) ($BigInt = [$Short]) (or) ($Short divided by 1000 into $Thousands) ($Short modulo 1000 into $Ones) ($BigInt = [$Ones $Thousands]) %% Start the operation off with zero carry. (bigint-add $A $B $R) (bigint-add-internal $A $B 0 $R) %% If we run out of number, we tack on the carry as the %% most significant group. (bigint-add-internal [] [] $Carry $Result) ($Result = [$Carry]) %% Simplify cases by swapping the places of A and B. %% Commutativity rules! (bigint-add-internal [] $B $Carry $Result) (bigint-add-internal $B [] $Carry $Result) %% If we have no more B remaining, it is zero. (bigint-add-internal [$Ha | $Ta] [] $Carry $Result) (bigint-add-internal [$Ha | $Ta] [0] $Carry $Result) %% Add, extract carry, build new bigint. (bigint-add-internal [$Ha | $Ta] [$Hb | $Tb] $Carry $Result) ($Ha plus $Hb into $Sum) ($Sum plus $Carry into $Total) (bigint-new $Total [$This $Next]) (bigint-add-internal $Ta $Tb $Next $Further) { ($Further = [0]) ($Result = [$This]) (or) ($Result = [$This | $Further]) }</blockquote><p>There’s also a hacky routine for printing these big integers. It has some extra bookkeeping to not zero-pad the first group of digits.</p><blockquote>(bigint-print $BigInt) (list-reverse $BigInt $Reversed) (bigint-print-internal @first $Reversed) (space) (bigint-print-internal $ []) (bigint-print-internal $Group [$H | $T]) (split word $H into $Digits) { ~($Group = @first) (list-length $Digits 1) 00 (no space) (or) ~($Group = @first) (list-length $Digits 2) 0 (no space) (or) %% Empty case to make query succeed even when no %% zero-padding is needed. } $H (no space) (bigint-print-internal @remaining $T)</blockquote><p>Oh and the above depends on two list queries which I’m not sure they exist in Dialog, so they got made.</p><blockquote>(list-reverse [] []) (list-reverse [$H | $T] $R) (list-reverse $T $Tr) (append $Tr [$H] $R) (list-length $L $N) (accumulate 1) *($ is one of $L) (into $N)</blockquote><p>I also wrote the functions to parse a range as given in the problem input.</p><blockquote>(range-parse $Input $Start $Stop) (extract-number $Input $Num $Rest) (bigint-parse $Num $Start) (word-tail $Rest $Further) (bigint-parse $Further $Stop) (word-tail $Word $Tail) (split word $Word into [$ | $Characters]) (join words $Characters into $Tail) %% This fails when it consumes the entire string because then it cannot %% construct the $Rest word from the empty list. That's probably unexpected, but %% also fine for this AoC problem. (extract-number $Input $Num $Rest) (split word $Input into $Characters) (extract-number-internal $Characters $Digits $Further) (join words $Digits into $Num) (join words $Further into $Rest) (extract-number-internal [(number $H) | $T] [$H | $Next] $Further) (extract-number-internal $T $Next $Further) (extract-number-internal $Characters [] $Characters)</blockquote><p>These work well when queried in the main query.</p><blockquote>(program entry point) (get input $Ranges) *($Range is one of $Ranges) (range-parse $Range $Start $Stop) Parsed out the range (bigint-print $Start) to (bigint-print $Stop) (line) (fail)</blockquote><p>which, given the example input, prints</p><blockquote>Parsed out the range 11 to 22 Parsed out the range 95 to 115 Parsed out the range 998 to 1012 Parsed out the range 1188511880 to 1188511890 Parsed out the range 222220 to 222224 Parsed out the range 1698522 to 1698528 Parsed out the range 446443 to 446449 Parsed out the range 38593856 to 38593862 Parsed out the range 565653 to 565659 Parsed out the range 824824821 to 824824827 Parsed out the range 2121212118 to 2121212124</blockquote><p>The next step would be to either (a) implement division and modulo for big integers, or (b) convert these big integers to words. Either of these approaches would let us detect the repetitions we need to solve the problem.</p><p>Unfortunately, (a) sounds difficult, and in the process of (b) I ran into the memory limits of Dialog running on the the Z-machine. And then I caught the flu, and then I still tried despite my brain being a mess, and then I just didn’t feel like it anymore.</p><p>Sorry! Maybe you’ll enjoy the next part instead.</p><h1><a href="https://entropicthoughts.com#notes-from-learning-dialog">Notes from learning Dialog</a></h1>
+<p>
+When I started writing the notes below, I hadn’t tried using Dialog yet.
+However, I had read <a href="https://linusakesson.net/dialog/docs/index.html">the excellent manual</a> and it does a great job of selling the
+language. As a learning exercise, I bit off one of the problems of <a href="https://adventofcode.com/2024">the 2024
+Advent of Code</a>. Dialog has been described as mind-bending, so maybe you’ll get
+something out of these notes even if you’re not interested in the Z-machine.
+</p><h2><a href="https://entropicthoughts.com#small-integers-are-the-bane-of-my-existence">Small integers are the bane of my existence</a></h2>
+<p>You may remember that the Z-machine only supports 16-bit integers, and that the puzzle input for the first day of 2024 used numbers sized around 75,000, which do not fit into 16 bits. We implemented long integer arithmetic on our own for Inform 6, which was greatly helped by having the 16-bit integers in the Z-machine, meaning we could comfortably store intermediate values without losing carry bits.</p><p>Imagine my shock when I read in the Dialog manual that</p><blockquote><p>All numbers in Dialog are restricted to the range 0–16383 (inclusive).</p></blockquote><p>Granted, this is still enough to implement long integer arithmetic, but! Dialog does also not have any bitwise operators, nor does it support emitting Z-machine opcodes directly. The manual goes on to explain that</p><blockquote><p>developers that require more sophisticated number crunching will have to get creative.</p></blockquote><p>You don’t say.</p><p>At the time I was learning the language I didn’t have the level of creativity in me to implement long integer arithmetic under those constraints. So I skipped past the first day, and went straight for the second day.</p><h2><a href="https://entropicthoughts.com#basics-of-dialog-execution">Basics of Dialog execution</a></h2>
+<p>Dialog is different from many other programming languages, so we’ll have to start slow. In Dialog, the subroutine is not the fundamental unit of abstraction. Instead, the query is. The main difference is that whereas a subroutine typically</p><ul><li>Has a name,</li><li>Takes arguments,</li><li>Can perform side effects, and</li><li>Returns a value.</li></ul><p>queries instead</p><ul><li>Are identified by words,</li><li>Can unify variables with values in both directions,</li><li>Can perform side effects, and</li><li>Always result in either failure or success.</li></ul><p>The latter point is important, because it determines how execution flows in a Dialog program. Failure in Dialog does not mean something bad happened – it is a normal way to stop executing a query.</p><p>
+When a Dialog program starts up, it always starts by evaluating the query called
+<pre>(program entry point)</pre>. The <pre>(program entry point)</pre> query must be defined by
+us, and we define a query by writing its name. The simplest way to define the
+entry point query would be to compile the following complete program:
+</p><pre>(program entry point)
+</pre>
+<p>
+This is a query identified by the words <pre>program entry point</pre>. Because it has no
+query body, it always suceeds. We could make it always fail by giving it a body
+like
+</p><blockquote>(program entry point) (1 = 2)</blockquote><p>
+The sub-query <pre>(1 = 2)</pre> succeeds if one is equal to two, and fails otherwise.
+Since one is not equal to two, it will always fail, meaning our program, when
+defined like that, will always fail. Since failure is counted as a normal way to
+terminate execution, this failure will not be visible to the user – the program
+simply stops.
+</p><p>If we write plain text in the body of a query, that is taken to be a print statement query. A print statement query always suceeds. Thus the following program will print a customary message and then suceed.</p><blockquote>(program entry point) Hello, world!</blockquote><p>
+If we instead wanted it to fail, we could add a failing query to the end of the
+main query body. We used the failing query <pre>(1 = 2)</pre>, before, but a convenient
+equivalent is <pre>(fail)</pre>, a query that always fails.
+</p><blockquote>(program entry point) Hello, world! (fail)</blockquote><p>This would run the first sub-query, which prints a message, and when the second query fails, the main query would also fail. This highlights a key principle of how Dialog programs run: when a query is evaluated, it evaluates all sub-queries in sequence, and fails when any of them fail.</p><h2><a href="https://entropicthoughts.com#reading-in-a-list-of-numbers">Reading in a list of numbers</a></h2>
+<p>Now, perhaps, we can ask the user for a sequence of numbers.</p><blockquote>(program entry point) Please enter a sequence of numbers: (line) (get input $Report) Aha, you are interested in $Report!</blockquote><p>
+The program above defines the main query <pre>(program entry point)</pre> in terms of
+four sub-queries:
+</p><ul><li>First a print statement to print a prompt.</li><li>Then comes a query called <pre>(line)</pre>. This is built into the Dialog language and causes a newline to be printed.3 Roughly speaking – Dialog applies some intelligence to things that are printed.</li><li>We have the query <pre>(get input $Report)</pre>. This pauses execution and waits for the user to type stuff. If the user types space-separated numbers, Dialog will create a list of numbers and assign that list into the variable<pre>$Report</pre>.</li><li>Finally, we have another print statement, where we display the list back to the user.4 Dialog applies some debug formatting to be able to print lists.</li></ul><p>As long as the user types something at the prompt, none of these queries can fail. That means whenever the program runs, Dialog will evaluate all four sub-queries in turn. The results are predictable:</p><blockquote>Please enter a sequence of numbers: 6 8 19 Aha, you are interested in [6 8 19]!</blockquote><p>or</p><blockquote>Please enter a sequence of numbers: 87 44 hammock Aha, you are interested in [87 44 hammock]!</blockquote><p>or</p><blockquote>Please enter a sequence of numbers: Aha, you are interested in []!</blockquote><p>Dialog does not enforce that the user types numbers, but if the user types numbers, the program will get a list of numbers rather than a list of dictionary words, which is the string-like type in Dialog.</p><h2><a href="https://entropicthoughts.com#extracting-and-querying-on-the-first-number">Extracting and querying on the first number</a></h2>
+<p>We’ll eventually want to do more complicated processing on the sequence we get from the user, but to take it step by step, let’s determine whether the first number the user typed is greater than three.</p><p>
+We’ll make a new query for this. In Dialog, queries are identified with words,
+but they can have variable names interspersed between any of the words. This
+means we could create a query called <pre>(does $List have a large first number?)</pre>
+where the variable <pre>$List</pre> representing the parameter comes early on in the
+definition. Here’s the full definition of such a query.
+</p><blockquote>(does $List have a large first number?) ($List = [$First | $Rest]) ($First &gt; 3)</blockquote><p>In order for this query to succeed, both of its subqueries must succeed. In other words, it must be able to</p><ul><li>decompose <pre>$List</pre>into a<pre>$First</pre>element and the<pre>$Rest</pre>of the list; and</li><li>the <pre>$First</pre>element must be a number greater than three.</li></ul><p>
+If either of those two sub-queries fail, then the entire <pre>(does $List have a
+large first number?)</pre> query will fail.
+</p><p>When we insert a call to the large-number query in our main program, it will either allow the main program to continue to execute (if the large-number query succeeds), or halt execution of the main program (if the large-number query fails). Thus, we can use it to conditionally print a message:</p><blockquote>(program entry point) Please enter a sequence of numbers: (line) (get input $Report) Aha, you are interested in $Report! (line) (does $Report have a large first number?) The first number is indeed large!</blockquote><p>
+What actually happens when Dialog encounters a call to a query is that it
+matches the name of the query word-for-word with all other queries we have
+defined. If any of the words in the query are variables (i.e. start with a
+dollar sign) and are currently unassigned, Dialog is allowed to assign them a
+value to make the query match. This process is called unification. In this
+case, the <pre>$Report</pre> variable is bound to a list, but the <pre>$List</pre> variable inside
+the query is unassigned, so Dialog assigns the value of <pre>$Report</pre> into <pre>$List</pre>
+to make the query match its definition. Then execution of the sub-query takes
+place.
+</p><p>We defined the query using a verbose name to illustrate how Dialog tries to match the name and assigns values to variables to make it match exactly, but we can use shorter query names. I’m a programmer, so I’d prefer to define our query as</p><blockquote>(first-large? $List) ($List = [$First | $Rest]) ($First &gt; 3)</blockquote><p>
+using the much shorter, Ruby-inspired name <pre>first-large?</pre>. We can also decompose
+the argument list in the query declaration directly, instead of with a subquery.
+It’s the same thing.
+</p><blockquote>(first-large? [$First | $Rest]) ($First &gt; 3)</blockquote><p>This will produce the expected effect.</p><blockquote>Please enter a sequence of numbers: 5 8 3 Aha, you are interested in [5 8 3]! The first number is indeed large!</blockquote><p>and</p><blockquote>Please enter a sequence of numbers: 1 8 2 Aha, you are interested in [1 8 2]!</blockquote><p>It’s a little annoying that it doesn’t print anything when the first number is small. We’ll see if we can fix that.</p><h2><a href="https://entropicthoughts.com#conditional-execution">Conditional execution</a></h2>
+<p>
+So far, we have only seen queries that succeed if all of their subqueries
+succeed. We can get the effect of conditional execution by defining the same
+query multiple times. Here, we have split out the printing of the message into a
+<pre>large-feedback</pre> query.
+</p><blockquote>(program entry point) Please enter a sequence of numbers: (line) (get input $Report) Aha, you are interested in $Report! (line) (large-feedback $Report) (large-feedback $List) (first-large? $List) The first number is indeed large! (large-feedback $List) Sorry, the first number seems small. (first-large? [$First | $Rest]) ($First &gt; 3)</blockquote><p>
+You’ll note that there are now two queries with the same declaration. When
+there are multiple queries that match, Dialog sets up a choice point before
+executing the first matching query. If that query fails, Dialog will roll back
+any changes it made during its execution, and execute the next matching query
+instead. In our program above, that means it will try the first <pre>large-feedback</pre>
+query, which fails if the first number is small, and then go on to try the
+second <pre>large-feedback</pre> query. The effect is printing different messages whether
+the first number is large or small.
+</p><p>
+If we don’t want to split up this definition, there’s a control flow primitive
+in Dialog called <pre>(or)</pre> which sets up such a choice point inside a query. To use
+that, we’d write the <pre>large-feedback</pre> query with one query body:
+</p><blockquote>(large-feedback $List) (first-large? $List) The first number is indeed large! (or) Sorry, the first number seems small.</blockquote><p>
+Although <pre>(or)</pre> looks like a query, it’s the syntax for a control flow primitive
+in Dialog. When a query is defined with <pre>(or)</pre>, Dialog first executes the
+queries above the <pre>(or)</pre> as normal, but if any of them fail, it restores to the
+start of execution of that query, and runs the queries below the <pre>(or)</pre> instead.
+</p><p>
+In the above case, this has the desired effect: if the first number is large, it
+will get to the relevant print statement, and then the <pre>large-feedback</pre>
+query is considered successful. In contrast, if the <pre>first-large?</pre> query
+fails, the <pre>(or)</pre> construct will move execution over to its other side, and
+print the consolitory message.
+</p><p>
+The <pre>(or)</pre> construct is inconvenient in that it considers everything above it
+as one branch, and everything below it as another branch. We can limit its
+scope with curly braces, as here:
+</p><blockquote>(program entry point) Please enter a sequence of numbers: (line) (get input $Report) Aha, you are interested in $Report! (line) { (first-large? $Report) The first number is indeed large! (or) Sorry, the first number seems small. } (first-large? [$First | $Rest]) ($First &gt; 3)</blockquote><p>This kind of conditional execution is so common that Dialog has syntactic sugar for it to make it look more like other programming languages. We could instead have written e.g.</p><blockquote>(program entry point) Please enter a sequence of numbers: (line) (get input $Report) Aha, you are interested in $Report! (line) (if) ($Report = [$First | $]) ($First &gt; 3) (then) The first number is indeed large! (else) Sorry, the first number seems small. (endif)</blockquote><p>
+This is desugared to almost the same thing.5 The difference is that further
+failures in the <pre>(then)</pre> branch won’t toss execution over to the <pre>(else)</pre>
+branch. In these notes, I will try to stick to the more primitive constructs
+rather than syntax sugar, to communicate more clearly that what happens under
+the hood are queries executing until one fails, then Dialog backtracks and tries
+the other alternative.
+</p><h2><a href="https://entropicthoughts.com#querying-multiple-numbers">Querying multiple numbers</a></h2>
+<p>Now that we have that in place, let’s construct a more complicated query on the report. Instead of seeing whether the first number is large, let’s see if the entire sequence is increasing. Our query that checks if a sequence is increasing will do so by running another query that checks if the rest of the sequence is increasing, given the first number.</p><blockquote>(sequence-increasing? [$First | $Rest]) (sequence-increasing-from? $Rest $First) (sequence-increasing-from? [$First | $Rest] $Previous) ($First &gt; $Previous) (sequence-increasing-from? $Rest $First)</blockquote><p>
+If we plop this down in our main query instead of the <pre>first-large?</pre> query,
+we’ll find that it judges all sequences as not increasing. The reason is that
+given the input, say, <pre>[4, 6, 9]</pre>, it will eventually try to run the query
+</p><blockquote>(sequence-increasing-from? [] 9)</blockquote><p>and this does not match any queries we have defined, so it fails.6 The functional programmers in the crowd will recognise this as recursion with a missing base case. And when it fails, the failure falls through to the top level. We can easily fix this by defining that query to always be a success:</p><blockquote>(sequence-increasing? [$First | $Rest]) (sequence-increasing-from? $Rest $First) (sequence-increasing-from? [] $) (sequence-increasing-from? [$First | $Rest] $Previous) ($First &gt; $Previous) (sequence-increasing-from? $Rest $First)</blockquote><p>The empty dollar sign is a wildcard variable, indicating we want the query to succeed for all values of that variable. With this addition, the program works. It does judge the empty input as “not increasing” but that’s probably fine.</p><h2><a href="https://entropicthoughts.com#conditional-execution-based-on-symbols">Conditional execution based on symbols</a></h2>
+<p>To solve the second day’s Advent of Code problem, we will also want to check if a sequence is decreasing. We could copy-paste the above queries and update the operator used, but we could also think of it as an opportunity for abstraction. First, we modify the queries to take a parameter that indicates the criterion on which the sequence should be evaluated.</p><blockquote>(sequence-satisfies? $Condition [$First | $Rest]) (sequence-satisfies-from? $Condition $Rest $First) (sequence-satisfies-from? $Condition [] $) (sequence-satisfies-from? $Condition [$First | $Rest] $Previous) (compare-by $Condition $First $Previous) (sequence-satisfies-from? $Condition $Rest $First)</blockquote><p>
+What we have done here is add another variable which indicates by which
+condition the sequence should be evaluated. We have also changed the explicit
+comparison <pre>($First &gt; $Previous)</pre> to a <pre>compare-by</pre> query that takes a condition
+and two values and compares by that condition.
+</p><p>
+When we call this query, we need to pass it a value indicating by which
+condition we want to compare. We could pass it a plain number (and decide on a
+convention that e.g. <pre>0</pre> means increasing, <pre>1</pre> means decreasing, etc.) but it’s
+more readable if we use a symbol.7 Actually, they are not called symbols in
+Dialog, but objects. That seems very confusing to me. They have no properties
+and no methods! They are plain symbols. I’m sure the compiler translates them to
+a number, too. These are words prefixed by hash signs. Thus, the call to the
+new query would look like:
+</p><blockquote>{ (sequence-satisfies? #increasing $Report) Yup, increasing. (or) Sorry, not increasing. }</blockquote><p>
+In order for this to work, we also have to define the <pre>compare-by</pre> query, so
+we’ll do that.
+</p><blockquote>(compare-by #increasing $A $B) ($A &gt; $B)</blockquote><p>With this, we get the expected result.</p><p>
+To support checking if a sequence is decreasing, we only have to implement that
+<pre>compare-by</pre> operation.
+</p><blockquote>(compare-by #decreasing $A $B) ($A &lt; $B)</blockquote><p>
+We can also add the <pre>compare-by</pre> operation to determine whether a sequence only
+consists of small steps.
+</p><blockquote>(compare-by #small-stepped $A $B) ($A &lt; $B) (compare-by #small-stepped $B $A) (compare-by #small-stepped $A $B) ($A minus $B into $Difference) ($Difference &lt; 4)</blockquote><p>
+This looks weird because Dialog isn’t very strong at maths. Dialog doesn’t have
+negative numbers, so we have to make sure we are subtracting in the right order.
+If <pre>$A</pre> is smaller than <pre>$B</pre>, we swap them before performing the computation.
+</p><h2><a href="https://entropicthoughts.com#evaluating-the-safety-of-a-sequence">Evaluating the safety of a sequence</a></h2>
+<p>The Advent of Code puzzle asks us to determine which reports are safe, where safety is determined by the sequence being small-stepped and being either increasing or decreasing. We have what we need to determine that for a single sequence now.</p><blockquote>(program entry point) Please enter a sequence of numbers: (line) (get input $Report) { (report-safe? $Report) The report is safe. (or) Sorry, that report is unsafe. } (report-safe? $Report) (sequence-satisfies? #small-stepped $Report) (sequence-monotonic? $Report) (sequence-monotonic? $Report) (sequence-satisfies? #increasing $Report) (sequence-monotonic? $Report) (sequence-satisfies? #decreasing $Report)</blockquote><p>
+We have a separate query for determining whether the report is increasing or
+decreasing because we want Dialog to try both. But we can apply a trick to
+simplify the code. We know that Dialog creates a choice point if we have a block
+with an <pre>(or)</pre> query, so we can use that to try both directions.
+</p><blockquote>(report-safe? $Report) (sequence-satisfies? #small-stepped $Report) { ($Direction = #increasing) (or) ($Direction = #decreasing) } (sequence-satisfies? $Direction $Report)</blockquote><p>
+When Dialog runs this query, it will first assign <pre>#increasing</pre> to <pre>$Direction</pre>,
+because it has not yet seen anything that contradicts this choice. It will then
+go through the <pre>sequence-satisfies? #increasing</pre> query. If that query fails,
+Dialog takes that to mean that there is evidence that contradicts <pre>$Direction</pre>
+being <pre>#increasing</pre>. So Dialog rolls back to the choice point created by the
+<pre>(or)</pre> construct, and runs the rest of the query again except with <pre>$Direction</pre>
+set to <pre>#decreasing</pre>. If that also fails, then the entire <pre>report-safe?</pre> query
+fails. But if it succeeds, the <pre>report-safe?</pre> query also succeeds.
+</p><p>
+This way of writing it would be unnecessarily verbose if we had many directions.
+There is a query built in to Dialog called <pre>($ is one of $)</pre>. That query
+succeeds if the first argument is a member of the list in the second argument.
+If the first argument is an unbound variable, then Dialog will do its thing
+where it assigns a value to the first argument to make the query succeed. In
+practice, that means Dialog assigns one of the values of the list to the variable.
+</p><p>We might imagine we could use this query as such:</p><blockquote>(report-safe? $Report) (sequence-satisfies? #small-stepped $Report) ($Direction is one of [#increasing #decreasing]) (sequence-satisfies? $Direction $Report)</blockquote><p>
+but this would not work as we want it to. The problem is that Dialog does not
+insert a choice point before the <pre>is one of</pre> query, so it will never be able to backtrack
+to try multiple assignments for the <pre>$Direction</pre> variable. There is a special
+little syntax we can use to get Dialog to insert a choice point before that
+query. See if you spot it!
+</p><blockquote>(report-safe? $Report) (sequence-satisfies? #small-stepped $Report) *($Direction is one of [#increasing #decreasing]) (sequence-satisfies? $Direction $Report)</blockquote><p>The asterisk turns the query into a multi-query, which means Dialog creates a choice point before running the query, and then if any of the subsequent queries fail, it backtracks and tries a new way to unify the query. If the subsequent queries succeed, the overall query evaluation succeeds and the choice point is discarded.</p><h2><a href="https://entropicthoughts.com#reading-multiple-reports">Reading multiple reports</a></h2>
+<p>At this point, we can use tail recursion to evaluate multiple reports.</p><blockquote>(program entry point) (read-and-evaluate-reports) (read-and-evaluate-reports) (get input $Report) (if) ~($Report = []) (then) (evaluate-safety $Report) (read-and-evaluate-reports) (endif) (evaluate-safety $Report) (report-safe? $Report) The report $Report is safe. (line) (or) Sorry, the report $Report is unsafe. (line)</blockquote><p>If we run this with the test input in the second day’s problem, it answers correctly.</p><blockquote>The report [7 6 4 2 1] is safe. Sorry, the report [1 2 7 8 9] is unsafe. Sorry, the report [9 7 6 2 1] is unsafe. Sorry, the report [1 3 2 4 5] is unsafe. Sorry, the report [8 6 4 4 1] is unsafe. The report [1 3 6 7 9] is safe.</blockquote><p>
+However, if we run this on the full input, it just … stops after a while, as if
+the <pre>read-and-evaluate-reports</pre> query fails – and this shouldn’t be possible
+given how it’s written!
+</p><p>Hidden in the last chapter of the Dialog manual, under the section Some notes on performance, subsection Memory footprint, we find the remark</p><blockquote><p>Tail-call optimization is backend-dependent. This means that infinite loops must be implemented using</p><pre>(repeat forever)</pre>. If they are implemented using recursion, some memory might leak with every iteration, and the program will eventually crash.</blockquote><p>
+The problem seems to be that we run out of memory!8 We can install an error
+handler in our Dialog code that receives runtime error codes. This confirms the
+memory problem. As the manual alludes to, there is a special query built into
+the language which always succeeds, and it’s called <pre>(repeat forever)</pre>. The way
+we normally use it is as a multi-query, meaning it will be re-tried over and
+over as long as any of the subsequent queries fail. Here it is in context.
+</p><blockquote>(read-and-evaluate-reports) *(repeat forever) (get input $Report) { ($Report = []) (or) (evaluate-safety $Report) (fail) }</blockquote><p>We need the explicit failure call at the end, because Dialog will only backtrack to the choice point established by the multi-query if the subsequent queries fail. When the input is empty, we don’t fail the query, because then we do want to break out of the query successfully.</p><h2><a href="https://entropicthoughts.com#counting-safe-reports">Counting safe reports</a></h2>
+<p>However, having turned the iteration into an actual loop, we can not explicitly accumulate a count of safe reports, which would have been my initial plan. What we’ll do instead is use a global variable to keep track of that.</p><blockquote>(global variable (safe-reports 0)) (read-and-evaluate-reports $Count) *(repeat forever) (get input $Report) { ($Report = []) (safe-reports $Count) (or) (report-safe? $Report) (safe-reports $Previous) ($Previous plus 1 into $Next) (now) (safe-reports $Next) (fail) }</blockquote><p>
+A global variable is like a query definition except that it is allowed to change
+when the program runs. At the program start, we have a query defined as
+<pre>(safe-reports 0)</pre>. When the program queries for e.g. <pre>(safe-reports
+$Previous)</pre>, and the <pre>$Previous</pre> variable is unassigned, it will assign <pre>0</pre> to
+<pre>$Previous</pre> in order to unify the queries – typical Dialog evaluation. This is
+how we can read global variables.
+</p><p>
+Because we have declared that query as a global variable, we are also allowed to
+run something like <pre>(now) (safe-reports 5)</pre>. This will re-define the query to
+<pre>(safe-reports 5)</pre>, rather than <pre>(safe-reports 0)</pre>. The <pre>(now)</pre> directive is
+what allows us to replace query definitions during program run-time. We use this
+in the <pre>(read-and-evaluate-reports)</pre> query to increment the count of safe
+reports seen.
+</p><p>Running this on the full test input, it actually gives us the correct answer!9 Just like with Prolog, I’m always a little surprised when a Dialog program Just Works™.</p><h2><a href="https://entropicthoughts.com#evaluating-reports-with-a-number-excluded">Evaluating reports with a number excluded</a></h2>
+<p>The twist for the second half of the second day’s problem is that we should consider reports safe also if we can produce a safe report by excluding one of the numbers in the report. This would have taken too much time for me to implement in Inform 6, but it is a natural fit for Dialog!</p><p>
+I can imagine two ways of doing it. We could modify the <pre>sequence-satisfies?</pre>
+query to try skipping over one item at each step, and returning successfully if
+any of those attempts are successful. If we want to keep our
+<pre>sequence-satisfies?</pre> unchanged, we could instead first generate all
+equivalent sequences (i.e. sequences missing one item), and then test all of
+those for safety.
+</p><p>I selected the latter approach. This is a query that generates all equivalent reports, i.e. it takes a report and gives back all reports that result from excluding one number from it.</p><blockquote>(report-equivalent [$First | $Rest] $Result) *(report-equivalent $Rest $More) ($Result = [$First | $More]) (or) ($Result = $Rest)</blockquote><p>I wrote this. It was actually easy to write. I just typed out the things I felt should be there. But I cannot for the life of me explain how it works.10 This happens when I write Prolog code too. My intuition for it is that we get all equivalent reports constructed from the rest of the numbers in this report and tack on the first number to them. Then when we have exhausted those, we also return the equivalent report we get from excluding the first number.</p><p>We can test this by creating a temporary entry point query that overrides the real one.</p><blockquote>(program entry point) (get input $Report) *(report-equivalent $Report $Equivalent) We got an equivalent $Equivalent (line) (fail)</blockquote><p>
+The multi-query continues to extract equivalents as long as the main query fails,
+which is always does thanks to the <pre>(fail)</pre> call. When given the input <pre>1 2 3 4</pre>
+this will print
+</p><blockquote>We got an equivalent [1 2 3] We got an equivalent [1 2 4] We got an equivalent [1 3 4] We got an equivalent [2 3 4]</blockquote><p>That’s exactly what we want! We’ll add a new query</p><blockquote>(report-with-equivalents-safe? $Report) (report-safe? $Report) (or) *(report-equivalent $Report $Equivalent) (report-safe? $Equivalent)</blockquote><p>
+which, if the report is not safe on its own, tests the safety of all equivalent
+reports. We call this in the main query instead of directly calling
+<pre>report-safe?</pre>. When fed the full input, it again returns the correct answer!
+</p><h1><a href="https://entropicthoughts.com#next-steps">Next steps</a></h1>
+<p>The flu and other commitments take over here, so this is where this adventure ends.</p><p>But I really like Dialog. In this article, we’ve flirted with using it in ways it’s not really meant for. I suspect it can be very powerful for making text adventures, which is what it’s really designed for. But I also find myself wishing Dialog was a better general-purpose language, because it has been nice to work in. Then again, maybe this sharp focus on text adventures is what has kept it nice.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

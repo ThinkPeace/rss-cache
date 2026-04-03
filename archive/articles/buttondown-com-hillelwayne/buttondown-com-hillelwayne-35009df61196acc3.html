@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LLMs are bad at vibing specifications | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>LLMs are bad at vibing specifications</h1>
+        <div class="meta">Computer Things 2026-03-10T17:12:30Z</div>
+        <div class="links">
+          <a href="https://buttondown.com/hillelwayne/archive/llms-are-bad-at-vibing-specifications/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/buttondown-com-hillelwayne/buttondown-com-hillelwayne-35009df61196acc3.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">No newsletter next week I&#x27;ll be speaking at InfoQ London . But see below for a book giveaway! LLMs are bad at vibing specifications About a year ago I wrote AI is a gamechanger for TLA+ users , which argued that AI are a &quot;specification force multiplier&quot;. That was written from the perspective an TLA+ expert using these tools. A full 4% of Github TLA+ specs n…</div>
+        <div class="content">
+          <h3>No newsletter next week</h3>
+<p>I'll be speaking at <a href="https://qconlondon.com/" target="_blank">InfoQ London</a>. But see below for a book giveaway!</p>
+<hr />
+<h1>LLMs are bad at vibing specifications</h1>
+<p>About a year ago I wrote <a href="https://buttondown.com/hillelwayne/archive/ai-is-a-gamechanger-for-tla-users/" target="_blank">AI is a gamechanger for TLA+ users</a>, which argued that AI are a "specification force multiplier". That was written from the perspective an TLA+ expert using these tools. A full <a href="https://github.com/search?q=path%3A*.tla+NOT+is%3Afork+claude&amp;type=code" target="_blank">4% of Github TLA+ specs</a> now have the word "Claude" somewhere in them. This is interesting to me, because it suggests there was always an interest in formal methods, people just lacked the skills to do it.  </p>
+<p>It's also interesting because it gives me a sense of what happens when beginners use AI to write formal specs. It's not good.</p>
+<p>As a case study, we'll use <a href="https://github.com/myProjectsRavi/sentinel-protocol/tree/main/docs/formal/specs" target="_blank">this project</a>, which is kind of enough to have vibed out TLA+ and Alloy specs.</p>
+<h3>Looking at a project</h3>
+<p><a href="https://github.com/myProjectsRavi/sentinel-protocol/blob/main/docs/formal/specs/threat-intel-mesh.als" target="_blank">Starting with the Alloy spec</a>. Here it is in its entirety:</p>
+<div class="codehilite"><pre><span></span><code>module ThreatIntelMesh
+
+sig Node {}
+
+one sig LocalNode extends Node {}
+
+sig Snapshot {
+  owner: one Node,
+  signed: one Bool,
+  signatures: set Signature
+}
+
+sig Signature {}
+
+sig Policy {
+  allowUnsignedImport: one Bool
+}
+
+pred canImport[p: Policy, s: Snapshot] {
+  (p.allowUnsignedImport = True) or (s.signed = True)
+}
+
+assert UnsignedImportMustBeDenied {
+  all p: Policy, s: Snapshot |
+    p.allowUnsignedImport = False and s.signed = False implies not canImport[p, s]
+}
+
+assert SignedImportMayBeAccepted {
+  all p: Policy, s: Snapshot |
+    s.signed = True implies canImport[p, s]
+}
+
+check UnsignedImportMustBeDenied for 5
+check SignedImportMayBeAccepted for 5
+</code></pre></div>
+
+<p class="empty-line"></p>
+<p>Couple of things to note here: first of all, this doesn't actually compile. It's using the <a href="https://alloy.readthedocs.io/en/latest/modules/boolean.html" target="_blank">Boolean</a> standard module so needs <code>open util/boolean</code> to function. Second, Boolean is the wrong approach here; you're supposed to use subtyping. </p>
+<div class="codehilite"><pre><span></span><code>sig Snapshot {
+<span class="w"> </span> owner: one Node,
+<span class="gd">- signed: one Bool,</span>
+<span class="w"> </span> signatures: set Signature
+}
+
+<span class="gi">+ sig SignedSnapshot in Snapshot {}</span>
+
+
+pred canImport[p: Policy, s: Snapshot] {
+<span class="gd">- s.signed = True</span>
+<span class="gi">+ s in SignedSnapshot</span>
+}
+</code></pre></div>
+
+<p>So we know the person did not actually run these specs. This is <em>somewhat</em> less of a problem in TLA+, which has an official MCP server that lets the agent run model checking. Even so, I regularly see specs that I'm pretty sure won't model check, with things like using <code>Reals</code> or assuming <code>NULL</code> is a built-in and not a user-defined constant.</p>
+<p>The bigger problem with the spec is that <code>UnsignedImportMustBeDenied</code> and <code>SignedImportMayBeAccepted</code> <em>don't actually do anything</em>. <code>canImport</code> is defined as <code>P || Q</code>. <code>UnsignedImportMustBeDenied</code> checks that <code>!P &amp;&amp; !Q =&gt; !canImport</code>. <code>SignedImportMayBeAccepted</code> checks that <code>P =&gt; canImport</code>. These are tautologically true! If they do anything at all, it is only checking that <code>canImport</code> was defined correctly. </p>
+<p>You see the same thing in the <a href="https://github.com/myProjectsRavi/sentinel-protocol/blob/main/docs/formal/specs/serialization-firewall.tla" target="_blank">TLA+ specs</a>, too:</p>
+<div class="codehilite"><pre><span></span><code>GadgetPayload ==
+  /\ gadgetDetected&#39; = TRUE
+  /\ depth&#39; \in 0..(MaxDepth + 5)
+  /\ UNCHANGED allowlistedFormat
+  /\ decision&#39; = &quot;block&quot;
+
+NoExploitAllowed == gadgetDetected =&gt; decision = &quot;block&quot;
+</code></pre></div>
+
+<p class="empty-line"></p>
+<p>The AI is only writing "obvious properties", which fail for reasons like "we missed a guard clause" or "we forgot to update a variable". It does not seem to be good at writing "subtle" properties that fail due to concurrency, nondeterminism, or bad behavior separated by several steps. Obvious properties are useful for orienting yourself and ensuring the system behaves like you expect, but the actual value in using formal methods comes from the subtle properties. </p>
+<p>(This ties into <a href="https://buttondown.com/hillelwayne/archive/some-tests-are-stronger-than-others/" target="_blank">Strong and Weak Properties</a>. LLM properties are weak, intended properties need to be strong.)</p>
+<p>This is a problem I see in almost every FM spec written by AI. LLMs aren't doing one of the core features of a spec. Articles like <a href="https://martin.kleppmann.com/2025/12/08/ai-formal-verification.html" target="_blank">Prediction: AI will make formal verification go mainstream</a> and <a href="https://leodemoura.github.io/blog/2026/02/28/when-ai-writes-the-worlds-software.html" target="_blank">When AI Writes the World's Software, Who Verifies It?</a> argue that LLMs will make formal methods go mainstream, but being easily able to write specifications doesn't help with correctness if the specs don't actually verify anything.</p>
+<h3>Is this a user error?</h3>
+<div class="subscribe-form"></div>
+<p>I first got interested in LLMs and TLA+ from <a href="https://zfhuang99.github.io/github%20copilot/formal%20verification/tla+/2025/05/24/ai-revolution-in-distributed-systems.html" target="_blank">The Coming AI Revolution in Distributed Systems</a>. The author of that later <a href="https://github.com/zfhuang99/lamport-agent/blob/main/spec/CRAQ/CRAQ.tla" target="_blank">vibecoded a spec</a> with a considerably more complex property:</p>
+<div class="codehilite"><pre><span></span><code>NoStaleStrictRead ==
+  \A i \in 1..Len(eventLog) :
+    LET ev == eventLog[i] IN
+      ev.type = &quot;read&quot; =&gt;
+        LET c == ev.chunk IN
+        LET v == ev.version IN
+        /\ \A j \in 1..i :
+             LET evC == eventLog[j] IN
+               evC.type = &quot;commit&quot; /\ evC.chunk = c =&gt; evC.version &lt;= v
+</code></pre></div>
+
+<p>This is a lot more complicated than the <code>(P =&gt; Q &amp;&amp; P) =&gt; Q</code> properties I've seen! It could be because <a href="https://github.com/deepseek-ai/3FS/tree/main/specs/DataStorage" target="_blank">the corresponding system already had a complete spec written in P</a>. But it could also be that Cheng Huang is already an expert specifier, meaning he can get more out of an LLM than an ordinary developer can. I've also noticed that I can usually coax an LLM to do more interesting things than most of my clients can. Which is good for my current livelihood, but bad for the hope of LLMs making formal methods mainstream. If you need to know formal methods to get the LLM to do formal methods, is that really helping?</p>
+<p>(Yes, if it lowers the skill threshold-- means you can apply FM with 20 hours of practice instead of 80. But the jury's still out on how <em>much</em> it lowers the threshold. What if it only lowers it from 80 to 75?) </p>
+<p>On the other hand, there also seem to be some properties that AI struggles with, even with explicit instructions. Last week a client and I tried to get Claude to generate a good <a href="https://www.hillelwayne.com/post/safety-and-liveness/" target="_blank">liveness</a> or <a href="https://www.hillelwayne.com/post/action-properties/" target="_blank">action</a> property instead of a standard obvious invariant, and it just couldn't. Training data issue? Something in the innate complexity of liveness? It's not clear yet. These properties are even more "subtle" than most invariants, so maybe that's it.</p>
+<p>On the other other hand, this is all as of March 2026. Maybe this whole article will be laughably obsolete by June. </p>
+<hr />
+<h3><a href="https://logicforprogrammers.com" target="_blank">Logic for Programmers</a> Giveaway</h3>
+<p>Last week's giveaway raised a few issues. First, the New World copies were all taken before all of the emails went out, so a lot of people did not even get a chance to try for a book. Second, due to a Leanpub bug the Europe coupon scheduled for 10 AM UTC actually activated at 10 AM my time, which was early evening for Europe. Third, everybody in the APAC region got left out.</p>
+<p>So, since I'm not doing a newsletter next week, let's have another giveaway:</p>
+<ul>
+<li><a href="https://leanpub.com/logic/c/E5A55F7B482C3" target="_blank">This coupon</a> will go up 2026-03-16 at 11:00 UTC, which should be noon Central European Time, and be good for ten books (five for this giveaway, five to account for last week's bug).</li>
+<li><a href="https://leanpub.com/logic/c/ADC664C95B6D1" target="_blank">This coupon</a> will go up 2026-03-17 at 04:00 UTC, which should be noon Beijing Time, and be good for five books.</li>
+<li><a href="https://leanpub.com/logic/c/U1250212A9070" target="_blank">This coupon</a> will go up 2026-03-17 at 17:00 UTC, which should be noon Central US Time, and also be good for five books.</li>
+</ul>
+<p>I think that gives the best chance of everybody getting at least a chance of a book, while being resilient to timezone shenanigans due to travel / Leanpub dropping bugfixes / daylight savings / whatever. </p>
+<p>(No guarantees that later "no newsletter" weeks will have giveaways! This is a gimmick)</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

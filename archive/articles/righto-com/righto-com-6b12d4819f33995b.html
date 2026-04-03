@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Conditions in the Intel 8087 floating-point chip&#x27;s microcode | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Conditions in the Intel 8087 floating-point chip&#x27;s microcode</h1>
+        <div class="meta">Ken Shirriff&#x27;s blog 2025-12-30T18:00:00Z</div>
+        <div class="links">
+          <a href="http://www.righto.com/2025/12/8087-microcode-conditions.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/righto-com/righto-com-6b12d4819f33995b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">In the 1980s, if you wanted your computer to do floating-point calculations faster, you could buy the Intel 8087 floating-point coprocessor chip. Plugging it into your IBM PC would make operations up to 100 times faster, a big boost for spreadsheets and other number-crunching applications. The 8087 uses complicated algorithms to compute trigonometric, logar…</div>
+        <div class="content">
+          <p>In the 1980s, if you wanted your computer to do floating-point calculations faster, you could buy
+the Intel 8087 floating-point coprocessor chip.
+Plugging it into your IBM PC would make operations up to 100 times faster, a big boost for spreadsheets
+and other number-crunching applications.
+The 8087 uses complicated algorithms to compute trigonometric, logarithmic, and exponential functions.
+These algorithms are implemented inside the chip in microcode.
+I'm part of a group that is reverse-engineering this microcode.
+In this post, I examine the 49 types of conditional tests that the 8087's microcode uses inside its algorithms.
+Some conditions are simple, such as checking if a number is zero or negative, while others are specialized,
+such as determining what direction to round a number.</p>
+<p>To explore the 8087's circuitry, I opened up an 8087 chip and took numerous photos of the silicon die with a microscope.
+Around the edges of the die, you can see the hair-thin bond wires that connect the chip to its 40 external pins.
+The complex patterns on the die are formed by its metal wiring, as well as the polysilicon and silicon underneath.
+The bottom half of the chip is the "datapath", the circuitry that performs calculations on 80-bit floating point values. 
+At the left of the datapath, a <a href="https://www.righto.com/2020/05/extracting-rom-constants-from-8087-math.html">constant ROM</a> holds important constants such as &pi;.
+At the right are the eight registers that the
+programmer uses to hold floating-point values; in an unusual design decision,
+these registers are arranged as a <a href="https://www.righto.com/2025/12/8087-stack-circuitry.html">stack</a>.</p>
+<p><a href="https://static.righto.com/images/8087-conditions/8087-die-labeled.jpg"><img alt="Die of the Intel 8087 floating point unit chip, with main functional blocks labeled. The die is 5mm&times;6mm.  Click for a larger image." class="hilite" height="587" src="https://static.righto.com/images/8087-conditions/8087-die-labeled-w450.jpg" title="Die of the Intel 8087 floating point unit chip, with main functional blocks labeled. The die is 5mm&times;6mm.  Click for a larger image." width="450" /></a><div class="cite">Die of the Intel 8087 floating point unit chip, with main functional blocks labeled. The die is 5mm&times;6mm.  Click for a larger image.</div></p>
+<p>The chip's instructions are defined by the large <a href="https://www.righto.com/2018/09/two-bits-per-transistor-high-density.html">microcode ROM</a> in the middle.
+To execute a floating-point instruction, the 8087 decodes the instruction and the microcode engine starts executing
+the appropriate micro-instructions from the microcode ROM.
+The microcode decode circuitry to the right of the ROM generates the appropriate control signals from each micro-instruction.<span id="fnref:decode"><a class="ref" href="#fn:decode">1</a></span>
+The bus registers and control circuitry handle interactions with the main 8086 processor and the rest of the system.</p>
+<h2>The 8087's microcode</h2>
+<p>Executing an 8087 instruction such as arctan requires hundreds of internal steps to compute the result.
+These steps are implemented in microcode with micro-instructions specifying each step of the algorithm.
+(Keep in mind the difference between the assembly language instructions used by a programmer and the
+undocumented low-level micro-instructions used internally by the chip.)
+The microcode ROM holds 1648 micro-instructions, implementing the 8087's instruction set.
+Each micro-instruction is 16 bits long and performs a simple operation such as moving data inside the chip, adding two values, or <a href="https://www.righto.com/2020/05/die-analysis-of-8087-math-coprocessors.html">shifting</a> data.
+I'm working with the "Opcode Collective" to reverse engineer the micro-instructions and fully understand the microcode (<a href="https://github.com/a-mcego/granite/blob/main/tools/8087mc/bin/8087.md">link</a>).</p>
+<p>The microcode engine (below) controls the execution of micro-instructions, acting as the mini-CPU inside the 8087.
+Specifically, it generates an 11-bit micro-address, the address of a micro-instruction in the ROM.
+The microcode engine implements jumps, subroutine calls, and returns within the microcode.
+These jumps, subroutine calls, and returns are all conditional; the microcode engine will either perform the
+operation or skip it, depending on the value of a specified condition.</p>
+<p><a href="https://static.righto.com/images/8087-conditions/engine.jpg"><img alt="The microcode engine. In this image, the metal is removed, showing the underlying silicon and polysilicon." class="hilite" height="633" src="https://static.righto.com/images/8087-conditions/engine-w200.jpg" title="The microcode engine. In this image, the metal is removed, showing the underlying silicon and polysilicon." width="200" /></a><div class="cite">The microcode engine. In this image, the metal is removed, showing the underlying silicon and polysilicon.</div></p>
+<p>I'll write more about the microcode engine later, but I'll give an overview here.
+At the top, the Instruction Decode PLA<span id="fnref:pla"><a class="ref" href="#fn:pla">2</a></span> decodes an 8087 instruction to determine the starting address in
+microcode.
+Below that, the Jump PLA holds microcode addresses for jumps and subroutine calls.
+Below this, six 11-bit registers implement the microcode stack, allowing six levels of subroutine calls inside the
+microcode.
+(Note that this stack is completely different from the 8087's register stack that holds eight floating-point values.)
+The stack registers have associated read/write circuitry.
+The incrementer adds one to the micro-address to step through the code.
+The engine also implements relative jumps, using an adder to add an offset to the current location.
+At the bottom, the address latch and drivers boost the 11-bit address output
+and send it to the microcode ROM.</p>
+<h2>Selecting a condition</h2>
+<p>A micro-instruction can say "jump ahead 5 micro-instructions if a register is zero" and the
+microcode engine will either perform the jump or ignore it, based on the register value.
+In the circuitry, the condition causes the microcode engine to either perform the jump or block the jump.
+But how does the hardware select one condition out of the large set of conditions?</p>
+<p>Six bits of the micro-instruction can specify one of 64 conditions.
+A circuit similar to the idealized diagram below selects the specified condition.
+The key component is a multiplexer, represented by a trapezoid below.
+A multiplexer is a simple circuit that selects one of its four inputs.
+By arranging multiplexers in a tree, one of the 64 conditions on the left is selected and becomes the output,
+passed to the microcode engine.</p>
+<p><a href="https://static.righto.com/images/8087-conditions/muxtree2.jpg"><img alt="A tree of multiplexers selects one of the conditions. This diagram is simplified." class="hilite" height="414" src="https://static.righto.com/images/8087-conditions/muxtree2-w400.jpg" title="A tree of multiplexers selects one of the conditions. This diagram is simplified." width="400" /></a><div class="cite">A tree of multiplexers selects one of the conditions. This diagram is simplified.</div></p>
+<p>For example, if bits J and K of the microcode are 00, the rightmost multiplexer will select the first input.
+If bits LM are 01, the middle multiplexer will select the second input, and if bits NO are 10, the left
+multiplexer will select its third input. The result is that condition 06 will pass through the tree and become the output.<span id="fnref:mux"><a class="ref" href="#fn:mux">3</a></span>
+By changing the bits that control the multiplexers, any of the inputs can be used.
+(We've arbitrarily given the 16 microcode bits the letter names A through P.)</p>
+<p>Physically, the conditions come from locations scattered across the die. For instance, conditions involving the opcode
+come from the instruction decoding part of the chip, while conditions involving a register are evaluated
+next to the register.
+It would be inefficient to run 64 wires for all the conditions to the microcode engine.
+The tree-based approach reduces the wiring since the "leaf" multiplexers can be located
+near the associated condition circuitry. Thus, only one wire needs to travel a long distance rather than multiple wires.
+In other words, the condition selection circuitry is distributed across the chip instead of being implemented as
+a centralized module.</p>
+<p>Because the conditions don't always fall into groups of four, the actual implementation is slightly different from
+the idealized diagram above.
+In particular, the top-level multiplexer has five inputs, rather than four.<span id="fnref:inputs"><a class="ref" href="#fn:inputs">4</a></span>
+Other multiplexers don't use all four inputs.
+This provides a better match between the physical locations of the condition circuits and the multiplexers.
+In total, 49 of the possible 64 conditions are implemented in the 8087.</p>
+<p>The circuit that selects one of the four conditions is called a multiplexer.
+It is constructed from pass transistors, transistors that are configured to either pass a signal through
+or block it.
+To operate the multiplexer, one of the select lines is energized, turning on the corresponding pass transistor.
+This allows the selected input to pass through the transistor to the output, while the other inputs are blocked.</p>
+<p><a href="https://static.righto.com/images/8087-conditions/multiplexer.jpg"><img alt="A 4-1 multiplexer, constructed from four pass transistors." class="hilite" height="180" src="https://static.righto.com/images/8087-conditions/multiplexer-w250.jpg" title="A 4-1 multiplexer, constructed from four pass transistors." width="250" /></a><div class="cite">A 4-1 multiplexer, constructed from four pass transistors.</div></p>
+<p>The diagram below shows how a multiplexer appears on the die. The pinkish regions are doped silicon. The white
+lines are polysilicon wires.
+When polysilicon crosses over doped silicon, a transistor is formed.
+On the left is a four-way multiplexer, constructed from four pass transistors. It takes inputs (black) for four conditions,
+numbered 38, 39, 3a, and 3b.
+There are four control signals (red) corresponding to the four combinations of bits N and O.
+One of the inputs will pass through a transistor to the output, selected by the active control signal.
+The right half contains the logic (four NOR gates and two inverters) to generate the control signals from the
+microcode bits.
+(Metal lines run horizontally from the logic to the control signal contacts, but I dissolved the metal for this
+photo.)
+Each multiplexer in the 8087 has a completely different layout,
+manually optimized based on the location of the signals and surrounding circuitry.
+Although the circuit for a multiplexer is regular (four transistors in parallel), the physical layout looks
+somewhat chaotic.</p>
+<p><a href="https://static.righto.com/images/8087-conditions/mux-diagram.jpg"><img alt="Multiplexers as they appear on the die. The metal layer has been removed to show the polysilicon and silicon. The &quot;tie-die&quot; patterns are due to thin-film effects where the oxide layer wasn't completely removed." class="hilite" height="256" src="https://static.righto.com/images/8087-conditions/mux-diagram-w500.jpg" title="Multiplexers as they appear on the die. The metal layer has been removed to show the polysilicon and silicon. The &quot;tie-die&quot; patterns are due to thin-film effects where the oxide layer wasn't completely removed." width="500" /></a><div class="cite">Multiplexers as they appear on the die. The metal layer has been removed to show the polysilicon and silicon. The "tie-die" patterns are due to thin-film effects where the oxide layer wasn't completely removed.</div></p>
+<p>The 8087 uses pass transistors for many circuits, not just multiplexers.
+Circuits with pass transistors are different from regular logic gates
+because the pass transistors provide no amplification. Instead, signals get weaker as they go through pass
+transistors.
+To solve this problem, inverters or buffers are inserted into the condition tree to boost signals;
+they are omitted from the diagram above.</p>
+<h2>The conditions</h2>
+<p>Of the 8087's 49 different conditions, some are widely used in the microcode, while others are designed for
+a specific purpose and are only used once.
+The full set of conditions is described in a footnote<span id="fnref:conditions"><a class="ref" href="#fn:conditions">7</a></span> but I'll give some highlights here.</p>
+<p>Fifteen conditions examine the bits of the current instruction's opcode. This allows
+one microcode routine to handle a group of similar instructions and then change behavior based on the specific
+instruction. For example, conditions test if the instruction is multiplication, if the instruction is an FILD/FIST
+(integer load or store), or if the bottom bit of the opcode is set.<span id="fnref:instructions"><a class="ref" href="#fn:instructions">5</a></span></p>
+<p>The 8087 has three temporary registers&mdash;tmpA, tmpB, and tmpC&mdash;that hold values during computation.
+Various conditions examine the values in the tmpA and tmpB registers.<span id="fnref:swap"><a class="ref" href="#fn:swap">6</a></span>
+In particular, the 8087 uses an interesting way to store numbers internally: each 80-bit floating-point value also 
+has two "tag" bits.
+These bits are mostly invisible to the programmer and can be thought of as metadata.
+The tag bits indicate if a register is empty, contains zero, contains a "normal" number, or contains a special
+value such as NaN (Not a Number) or infinity.
+The 8087 uses the tag bits to optimize operations.
+The tags also detect stack overflow (storing to a non-empty stack register) or stack underflow (reading from
+an empty stack register).</p>
+<p>Other conditions are highly specialized. For instance, one condition looks at the rounding mode setting and
+the sign of the value to determine if the value should be rounded up or down.
+Other conditions deal with exceptions such as numbers that are too small (i.e. denormalized) or numbers that
+lose precision.
+Another condition tests if two values have the same sign or not.
+Yet another condition tests if two values have the same sign or not, but inverts the result if the current
+instruction is subtraction.
+The simplest condition is simply "true", allowing an unconditional branch.</p>
+<p>For flexibility, conditions can be "flipped", either jumping if the condition is true or jumping if the condition is false.
+This is controlled by bit P of the microcode.
+In the circuitry, this is implemented by a gate that XORs the P bit with the condition. The result is that the
+state of the condition is flipped if bit P is set.</p>
+<p>For a concrete example of how conditions are used, consider the
+<a href="https://raw.githubusercontent.com/a-mcego/granite/refs/heads/main/tools/8087mc/bin/8087mc_out.txt#:~:text=%230896%09AB%20%20%20%20%20%20I%20%20L%20N%20%20%09c094%09%2Bjmp%2D%3E%230898%20cond%3D0x0a%20opcode%261">microcode routine</a>
+that implements <code>FCHS</code> and <code>FABS</code>, the
+instructions to change the sign and compute the absolute value, respectively.
+These operations are almost the same (toggling the sign bit versus clearing the sign bit), so the same
+microcode routine handles both instructions, with a jump instruction to handle the difference.
+The <code>FABS</code> and <code>FCHS</code> instructions were designed with identical opcodes,
+except that the bottom bit is set for <code>FABS</code>.
+Thus, the microcode routine uses a condition that tests the bottom bit, allowing the routine to branch and
+change its behavior for <code>FABS</code> vs <code>FCHS</code>.</p>
+<p>Looking at the relevant micro-instruction, it has the hex value
+<code>0xc094</code>, or in binary <code>110 000001 001010 0</code>.
+The first three bits (ABC=110) specify the relative jump operation (100 would jump to a fixed target and 101 would
+perform a subroutine call.)
+Bits D through I (<code>000010</code>) indicate the amount of the jump (+`). 
+Bits J through O (<code>001010</code>, hex 0a) specify the condition to test, in this case, the last bit of the instruction opcode.
+The final bit (P) would toggle the condition if set, (i.e. jump if false).
+Thus, for <code>FABS</code>, the jump instruction will jump ahead one micro-instruction.
+This has the effect of skipping the next micro-instruction, which sets the appropriate sign bit for
+<code>FCHS</code>.</p>
+<h2>Conclusions</h2>
+<p>The 8087 performs floating-point operations much faster than the 8086 by using
+special hardware, optimized for floating-point.
+The condition code circuitry is one example of this: the 8087
+can test a complicated condition in a single operation.
+However, these complicated conditions make it much harder to understand the microcode.
+But by a combination of examining the circuitry and looking at the micocode, we're making progress.
+Thanks to the members of the "Opcode Collective" for their hard work, especially Smartest Blob and Gloriouscow.</p>
+<p>For updates, follow me on
+ Bluesky (<a href="https://bsky.app/profile/righto.com">@righto.com</a>),
+Mastodon (<a href="https://oldbytes.space/@kenshirriff">@kenshirriff@oldbytes.space</a>),
+or <a href="http://www.righto.com/feeds/posts/default">RSS</a>.</p>
+<h2>Notes and references</h2>
+<div class="footnote">
+<ol>
+<li id="fn:decode">
+<p>The section of the die that I've labeled "Microcode decode" performs some of the microcode decoding, but
+large parts of the decoding are scattered across the chip, close to the circuitry that needs the signals.
+This makes reverse-engineering the microcode much more difficult.
+I thought that understanding the microcode would be straightforward, just examining a block of decode circuitry.
+But this project turned out to be much more complicated and I need to reverse-engineer the entire chip.&#160;<a class="footnote-backref" href="#fnref:decode" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+</li>
+<li id="fn:pla">
+<p>A PLA is a "Programmable Logic Array". It is a technique to implement logic functions with grids of transistors.
+A PLA can be used as a compressed ROM, holding data in a more compact representation.
+(Saving space was very important in chips of this era.)
+In the 8087, PLAs are used to hold tables of microcode addresses.&#160;<a class="footnote-backref" href="#fnref:pla" title="Jump back to footnote 2 in the text">&#8617;</a></p>
+</li>
+<li id="fn:mux">
+<p>Note that the multiplexer circuit selects the condition corresponding to the binary value of the bits.
+In the example, bits 000110 (0x06) select condition 06.&#160;<a class="footnote-backref" href="#fnref:mux" title="Jump back to footnote 3 in the text">&#8617;</a></p>
+</li>
+<li id="fn:inputs">
+<p>The five top-level multiplexer inputs correspond to bit patterns 00, 011, 10, 110, and 111.
+That is, two inputs depend on bits J and K, while three inputs depend on bits J, K, and L.
+The bit pattern 010 is unused, corresponding to conditions 0x10 through 0x17, which aren't implemented.&#160;<a class="footnote-backref" href="#fnref:inputs" title="Jump back to footnote 4 in the text">&#8617;</a></p>
+</li>
+<li id="fn:instructions">
+<p>The 8087 acts as a co-processor with the 8086 processor.
+The 8086 instruction set is designed so instructions with a special "ESCAPE" sequence in the top 5 bits
+are processed by the co-processor, in this case the 8087.
+Thus, the 8087 receives a 16-bit instruction, but only the bottom 11 bits are usable.
+For a memory operation, the second byte of the instruction is an 8086-style <a href="https://en.wikipedia.org/wiki/ModR/M">ModR/M</a> byte.
+For instructions that don't access memory, the second byte specifies more of the instruction and sometimes specifies the
+stack register to use for the instruction.</p>
+<p>The relevance of this is that the 8087's microcode engine uses the 11 bits of the instruction to determine
+which microcode routine to execute.
+The microcode also uses various condition codes to change behavior depending on different bits of the
+instruction.&#160;<a class="footnote-backref" href="#fnref:instructions" title="Jump back to footnote 5 in the text">&#8617;</a></p>
+</li>
+<li id="fn:swap">
+<p>There is a complication with the tmpA and tmpB registers: they can be swapped with the micro-instruction
+"ABC.EF". 
+The motivation behind this is that if you have two arguments, you can use a micro-subroutine to load
+an argument into tmpA, swap the registers, and then use the same subroutine to load the second argument
+into tmpA. The result is that the two arguments end up in tmpB and tmpA without any special coding in
+the subroutine.</p>
+<p>The implementation doesn't physically swap the registers, but renames them internally, which is
+much more efficient.
+A flip-flop is toggled every time the registers are swapped. If the flip-flop is set, a request goes
+to one register, while if the flip-flop is clear, a request goes to the other register.
+(Many processors use the same trick. For instance, the Intel 8080 has an instruction to exchange the
+DE and HL registers. The Z80 has an instruction to swap register banks. In both cases, a flip-flop
+renames the registers, so the data doesn't need to move.)&#160;<a class="footnote-backref" href="#fnref:swap" title="Jump back to footnote 6 in the text">&#8617;</a></p>
+</li>
+<li id="fn:conditions">
+<p>The table below is the real meat of this post, the result of much circuit analysis. These details probably aren't
+interesting to most people, so I've relegated the table to a footnote.
+Descriptions in italics are provided by Smartest Blob based on examination of the microcode.
+Grayed-out lines are unused conditions.</p>
+<p>The table has five sections, corresponding to the 5 inputs to the top-level condition multiplexer.
+These inputs come from different parts of the chip, so the sections correspond to different categories of
+conditions.</p>
+<p>The first section consists of instruction parsing, with circuitry near the microcode engine.
+The description shows the 11-bit opcode pattern that triggers the condition, with 0 bits and 1 bits as
+specified, and X indicating a "don't care" bit that can be 0 or 1.
+Where simpler, I list the relevant instructions instead.</p>
+<p>The next section indicates conditions on the exponent. I am still investigating these conditions, so
+the descriptions are incomplete.
+The third section is conditions on the temporary registers or conditions related to the control register.
+These circuits are to the right of the microcode ROM.</p>
+<p>Conditions in the fourth section examine the floating-point bus, with circuitry near the bottom of the chip.
+Conditions 34 and 35 use a special 16-bit bidirectional shift register, at the far right of the chip.
+The top bit from the floating-point bus is shifted in. Maybe this shift register is used for CORDIC
+calculations?
+The conditions in the final block are miscellaneous, including the always-true condition 3e, which is used
+for unconditional jumps.</p>
+<p>
+<table class="cond">
+<tr><th>Cond.</th><th>Description</th></tr></p>
+<p><tr class="topborder"><td>00</td><td>not XXX 11XXXXXX</td>
+<tr><td>01</td><td>1XX 11XXXXXX</td>
+<tr><td>02</td><td>0XX 11XXXXXX</td>
+<tr><td>03</td><td>X0X XXXXXXXX</td>
+<tr><td>04</td><td>not cond 07 or 1XX XXXXXXXX</td>
+<tr><td>05</td><td>not FLD/FSTP temp-real or BCD</td>
+<tr><td>06</td><td>110 xxxxxxxx or 111 xx0xxxxx</td>
+<tr><td>07</td><td>FLD/FSTP temp-real</td>
+<tr><td>08</td><td>FBLD/FBSTP</td>
+<tr class="unused"><td>09</td><td><i></i></td>
+<tr><td>0a</td><td>XXX XXXXXXX1</td>
+<tr><td>0b</td><td>XXX XXXX1XXX</td>
+<tr><td>0c</td><td>FMUL</td>
+<tr><td>0d</td><td>FDIV FDIVR</td>
+<tr><td>0e</td><td>FADD FCOM FCOMP FCOMPP FDIV FDIVR FFREE FLD FMUL FST FSTP FSUB FSUBR FXCH</td>
+<tr><td>0f</td><td>FCOM FCOMP FCOMPP FTST</td>
+<tr class="unused"><td>10</td><td><i></i></td>
+<tr class="unused"><td>11</td><td><i></i></td>
+<tr class="unused"><td>12</td><td><i></i></td>
+<tr class="unused"><td>13</td><td><i></i></td>
+<tr class="unused"><td>14</td><td><i></i></td>
+<tr class="unused"><td>15</td><td><i></i></td>
+<tr class="unused"><td>16</td><td><i></i></td>
+<tr class="unused"><td>17</td><td><i></i></td>
+<tr class="topborder"><td>18</td><td>exponent condition</td>
+<tr><td>19</td><td>exponent condition</td>
+<tr><td>1a</td><td>exponent condition</td>
+<tr><td>1b</td><td>exponent condition</td>
+<tr><td>1c</td><td>exponent condition</td>
+<tr><td>1d</td><td>exponent condition</td>
+<tr><td>1e</td><td>eight exponent zero bits</td>
+<tr><td>1f</td><td>exponent condition</td>
+<tr class="topborder"><td>20</td><td>tmpA tag ZERO</td>
+<tr><td>21</td><td>tmpA tag SPECIAL</td>
+<tr><td>22</td><td>tmpA tag VALID</td>
+<tr><td>23</td><td><i>stack overflow</i></td>
+<tr><td>24</td><td>tmpB tag ZERO</td>
+<tr><td>25</td><td>tmpB tag SPECIAL</td>
+<tr><td>26</td><td>tmpB tag VALID</td>
+<tr><td>27</td><td><i>st(i) doesn't exist (A)?</i></td>
+<tr><td>28</td><td>tmpA sign</td>
+<tr><td>29</td><td>tmpB top bit</td>
+<tr><td>2a</td><td>tmpA zero</td>
+<tr><td>2b</td><td>tmpA top bit</td>
+<tr><td>2c</td><td>Control Reg bit 12: infinity control</td>
+<tr><td>2d</td><td>round up/down</td>
+<tr><td>2e</td><td>unmasked interrupt</td>
+<tr><td>2f</td><td>DE (denormalized) interrupt</td>
+<tr class="topborder"><td>30</td><td>top reg bit</td>
+<tr class="unused"><td>31</td><td><i></i></td>
+<tr><td>32</td><td>reg bit 64</td>
+<tr><td>33</td><td>reg bit 63</td>
+<tr><td>34</td><td>Shifted top bits, all zero</td>
+<tr><td>35</td><td>Shifted top bits, one out</td>
+<tr class="unused"><td>36</td><td><i></i></td>
+<tr class="unused"><td>37</td><td><i></i></td>
+<tr class="topborder"><td>38</td><td>const latch zero</td>
+<tr><td>39</td><td>tmpA vs tmpB sign, flipped for subtraction</td>
+<tr><td>3a</td><td>precision exception</td>
+<tr><td>3b</td><td>tmpA vs tmpB sign</td>
+<tr class="unused"><td>3c</td><td><i></i></td>
+<tr class="unused"><td>3d</td><td><i></i></td>
+<tr><td>3e</td><td>unconditional</td>
+<tr class="unused"><td>3f</td><td><i></i></td>
+</table></p>
+<p>This table is under development and undoubtedly has errors.&#160;<a class="footnote-backref" href="#fnref:conditions" title="Jump back to footnote 7 in the text">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

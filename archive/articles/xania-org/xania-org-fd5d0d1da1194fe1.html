@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>When LICM fails us | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>When LICM fails us</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-14T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/14-licm-when-it-doesnt?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-fd5d0d1da1194fe1.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">When aliasing can prevent loop-invariant code motion</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p><html:a href="/202512/13-licking-licm">Yesterday's LICM post</html:a> ended with the compiler pulling invariants like <html:code>size()</html:code> and <html:code>get_range</html:code> out of our loop - clean assembly, great performance. Job done, right?</html:p>
+
+<html:p>Not quite. Let's see how that optimisation can disappear.</html:p>
+
+<html:p>Let's say you had a <html:code>const char *</html:code><html:sup id="fnref:cpp"><html:a class="footnote-ref" href="#fn:cpp">1</html:a></html:sup>, and wanted to write a function to return if there was an exclamation mark or not:</html:p>
+
+<html:p>Here we're relying on loop-invariant code motion (LICM) to move the <html:code>strlen</html:code> out of the loop, called once before we loop, and then the loop is:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">.L4:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">rdi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">1</html:span><html:span class="w">                </html:span><html:span class="c1">; ++index</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">BYTE</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi-1</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="mi">33</html:span><html:span class="w">  </html:span><html:span class="c1">; is string[index-1] a '!' ?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">je</html:span><html:span class="w"> </html:span><html:span class="no">.L5</html:span><html:span class="w">                    </html:span><html:span class="c1">; if so, jump to "return true"</html:span>
+<html:span class="nl">.L2:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rdi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="w">              </html:span><html:span class="c1">; else...are we at the end?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.L4</html:span><html:span class="w">                   </html:span><html:span class="c1">; loop if not</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>All pretty good. We'll learn in later posts<html:sup id="fnref:vector"><html:a class="footnote-ref" href="#fn:vector">2</html:a></html:sup> that we can improve on this simple loop, but for now this seems ok.</html:p>
+
+<html:p>Now let's assume we were curious how many characters in total we were comparing across our entire program, and add some basic instrumentation<html:sup id="fnref:ig"><html:a class="footnote-ref" href="#fn:ig">3</html:a></html:sup>:</html:p>
+
+<html:p>We might reasonably expect a single increment to be added to our loop. But if we take a closer look:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">.L4:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">QWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="no">num_compares</html:span><html:span class="p">[</html:span><html:span class="no">rip</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="mi">1</html:span><html:span class="c1">; ++num_compares;</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">BYTE</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rbp</html:span><html:span class="err">+</html:span><html:span class="mi">0</html:span><html:span class="err">+</html:span><html:span class="no">rbx</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="mi">33</html:span><html:span class="w">      </html:span><html:span class="c1">; is char a '!' ?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">je</html:span><html:span class="w"> </html:span><html:span class="no">.L5</html:span><html:span class="w">                            </html:span><html:span class="c1">; if so, jump to "return true"</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">rbx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">1</html:span><html:span class="w">                        </html:span><html:span class="c1">; ++index</html:span>
+<html:span class="nl">.L2:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">rdi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rbp</html:span><html:span class="w">                      </html:span><html:span class="c1">; er...</html:span>
+<html:span class="w">  </html:span><html:span class="nf">call</html:span><html:span class="w"> </html:span><html:span class="no">strlen</html:span><html:span class="w">                       </html:span><html:span class="c1">; what the heck? strlen?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rbx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="w">                      </html:span><html:span class="c1">; oh no! what happened?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jb</html:span><html:span class="w"> </html:span><html:span class="no">.L4</html:span><html:span class="w">                            </html:span><html:span class="c1">; loop if index != strlen(...)</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>Suddenly we've lost our lovely LICM! By simply incrementing a global variable<html:sup id="fnref:clang"><html:a class="footnote-ref" href="#fn:clang">4</html:a></html:sup>, we lost the ability to call <html:code>strlen</html:code> and keep the result. Why is this?</html:p>
+
+<html:p>It comes down to aliasing: the compiler can't prove that the string we're getting the length of doesn't share memory with the <html:code>num_compares</html:code> variable! Every time we modify <html:code>num_compares</html:code> the compiler has to assume that <html:em>maybe</html:em> the string changed as a result!</html:p>
+
+<html:p>This seems pretty odd: why on earth would a string overlap with a <html:code>std::size_t</html:code>? Don't we have rules about this? Aren't we disallowed from doing such things - type punning is barred - at least in C++?</html:p>
+
+<html:p>Unfortunately, <html:code>char*</html:code> has a <html:strong>special</html:strong> status in the standard<html:sup id="fnref:aliasing"><html:a class="footnote-ref" href="#fn:aliasing">5</html:a></html:sup>: it's allowed to alias with <html:strong>anything</html:strong>. That's why the compiler can't assume our string and <html:code>num_compares</html:code> occupy different memory! If we had any other type than <html:code>char *</html:code> then the compiler <html:em>could</html:em> use LICM.</html:p>
+
+<html:p>At least, that's what I hoped. In practice neither GCC<html:sup id="fnref:gcc-bug"><html:a class="footnote-ref" href="#fn:gcc-bug">6</html:a></html:sup>, clang<html:sup id="fnref:clang-bug"><html:a class="footnote-ref" href="#fn:clang-bug">7</html:a></html:sup> nor MSVC were able to LICM the code I tried. I could easily be missing something here, so do let me know if you have any ideas.</html:p>
+
+<html:p>Today's post seems a bit of a downer: the compiler wasn't able to do an optimisation I had otherwise hoped it might. Tomorrow we'll look at some other examples where the compiler struggles with aliasing, and we'll see how to help it out.</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/OwFNblEEAXo">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 14 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/13-licking-licm">Loop-Invariant Code Motion</html:a> | <html:a href="/202512/15-aliasing-in-general">Aliasing</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:cpp">
+<html:p>Think of this as more a C-style implementation: in C++ we'd probably use a <html:code>string_view</html:code> here which avoids the specific issue we're about to run in to. And of course <html:code>strchr</html:code> and friends are more optimal, but...bear with me! <html:a class="footnote-backref" href="#fnref:cpp" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:vector">
+<html:p>Specifically, either by using <html:code>strchr</html:code> or other settings, we can get the compiler's help to vectorize this. We'll talk more of that later. <html:a class="footnote-backref" href="#fnref:vector" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:ig">
+<html:p>We're going to ignore any threading issues here. <html:a class="footnote-backref" href="#fnref:ig" title="Jump back to footnote 3 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:clang">
+<html:p>Making the variable <html:code>static</html:code> helps for clang, but not gcc. Clang sees that we don't use the variable and gets rid of it, but if we were to use it elsewhere it's possible it wouldn't be able to do this optimisation. <html:a class="footnote-backref" href="#fnref:clang" title="Jump back to footnote 4 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:aliasing">
+<html:p>See <html:a href="https://eel.is/c++draft/basic.lval#11">[basic.lval] paragraph 11</html:a> in the C++ draft standard, which lists <html:code>char</html:code>, <html:code>unsigned char</html:code>, and <html:code>std::byte</html:code> as exceptions to the strict aliasing rule. <html:a class="footnote-backref" href="#fnref:aliasing" title="Jump back to footnote 5 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:gcc-bug">
+<html:p>I filed a <html:a href="https://gcc.gnu.org/bugzilla/show_bug.cgi?id=122240">missed optimisation opportunity</html:a> for GCC and the thought is the heuristic that handles inlining is perhaps making a poor choice. We'll talk about inlining later. <html:a class="footnote-backref" href="#fnref:gcc-bug" title="Jump back to footnote 6 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:clang-bug">
+<html:p>Clang's optimiser had slightly different characteristics, and I <html:a href="https://github.com/llvm/llvm-project/issues/163097">filed this issue</html:a> to track. <html:a class="footnote-backref" href="#fnref:clang-bug" title="Jump back to footnote 7 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

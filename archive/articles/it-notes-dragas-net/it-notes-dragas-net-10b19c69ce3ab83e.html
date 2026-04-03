@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FreeBSD vs. SmartOS: Who&#x27;s Faster for Jails, Zones, and bhyve VMs? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>FreeBSD vs. SmartOS: Who&#x27;s Faster for Jails, Zones, and bhyve VMs?</h1>
+        <div class="meta">IT Notes 2025-09-19T08:50:00Z</div>
+        <div class="links">
+          <a href="https://it-notes.dragas.net/2025/09/19/freebsd-vs-smartos-whos-faster-for-jails-zones-bhyve/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/it-notes-dragas-net/it-notes-dragas-net-10b19c69ce3ab83e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Disclaimer These benchmarks were performed on my specific hardware and tuned for the workloads I expect to run. They should not be taken as absolute or universally applicable results. Different CPUs, storage, networking setups, or workload profiles could produce very different outcomes. What I’m sharing here is a faithful snapshot of my test environment and…</div>
+        <div class="content">
+          <p><img src="https://it-notes.dragas.net/featured/server_rack.webp" alt="A server rack with some servers and cables"></p><blockquote>
+<p><strong>Disclaimer</strong><br />
+These benchmarks were performed on my specific hardware and tuned for the workloads I expect to run.<br />
+They should not be taken as absolute or universally applicable results.<br />
+Different CPUs, storage, networking setups, or workload profiles could produce very different outcomes.<br />
+What I’m sharing here is a faithful snapshot of <em>my</em> test environment and use case - a guidepost, not a final verdict.</p>
+</blockquote>
+<p>Years ago, I installed a PCEngines APU at a client's site. It dutifully ran Proxmox with a few small VMs inside. It wasn't a speed demon, but it got the job done. Tasked with running in a closed, uncooled, and unsupervised server closet, it soldiered on for about seven years.</p>
+<p>Then, while I was at BSDCan, I got the call. A series of power outages and surges had finally taken their toll, and the APU was dead. It was probably just the power supply, but given its age, we decided it was time for a replacement. I set up a remote bypass to keep them running, but I knew I'd need to install something more powerful soon.</p>
+<p>I ordered a modern MiniPC-based on the low-power Intel Processor N150 platform, but with 16GB of RAM and more than enough performance to serve as a decent workstation. I have a similar one in my office running openSUSE Tumbleweed, and it works beautifully.</p>
+<p>This time, however, I decided to replace Proxmox with a different virtualization system. This decision wasn't made in a vacuum. In the past, I've put bhyve head-to-head with Proxmox, and my findings were clear: <strong>bhyve on FreeBSD is an extremely efficient hypervisor, <a href="https://it-notes.dragas.net/2024/06/10/proxmox-vs-freebsd-which-virtualization-host-performs-better/">often outperforming KVM on Proxmox in my tests</a></strong>.</p>
+<p>This positive experience is what made FreeBSD with bhyve a top contender. The other path was a KVM-style approach (which would require fewer changes to the VMs), where my options would be NetBSD or an <a href="https://www.illumos.org/">illumos-based</a> OS like <a href="https://www.tritondatacenter.com/smartos">SmartOS</a>. Since I had the new hardware on hand, I decided to run some tests to see how these different technologies stacked up against each other, and against the bare metal itself.</p>
+<h3>The Lineup: What I Put on the Test Bench</h3>
+<p>My goal was to test every reasonable option on this Intel N150 hardware. The final lineup covered the entire spectrum:</p>
+<ul>
+<li><strong>The Baseline:</strong><ul>
+<li><strong>FreeBSD 14.3-RELEASE Bare Metal:</strong> The ground truth for performance on this hardware.</li>
+</ul>
+</li>
+<li><strong>OS-Level Virtualization (Containers):</strong><ul>
+<li><strong>SmartOS Native Zone:</strong> The baseline native container on SmartOS.</li>
+<li><strong>SmartOS LX Zone:</strong> Running <strong>Ubuntu 24.04</strong> and <strong>Alpine Linux</strong>.</li>
+<li><strong>FreeBSD Native Jail:</strong> The baseline native container on FreeBSD.</li>
+<li><strong>FreeBSD Jail with Linux:</strong> A jail running a <strong>Ubuntu 22.04</strong> userland.</li>
+</ul>
+</li>
+<li><strong>Full Hardware Virtualization (HVM):</strong><ul>
+<li><strong>SmartOS bhyve Zone:</strong> A FreeBSD guest inside the bhyve hypervisor on a SmartOS host.</li>
+<li><strong>SmartOS KVM Zone:</strong> A FreeBSD guest inside the KVM hypervisor on a SmartOS host.</li>
+<li><strong>FreeBSD bhyve VM:</strong> A FreeBSD guest inside the bhyve hypervisor on a FreeBSD host.</li>
+</ul>
+</li>
+</ul>
+<h3>The Benchmark: My <code>sysbench</code> Commands</h3>
+<p>To keep the comparison fair and simple, I used two core <code>sysbench</code> commands. To ensure consistency, I even compiled <code>sysbench</code> from scratch on the SmartOS native zone to match the versions and compile options on the other systems as closely as possible.</p>
+<p>The commands I used in each environment were:</p>
+<ul>
+<li><strong>For CPU performance:</strong> <code>sysbench --test=cpu --cpu-max-prime=20000 run</code></li>
+<li><strong>For memory performance:</strong> <code>sysbench --test=memory run</code></li>
+</ul>
+<h3>First Look: CPU and Memory on the Intel N150</h3>
+<p>My initial tests on the Intel N150 hardware immediately revealed some interesting trends. The <code>sysbench</code> CPU results from any native FreeBSD environment (bare metal or jail) were on a completely different scale from the Linux and SmartOS guests, making a direct comparison meaningless.</p>
+<p>However, by excluding the incompatible FreeBSD-native results, we get a very clear picture of the overhead between the various container technologies.</p>
+<h4>Valid CPU Performance Comparison (Single Thread, Intel N150)</h4>
+<table>
+<thead>
+<tr>
+<th>Host OS</th>
+<th>Container Tech</th>
+<th>Guest OS</th>
+<th>CPU Performance (Events/sec)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FreeBSD</td>
+<td>Jail (OS-level)</td>
+<td>Ubuntu 22.04</td>
+<td><strong>1108.18</strong></td>
+</tr>
+<tr>
+<td>SmartOS</td>
+<td>LX Zone (OS-level)</td>
+<td>Ubuntu 24.04</td>
+<td>1107.13</td>
+</tr>
+<tr>
+<td>SmartOS</td>
+<td>Native Zone (OS-level)</td>
+<td>SmartOS</td>
+<td>1107.04</td>
+</tr>
+<tr>
+<td>SmartOS</td>
+<td>LX Zone (OS-level)</td>
+<td>Alpine Linux</td>
+<td>1022.81</td>
+</tr>
+</tbody>
+</table>
+<p>The takeaway here was clear: for CPU work, the overhead from these containers is basically a rounding error. For CPU-bound tasks, neither SmartOS Zones nor FreeBSD Jails will be a bottleneck.</p>
+<p>The memory results, which were consistent across all platforms, were far more revealing.</p>
+<h4>Overall Memory Performance Comparison (Intel Processor N150)</h4>
+<table>
+<thead>
+<tr>
+<th>Host OS</th>
+<th>Virtualization Tech</th>
+<th>Guest OS</th>
+<th>Memory Performance (Transfer Rate)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>SmartOS</strong></td>
+<td><strong>LX Zone (OS-level)</strong></td>
+<td><strong>Ubuntu 24.04</strong></td>
+<td><strong>4970.54 MiB/sec</strong></td>
+</tr>
+<tr>
+<td>SmartOS</td>
+<td>Native Zone (OS-level)</td>
+<td>SmartOS (Native)</td>
+<td>4549.97 MiB/sec</td>
+</tr>
+<tr>
+<td>FreeBSD</td>
+<td>Jail (OS-level)</td>
+<td>Ubuntu 22.04</td>
+<td>4348.32 MiB/sec</td>
+</tr>
+<tr>
+<td><strong>FreeBSD</strong></td>
+<td><strong>Bare Metal</strong></td>
+<td><strong>FreeBSD (Native)</strong></td>
+<td><strong>4005.08 MiB/sec</strong></td>
+</tr>
+<tr>
+<td>FreeBSD</td>
+<td>Native Jail (OS-level)</td>
+<td>FreeBSD (Native)</td>
+<td>3990.13 MiB/sec</td>
+</tr>
+<tr>
+<td>SmartOS</td>
+<td>LX Zone (OS-level)</td>
+<td>Alpine Linux</td>
+<td>3803.72 MiB/sec</td>
+</tr>
+<tr>
+<td><strong>FreeBSD</strong></td>
+<td><strong>bhyve VM (Full HVM)</strong></td>
+<td><strong>FreeBSD</strong></td>
+<td><strong>3636.01 MiB/sec</strong></td>
+</tr>
+<tr>
+<td><strong>SmartOS</strong></td>
+<td><strong>bhyve Zone (Full HVM)</strong></td>
+<td><strong>FreeBSD</strong></td>
+<td><strong>3020.15 MiB/sec</strong></td>
+</tr>
+<tr>
+<td><strong>SmartOS</strong></td>
+<td><strong>KVM Zone (Full HVM)</strong></td>
+<td><strong>FreeBSD</strong></td>
+<td><strong>205.18 MiB/sec</strong></td>
+</tr>
+</tbody>
+</table>
+<p>These initial numbers led to a few conclusions: a virtual layer could be a performance boost, the userland matters, and bhyve clearly outclassed the legacy KVM on SmartOS. However, one result was nagging at me: the performance gap between FreeBSD bare metal (<code>4005.08 MiB/sec</code>) and a native bhyve VM (<code>3636.01 MiB/sec</code>) was about 9%. This was a larger drop than I expected. It prompted a new question: was this overhead inherent to bhyve, or was it a quirk of the new N150 hardware?</p>
+<h3>Going deeper: Testing on an Intel i7-7500U</h3>
+<p>To see if more mature, better-supported hardware would tell a different story, I replicated the FreeBSD tests on an older Qotom Mini-PC powered by an Intel i7-7500U. The results were illuminating and dramatically changed the narrative.</p>
+<h4>CPU Performance Comparison (Intel i7-7500U)</h4>
+<p>Once again, the CPU tests produced strange results. The native FreeBSD environments all reported incredibly high numbers in the millions of events/sec, while the Ubuntu Linuxulator jail's result was on a completely different, incompatible scale. Frankly, given the massive discrepancy between FreeBSD-native and Linux-based environments, I'm unsure that the <code>sysbench</code> CPU figures can be considered totally reliable in absolute terms.</p>
+<p>However, what <em>is</em> useful is comparing the native FreeBSD results against each other. This tells us about relative overhead.</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>CPU Performance (Events/sec)</th>
+<th>Overhead vs. Bare Metal</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FreeBSD Bare Metal</td>
+<td>6,377,778</td>
+<td>Baseline</td>
+</tr>
+<tr>
+<td>FreeBSD Native Jail</td>
+<td>6,379,271</td>
+<td>~0.0%</td>
+</tr>
+<tr>
+<td><strong>FreeBSD bhyve VM</strong></td>
+<td><strong>6,346,852</strong></td>
+<td><strong>-0.48%</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Even if we're skeptical of the absolute numbers, the relative comparison is crystal clear: the CPU overhead of bhyve is <strong>less than half a percent</strong>. This is the key takeaway.</p>
+<h4>Memory Performance Comparison (Intel i7-7500U)</h4>
+<p>The memory benchmarks, in contrast, were consistent and highly informative.</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Memory Performance (Transfer Rate)</th>
+<th>Overhead vs. Bare Metal</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ubuntu 22.04 Jail</td>
+<td>4856.23 MiB/sec</td>
+<td>+7.55%</td>
+</tr>
+<tr>
+<td>FreeBSD Native Jail</td>
+<td>4517.73 MiB/sec</td>
+<td>+0.05%</td>
+</tr>
+<tr>
+<td><strong>FreeBSD Bare Metal</strong></td>
+<td><strong>4515.24 MiB/sec</strong></td>
+<td><strong>Baseline</strong></td>
+</tr>
+<tr>
+<td><strong>FreeBSD bhyve VM</strong></td>
+<td><strong>4491.60 MiB/sec</strong></td>
+<td><strong>-0.52%</strong></td>
+</tr>
+</tbody>
+</table>
+<p>This is where the real story is. The memory performance of a bhyve VM was a mere <strong>0.52%</strong> slower than bare metal. This is the kind of near-native performance one hopes for from a top-tier hypervisor and stands in stark contrast to the 9% drop seen on the newer N150.</p>
+<h3>Breaking Down the Results: What I Learned From Both Tests</h3>
+<p>This comprehensive two-platform analysis paints a much clearer picture.</p>
+<p><strong>1. Hardware <em>Really</em> Matters</strong>
+Performance is not an absolute. The difference between the two platforms was stark: on the mature i7-7500U, bhyve’s overhead was less than 1%, while on the newer, budget N150, it was a more significant 9%. This suggests the performance dip is likely due to missing optimizations for that specific CPU architecture, rather than a fundamental flaw in bhyve itself.</p>
+<p><strong>2. bhyve's True Potential is Near-Native Speed</strong>
+The i7 tests prove that <strong>bhyve is an exceptionally efficient hypervisor</strong> on well-supported hardware. The relative CPU overhead was a negligible -0.48%, and more importantly, the reliable memory benchmarks showed a performance drop of just 0.52% compared to bare metal. This is the gold standard for virtualization.</p>
+<p><strong>3. FreeBSD Jails are Feather-Light</strong>
+On both platforms, native FreeBSD jails demonstrated almost zero performance overhead. On the i7, both CPU and memory performance were virtually identical to bare metal (a 0.05% difference). The N150 CPU tests further showed that FreeBSD's container implementation is so efficient that running a Linux userland inside a jail delivered the best CPU scores of the entire lineup.</p>
+<p><strong>4. SmartOS Zones Are Also Extremely Efficient</strong>
+Just like Jails, SmartOS's native Zones proved to be remarkably lightweight. The N150 CPU tests confirm this, showing that native and LX zones have virtually identical, top-tier performance. On the memory front, the native Zone delivered performance over 13% <em>faster</em> than the FreeBSD bare-metal baseline, pointing to the high efficiency of the illumos kernel.</p>
+<p><strong>5. The Linux Userland Excels at Throughput</strong>
+A clear pattern emerged on both testbeds: the Ubuntu userland consistently delivered excellent benchmark results. On the CPU front, Ubuntu on both FreeBSD and SmartOS delivered the highest, and nearly identical, performance scores on the N150. For memory, the story was even more dramatic: the Ubuntu LX Zone on SmartOS was the top performer, beating bare-metal FreeBSD by nearly 25%, while the Ubuntu jail on the i7 also surpassed its host by over 7%.</p>
+<h3>Final Thoughts: The Verdict for My Client's New Server</h3>
+<p>So, what's the bottom line for my client's new MiniPC? This benchmarking journey has made the path forward much clearer.</p>
+<p>At the beginning of this process, my main question was whether to stick with a KVM-based setup or make the switch to bhyve. The performance data answers that decisively. The legacy KVM on SmartOS showed a crippling performance penalty, making it a non-starter. Given that, the extra effort to migrate the existing VMs to a bhyve-compatible format is absolutely worth it. The performance gain is just too significant to ignore.</p>
+<p>The final question, then, is <em>which</em> host OS to use for bhyve: SmartOS or FreeBSD? This is a much tougher call, as both platforms demonstrated incredible strengths.</p>
+<p><strong>SmartOS</strong>, powered by the illumos kernel, was a true surprise. It delivered astonishing performance on the target N150 hardware. Its key advantage is the raw speed of its containerization for both CPU and memory tasks. The Ubuntu LX Zone not only ran flawlessly but delivered top-tier CPU scores and outperformed the bare-metal FreeBSD baseline in memory by a massive 25% margin. This points to a highly efficient kernel and offers the tantalizing prospect of running ultra-fast Linux containers alongside performant bhyve VMs on the same host.</p>
+<p>On the other hand, <strong>FreeBSD</strong> proved its mastery of bhyve virtualization. The tests on the i7 hardware showed its implementation to be the gold standard, offering virtually zero performance overhead for full hardware virtualization. Its native Jails are equally efficient, and its Linux compatibility layer is so effective that an Ubuntu jail delivered the <em>fastest CPU performance</em> of all containers tested on FreeBSD. For workloads that <em>must</em> live in a full VM, FreeBSD offers the most performant and native bhyve experience, with the reasonable expectation that its support for newer hardware like the N150 will only improve over time.</p>
+<p>Ultimately, the choice comes down to the primary workload. It's a decision between the raw container speed and Linux flexibility of SmartOS versus the pure, uncompromising HVM performance of FreeBSD.</p>
+<p>But one thing is certain: thanks to this deep dive, the path forward is much clearer, and it's paved by bhyve.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

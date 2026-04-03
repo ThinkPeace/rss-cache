@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Introducing gzpeek, a tool to parse gzip metadata | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Introducing gzpeek, a tool to parse gzip metadata</h1>
+        <div class="meta">Evan Hahn (dot com) 2026-02-26T00:00:00Z</div>
+        <div class="links">
+          <a href="https://evanhahn.com/introducing-gzpeek/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/evanhahn-com/evanhahn-com-a73ef9d93446f017.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">In short: gzip streams contain metadata, like the operating system that did the compression. I built a tool to read this metadata. I love reading specifications for file formats. They always have little surprises. I had assumed that the gzip format was strictly used for compression. My guess was: a few bytes of bookkeeping, the compressed data, and maybe a…</div>
+        <div class="content">
+          <p><em>In short: gzip streams contain metadata, like the operating system that did the compression. I built <a href="https://codeberg.org/EvanHahn/gzpeek">a tool</a> to read this metadata.</em></p>
+<p>I love reading specifications for file formats. They always have little surprises.</p>
+<p>I had assumed that the gzip format was strictly used for compression. My guess was: a few bytes of bookkeeping, the compressed data, and maybe a checksum.</p>
+<p>But then I read <a href="https://www.rfc-editor.org/rfc/rfc1952">the spec</a>. The gzip header holds more than I expected!</p>
+<h2 id="whats-in-gzip-metadata">What&rsquo;s in gzip metadata?</h2>
+<p>In addition to two bytes identifying the data as gzip, there&rsquo;s also:</p>
+<ul>
+<li>
+<p>The <strong>operating system</strong> that did the compression. This was super surprising to me! There&rsquo;s a single byte that identifies the compressor&rsquo;s OS: <code>0</code> for Windows, <code>1</code> for the Amiga, <code>3</code> for Unix, and many others I&rsquo;d never heard of. Compressors can also set <code>255</code> for an &ldquo;unknown&rdquo; OS.</p>
+<p>Different tools set this value differently. zlib, the most popular gzip library, <a href="https://github.com/madler/zlib/blob/09a1572aa624e5ddb6c075dc013880de70b1b9b9/zutil.h#L100-L189">changes the flag based on the operating system</a>. (It even defines some OSes that aren&rsquo;t in the spec, like <code>18</code> for BeOS.) Many other libraries build atop zlib and inherit this behavior, such as .NET&rsquo;s <code>GZipStream</code>, Ruby&rsquo;s <code>GzipWriter</code>, and PHP&rsquo;s <code>gzencode</code>.</p>
+<p>Java&rsquo;s <code>GZIPOutputStream</code>, JavaScript&rsquo;s <code>CompressionStream</code>, and Go&rsquo;s <code>compress/gzip</code> set the OS to &ldquo;unknown&rdquo; regardless of operating system. Some, like Zopfli and Apache&rsquo;s <code>mod_deflate</code>, hard-code it to &ldquo;Unix&rdquo; no matter what.</p>
+<p>All that to say: in practice, you can&rsquo;t rely on this flag to determine the source OS, but it can give you a hint.</p>
+</li>
+<li>
+<p><strong>Modification time</strong> for the data. This can be the time that compression started or the modification time of the file. It can also be set to <code>0</code> if you don&rsquo;t want to communicate a time.</p>
+<p>This is represented as an unsigned 32-bit integer in the Unix format. That means it can represent any moment between January 1, 1970 and February 7, 2106. I hope we devise a better compression format in the next ~80 years, because we can only represent dates in that range.</p>
+<p>In my testing, many implementations set this to <code>0</code>. A few set it to the current time or the file&rsquo;s modification time—the <code>gzip</code> command is one of these.</p>
+</li>
+<li>
+<p><strong>FTEXT</strong>, a boolean flag vaguely indicating that the data is &ldquo;probably ASCII text&rdquo;. When I say vaguely, I mean it: the spec &ldquo;deliberately [does] not specify the algorithm used to set this&rdquo;. This is apparently for systems which have different storage formats for ASCII and binary data.</p>
+<p>In all my testing, nobody sets this flag to anything but <code>0</code>.</p>
+</li>
+<li>
+<p><strong>An extra flag</strong> indicating how hard the compressor worked. <code>2</code> signals that it was compressed with max compression (e.g., <code>gzip -9</code>), <code>4</code> for the fastest algorithm, and <code>0</code> for everything else.</p>
+<p>In practice, zlib and many others set this correctly per the spec, but some tools hard-code it to <code>0</code>. And as far as I can tell, this byte is not used during decompression, so it doesn&rsquo;t really matter.</p>
+</li>
+<li>
+<p>The <strong>original file name</strong>. For example, when I run <code>gzip my_file.txt</code>, the name is set to <code>my_file.txt</code>. This field is optional, so many tools don&rsquo;t set it, but the <code>gzip</code> command line tool does. You can disable that with <code>gzip --no-name</code>.</p>
+</li>
+<li>
+<p>A <strong>comment</strong>. This optional field is seldom used, and many decompressors ignore it. But you could add a little comment if you want.</p>
+</li>
+<li>
+<p><strong>Extra arbitrary data</strong>. If the other metadata wasn&rsquo;t enough, you can stuff whatever you want into arbitrary subfields. Each subfield has a two-byte identifier and then 0 or more bytes of additional info.</p>
+</li>
+</ul>
+<p>That&rsquo;s way more info than I expected!</p>
+<h2 id="gzpeek-a-metadata-explorer-tool">gzpeek, a metadata explorer tool</h2>
+<p>I was intrigued by this metadata and I&rsquo;ve been wanting to learn <a href="https://ziglang.org/">Zig</a>, so I wrote <a href="https://codeberg.org/EvanHahn/gzpeek"><strong>gzpeek</strong></a>.</p>
+<p>gzpeek is a command-line tool that lets you inspect the metadata of gzip streams. Here&rsquo;s how to read metadata from a gzipped file:</p>
+<div class="highlight"><pre tabindex="0"><code class="language-sh" data-lang="sh"><span><span>gzpeek my_file.gz
+</span></span><span><span><span># FTEXT: 0</span>
+</span></span><span><span><span># MTIME: 1591676406</span>
+</span></span><span><span><span># XFL: 2</span>
+</span></span><span><span><span># OS: 3 (Unix)</span>
+</span></span><span><span><span># NAME: my_file.txt</span>
+</span></span></code></pre></div><p>It extracts everything I listed above: the operating system, original file name, modification time, and more. I used it a bunch when surveying different gzip implementations.</p>
+<p>Give it a try, and <a href="https://evanhahn.com/contact/">let me know</a> what gzip metadata you find.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to Build a Webhook System in Rails Using Sidekiq | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How to Build a Webhook System in Rails Using Sidekiq</h1>
+        <div class="meta">Keygen Blog 2021-06-16T05:00:00Z</div>
+        <div class="links">
+          <a href="https://keygen.sh/blog/how-to-build-a-webhook-system-in-rails-using-sidekiq/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/keygen-sh/keygen-sh-746ff4caaf68eb98.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">It&#x27;s the heyday of SaaS and webhooks are all the rage. Learn how to build a webhook system for your service using Rails and Sidekiq.</div>
+        <div class="content">
+          <html>
+  <body><h1>How to Build a Webhook System in Rails Using Sidekiq</h1><p>Wednesday, Jun 16th 2021</p><p>It's 2021, and we're in the heyday of SaaS. As the SaaS economy has grown, so has the need for these services to communicate events to each other asynchronously. Complex business logic can often span across both internal and external services, and one way external communication is accomplished is with a design pattern called "webhooks."</p><p>If you've ever integrated with an API service such as <a href="https://stripe.com">Stripe</a>, you're probably
+well aware of what a webhook is. For Stripe, events like <pre>customer.created</pre> and <pre>invoice.*</pre>
+are table-stakes for many businesses. (At least they are for ours.)</p><p>Many other services, and even our own API, send webhooks for important events. There are even <a href="https://zapier.com">entire
+businesses built on the concept of webhooks</a>.</p><p>Suffice it to say — webhooks are here to stay. They've gone from nice-to-have to must-have for any sort of API-based SaaS.</p><p>Speaking of SaaS —</p><p>There are a number of webhooks-as-a-service options out there, such as <a href="https://hostedhooks.com/">HostedHooks</a>
+and YC-backed <a href="https://www.svix.com/">Svix</a>. But much to my dismay, none of these existed back when
+I started Keygen, so I figured I'd share the knowledge on how I've built mine over the years.</p><p>It's actually kind of funny — back in 2017, I had a similar idea scribbled down in my "notebook of start up ideas", but never got around to building it as I've been too busy with Keygen over the past 5 years. But I'm glad others have ran with the idea.</p><p>But running a webhook system yourself has its, ehm… quirks? The quirks are usually due to misbehaved webhook endpoints, but we'll touch more on that later. It seems like every month I'm adjusting things to handle new quirks.</p><p>Another thing that can take some time to get right is a retry cadence that works for both you and your users, which we'll also cover in a bit more detail later on.</p><p>Anyways —</p><p>These days, you may want to spend some time and ask yourself the build-vs-buy question. Using a third-party for webhooks may save you time (and money.)</p><p>But today, we're going to build. And we can move fast when we're on Rails.</p><h2>Defining our webhook resources</h2><p>In its simplest form, a webhook system is built on top of the <a href="https://en.wikipedia.org/wiki/Publish%E2%80%93subscribe_pattern">pub/sub design pattern</a>:</p><blockquote><p>Some event e happens in our service, and we want to notify all subscribers s.</p></blockquote><p>In the context of a webhook, an event e will consist of the following information:</p><ul><li>An <pre>event</pre>— this will be an event name, for example<pre>payment.successful</pre>,<pre>license.expired</pre>, or<pre>user.updated</pre>.</li><li>A <pre>payload</pre>— this will be the data we'll be sending to subscribers. Typically, it's a snapshot of the affected resource. For example, the<pre>user.updated</pre>event may send a snapshot of the user after it was updated.</li></ul><p>And a subscriber s will consist of the following information:</p><ul><li>A <pre>url</pre>— this will be the URL that the webhook is delivered to.</li></ul><p>Since we don't know how big the set of s is, we don't want to run these notifications inline with our normal application code. Why? Because the bigger s is, the slower our app will be, and we also have no control over deliveribility speed, other than through setting an upper bound on webhook execution time with a timeout.</p><p>So rather than run inline, we'll need some sort of queueing and background job system so that we can asynchronously process notifications to each subscriber.</p><p>If you've ever used Rails, you're probably familiar with the ubiquitous <a href="https://sidekiq.org">Sidekiq</a>
+gem.</p><p>Sidekiq is powerful background job library that we'll be using to queue up webhook events and process them asynchronously. And we'll also be leaning on Sidekiq to handle the bulk of our retry logic (more on this later.)</p><p>The webhook system we're going to build today is actually modeled after Keygen's webhook system. As of writing, Keygen has processed nearly 250 million webhook events using Sidekiq. (Thanks for your work, Mike!)</p><h2>Building out our models</h2><p>To kick things off, let's create a new Rails 6 API application:</p><pre><pre>$ rails new . --api --database postgresql \    --skip-active-storage \    --skip-action-cable</pre></pre>
+<p>Then we'll want to create our first table, a webhook endpoint. These are going to represent the subscribers s in our webhook system.</p><p>Let's generate a new migration:</p><pre><pre>$ rails g migration CreateWebhookEndpoints</pre></pre>
+<p>Next, we'll want to define the schema, which only consists of a <pre>url</pre>:</p><pre><pre>class CreateWebhookEndpoints &lt; ActiveRecord::Migration[5.2]  def change    create_table :webhook_endpoints do |t|      t.string :url, null: false       t.timestamps null: false    end  endend</pre></pre>
+<p>Now before we run our migration, let's also go ahead and define the other table in our system, the webhook event. As the name implies, these will represent the events e in our webhook system. Let's generate another migration:</p><pre><pre>$ rails g migration CreateWebhookEvents</pre></pre>
+<p>Then let's define the schema, which consists of a reference to a webhook endpoint,
+as well as the <pre>event</pre> and <pre>payload</pre> attributes we discussed earlier:</p><pre><pre>class CreateWebhookEvents &lt; ActiveRecord::Migration[5.2]  def change    create_table :webhook_events do |t|      t.integer :webhook_endpoint_id, null: false, index: true       t.string :event, null: false      t.text :payload, null: false       t.timestamps null: false    end  endend</pre></pre>
+<p>Now let's go ahead and run those migrations:</p><pre><pre>$ rails db:migrate</pre></pre>
+<p>Next, we'll want to define the 2 models. We'll start with the webhook endpoint:</p><pre><pre>class WebhookEndpoint &lt; ApplicationRecord  has_many :webhook_events, inverse_of: :webhook_endpoint   validates :url, presence: trueend</pre></pre>
+<p>Lastly, we'll define the webhook event model:</p><pre><pre>class WebhookEvent &lt; ApplicationRecord  belongs_to :webhook_endpoint, inverse_of: :webhook_events   validates :event, presence: true  validates :payload, presence: trueend</pre></pre>
+<p>Okay, phew —</p><p>Let's go ahead and test out what we've got in the console:</p><pre><pre>$ rails c&gt; WebhookEndpoint.create!(url: 'https://functions.ecorp.example/webhooks')# =&gt; #&lt;WebhookEndpoint#       id: 1,#       url: "https://functions.ecorp.example/webhooks",#       created_at: "2021-06-14 22:14:53.587473000 +0000",#       updated_at: "2021-06-14 22:14:53.587473000 +0000"#     &gt;&gt; WebhookEvent.create!(    webhook_endpoint: _,    event: 'events.test',    payload: { test: 1 }  )# =&gt; #&lt;WebhookEvent#       id: 1,#       webhook_endpoint_id: 1,#       event: "events.test",#       payload: { "test" =&gt; 1 },#       created_at: "2021-06-14 22:17:06.908392000 +0000",#       updated_at: "2021-06-14 22:17:06.908392000 +0000"#     &gt;</pre></pre>
+<h2>Building our webhook worker</h2><p>Now that we have an event queued up, we need to process it. We've talked a lot about Sidekiq, so let's write our webhook worker.</p><h3>Installing dependencies</h3><p>To start, let's go ahead and add Sidekiq and Redis to our <pre>Gemfile</pre>:</p><pre><pre>+gem 'sidekiq' +gem 'redis' </pre></pre>
+<p>We're also going to need an HTTP library so that we can send webhook events to webhook
+endpoints. Let's add the popular <a href="https://github.com/httprb/http"> http.rb</a> gem.</p><pre><pre>+gem 'http' </pre></pre>
+<p>And we'll run Bundler to install everything:</p><pre><pre>$ bundle</pre></pre>
+<h3>Defining our webhook worker</h3><p>Next up we'll want to create a new <pre>app/workers</pre> directory for our worker classes
+to live in, to keep our Sidekiq workers distinct from any ActiveJobs.</p><pre><pre>$ mkdir app/workers$ touch app/workers/webhook_worker.rb</pre></pre>
+<p>Now, let's define the base logic for our webhook worker. It's going to accept a webhook
+ID as an input parameter, use that to query the endpoint, then <pre>POST</pre> the event payload
+to the endpoint's URL. If it fails, it'll retry.</p><pre><pre>require 'http.rb' class WebhookWorker  include Sidekiq::Worker   def perform(webhook_event_id)    webhook_event = WebhookEvent.find_by(id: webhook_event_id)    return if      webhook_event.nil?     webhook_endpoint = webhook_event.webhook_endpoint    return if      webhook_endpoint.nil?     # Send the webhook request with a 30 second timeout.    response = HTTP.timeout(30)                   .headers(                     'User-Agent' =&gt; 'rails_webhook_system/1.0',                     'Content-Type' =&gt; 'application/json',                   )                   .post(                     webhook_endpoint.url,                     body: {                       event: webhook_event.event,                       payload: webhook_event.payload,                     }.to_json                   )     # Raise a failed request error and let Sidekiq handle retrying.    raise FailedRequestError unless      response.status.success?  end   private   # General failed request error that we're going to use to signal  # Sidekiq to retry our webhook worker.  class FailedRequestError &lt; StandardError; endend</pre></pre>
+<p>As you can see, our webhook system is actually relatively simple. And it's going to stay that way apart from a little subscription management and some special-case error handling. But overall, you may be surprised at how "simple" this system is.</p><p>Since we're leaning on Sidekiq to handle queueing, processing and retries, all
+we really have to do is handle delivery. We're attempting delivery by sending an
+HTTP <pre>POST</pre> request to the endpoint's URL with a JSON-encoded payload:</p><pre><pre>{  "event": "events.test",  "payload": {    "test": 1  }}</pre></pre>
+<p>
+    A quick note: since we're raising an exception here, this is going to get
+    a bit… noisy. I have some log line filters in place to ignore the verbose stack
+    traces from <pre>FailedRequestError</pre>, so keep that idea tucked away. You can also
+    silence the stack trace by overriding <pre>FailedRequestError#backtrace</pre>, e.g.
+    <pre>def backtrace = nil</pre>.
+  </p><p>This whole thing could probably be done without relying on errors for control flow, but I can't be bothered. It works as-is, and ignoring noisy log lines is cheap.</p><h3>Delivering our first webhook</h3><p>Let's go ahead and attempt to deliver our first webhook event. For now, we'll run jobs inline from the console, rather than queue them:</p><pre><pre>$ rails c&gt; WebhookWorker.new.perform(WebhookEvent.last.id)# =&gt; Traceback (most recent call last):#      2: from (irb):1#      1: from app/workers/webhook_worker.rb:24:in `perform'#    HTTP::TimeoutError (execution expired)</pre></pre>
+<p>Unless you happen to have a server running at the endpoint you entered, you're probably going to get a timeout error after about 30 seconds.</p><p>Which brings us to our first error case: timeouts.</p><h3>Handing delivery timeouts</h3><p>First thing's first — let's go ahead and update our worker class to rescue from that error class so that we can handle it more gracefully:</p><pre><pre> def perform(webhook_event_id)   ...+rescue HTTP::TimeoutError +  end</pre></pre>
+<p>But what does "gracefully" mean here? Well, let's think about this from a developer's perspective — what do they want to know? They probably want to know their webhook endpoint just timed out, right?</p><p>Ideally, we'd send them an alert. But we won't go that deep today. At the very least, we need a way to store an error on the webhook event model.</p><p>But rather than just store errors, why don't we go ahead and store the entire <pre>response</pre>?
+Providing visibility into what response the endpoint actually sent will offer a
+nice developer experience when they're tasked with debugging a webhook integration.</p><p>Rather than dig through logs, they can look at their recent failed webhook events.</p><p>Let's go ahead and generate a new migration for that:</p><pre><pre>$ rails g migration AddResponseToWebhookEvents</pre></pre>
+<p>And we'll add a new <pre>jsonb</pre> column to our webhook events called <pre>response</pre>:</p><pre><pre>class AddResponseToWebhookEvents &lt; ActiveRecord::Migration[5.2]  def change    add_column :webhook_events, :response, :jsonb, default: {}  endend</pre></pre>
+<p>Now let's adjust our worker to store the response object, both for typical responses as well as for newly discovered timeout errors:</p><pre><pre>def perform(webhook_event_id)  webhook_event = WebhookEvent.find_by(id: webhook_event_id)  return if    webhook_event.nil?   webhook_endpoint = webhook_event.webhook_endpoint  return if    webhook_endpoint.nil?   # Send the webhook request with a 30 second timeout.  response = HTTP.timeout(30)                 .headers(                   'User-Agent' =&gt; 'rails_webhook_system/1.0',                   'Content-Type' =&gt; 'application/json',                 )                 .post(                   webhook_endpoint.url,                   body: {                     event: webhook_event.event,                     payload: webhook_event.payload,                   }.to_json                 )   # Store the webhook response.  webhook_event.update(response: {    headers: response.headers.to_h,    code: response.code.to_i,    body: response.body.to_s,  })   # Raise a failed request error and let Sidekiq handle retrying.  raise FailedRequestError unless    response.status.success?rescue HTTP::TimeoutError  # This error means the webhook endpoint timed out. We can either  # raise a failed request error to trigger a retry, or leave it  # as-is and consider timeouts terminal. We'll do the latter.  webhook_event.update(response: { error: 'TIMEOUT_ERROR' })end</pre></pre>
+<p>Okay, now that we've (hopefully) handled timeouts, let's try delivering the event again:</p><pre><pre>$ rails c&gt; WebhookWorker.new.perform(WebhookEvent.last.id)# =&gt; true&gt; WebhookEvent.last.response# =&gt; { "error" =&gt; "TIMEOUT_ERROR" }</pre></pre>
+<p>Nice! As you can see, our <pre>response</pre> column now says there was a timeout error. We
+obviously don't want to continue using <pre>ecorp.example</pre> as our test server, so let's
+update our endpoint to something else, say, a Rails server on port <pre>3000</pre>.</p><p>In a new terminal pane, let's start up our Rails server:</p><pre><pre>rails s</pre></pre>
+<p>Then let's update our endpoint:</p><pre><pre>$ rails c&gt; WebhookEndpoint.last.update!(url: 'http://localhost:3000/webhooks')# =&gt; true</pre></pre>
+<p>Lastly, let's kick off a new webhook worker:</p><pre><pre>$ rails c&gt; WebhookWorker.new.perform(WebhookEvent.last.id)# =&gt; Traceback (most recent call last):#      2: from (irb):17#      1: from app/workers/webhook_worker.rb:76:in `perform'#    WebhookWorker::FailedRequestError (WebhookWorker::FailedRequestError)&gt; WebhookEvent.last.response# =&gt; { "body" =&gt; "...", "code" =&gt; 404, "headers" =&gt; { ... } }</pre></pre>
+<p>As we can see, the worker is (correctly) raising the failed request error for the <pre>404</pre> response,
+which will signal Sidekiq to automatically retry the job. And you should also see a line in your
+server logs indicating the <pre>404</pre>:</p><pre><pre>ActionController::RoutingError (No route matches [POST] "/webhooks"):</pre></pre><p>Now before we go any further, we need to adjust our webhook server to return a <pre>204</pre> response
+for the <pre>/webhooks</pre> route. To keep things simple, we'll add an inline <pre>proc</pre> handler
+that returns a basic Rack response.</p><p>Let's edit our <pre>config/routes.rb</pre> file with a new route:</p><pre><pre> Rails.application.routes.draw do-  # For details on the DSL available within this file, see https://guides.rubyonrails.org/routing.html +  post '/webhooks', to: proc { [204, {}, []] }  end</pre></pre>
+<p>And then let's attempt to deliver the webhook one more time again:</p><pre><pre>$ rails c&gt; WebhookWorker.new.perform(WebhookEvent.last.id)# =&gt; nil&gt; WebhookEvent.last.response# =&gt; { "body" =&gt; "", "code" =&gt; 204, "headers" =&gt; { ... } }</pre></pre>
+<p>Note the lack of a failed request error, and our status code is <pre>204</pre>. We should also see
+a log line in our Rails server logs indicating the request was sent:</p><pre><pre>Started POST "/webhooks" for ::1 at 2021-06-15 10:04:34 -0500</pre></pre><h2>Broadcasting our webhook events</h2><p>Now, creating webhook events and delivering them inline from the console is kind of cumbersome. We've also been sending the same event every time. Let's write a service object that helps streamline the process of broadcasting new events to our webhook endpoints.</p><p>Let's create a new <pre>services</pre> directory, and a file for our new service object:</p><pre><pre>$ mkdir app/services$ touch app/services/broadcast_webhook_service.rb</pre></pre>
+<p>Our service object is going to accept an <pre>event</pre> and a <pre>payload</pre>, and it will create a new
+webhook event for each endpoint and queue it up for delivery:</p><pre><pre>class BroadcastWebhookService  def self.call(event:, payload:)    new(event: event, payload: payload).call  end   def call    WebhookEndpoint.find_each do |webhook_endpoint|      webhook_event = WebhookEvent.create!(        webhook_endpoint: webhook_endpoint,        event: event,        payload: payload,      )       WebhookWorker.perform_async(webhook_event.id)    end  end   private   attr_reader :event, :payload   def initialize(event:, payload:)    @event   = event    @payload = payload  endend</pre></pre>
+<p>In the real world, this service may only want to broadcast events to endpoints belonging to specific users, for example if your app is multi-tenant. But right now, we aren't going to worry about that sort of detail.</p><p>Let's test the service out in our console:</p><pre><pre>$ rails c&gt; WebhookEvent.delete_all# =&gt; 1&gt; BroadcastWebhookService.call(event: 'events.test', payload: { test: 2 })# =&gt; nil&gt; WebhookEvent.last# =&gt; #&lt;WebhookEvent#       id: 2,#       webhook_endpoint_id: 1,#       event: "events.test",#       payload: { "test" =&gt; 2 },#       created_at: "2021-06-15 15:43:21.767801000 +0000",#       updated_at: "2021-06-15 15:43:21.767801000 +0000",#       response: {}#     &gt;</pre></pre>
+<p>Curious — <pre>response</pre> is empty, and we don't see any request logs for our Rails server.
+What gives? Well, we queued up the webhook worker, but we're no longer processing it
+inline. We'll need to boot up a Sidekiq process and let our workers work.</p><p>In a new terminal pane:</p><pre><pre>$ sidekiq</pre></pre>
+<p>Then we can go back to our console session and check the last event:</p><pre><pre>$ rails c&gt; WebhookEvent.last# =&gt; #&lt;WebhookEvent#       id: 2,#       webhook_endpoint_id: 2,#       event: "events.test",#       payload: { "test" =&gt; 2 },#       created_at: "2021-06-15 15:48:32.801960000 +0000",#       updated_at: "2021-06-15 15:48:32.810783000 +0000",#       response: {#         "body" =&gt; "",#         "code" =&gt; 204,#         "headers" =&gt; { ... }#       }#     &gt;</pre></pre>
+<p>The event was delivered successfully, as indicated by the <pre>204</pre> response.</p><h2>Subscribing to certain events</h2><p>As your list of event types grows, your users are likely to only care about a handful of them. For example, our API service sends over 60 different event types, but we've found that each customer on average only listens to about 5 of them (which 5 depends on the licensing and billing model for the given business).</p><p>Allowing users to subscribe to only the events they need lets us:</p><ul><li>Reduces our costs by not queueing up and delivering superfluous webhooks.</li><li>Reduces their costs by not spamming webhooks they don't need.</li></ul><p>It's a win-win.</p><p>Let's update our webhook endpoints to be able to subscribe to certain events. To start,
+let's add a new <pre>subscriptions</pre> column to our webhook endpoints:</p><pre><pre>$ rails g migration AddSubscriptionsToWebhookEndpoints</pre></pre>
+<p>Then we'll throw this into the migration file:</p><pre><pre>class AddSubscriptionsToWebhookEndpoints &lt; ActiveRecord::Migration[5.2]  def change    add_column :webhook_endpoints, :subscriptions, :jsonb, default: ['*']  endend</pre></pre>
+<p>Note the default <pre>*</pre> wildcard value. We're going to use that to signal that the endpoint
+will subscribe to all event types. Rare for production, useful for development.</p><p>Let's run the migration:</p><pre><pre>$ rails db:migrate</pre></pre>
+<p>And then let's update our webhook endpoint model to require at least 1 subscription, and also add a helper method to the model for checking if a given endpoint is subscribed to an event type. We'll use this throughout our webhook system.</p><pre><pre> class WebhookEndpoint &lt; ApplicationRecord   has_many :webhook_events, inverse_of: :webhook_endpoint  +  validates :subscriptions, length: { minimum: 1 }, presence: true    validates :url, presence: true+ +  def subscribed?(event) +    (subscriptions &amp; ['*', event]).any? +  end  end</pre></pre>
+<p>We can test this out by updating our endpoint's subscriptions:</p><pre><pre>$ rails c&gt; WebhookEndpoint.last.subscriptions# =&gt; ["*"]&gt; WebhookEndpoint.last.subscribed?('events.noop')# =&gt; true&gt; WebhookEndpoint.last.subscribed?('events.test')# =&gt; true&gt; WebhookEndpoint.last.update!(subscriptions: ['events.test'])# =&gt; true&gt; WebhookEndpoint.last.subscribed?('events.noop')# =&gt; false&gt; WebhookEndpoint.last.subscribed?('events.test')# =&gt; true</pre></pre>
+<p>Next, we'll adjust our service object to skip over endpoints that are not subscribed to the current event being broadcast:</p><pre><pre> def call   WebhookEndpoint.find_each do |webhook_endpoint|+    next unless +      webhook_endpoint.subscribed?(event) +      webhook_event = WebhookEvent.create!(       webhook_endpoint: webhook_endpoint,       event: event,       payload: payload,     )       WebhookWorker.perform_async(webhook_event.id)   end end</pre></pre>
+<p>Lastly, we'll also want to update our worker to do the same, just in case a webhook is in the process of being delivered but the user has since unsubscribed to that event.</p><p>For example, if a given event is particularly noisy, it may cause performance issues
+for the end-user's webhook server and they may want to retroactively unsubscribe
+from the noisy event. (For instance, our <pre>license.validation.*</pre> events can get
+pretty noisy depending on the licensing integration.)</p><p>Let's adjust our webhook worker to skip over event types that the webhook endpoint is no longer subscribed to:</p><pre><pre> def perform(webhook_event_id)   webhook_event = WebhookEvent.find_by(id: webhook_event_id)   return if     webhook_event.nil?     webhook_endpoint = webhook_event.webhook_endpoint   return if     webhook_endpoint.nil?+ +  return unless +    webhook_endpoint.subscribed?(webhook_event.event)      # Send the webhook request with a 30 second timeout.   response = HTTP.timeout(30)                  .headers(                    'User-Agent' =&gt; 'rails_webhook_system/1.0',                    'Content-Type' =&gt; 'application/json',                  )                  .post(                    webhook_endpoint.url,                    body: {                      event: webhook_event.event,                      payload: webhook_event.payload,                    }.to_json                  )     # Store the webhook response.   webhook_event.update(response: {     headers: response.headers.to_h,     code: response.code.to_i,     body: response.body.to_s,   })     # Raise a failed request error and let Sidekiq handle retrying.   raise FailedRequestError unless     response.status.success? rescue HTTP::TimeoutError # This error means the webhook endpoint timed out. We can either   # raise a failed request error to trigger a retry, or leave it   # as-is and consider timeouts terminal. We'll do the latter.   webhook_event.update(response: { error: 'TIMEOUT_ERROR' }) end</pre></pre>
+<p>We can once again test this out by queueing up a new event that our endpoint isn't subscribed to. Let's do this from the console:</p><pre><pre>$ rails c&gt; WebhookEvent.count# =&gt; 2&gt; BroadcastWebhookService.call(event: 'events.noop', payload: { test: 3 })# =&gt; nil&gt; WebhookEvent.count# =&gt; 2</pre></pre>
+<h2>Improving our retry cadence</h2><p>Right now, we're using Sidekiq's default retry cadence, which is an exponential backoff.
+This is great for normal background jobs, but in our case, potentially retrying seconds
+after a failed webhook usually just exacerbates the problem. Sidekiq's default retry
+cadence is <pre>retry_count ** 4</pre>, which starts small and eventually gets large.</p><p>For example, if a webhook server is timing out because of too many requests, retrying all
+of them in quick succession until the backoff grows large enough isn't going to help
+the situation. We can alleviate that risk by adding in a little bit of "jitter" into
+the retry cadence and increasing the exponent from <pre>4</pre> to <pre>5</pre>:</p><pre><pre> class WebhookWorker   include Sidekiq::Worker+ +  sidekiq_retry_in do |retry_count| +    # Exponential backoff, with a random 30-second to 10-minute "jitter"   +    # added in to help spread out any webhook "bursts."                    +    jitter = rand(30.seconds..10.minutes).to_i + +    (retry_count ** 5) + jitter +  end      def perform(webhook_event_id)     ...   end end</pre></pre>
+<p>This should do a couple things:</p><ul><li>Reduce occurrences of instantaneous retries, reducing the chance of us exacerbating any issues with the webhook server.</li><li>Help space out sudden large bursts of failing webhooks by using a random jitter between 30 seconds and 10 minutes.</li></ul><p>One other thing we can also do is limit the amount of times a webhook will retry:</p><pre><pre> class WebhookWorker   include Sidekiq::Worker  +  sidekiq_options retry: 10, dead: false    sidekiq_retry_in do |retry_count|     # Exponential backoff, with a random 30-second to 10-minute "jitter"     # added in to help spread out any webhook "bursts."     jitter = rand(30.seconds..10.minutes).to_i       (retry_count ** 5) + jitter   end     def perform(webhook_event_id)     ...   end end</pre></pre>
+<p>Here we've set the maximum number of retries to <pre>10</pre>, and we've also told Sidekiq to
+not store these failed webhooks in its set of "dead" jobs. We don't care about dead
+webhook jobs. With our retry exponent of <pre>5</pre> and a maximum retry limit of <pre>10</pre>, retries
+should occur over approximately 3 days:</p><pre><pre>$ rails c&gt; include ActionView::Helpers::DateHelper&gt; total = 0.0&gt; 10.times { |i| total += ((i + 1) ** 5) + rand(30.seconds..10.minutes) }&gt; distance_of_time_in_words(total)# =&gt; "3 days"</pre></pre>
+<p>The exponent and retry limit can be increased to spread the retries out over a longer duration. (The values can also be decreased, of course.)</p><h2>Disabling our webhook endpoints</h2><p>Another great feature to have is being able to disable webhook endpoints. This could come in handy for us when we want to disable a problem endpoint, but not delete it (so that the problem can be resolved by the endpoint owner.) This feature can also come in handy for our users, by allowing them to keep certain webhook endpoints on-hand, but only have them enabled when they need them.</p><p>To accomplish this, we'll want to add a new <pre>enabled</pre> column to our webhook endpoints:</p><p>(There's a relatively wide changeset here — we're touching a lot of files.)</p><pre><pre>$ rails g migration AddEnabledToWebhookEndpoints</pre></pre>
+<p>And then within the migration, we'll want to have this:</p><pre><pre>class AddEnabledToWebhookEndpoints &lt; ActiveRecord::Migration[5.2]  def change    add_column :webhook_endpoints, :enabled, :boolean,      default: true,      index: true  endend</pre></pre>
+<p>And we'll want to run the migration:</p><pre><pre>$ rails db:migrate</pre></pre>
+<p>Next, we'll want to update the webhook endpoint model to have an <pre>enabled</pre> scope,
+and we'll also add a bang-method to <pre>disable!</pre> a webhook endpoint:</p><pre><pre> class WebhookEndpoint &lt; ApplicationRecord   has_many :webhook_events, inverse_of: :webhook_endpoint     validates :subscriptions, length: { minimum: 1 }, presence: true   validates :url, presence: true+ +  scope :enabled, -&gt; { where(enabled: true) }      def subscribed?(event)    (subscriptions &amp; ['*', event]).any?   end+ +  def disable! +    update!(enabled: false) +  end  end</pre></pre>
+<p>Next, the broadcast webhook service needs to utilize the new <pre>enabled</pre> scope so that
+we only broadcast events to endpoints that are enabled:</p><pre><pre> def call-  WebhookEndpoint.find_each do |webhook_endpoint| +  WebhookEndpoint.enabled.find_each do |webhook_endpoint|      ...   end end</pre></pre>
+<p>Finally, we'll update the webhook worker to bail early if the endpoint is disabled:</p><pre><pre> def perform(webhook_event_id)   ...   return unless-    webhook_endpoint.subscribed?(webhook_event.event) +    webhook_endpoint.subscribed?(webhook_event.event) &amp;&amp; +    webhook_endpoint.enabled?    ... end</pre></pre>
+<p>If we go ahead and disable our endpoint and then broadcast a new event, we shouldn't see a webhook delivery occur:</p><pre><pre>$ rails c&gt; WebhookEndpoint.last.update!(enabled: false)# =&gt; true&gt; WebhookEvent.count# =&gt; 2&gt; BroadcastWebhookService.call(event: 'events.test', payload: { test: 4 })# =&gt; nil&gt; WebhookEvent.count# =&gt; 2</pre></pre>
+<p>If we had a failed webhook event being retried, and then we disabled the event's endpoint, the worker should stop attempting to retry. We aren't going to test that scenario, but it should be covered by the changeset here.</p><h2>Improving our error handling</h2><p>When it comes to sending webhooks, there are a plethora of errors that can occur. From
+DNS issues, to TLS issues, to an <a href="https://ngrok.com">ngrok</a> tunnel no longer being active,
+to various type of timeouts and connection errors.</p><p>For now, we're going to handle the first 2: DNS and TLS issues.</p><p>Let's adjust our worker to rescue from a couple error classes:</p><ul><li><pre>OpenSSL::SSL::SSLError</pre>— this means the TLS connection failed, often due to an expired cert. In my experience, these are often short-lived and resolve within the 3 day delivery window that we've configured for retries.</li><li><pre>HTTP::ConnectionError</pre>— this is a general "catch-all" from<pre>http.rb</pre>. From my experience it usually means DNS, but it's kind of nuanced.</li></ul><pre><pre>def perform(webhook_event_id)  ...rescue OpenSSL::SSL::SSLError  # Since TLS issues may be due to an expired cert, we'll continue retrying  # since the issue may get resolved within the 3 day retry window. This  # may be a good place to send an alert to the endpoint owner.  webhook_event.update(response: { error: 'TLS_ERROR' })   # Signal the webhook for retry.  raise FailedRequestErrorrescue HTTP::ConnectionError  # This error usually means DNS issues. To save us the bandwidth,  # we're going to disable the endpoint. This would also be a good  # location to send an alert to the endpoint owner.  webhook_event.update(response: { error: 'CONNECTION_ERROR' })   # Disable the problem endpoint.  webhook_endpoint.disable!rescue HTTP::TimeoutError  # This error means the webhook endpoint timed out. We can either  # raise a failed request error to trigger a retry, or leave it  # as-is and consider timeouts terminal. We'll do the latter.  webhook_event.update(response: { error: 'TIMEOUT_ERROR' })end</pre></pre>
+<p>How we handle each of these errors ends up being pretty arbitrary. I just chose these to exemplify how to handle a few different scenarios:</p><ul><li>Retrying the webhook after an error occurs</li><li>Disabling an endpoint after a fatal error</li><li>Not retrying after an error</li></ul><h2>Using pattern matching for special cases</h2><p>I mentioned <a href="https://ngrok.com">ngrok</a> earlier and I wanted to share some information on
+how you could use Ruby's new <a href="https://docs.ruby-lang.org/en/3.0.0/doc/syntax/pattern_matching_rdoc.html">pattern matching</a>
+to handle certain response patterns differently. We'll be applying this to ngrok
+specifically, but you could use the same logic to match against other types of
+responses as well.</p><p>Take an example — when an ngrok user creates a tunnel to a local server, and then adds that URL as a webhook endpoint, often times the tunnel session will be killed at the end of the day, but the webhook endpoint will still be enabled. I've found this to be a common occurrence with various localhost tunnel services.</p><p>One way we can handle these ngrok tunnels is by using pattern matching to match against certain response codes and response bodies from ngrok endpoints.</p><p>There are 3 scenarios for ngrok endpoints that we're going to cover today:</p><ul><li>When an ngrok URL no longer exists. This will return a <pre>404</pre>response code. We'll handle this by completely deleting the endpoint, since non-stable URLs are randomly generated and cannot be recreated.</li><li>When an ngrok URL is active, but the server being tunneled to is no longer
+running. This will return a <pre>502</pre>and usually occurs when the developer kills their local server at the end of a work day, but forgets to kill the ngrok session. We'll keep retrying this one, since the ngrok process records the events which can be replayed later on.</li><li>When a <a href="https://ngrok.com/docs#getting-started-stable">"stable" ngrok URL</a>is valid but there is no active tunnel session. This will return a<pre>504</pre>. We'll automatically disable this endpoint.</li></ul><p>Let's modify our webhook worker to be able to handle these scenarios:</p><pre><pre>def perform(webhook_event_id)  ...   # Exit early if the webhook was successful.  return if    response.status.success?   # Handle response errors.  case webhook_event  in webhook_endpoint: { url: /\.ngrok\.io/ },     response: { code: 404, body: /tunnel .+?\.ngrok\.io not found/i }    # Automatically delete dead ngrok tunnel endpoints. This error likely    # means that the developer forgot to remove their temporary ngrok    # webhook endpoint, seeing as it no longer exists.    webhook_endpoint.destroy!  in webhook_endpoint: { url: /\.ngrok\.io/ },     response: { code: 502 }    # The bad gateway error usually means that the tunnel is still open    # but the local server is no longer responding for any number of    # reasons. We're going to automatically retry.    raise FailedRequestError  in webhook_endpoint: { url: /\.ngrok\.io/ },     response: { code: 504 }    # Automatically disable these since the endpoint is likely an ngrok    # "stable" URL, but it's not currently running. To save bandwidth,    # we do not want to automatically retry.    webhook_endpoint.disable!  else    # Raise a failed request error and let Sidekiq handle retrying.    raise FailedRequestError  end   ...end</pre></pre>
+<p>Now to actually be able to pattern match against our webhook event model,
+we'll need to add a <pre>deconstruct_keys</pre> method:</p><pre><pre> class WebhookEvent &lt; ApplicationRecord   belongs_to :webhook_endpoint, inverse_of: :webhook_events     validates :event, presence: true   validates :payload, presence: true  +  def deconstruct_keys(keys) +    { +      webhook_endpoint: { url: webhook_endpoint.url }, +      event: event, +      payload: payload, +      response: response.symbolize_keys, +    } +  end  end</pre></pre>
+<p>This will allow us to match against the hash pattern we define. In our case, we're
+surfacing the <pre>webhook_endpoint</pre>, <pre>event</pre>, <pre>payload</pre> and the <pre>response</pre> object.</p><p>We can test these scenarios by creating an ngrok tunnel to our local Rails server:</p><pre><pre>$ ngrok http 3000</pre></pre>
+<p>Then we can update our webhook endpoint to use the generated ngrok URL:</p><pre><pre>$ rails c&gt; WebhookEndpoint.last.update!(    url: 'https://349df8f512ea.ngrok.io/webhooks'  )# =&gt; true</pre></pre>
+<p>Next, we can queue up a new webhook event to send:</p><pre><pre>$ rails c&gt; BroadcastWebhookService.call(event: 'events.test', payload: { test: 5 })# =&gt; nil&gt; WebhookEvent.last.response# =&gt; { "body" =&gt; "", "code" =&gt; 204, "headers" =&gt; { ... } }</pre></pre>
+<p>Looking at our ngrok logs, we see a <pre>204</pre> status code for that webhook. Now, let's
+kill our ngrok process and send another event:</p><pre><pre>$ rails c&gt; WebhookEndpoint.count# =&gt; 1&gt; BroadcastWebhookService.call(event: 'events.test', payload: { test: 6 })# =&gt; nil&gt; WebhookEndpoint.count# =&gt; 0</pre></pre>
+<p>Using pattern matching, our worker (correctly) determined that the bad ngrok webhook endpoint
+should be deleted, since it's now returning a <pre>404</pre>.</p><p>Similarly, we can test the other scenarios, for example by keeping the ngrok session active but killing the local Rails server process. But I'll leave that as an exercise for the curious reader.</p><h2>Caveats and summary</h2><p>Today, we've covered how to build a webhook system using Rails and Sidekiq. We've learned how we can rely on Sidekiq to do the heavy-lifting for us, and then we broke out Ruby's new pattern matching syntax for some special-case response handling.</p><p>So what's next? Here are things to try and look out for:</p><ul><li>Assert that webhook endpoints are non-malicious (one big thing to assert is that they are not pointing to the system itself!)</li><li>Assert that webhook endpoints use TLS.</li><li>Assert that webhook jobs are unique (see <a href="https://sidekiq.org/products/pro.html">Sidekiq Pro</a>'s unique jobs feature, or the<pre>sidekiq-unique-jobs</pre>gem.)</li><li>Assert that the webhook event <pre>response</pre>is not too large. (Some endpoints will try to send you the entire Internet to store.)</li><li>Add the ability to manually retry events.</li><li>Add better error handling.</li><li>Add logging (!)</li></ul><p>You can view <a href="https://github.com/ezekg/example-rails-webhook-system">the full example app</a> on
+GitHub.</p><p>Until next time.</p><p>
+  If you find any errors in my code, or if you can think of ways to improve things, <a href="https://x.com/_m27e">ping me via Twitter</a>.
+</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

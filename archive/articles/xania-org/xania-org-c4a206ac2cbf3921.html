@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Partial inlining | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Partial inlining</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-18T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/18-partial-inlining?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-c4a206ac2cbf3921.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Inlining doesn&#x27;t have to be all-or-nothing</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p>We've learned how important inlining is to optimisation, but also that it might sometimes cause code bloat. Inlining doesn't have to be all-or-nothing!</html:p>
+
+<html:p>Let's look at a simple function that has a fast path and slow path; and then see how the compiler handles it<html:sup id="fnref:note"><html:a class="footnote-ref" href="#fn:note">1</html:a></html:sup>.</html:p>
+
+<html:p>In this example we have some <html:code>process</html:code> function that has a really trivial fast case for numbers in the range 0-100. For other numbers it does something more expensive. Then <html:code>compute</html:code> calls <html:code>process</html:code> twice (making it less appealing to inline all of <html:code>process</html:code>).</html:p>
+
+<html:p>Looking at the assembly output, we see what's happened: The compiler has split <html:code>process</html:code> into two functions, a <html:code>process (part.0)</html:code> that does the expensive part only. It then rewrites <html:code>process</html:code> into the quick check for 100, returning double the value if less than 100. If not, it jumps to the <html:code>(part.0)</html:code> function:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nf">process</html:span><html:span class="p">(</html:span><html:span class="no">unsigned</html:span><html:span class="w"> </html:span><html:span class="no">int</html:span><html:span class="p">):</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">edi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">99</html:span><html:span class="w">                           </html:span><html:span class="c1">; less than or equal to 99?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jbe</html:span><html:span class="w"> </html:span><html:span class="no">.L7</html:span><html:span class="w">                               </html:span><html:span class="c1">; skip to fast path if so</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jmp</html:span><html:span class="w"> </html:span><html:span class="no">process</html:span><html:span class="p">(</html:span><html:span class="no">unsigned</html:span><html:span class="w"> </html:span><html:span class="no">int</html:span><html:span class="p">)</html:span><html:span class="w"> </html:span><html:span class="p">(.</html:span><html:span class="no">part.0</html:span><html:span class="p">)</html:span><html:span class="w">   </html:span><html:span class="c1">; else jump to the expensive path</html:span>
+<html:span class="nl">.L7:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">lea</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="err">+</html:span><html:span class="no">rdi</html:span><html:span class="p">]</html:span><html:span class="w">                    </html:span><html:span class="c1">; return `value * 2`</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ret</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>This first step - extracting the cold path into a separate function - is called <html:strong>function outlining</html:strong>. The original <html:code>process</html:code> becomes a thin wrapper handling the hot path, delegating to the outlined <html:code>process (.part.0)</html:code> when needed. This split sets up the real trick: <html:strong>partial inlining</html:strong>. When the compiler later inlines <html:code>process</html:code> into <html:code>compute</html:code>, it inlines just the wrapper whilst keeping calls to the outlined cold path. External callers can still call <html:code>process</html:code> and have it work correctly for all values.</html:p>
+
+<html:p>Let's see this optimisation in action in the <html:code>compute</html:code> function:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nf">compute</html:span><html:span class="p">(</html:span><html:span class="no">unsigned</html:span><html:span class="w"> </html:span><html:span class="no">int</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">unsigned</html:span><html:span class="w"> </html:span><html:span class="no">int</html:span><html:span class="p">):</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">edi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">99</html:span><html:span class="w">                   </html:span><html:span class="c1">; is a &lt;= 99?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jbe</html:span><html:span class="w"> </html:span><html:span class="no">.L13</html:span><html:span class="w">                      </html:span><html:span class="c1">; if so, go to the inlined fast path for a</html:span>
+<html:span class="w">  </html:span><html:span class="nf">call</html:span><html:span class="w"> </html:span><html:span class="no">process</html:span><html:span class="p">(</html:span><html:span class="no">unsigned</html:span><html:span class="w"> </html:span><html:span class="no">int</html:span><html:span class="p">)</html:span><html:span class="w"> </html:span><html:span class="p">(.</html:span><html:span class="no">part.0</html:span><html:span class="p">)</html:span><html:span class="w"> </html:span><html:span class="c1">; else, call expensive case</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">r8d</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="w">                  </html:span><html:span class="c1">; save the result of process(a)</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">esi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">99</html:span><html:span class="w">                   </html:span><html:span class="c1">; is b &lt;= 99?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jbe</html:span><html:span class="w"> </html:span><html:span class="no">.L14</html:span><html:span class="w">                      </html:span><html:span class="c1">; if so go to the inlined fast path for b</html:span>
+<html:span class="nl">.L11:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">edi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">esi</html:span><html:span class="w">                  </html:span><html:span class="c1">; otherwise, call expensive case for b</html:span>
+<html:span class="w">  </html:span><html:span class="nf">call</html:span><html:span class="w"> </html:span><html:span class="no">process</html:span><html:span class="p">(</html:span><html:span class="no">unsigned</html:span><html:span class="w"> </html:span><html:span class="no">int</html:span><html:span class="p">)</html:span><html:span class="w"> </html:span><html:span class="p">(.</html:span><html:span class="no">part.0</html:span><html:span class="p">)</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">r8d</html:span><html:span class="w">                  </html:span><html:span class="c1">; add the two slow cases together</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ret</html:span><html:span class="w">                           </html:span><html:span class="c1">; return</html:span>
+
+<html:span class="nl">.L13:</html:span><html:span class="w">                           </html:span><html:span class="c1">; case where a is fast case</html:span>
+<html:span class="w">  </html:span><html:span class="nf">lea</html:span><html:span class="w"> </html:span><html:span class="no">r8d</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="err">+</html:span><html:span class="no">rdi</html:span><html:span class="p">]</html:span><html:span class="w">            </html:span><html:span class="c1">; process(a) is just a + a</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">esi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">99</html:span><html:span class="w">                   </html:span><html:span class="c1">; is b &gt; 99?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ja</html:span><html:span class="w"> </html:span><html:span class="no">.L11</html:span><html:span class="w">                       </html:span><html:span class="c1">; jump to b slow case if so</html:span>
+<html:span class="w">                                </html:span><html:span class="c1">; (falls through to...)</html:span>
+<html:span class="nl">.L14:</html:span><html:span class="w">                           </html:span><html:span class="c1">; b fast case</html:span>
+<html:span class="w">  </html:span><html:span class="nf">lea</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rsi</html:span><html:span class="err">+</html:span><html:span class="no">rsi</html:span><html:span class="p">]</html:span><html:span class="w">            </html:span><html:span class="c1">; double b</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">r8d</html:span><html:span class="w">                  </html:span><html:span class="c1">; return 2*a + 2*b</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ret</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>Looking at <html:code>compute</html:code>, we can see the benefits of this approach clearly: The simple range check and arithmetic (<html:code>cmp</html:code>, <html:code>lea</html:code>) are inlined directly, avoiding the function call overhead for the fast path. When a value is 100 or greater, it calls the outlined <html:code>process (.part.0)</html:code> function for the more expensive computation.</html:p>
+
+<html:p>This is the best of both worlds: we get the performance benefit of inlining the lightweight check and simple arithmetic, whilst avoiding code bloat from duplicating the expensive computation<html:sup id="fnref:again"><html:a class="footnote-ref" href="#fn:again">2</html:a></html:sup>. The original <html:code>process</html:code> function remains intact and callable, so external callers still work correctly.</html:p>
+
+<html:p>Partial inlining lets the compiler make nuanced trade-offs about what to inline and what to keep shared. The compiler can outline portions of a function based on its heuristics about code size and performance<html:sup id="fnref:tradeoff"><html:a class="footnote-ref" href="#fn:tradeoff">3</html:a></html:sup>, giving you benefits of inlining without necessarily paying the full code size cost. In this example, the simple check is duplicated whilst the complex computation stays shared.</html:p>
+
+<html:p>As with many optimisations, the compiler's heuristics<html:sup id="fnref:clang"><html:a class="footnote-ref" href="#fn:clang">4</html:a></html:sup> usually make reasonable choices about when to apply partial inlining, but it's worth checking your hot code paths to see if the compiler has made the decisions you expect. Taking a quick peek in <html:a href="https://godbolt.org">Compiler Explorer</html:a> is a good way to develop your intuition.</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/STZb5K5sPDs">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 18 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/17-inlining-the-ultimate-optimisation">Inlining - the ultimate optimisation</html:a> | <html:a href="/202512/19-tail-call-optimisation">Chasing your tail</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:note">
+<html:p>I have had to cheat a little here to get the output I want: I've actually disabled GCC's main inlining pass, otherwise it chooses to inline the whole of <html:code>process</html:code>. With a larger, more complex "slow path" that would be unnecessary, but in order to demonstrate the effect of partial inlining without generating tons of code, I'm using this slight cheat. <html:a class="footnote-backref" href="#fnref:note" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:again">
+<html:p>Again, in this contrived example it probably <html:em>would</html:em> be OK to inline <html:code>process</html:code>, and the compiler really wants to, but for didactic purposes I've prevented that here. You can hopefully get the gist of this. <html:a class="footnote-backref" href="#fnref:again" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:tradeoff">
+<html:p>Of course, nothing is free - duplicating code still takes up instruction cache space. The compiler's heuristics have to weigh the benefits against the costs, and different compilers make different choices. <html:a class="footnote-backref" href="#fnref:tradeoff" title="Jump back to footnote 3 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:clang">
+<html:p>Note that this varies substantially from compiler to compiler: I couldn't trick clang into making similar partial inlining decisions to gcc using flags, so I couldn't compare like with like. In my experience gcc and clang make quite different choices about inlining. <html:a class="footnote-backref" href="#fnref:clang" title="Jump back to footnote 4 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

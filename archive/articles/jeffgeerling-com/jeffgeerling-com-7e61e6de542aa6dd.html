@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to Securely Erase an old Hard Drive on macOS Tahoe | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How to Securely Erase an old Hard Drive on macOS Tahoe</h1>
+        <div class="meta">Jeff Geerling 2026-02-26T20:30:00Z</div>
+        <div class="links">
+          <a href="https://www.jeffgeerling.com/blog/2026/securely-erase-hard-drive-macos-tahoe/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jeffgeerling-com/jeffgeerling-com-7e61e6de542aa6dd.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Apparently Apple thinks nobody with a modern Mac uses spinning rust (hard drives with platters) anymore. I plugged in a hard drive from an old iMac into my Mac Studio using my Sabrent USB to SATA Hard Drive enclosure, and opened up Disk Utility, clicked on the top-level disk in the sidebar, and clicked &#x27;Erase&#x27;. Lo and behold, there&#x27;s no &#x27;Security Options&#x27; b…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>How to Securely Erase an old Hard Drive on macOS Tahoe</h1>
+    <p>Apparently Apple thinks nobody with a modern Mac uses spinning rust (hard drives with platters) anymore.</p>
+    <p>I plugged in a hard drive from an old iMac into my Mac Studio using my <a href="https://amzn.to/4aP7e3d">Sabrent USB to SATA Hard Drive</a> enclosure, and opened up Disk Utility, clicked on the top-level disk in the sidebar, and clicked 'Erase'.</p>
+    <graphic src="/blog/2026/securely-erase-hard-drive-macos-tahoe/no-secure-erase-sabrent-media-macos-tahoe-disk-utility.png" alt="Secure Erase option missing in macOS Tahoe Disk Utility"/>
+    <p>Lo and behold, there's no 'Security Options' button on there, as there had been since—I believe—the very first version of Disk Utility in Mac OS X!</p>
+    <p>It seems like <a href="https://discussions.apple.com/thread/256053093">this option may have been dropped in macOS 15 Sequoia</a>, but regardless, if you want to write 1s, 0s, or do a <a href="https://apple.stackexchange.com/a/61272">DOE-compliant 3-pass erase</a>, you have to hop over to Terminal now.</p>
+    <p>Apple apparently hasn't gotten the memo, as <a href="https://support.apple.com/guide/disk-utility/erase-and-reformat-a-storage-device-dskutl14079/mac">their macOS 26 Tahoe Disk Utility User Guide</a> currently states<a href="https://www.jeffgeerling.com#fn:1">1</a>:</p>
+    <blockquote>
+      <p>(Optional) If available, click Security Options, use the slider to choose how many times to write over the erased data, then click OK.</p>
+      <p>Secure erase options are available only for some types of storage devices. If the Security Options button is not available, Disk Utility cannot perform a secure erase on the storage device.</p>
+    </blockquote>
+    <h2>Secure Erase with <pre>diskutil</pre> in Terminal</h2>
+    <p>First, find your disk using <pre>diskutil list</pre>:</p>
+    <pre>
+      <pre>$ diskutil list
+/dev/disk0 (internal, physical):
+   #:                       TYPE NAME                    SIZE       IDENTIFIER
+   0:      GUID_partition_scheme                        *1.0 TB     disk0
+   1:             Apple_APFS_ISC Container disk1         524.3 MB   disk0s1
+   2:                 Apple_APFS Container disk3         994.7 GB   disk0s2
+   3:        Apple_APFS_Recovery Container disk2         5.4 GB     disk0s3
+...
+/dev/disk9 (external, physical):
+   #:                       TYPE NAME                    SIZE       IDENTIFIER
+   0:     FDisk_partition_scheme                        *1.0 TB     disk9
+   1:                  Apple_HFS Macintosh HD            1.0 TB     disk9s1
+</pre>
+    </pre>
+    <p>Mine is <pre>/dev/disk9</pre>. Run the command <pre>diskutil secureErase</pre> on that disk, providing an integer for the secure option:</p>
+    <pre>
+      <pre>0 - Single-pass erase resulting in a zero fill.
+1 - Single-pass erase resulting in a random-number fill.
+2 - Seven-pass "secure" erase.
+3 - Gutmann algorithm 35-pass "secure" erase.
+4 - Three-pass "secure" erase.
+</pre>
+    </pre>
+    <p>For example:</p>
+    <pre>
+      <pre>$ diskutil secureErase 1 /dev/disk9
+Started erase on disk9
+[ / 0%..10%.............................................. ] 10.5% 
+</pre>
+    </pre>
+    <p><pre>diskutil</pre>'s docs warn <pre>Level 2, 3, or 4 secure erases can take an extremely long time</pre>, but even a single pass takes a while on older drives, or some of the largest modern drives with 16+ TB. SATA performance has sadly not kept up with the times.</p>
+    <ul>
+      <li>
+        <p>As of February 2026.</p>
+        <a href="https://www.jeffgeerling.com#fnref:1">↩︎</a>
+      </li>
+    </ul>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

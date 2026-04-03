@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reverse engineering the mysterious Up-Data Link Test Set from Apollo | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Reverse engineering the mysterious Up-Data Link Test Set from Apollo</h1>
+        <div class="meta">Ken Shirriff&#x27;s blog 2025-07-21T16:10:00Z</div>
+        <div class="links">
+          <a href="http://www.righto.com/2025/07/reverse-engineering-mysterious-up-data.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/righto-com/righto-com-9e1fe9c8f3442af2.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Back in 2021, a collector friend of ours was visiting a dusty warehouse in search of Apollo-era communications equipment. A box with NASA-style lights caught his eye—the &quot;AGC Confirm&quot; light suggested a connection with the Apollo Guidance Computer. Disappointingly, the box was just an empty chassis and the circuit boards were all missing. He continued to pok…</div>
+        <div class="content">
+          <p>Back in 2021, a collector friend of ours was visiting a dusty warehouse in search of Apollo-era communications equipment.
+A box with NASA-style lights caught his eye&mdash;the "AGC Confirm" light suggested a connection
+with the Apollo Guidance Computer.
+Disappointingly, the box was just an empty chassis and the circuit boards were all missing.
+He continued to poke around the warehouse when, to his surprise, he found a bag on the other side of the warehouse
+that contained the missing boards!
+After reuniting the box with its wayward circuit cards, he brought it to us:
+could we make this undocumented unit work?</p>
+<p><a href="https://static.righto.com/images/updata/powered-up2.jpg"><img alt="The Up-Data Link Confidence Test Set, powered up." class="hilite" height="409" src="https://static.righto.com/images/updata/powered-up2-w600.jpg" title="The Up-Data Link Confidence Test Set, powered up." width="600" /></a><div class="cite">The Up-Data Link Confidence Test Set, powered up.</div></p>
+<p>A label on the back indicated that it is an "Up-Data Link Confidence Test Set", built by Motorola.
+As the name suggests, the box was designed to test Apollo's Up-Data Link (UDL), a system that allowed digital commands to be sent up to the spacecraft.
+As I'll explain in detail below, these commands allowed ground stations to switch spacecraft circuits on or off, interact with the Apollo Guidance Computer, or set the spacecraft's clock.
+The Up-Data Link needed to be tested on the ground to ensure that its functions operated correctly.
+Generating the test signals for the Up-Data Link and verifying its outputs was the responsibility of the Up-Data Link Confidence Test Set (which I'll call the Test Set for short)</p>
+<p>The Test Set illustrates how, before integrated circuits, complicated devices could be constructed from
+thumb-sized encapsulated modules.
+Since I couldn't uncover any documentation on these modules, I had to reverse-engineer them,
+discovering that different modules implemented everything from flip-flops and logic gates to opto-isolators and analog circuits.
+With the help of a Lumafield 3-dimensional X-ray scanner,
+we looked inside the modules and examined the discrete transistors, resistors, diodes, and other components mounted inside.</p>
+<p><a href="https://static.righto.com/images/updata/modules.jpg"><img alt="Four of the 13-pin Motorola modules. These implement logic gates (2/2G &amp; 2/1G), lamp drivers (LD), more logic gates (2P/3G), and a flip-flop (LP FF). The modules have 13 staggered pins, ensuring that they can't be plugged in backward." class="hilite" height="369" src="https://static.righto.com/images/updata/modules-w400.jpg" title="Four of the 13-pin Motorola modules. These implement logic gates (2/2G &amp; 2/1G), lamp drivers (LD), more logic gates (2P/3G), and a flip-flop (LP FF). The modules have 13 staggered pins, ensuring that they can't be plugged in backward." width="400" /></a><div class="cite">Four of the 13-pin Motorola modules. These implement logic gates (2/2G & 2/1G), lamp drivers (LD), more logic gates (2P/3G), and a flip-flop (LP FF). The modules have 13 staggered pins, ensuring that they can't be plugged in backward.</div></p>
+<p>Reverse-engineering this system&mdash;from the undocumented modules to the mess of wiring&mdash;was a challenge.
+Mike found one NASA document that mentioned the Test Set, but the document was remarkably uninformative.<span id="fnref:useless-diagram"><a class="ref" href="#fn:useless-diagram">1</a></span>
+Moreover, key components of the box were missing, probably removed for salvage years ago.
+In this article, I'll describe how we learned the system's functionality,
+uncovered the secrets of the encapsulated modules,
+built a system to automatically trace the wiring,
+and used the UDL Test Set in a large-scale re-creation of the Apollo communications system.</p>
+<h2>The Apollo Up-Data Link</h2>
+<p>Before describing the Up-Data Link Test Set, I'll explain the Up-Data Link (UDL) itself.
+The Up-Data Link provided a mechanism for the Apollo spacecraft to receive digital commands from ground stations.
+These commands allowed ground stations to control the Apollo Guidance Computer, turn equipment on or off,
+or update the spacecraft's clock.
+Physically, the Up-Data Link is a light blue metal box with an irregular L shape, weighing almost 20 pounds.</p>
+<p><a href="https://static.righto.com/images/updata/updata-link.jpg"><img alt="The Up-Data Link box." class="hilite" height="300" src="https://static.righto.com/images/updata/updata-link-w500.jpg" title="The Up-Data Link box." width="500" /></a><div class="cite">The Up-Data Link box.</div></p>
+<p>The Apollo Command Module was crammed with boxes of electronics, from communication and navigation to power and sequencing.
+The Up-Data Link was mounted above the AC power inverters, below the Apollo Guidance Computer, and to the left of the waste management system and urine bags.</p>
+<p><a href="https://static.righto.com/images/updata/updata-equipment-bay.jpg"><img alt="The lower equipment bay of the Apollo Command Module. The Up-Data Link is highlighted in yellow. Click this image (or any other) for a larger version. From Command/Service Module Systems Handbook p212." class="hilite" height="541" src="https://static.righto.com/images/updata/updata-equipment-bay-w700.jpg" title="The lower equipment bay of the Apollo Command Module. The Up-Data Link is highlighted in yellow. Click this image (or any other) for a larger version. From Command/Service Module Systems Handbook p212." width="700" /></a><div class="cite">The lower equipment bay of the Apollo Command Module. The Up-Data Link is highlighted in yellow. Click this image (or any other) for a larger version. From <a href="https://www.ibiblio.org/apollo/Documents/HSI-481260.pdf#page=212">Command/Service Module Systems Handbook</a> p212.</div></p>
+<h3>Up-Data Link Messages</h3>
+<p>The Up-Data Link supported four types of messages:</p>
+<ul>
+<li>
+<p>Mission Control had direct access to the Apollo Guidance Computer (AGC) through the UDL,
+controlling the computer, keypress by keypress.
+That is, each message caused the UDL to simulate a keypress on the Display/Keyboard (DSKY), the astronaut's interface
+to the computer.</p>
+</li>
+<li>
+<p>The spacecraft had a clock, called
+the Central Timing Equipment or CTE, that tracked the elapsed time of the mission, from days to seconds.
+A CTE message could set the clock to a specified time.</p>
+</li>
+<li>
+<p>A system called Real Time Control (RTC) allowed the UDL to turn relays on or off, so some spacecraft systems to be
+controlled from the ground.<span id="fnref:relays"><a class="ref" href="#fn:relays">2</a></span>
+These 32 relays, mounted inside the Up-Data Link box, could do
+everything from illuminating an Abort light&mdash;indicating that Mission Control says to abort&mdash;to controlling the data tape recorder or the S-band radio.</p>
+</li>
+<li>
+<p>Finally, the UDL supported two test messages to "exercise all process, transfer and program control logic" in the UDL.</p>
+</li>
+</ul>
+<p>The diagram below shows the format of messages to the Up-Data Link.
+Each message consisted of 12 to 30 bits, depending on the message type.
+The first three bits, the Vehicle Address, selected which spacecraft should receive the message.
+(This allowed messages to be directed to the Saturn V booster, the Command Module, or the Lunar Module.<span id="fnref:command-system"><a class="ref" href="#fn:command-system">3</a></span>)
+Next, three System Address bits specified the spacecraft system to receive the message, corresponding to the four message types above.
+The remaining bits supplied the message text.</p>
+<p><a href="https://static.righto.com/images/updata/message-format.jpg"><img alt="Format of the messages to the Up-Data Link. From Telecommunication Systems Study Guide.
+Note that the vehicle access code uses a different sub-bit pattern from the rest of the message.
+This diagram shows an earlier sub-bit encoding, not the encoding used by the Test Set." class="hilite" height="260" src="https://static.righto.com/images/updata/message-format-w500.jpg" title="Format of the messages to the Up-Data Link. From Telecommunication Systems Study Guide.
+Note that the vehicle access code uses a different sub-bit pattern from the rest of the message.
+This diagram shows an earlier sub-bit encoding, not the encoding used by the Test Set." width="500" /></a><div class="cite">Format of the messages to the Up-Data Link. From <a href="https://www.ibiblio.org/apollo/Documents/telecommunication_systems_study_guide.pdf#page=231">Telecommunication Systems Study Guide</a>.
+Note that the vehicle access code uses a different sub-bit pattern from the rest of the message.
+This diagram shows an earlier sub-bit encoding, not the encoding used by the Test Set.</div></p>
+<p>The contents of the message text depended on the message type.
+A Real Time Control (RTC) message had a six-bit value specifying the relay number as well as whether it should be turned off or on.
+An Apollo Guidance Computer (AGC) message had a five-bit value specifying a key on the Display/Keyboard (DSKY).
+For reliability, the message was encoded in 16 bits: the message, the message inverted, the message again, and a padding bit; any mismatching bits would trigger an error.
+A CTE message set the clock using four 6-bit values indicating seconds, minutes, hours, and
+days.
+The UDL processed the message by resetting the clock and then advancing the time by issuing the specified number of
+pulses to the CTE to advance the seconds, minutes, hours, and days.
+(This is similar to setting a digital alarm clock by advancing the digits one at a time.)
+Finally, the two self test messages consisted of 24-bit patterns that would exercise the UDL's internal circuitry.
+The results of the test were sent back to Earth via Apollo's telemetry system.</p>
+<p>For reliability, each bit transmitted to the UDL was replaced by five "sub-bits":
+each "1" bit was replaced with the sub-bit sequence "01011", and each "0" bit was replaced with the
+complement, "10100".<span id="fnref:sub-bits"><a class="ref" href="#fn:sub-bits">4</a></span>
+The purpose of the sub-bits was that any corrupted data would result in
+an invalid sub-bit code so corrupted messages could be rejected.
+The Up-Data Link performed this validation by matching the input data stream against "01011" or "10100".
+(The vehicle address at the start of a message used a different sub-bit code, ensuring
+that the start of the message was properly identified.)
+By modern standards, sub-bits are an inefficient way of providing redundancy, since the message becomes five times larger.
+As a consequence, the effective transmission rate was low: 200 bits per second.</p>
+<p>There was no security in the Up-Data Link messages, apart from the need for a large transmitter.
+Of the systems on Apollo, only the rocket destruct system&mdash;euphemistically called the Propellant Dispersion System&mdash;was cryptographically secure.<span id="fnref:destruct"><a class="ref" href="#fn:destruct">5</a></span></p>
+<p>Since the Apollo radio system was analog, the digital sub-bits couldn't be transmitted from ground to space directly.
+Instead, a technique called phase-shift keying (PSK) converted the data into an audio signal.
+This audio signal consists of a sine wave that is inverted to indicate a 0 bit versus a 1 bit;
+in other words, its phase is shifted by 180 degrees for a 0 bit.
+The Up-Data Link box takes this audio signal as input and demodulates it to extract the digital message data.
+(Transmitting this audio signal from ground to the Up-Data Link required more steps that aren't relevant to the Test Set,
+so I'll describe them in a footnote.<span id="fnref:s-band"><a class="ref" href="#fn:s-band">6</a></span>)</p>
+<h2>The Up-Data Link Test Set</h2>
+<p>Now that I've explained the Up-Data Link, I can describe the Test Set in more detail.
+The purpose of the UDL Test Set is to test the Up-Data Link system.
+It sends a message&mdash;as an audio signal&mdash;to the Up-Data Link box, implementing the message formatting, sub-bit encoding, and phase shift keying
+described above.
+Then it verifies the outputs from the UDL to ensure that the UDL performed the correct action.</p>
+<p>Perhaps the most visible feature of the Test Set is the paper tape reader on the front panel: this reader
+is how the Test Set obtains messages to transmit.
+Messages are punched onto strips of paper tape, encoded as a sequence of 13 octal digits.<span id="fnref:paper-tape"><a class="ref" href="#fn:paper-tape">7</a></span>
+After a message is read from paper tape, it is shown on the 13-digit display.
+The first three digits are an arbitrary message number, while the remaining 10 octal digits denote the 30-bit message to send to the UDL.
+Based on the type of message, specified by the System Address digit,
+the Test Set validates the UDL's response and indicates success or errors on the panel lights.</p>
+<p>I created the block diagram below to explain the architecture and construction of the Test Set (click for a larger view).
+The system has 25 circuit boards, labeled A1 through A25;<span id="fnref:top-view"><a class="ref" href="#fn:top-view">8</a></span> for the most part, they correspond to functional blocks in the diagram.</p>
+<p><a href="https://static.righto.com/images/updata/block-diagram3.jpg"><img alt="My block diagram of the Up-Data Link Test Set. (Click for a larger image.)" class="hilite" height="737" src="https://static.righto.com/images/updata/block-diagram3-w600.jpg" title="My block diagram of the Up-Data Link Test Set. (Click for a larger image.)" width="600" /></a><div class="cite">My block diagram of the Up-Data Link Test Set. (Click for a larger image.)</div></p>
+<p>The Test Set's front panel is dominated by its display of 13 large digits.
+It turns out that the storage of these digits is the heart of the Test Set.
+This storage (A3-A9) assembles the digits as they are read from the paper tape, circulates the bits for transmission, and
+provides digits to the other circuits to select the message type and validate the results.
+To accomplish this, the 13 digit circuits are configured as a 39-bit shift register.
+As the message is read from the paper tape, its bits are shifted into the digit storage, right to left, and the
+message is shown on the display.
+To send the message, the shift register is reconfigured so the 10 digits form a loop, excluding the message number.
+As the bits cycle through the loop, the leftmost bit is encoded and transmitted.
+At the end of the transmission, the digits have cycled back to their original positions, so the message can be
+transmitted again if desired.
+Thus, the shift-register mechanism both deserializes the message when it is read and serializes the message for transmission.</p>
+<p>The Test Set uses three boards (A15, A2, and A1) to expand the message with sub-bits and to encode the message into audio.
+The first board converts each bit into five sub-bits.
+The second board applies phase-shift keying (PSK) modulation, and the third board has filters to produce clean sine waves from the digital signals.</p>
+<!--
+Several boards generate control signals for the other boards.
+The paper tape reader is controlled by board A18, while board A13 implements the higher-level state machine for reading and transmitting a digit.
+Boards A16, and A17 generate control signals based on the message type stored in digit 5.
+-->
+
+<p>On the input side, the Test Set receives signals from the Up-Data Link (UDL) box through round military-style connectors.
+These input signals are buffered by boards A25, A22, A23, A10, and A24.
+Board 15 verifies the input sub-bits by comparing them with the transmitted sub-bits.
+For an AGC message, the computer signals are verified by board A14.
+The timing (CTE) signals are verified by boards A20 and A21.
+The UDL status (validity) signals are processed by board A12.
+Board A11 implements a switching power supply to power the interface boards.</p>
+<p>You can see from the block diagram that the Test Set is complex and implements multiple functions.
+On the other hand, the block diagram also shows that it takes a lot of 1960s circuitry to implement anything.
+For instance, one board can only handle two digits, so the digit display alone requires seven boards.
+Another example is the inputs, requiring a full board for two or three input bits.</p>
+<h2>Encapsulated modules</h2>
+<p>The box is built from modules that are somewhat like integrated circuits but contain discrete components.
+Modules like these were used in the early 1960s before ICs caught on.
+Each module implements a simple function such as a flip-flop or buffer.
+They were more convenient than individual components, since a module provided a ready-made function.
+They were also compact, since the components were tightly packaged inside the module.</p>
+<p>Physically, each module has 13 pins: a row of 7 on one side and a row of 6 offset on the other side.
+This arrangement ensures that a module cannot be plugged in backward.</p>
+<p><a href="https://static.righto.com/images/updata/module.jpg"><img alt="A Motorola &quot;LP FF&quot; module. This module implements a J-K flip-flop. &quot;LP&quot; could indicate low performance, low power, or low propagation; the system also uses &quot;HP FF&quot; modules, which could be high performance." class="hilite" height="257" src="https://static.righto.com/images/updata/module-w400.jpg" title="A Motorola &quot;LP FF&quot; module. This module implements a J-K flip-flop. &quot;LP&quot; could indicate low performance, low power, or low propagation; the system also uses &quot;HP FF&quot; modules, which could be high performance." width="400" /></a><div class="cite">A Motorola "LP FF" module. This module implements a J-K flip-flop. "LP" could indicate low performance, low power, or low propagation; the system also uses "HP FF" modules, which could be high performance.</div></p>
+<p>Reverse engineering these modules was difficult since they were encapsulated in plastic and the components were inaccessible.
+The text printed on each module hinted at its function.
+For example, the J-K flip-flop module above is labeled "LP FF".
+The "2/2G &amp; 2/1G" module turned out to contain two NAND gates and two inverters (the 2G and 1G gates).
+A "2P/3G" module contains two pull-up resistors and two three-input NAND gates.
+Other modules provided special-purpose analog functions for the PSK modulation.</p>
+<p>I reverse-engineered the functions of the modules by applying signals and observing the results.
+Conveniently, the pins are on 0.200" spacing so I could plug modules into a standard breadboard.
+The functions of the logic modules were generally straightforward to determine.
+The analog modules were more difficult; for instance, the "-3.9V" module contains a -3.9-volt Zener diode, 
+six resistors, and three capacitors in complicated arrangements.</p>
+<p>To determine how the modules are constructed internally, we had a module X-rayed by John McMaster and another module X-rayed in three dimensions by Lumafield.
+The X-rays revealed that modules were built with "cordwood construction", a common technique in the 1960s.
+That is, cylindrical components were mounted between two boards, stacked parallel similar to a pile of wood logs.
+Instead of using printed-circuit boards, the leads of the components were welded to metal strips to provide the interconnections.</p>
+<p><a href="https://static.righto.com/images/updata/lumafield.jpg"><img alt="A 3-D scan of the module showing the circuitry inside the compact package, courtesy of Lumafield. Two transistors are visible near the center." class="hilite" height="334" src="https://static.righto.com/images/updata/lumafield-w500.jpg" title="A 3-D scan of the module showing the circuitry inside the compact package, courtesy of Lumafield. Two transistors are visible near the center." width="500" /></a><div class="cite">A 3-D scan of the module showing the circuitry inside the compact package, courtesy of Lumafield. Two transistors are visible near the center.</div></p>
+<p>For more information on these modules, see my articles <a href="https://www.righto.com/2022/08/lumafield-flip-flop.html">Reverse-engineering a 1960s cordwood flip-flop module with X-ray CT scans</a> and 
+<a href="https://www.righto.com/2022/06/x-ray-reverse-engineering-hybrid-module.html">X-ray reverse-engineering a hybrid module</a>.
+You can interact with the scan <a href="https://voyager.lumafield.com/project/afa60fd5-308d-41da-a0c6-14294af54338">here</a>.</p>
+<h2>The boards</h2>
+<p>In this section, I'll describe some of the circuit boards and point out their interesting features.
+A typical board has up to 15 modules, arranged as five rows of three.
+The modules are carefully spaced so that two boards can be meshed
+with the components on one board fitting into the gaps on the other board.
+Thus, a pair of boards forms a dense block.</p>
+<p><a href="https://static.righto.com/images/updata/sandwich.jpg"><img alt="This photo shows how the modules of the two circuit boards are arranged so the boards can be packed together tightly." class="hilite" height="370" src="https://static.righto.com/images/updata/sandwich-w500.jpg" title="This photo shows how the modules of the two circuit boards are arranged so the boards can be packed together tightly." width="500" /></a><div class="cite">This photo shows how the modules of the two circuit boards are arranged so the boards can be packed together tightly.</div></p>
+<p>Each pair of boards is attached to side rails and a mounting bracket, forming a unit.<span id="fnref2:top-view"><a class="ref" href="#fn:top-view">8</a></span>
+The bracket has ejectors to remove the board unit, since the backplane connectors grip the boards tightly.
+Finally, each bracket is labeled with the board numbers, the test point numbers, and the Motorola logo.
+The complexity of this mechanical assembly suggests that Motorola had developed an integrated prototyping system around the circuit modules, prior to the Test Set.</p>
+<h3>Digit driver boards</h3>
+<p>The photo below shows a typical board, the digit driver board.
+At the left, a 47-pin plug provides the connection between the board and the Test Set's backplane.
+At the right, 15 test connections allow the board to be probed and tested while it is installed.
+The board itself is a two-sided printed circuit board with gold plating.
+Boards are powered with +6V, -6V, and ground; the two red capacitors in the lower left filter the two voltages.</p>
+<p><a href="https://static.righto.com/images/updata/driver-board.jpg"><img alt="Boards A4 through A9 are identical digit driver boards." class="hilite" height="429" src="https://static.righto.com/images/updata/driver-board-w600.jpg" title="Boards A4 through A9 are identical digit driver boards." width="600" /></a><div class="cite">Boards A4 through A9 are identical digit driver boards.</div></p>
+<p>The digit driver is the most common board in the system, appearing six times.<span id="fnref:drivers"><a class="ref" href="#fn:drivers">9</a></span>
+Each board stores two octal digits in a shift register and drives two digit displays on the front panel.
+Since the digits are octal, each digit requires three bits of storage, implemented with
+three flip-flop modules connected as a shift register.
+If you look closely, you can spot the six flip-flop modules, labeled "LP FF".</p>
+<p>The digits are displayed through an unusual technology: an edge-lit lightguide display.<span id="fnref:numerik"><a class="ref" href="#fn:numerik">10</a></span>
+From a distance, it resembles a Nixie tube, but it uses 10 lightbulbs, one for each number value, with a plastic layer for each digit.
+Each plastic sheet has numerous dots etched in the shape of the corresponding number.
+One sheet is illuminated from the edge, causing the dots in the sheet to light up and display that number.
+In the photo below, you can see both the illuminated and the unilluminated dots.
+The displays take 14 volts, but the box runs at 28 volts, so a board full of resistors on the front panel drops the voltage from 28 to 14, giving off noticeable heat in the process.</p>
+<p><a href="https://static.righto.com/images/updata/digit.jpg"><img alt="A close-up of a digit in the Test Set, showing the structure of the edge-lit lightguide display." class="hilite" height="309" src="https://static.righto.com/images/updata/digit-w250.jpg" title="A close-up of a digit in the Test Set, showing the structure of the edge-lit lightguide display." width="250" /></a><div class="cite">A close-up of a digit in the Test Set, showing the structure of the edge-lit lightguide display.</div></p>
+<p>For each digit position, the driver board provides eight drive signals, one for each bulb.
+The drivers are implemented in "LD" modules.
+Since each LD module contains two drive transistors controlled by 4-input AND gates, a module supports two bulbs.
+Thus, a driver board holds eight LD modules in total.
+The LD modules are also used on other boards to drive the lights on the front panel.</p>
+<h3>Ring counters</h3>
+<p>The Test Set contains multiple counters to count bits, sub-bits, digits, states, and so forth.
+While a modern design would use binary counters, the Test Set is implemented with a circuit called a <em>ring counter</em> that optimizes the hardware.</p>
+<p>For instance, to count to ten, five flip-flops are arranged as a shift register so each flip-flop sends its output to the next one.
+However, the last flip-flop sends its <em>inverted</em> output to the first.
+The result is that the counter will proceed: 10000, 11000, 11100, 11110, 11111 as 1 bits are shifted in at the left.
+But after a 1 reaches the last bit, 0 bits will be shifted in at the left: 01111, 00111, 00011, 00001, and finally 0000.
+Thus, the counter moves through ten states.</p>
+<p>Why not use a 4-bit binary counter and save a flip-flop? First, the binary counter requires additional logic to go from 9 back to 0.
+Moreover, acting on a particular binary value requires a 4-input gate to check the four bits.
+But a particular value of a ring counter can be detected with a smaller 2-input gate by checking the bits on either side of the 0/1 boundary.
+For instance, to detect a count of 3 (11<strong>10</strong>0), only the two highlighted bits need to be tested.
+Thus, the decoding logic is much simpler for a ring counter, which is important when each gate comes in an expensive module.</p>
+<p>Another use of the ring counter is in the sub-state generator, counting out the five states.
+Since this ring counter uses three flip-flops, you might expect it to count to six.
+However, the first flip-flop gets one of its inputs from the second flip-flop, resulting in five states:
+000, 100, 110, 011, and 001, with the 111 state skipped.<span id="fnref:count-to-five"><a class="ref" href="#fn:count-to-five">11</a></span>
+This illustrates the flexibility of ring counters to generate arbitrary numbers of states.</p>
+<h3>The PSK boards</h3>
+<p>Digital data could not be broadcast directly to the spacecraft, so the data was turned into an audio signal using phase-shift keying (PSK).
+The Test Set uses two boards (A1 and A2) to produce this signal.
+These boards are interesting and unusual because they are analog, unlike the other boards in the Test Set.</p>
+<p>The idea behind phase-shift keying is to change the phase of a sine wave depending on the bit (i.e., sub-bit) value.
+Specifically, a 2 kHz sine wave indicated a one bit, while the sine wave was inverted for a zero bit.
+That is, a phase shift of 180º indicated a 0 bit.
+But how do you tell which sine wave is original and which is flipped? The solution was to combine the information
+signal with a 1 kHz reference signal that indicates the start and phase of each bit.
+The diagram below shows how the bits 1-0-1 are encoded into the composite audio signal that
+is decoded by the Up-Data Link box.</p>
+<p><a href="https://static.righto.com/images/updata/modulation.jpg"><img alt="The phase-shift keying modulation process. This encoded digital data into an audio signal for transmission to the Up-DataLink. Note that &quot;1 kc&quot; is 1 kilocycle, or 1 kilohertz in modern usage. From Apollo Digital Up-Data Link Description." class="hilite" height="355" src="https://static.righto.com/images/updata/modulation-w500.jpg" title="The phase-shift keying modulation process. This encoded digital data into an audio signal for transmission to the Up-DataLink. Note that &quot;1 kc&quot; is 1 kilocycle, or 1 kilohertz in modern usage. From Apollo Digital Up-Data Link Description." width="500" /></a><div class="cite">The phase-shift keying modulation process. This encoded digital data into an audio signal for transmission to the Up-DataLink. Note that "1 kc" is 1 kilocycle, or 1 kilohertz in modern usage. From <a href="https://www.ibiblio.org/apollo/Documents/TM-X-1146-ApolloDigitalUpDataLinkDescription-Lenett.pdf#page=39">Apollo Digital Up-Data Link Description</a>.</div></p>
+<p>The core of the PSK modulation circuit is a transformer with a split input winding.
+The 2 kHz sine wave is applied to the winding's center tap.
+One side of the winding is grounded (by the "ø DET" module) for a 0 bit, but the other side of the winding is grounded for a 1 bit.
+This causes the signal to go through the winding in one direction for a 1 bit and the opposite direction for a 0 bit.
+The transformer's output winding thus receives an inverted signal for a 0 bit, giving the 180º phase shift seen in the second waveform above.
+Finally, the board produces the composite audio signal by mixing in the reference signal through a potentiometer and the "SUM" module.<span id="fnref:psk"><a class="ref" href="#fn:psk">12</a></span></p>
+<p><a href="https://static.righto.com/images/updata/board2.jpg"><img alt="Board A2 is the heart of the PSK encoding. The black transformer selects the phase shift, controlled by the &quot;ø DET&quot; and &quot;ø DET D&quot; modules in front of it. The two central potentiometers  balance the components of the output signal." class="hilite" height="289" src="https://static.righto.com/images/updata/board2-w450.jpg" title="Board A2 is the heart of the PSK encoding. The black transformer selects the phase shift, controlled by the &quot;ø DET&quot; and &quot;ø DET D&quot; modules in front of it. The two central potentiometers  balance the components of the output signal." width="450" /></a><div class="cite">Board A2 is the heart of the PSK encoding. The black transformer selects the phase shift, controlled by the "ø DET" and "ø DET D" modules in front of it. The two central potentiometers  balance the components of the output signal.</div></p>
+<p>Inconveniently, 
+some key components of the Test Set were missing; probably the most valuable components were salvaged when the box was scrapped.
+The missing components included the power supplies and amplifiers on the back of the box, as well as parts from
+PSK board A1.
+This board had ten white wires that had been cut, going to missing components labeled MP1, R2, L1, and L2.
+By studying the circuitry, I determined that MP1 had been a 4-kHz oscillator that provided the master clock for the Test Set.
+R2 was simply a potentiometer to adjust signal levels.</p>
+<p><a href="https://static.righto.com/images/updata/board-a1-updated.jpg"><img alt="Marc added circuitry to board A1 to replace the two missing filters and the missing oscillator. (The oscillator was used earlier to drive a clock from Soyuz.)" class="hilite" height="451" src="https://static.righto.com/images/updata/board-a1-updated-w450.jpg" title="Marc added circuitry to board A1 to replace the two missing filters and the missing oscillator. (The oscillator was used earlier to drive a clock from Soyuz.)" width="450" /></a><div class="cite">Marc added circuitry to board A1 to replace the two missing filters and the missing oscillator. (The oscillator was used earlier to drive a clock from Soyuz.)</div></p>
+<p>But L1 and L2 were more difficult.
+It took a lot of reverse-engineering before we determined that L1 and L2 were 
+resonant filters to convert the digital waveforms to the sine waves needed for the PSK output.
+Marc used a combination of theory and trial-and-error to determine the inductor and capacitor values that produced a
+clean signal.
+The photo above shows our substitute filters, along with a replacement oscillator.</p>
+<h3>Input boards</h3>
+<p>The Test Set receives signals from the Up-Data Link box under test and verifies that these signals are correct.
+The Test Set has five input boards (A22 through A25) to buffer the input signals and convert them to digital levels.
+The input boards also provide electrical isolation between the input signals and the Test Set, avoiding problems caused by
+ground loops or different voltage levels.</p>
+<p>A typical input board is A22, which receives two input signals, supplied through coaxial cables.
+The board buffers the signals with op-amps, and then produces a digital signal for use by the box.
+The op-amp outputs go into "1 SS" isolation modules that pass the signal through to the box while ensuring isolation.
+These modules are optocouplers, using an LED and a phototransistor to provide isolation.<span id="fnref:led"><a class="ref" href="#fn:led">13</a></span>
+The op-amps are powered by an isolated power supply.</p>
+<p><a href="https://static.righto.com/images/updata/board22.jpg"><img alt="Board A22 handles two input signals. It has two op-amps and associated circuitry. Note the empty module positions; board A23 has these positions populated so it supports three inputs." class="hilite" height="384" src="https://static.righto.com/images/updata/board22-w450.jpg" title="Board A22 handles two input signals. It has two op-amps and associated circuitry. Note the empty module positions; board A23 has these positions populated so it supports three inputs." width="450" /></a><div class="cite">Board A22 handles two input signals. It has two op-amps and associated circuitry. Note the empty module positions; board A23 has these positions populated so it supports three inputs.</div></p>
+<p>Each op-amp module is a Burr-Brown Model 1506 module,<span id="fnref:burr-brown"><a class="ref" href="#fn:burr-brown">14</a></span> encapsulating a transistorized op-amp into a convenient 8-pin module.
+The module is similar to an integrated-circuit op-amp, except it has discrete components inside and is considerably larger than an integrated circuit.
+Burr-Brown is <a href="https://www.ti.com/lit/ta/sszt411/sszt411.pdf?ts=1750913508757">said</a> to have created the first solid-state op-amp in 1957, and started making op-amp modules around 1962.</p>
+<p>Board A24 is also an isolated input board, but uses different circuitry.
+It has two modules that each contain four Schmitt triggers, circuits to sharpen up a noisy input.
+These modules have the puzzling label "-12+6LC".
+Each output goes through a "1 SS" isolation module, as with the previous input boards.
+This board receives the 8-bit "validity" signal from the Up-Data Link.</p>
+<h3>The switching power supply board</h3>
+<p>Board A11 is interesting: instead of sealed modules, it has a large green cube with numerous wires attached.
+This board turned out to be a switching power supply that implements six dual-voltage power supplies.
+The green cube is a transformer with 14 center-tapped windings connected to 42 pins.
+The transformer ensures that the power supply's outputs are isolated.
+This allows the op-amps on the input boards to remain electrically isolated from the rest of the Test Set.</p>
+<p><a href="https://static.righto.com/images/updata/board11.jpg"><img alt="The switching power supply board is dominated by a large green transformer with many windings. The two black power transistors are at the front." class="hilite" height="379" src="https://static.righto.com/images/updata/board11-w500.jpg" title="The switching power supply board is dominated by a large green transformer with many windings. The two black power transistors are at the front." width="500" /></a><div class="cite">The switching power supply board is dominated by a large green transformer with many windings. The two black power transistors are at the front.</div></p>
+<p>The power supply uses a design known as a <a href="https://en.wikipedia.org/wiki/Royer_oscillator">Royer Converter</a>; the two transistors drive the transformer in a push-pull configuration.
+The transistors are turned on alternately at high frequency, driven by a feedback winding.
+The transformer has multiple windings, one for each output.
+Each center-tapped winding uses two diodes to produce a DC output, filtered by the large capacitors.
+In total, the power supply has four ±7V outputs and two ±14V outputs to supply the input boards.</p>
+<p>This switching power supply is independent from the power supplies for the rest of the Test Set.
+On the back of the box, we could see where power supplies and amplifiers had been removed.
+Determining the voltages of the missing power supplies would have been a challenge.
+Fortunately, the front of the box had test points with labels for the various voltages: -6, +6, and +28, so we knew what voltages were required.</p>
+<h2>The front panel</h2>
+<p>The front panel reveals many of the features of the Test Set.
+At the top, lights indicate the success or failure of various tests.
+"Sub-bit agree/error" indicates if the sub-bits read back into the Test Set match the values sent.
+"AGC confirm/error" shows the results of an Apollo Guidance Computer message, while "CTE confirm/error" shows the results of a Central Timing Equipment message.
+"Verif confirm/error" indicates if the verification message from the UDL matches the expected value for a test message.
+At the right, lights indicate the status of the UDL: standby, active, or powered off.</p>
+<p><a href="https://static.righto.com/images/updata/panel.jpg"><img alt="A close-up of the Test Set's front panel." class="hilite" height="386" src="https://static.righto.com/images/updata/panel-w500.jpg" title="A close-up of the Test Set's front panel." width="500" /></a><div class="cite">A close-up of the Test Set's front panel.</div></p>
+<p>In the middle, toggle switches control the UDL operation.
+The "Sub-bit spoil" switch causes sub-bits to be occasionally corrupted for testing purposes.
+"Sub-bit compare/override" enables or disables sub-bit verification.
+The four switches on the right control the paper tape reader.
+The "Program start" switch is the important one: it causes the UDL to send one message (in "Single" mode) or multiple messages (in "Serial" mode).
+The Test Set can stop or continue when an error occurs ("Stop on error" / "Bypass error").
+Finally, "Tape advance" causes messages to be read from paper tape, while "Tape stop" causes the UDL to re-use the current message rather than loading a new one.</p>
+<p>The UDL provides a verification code that indicates its status.
+The "Verification Return" knob selects the source of this verification code:
+the "Direct" position uses a 4-bit verification code, while
+"Remote" uses an 8-bit verification code.<span id="fnref:verification"><a class="ref" href="#fn:verification">15</a></span></p>
+<p>At the bottom, "PSK high/low" selects the output level for the PSK signal from the Test Set.
+(Since the amplifier was removed from our Test Set, this switch has no effect.
+Likewise, the "Power On / Off" switch has no effect since the power supplies were removed. We power the Test Set
+with an external lab supply.)
+In the middle, 15 test points allow access to various signals inside the Test Set.
+The round elapsed time indicator shows how many hours the Test Set has been running (apparently over 12 months of continuous operation).</p>
+<h2>Reverse-engineering the backplane</h2>
+<p>Once I figured out the circuitry on each board, the next problem was determining how the boards were connected.
+The backplane consists of rows of 47-pin sockets, one for each board.
+Dense white wiring runs between the sockets as well as to switches, displays, and connectors.
+I started beeping out the connections with a multimeter, picking a wire and then trying to find the other end.
+Some wires were easy since I could see both ends, but many wires disappeared into a bundle.
+I soon realized that manually tracing the wiring was impractically slow:
+with 25 boards and 47 connections per board, brute-force testing of every pair of connections would require hundreds of thousands of checks.</p>
+<p><a href="https://static.righto.com/images/updata/backplane-view.jpg"><img alt="The backplane wiring of the Test Set consisted of bundles of white wires, as shown in this view of the underside of the Test Set." class="hilite" height="456" src="https://static.righto.com/images/updata/backplane-view-w500.jpg" title="The backplane wiring of the Test Set consisted of bundles of white wires, as shown in this view of the underside of the Test Set." width="500" /></a><div class="cite">The backplane wiring of the Test Set consisted of bundles of white wires, as shown in this view of the underside of the Test Set.</div></p>
+<p>To automate the beeping-out of connections, I built a system that I call <a href="https://github.com/shirriff/beepomatic"><em>Beep-o-matic</em></a>.
+The idea behind <em>Beep-o-matic</em> is to automatically find all the connections between two motherboard slots by plugging
+two special boards into the slots.
+By energizing all the pins on the first board in sequence, a microcontroller can detect connected pins on the second board, revealing the wiring between the two slots.</p>
+<p>This system worked better than I expected, rapidly generating a list of connections.
+I still had to plug the Beep-o-matic boards into each pair of slots (about 300 combinations in total), but each scan took just a few seconds, so a full scan was practical.
+To find the wiring to the switches and connectors, I used a variant of the process.
+I plugged a board into a slot and used a program to continuously monitor the pins for changes.
+I went through the various switch positions and applied signals to the connectors to find the associated connections.</p>
+<h2>Conclusions</h2>
+<p>I started reverse-engineering the Test Set out of curiosity: given an undocumented box made from mystery modules and
+missing key components,
+could we understand it? Could we at least get the paper tape reader to run and the lights to flash?
+It was a tricky puzzle to figure out the modules and the circuitry, but eventually we could read a paper tape and
+see the results on the display.</p>
+<p>But the box turned out to be useful.
+Marc has amassed a large and operational collection of Apollo communications hardware.
+We use the UDL Test Set to generate realistic signals that we feed into Apollo's S-band communication system.
+We haven't transmitted these signals to the Moon, but we have transmitted signals between antennas a few feet apart,
+receiving them with a box called the S-band Transponder.
+Moreover, we have used the Test Set to control an Up-Data Link box, a CTE clock, and a
+simulated Apollo Guidance Computer, reading commands from the paper tape and sending them through the complete communication path.
+Ironically, the one thing we haven't done with the Test Set is use it to test the Up-Data Link in the way it is intended: connecting the UDL's outputs to the Test Set and checking the panel lights.</p>
+<p>From a wider perspective, the Test Set provides a glimpse of the vast scope of the Apollo program.
+This complicated box was just one part of the test apparatus for one small part of Apollo's electronics.
+Think of the many different electronic systems in the Apollo spacecraft, and consider the
+enormous effort to test them all.
+And electronics was just a small part of Apollo alongside the engines, mechanical structures, fuel cells, and life support systems. 
+With all this complexity, it's not surprising that the Apollo program employed 400,000 people.</p>
+<p>For more information, the footnotes include a list of UDL documentation<span id="fnref:documentation"><a class="ref" href="#fn:documentation">16</a></span> and <a href="https://www.youtube.com/@CuriousMarc/videos">CuriousMarc</a>'s videos<span id="fnref:videos"><a class="ref" href="#fn:videos">17</a></span>.
+Follow me on
+Bluesky (<a href="https://bsky.app/profile/righto.com">@righto.com</a>),
+Mastodon (<a href="https://oldbytes.space/@kenshirriff">@kenshirriff@oldbytes.space</a>),
+or <a href="http://www.righto.com/feeds/posts/default">RSS</a>.
+(I've given up on Twitter.)
+I worked on this project with CuriousMarc, Mike Stewart, and Eric Schlapfer.
+Thanks to <a href="https://www.mcmaster.tech/about">John McMaster</a> for X-rays, thanks to <a href="https://www.lumafield.com/">Lumafield</a> for the CT scans, and thanks to Marcel for providing the box.</p>
+
+<h2>Notes and references</h2>
+<div class="footnote">
+<ol>
+<li id="fn:useless-diagram">
+<p>Mike found a NASA document
+<a href="https://www.ibiblio.org/apollo/Documents/g14-900708c_vol2_functional_schematics_sc-008_sesl.pdf#page=82">Functional Integrated System Schematics</a> that includes "Up Data Link GSE/SC Integrated Schematic Diagram".
+Unfortunately, this was not very helpful since the diagram merely shows the Test Set as a rectangle with one wire in and one wire out.
+The remainder of the diagram (omitted) shows that the output line passes through a dozen boxes (modulators, switches, amplifiers,
+and so forth) and then enters the UDL onboard the Spacecraft Command Module.
+At least we could confirm that the Test Set was part of the functional integrated testing of the UDL.</p>
+<p><a href="https://static.righto.com/images/updata/nasa-diagram.jpg"><img alt="Detail from &quot;Up Data Link GSE/SC Integrated Schematic Diagram&quot;, page GT3." class="hilite" height="209" src="https://static.righto.com/images/updata/nasa-diagram-w500.jpg" title="Detail from &quot;Up Data Link GSE/SC Integrated Schematic Diagram&quot;, page GT3." width="500" /></a><div class="cite">Detail from "Up Data Link GSE/SC Integrated Schematic Diagram", page GT3.</div></p>
+<p>Notably, this diagram has the Up-Data Link Confidence Test Set denoted with "2A17".
+If you examine the photo of the Test Set at the top of the article, you can see that the physical box has a Dymo label "2A17", confirming that this is the same box.&#160;<a class="footnote-backref" href="#fnref:useless-diagram" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+</li>
+<li id="fn:relays">
+<p>The table below lists the functions that could be performed by sending a "realtime command" to the Up-Data Link
+to activate a relay.
+The crew could reset any of the relays except for K1-K5 (Abort Light A and Crew Alarm).</p>
+<p><a href="https://static.righto.com/images/updata/realtime-command-list.jpg"><img alt="The functions controlled by the relays. Adapted from Command/Service Module Systems Handbook." class="hilite" height="527" src="https://static.righto.com/images/updata/realtime-command-list-w550.jpg" title="The functions controlled by the relays. Adapted from Command/Service Module Systems Handbook." width="550" /></a><div class="cite">The functions controlled by the relays. Adapted from <a href="https://www.ibiblio.org/apollo/Documents/HSI-481260.pdf#page=64">Command/Service Module Systems Handbook</a>.</div></p>
+<p>A message selected one of 32 relays and specified if the relay should be turned on or off.
+The relays were magnetic latching relays, so they stayed in the selected position even when de-energized.
+The relay control also supported "salvo reset": four commands to reset a bank of relays at once.&#160;<a class="footnote-backref" href="#fnref:relays" title="Jump back to footnote 2 in the text">&#8617;</a></p>
+</li>
+<li id="fn:command-system">
+<p>The Saturn V booster had a system for receiving commands from the ground, closely related to the Up-Data Link, but with some differences.
+The Saturn V system used the same Phase-Shift Keying (PSK) and 70 kHz subcarrier as the Up-Data Link, but the frequency of the S-band signal was different for Saturn V (2101.8 MHz).
+(Since the Command Module and the booster use separate frequencies, the use of different addresses in the up-data messages was somewhat redundant.)
+Both systems used sub-bit encoding.
+Both systems used three bits for the vehicle address, but the remainder of the Saturn message was different, consisting of 14 bits for the decoder address, and 18 bits for message data.
+A typical message for the Launch Vehicle Digital Computer (LVDC) includes a 7-bit command followed by the 7 bits inverted for error detection.
+The command system for the Saturn V was located in the Instrument Unit, the ring containing most of the electronic systems that was mounted at the top of the rocket, below the Lunar Module.
+The command system is described in <a href="https://www.ibiblio.org/apollo/Documents/UAH-19650801-AstrionicsSystemHandbookSaturnLaunchVehicles.pdf#page=166">Astrionics System Handbook</a> section 6.2.</p>
+<p><a href="https://static.righto.com/images/updata/iu-command-decoder.jpg"><img alt="The Saturn Command Decoder. From Saturn IB/V Instrument Unit System Description and Component Data." class="hilite" height="276" src="https://static.righto.com/images/updata/iu-command-decoder-w350.jpg" title="The Saturn Command Decoder. From Saturn IB/V Instrument Unit System Description and Component Data." width="350" /></a><div class="cite">The Saturn Command Decoder. From Saturn IB/V Instrument Unit System Description and Component Data.</div></p>
+<p>The Lunar Module also had an Up-Data system, called the Digital Up-link Assembly (DUA) and built with integrated circuits.
+The Digital Up-link Assembly was similar to the Command Module's Up-Data Link and allowed ground stations to control the Lunar Guidance Computer.
+The DUA also controlled relays to arm the ascent engine.
+The DUA messages consisted of three vehicle address bits, three system address bits, and 16 information bits.
+Unlike the Command Module's UDL, the DUA includes the 70-kHz discriminator to demodulate the sub-band.
+The DUA also provided a redundant up-link voice path, using the data subcarrier to transmit audio.
+(The Command Module had a similar redundant voice path, but the demodulation was performed in the Premodulation Processor.)
+The DUA was based on the Digital-Command Assembly (DCA) that received up-link commands on the development vehicles.
+See <a href="https://www.nasa.gov/wp-content/uploads/static/history/alsj/tnD6974LMCommSystem.pdf">Lunar Module Communication System</a> and <a href="https://www.nasa.gov/wp-content/uploads/static/history/alsj/LM10HandbookVol1.pdf">LM10 Handbook</a> 2.7.4.2.2.&#160;<a class="footnote-backref" href="#fnref:command-system" title="Jump back to footnote 3 in the text">&#8617;</a></p>
+</li>
+<li id="fn:sub-bits">
+<p>Unexpectedly, we found three different sets of sub-bit codes in different documents.
+The <a href="https://www.ibiblio.org/apollo/Documents/telecommunication_systems_study_guide.pdf#page=231">Telecommunications Study Guide</a> says that the first digit (the Vehicle Address) encodes a one bit with the sub-bits 11011;
+for the remaining digits, a one bit is encoded by 10101.
+<a href="https://ntrs.nasa.gov/api/citations/19650025875/downloads/19650025875.pdf#page=201">Apollo Digital Command System</a> says that the first digit uses 11001 and the remainder use 10001.
+The schematic in <a href="https://www.ibiblio.org/apollo/Documents/TM-X-1146-ApolloDigitalUpDataLinkDescription-Lenett.pdf#page=48">Apollo Digital Up-Data Link Description</a> shows
+that the first digit uses 11000 and the remainder use 01011.
+This encoding matches our Up-Data Link and the Test Set, although the Test Set flipped the phase in the PSK signal.
+(In all cases, a zero bit is encoded by inverting all five sub-bits.)&#160;<a class="footnote-backref" href="#fnref:sub-bits" title="Jump back to footnote 4 in the text">&#8617;</a></p>
+</li>
+<li id="fn:destruct">
+<p>To provide range safety if the rocket went off course, the Saturn V booster had a destruct system.
+This system used detonating fuses along the RP-1 and LOX tanks to split the tanks open.
+As this happened, the escape tower at the top of the rocket would pull the astronauts to safety,
+away from the booster.
+The destruct system was controlled by the Digital Range Safety Command System (DRSCS), which used a
+cryptographic plug to prevent a malevolent actor from blowing up the rocket.</p>
+<p>The DRSCS&mdash;used on both the Saturn and Skylab programs&mdash;received
+a message consisting of a 9-character "Address" word and a 2-character "Command" word.
+Each character was composed of two audio-frequency tones from an "alphabet" of seven tones, reminiscent of
+the Dual-Tone Multi-Frequency (DTMF) signals used by Touch-Tone phones.
+The commands could arm the destruct circuitry, shut off propellants, disperse propellants,
+or switch the DRSCS off.</p>
+<p>To make this system secure,
+a "code plug" was carefully installed in the rocket shortly before launch.
+This code plug provided the "key-of-the-day" by shuffling the mapping between tone pairs and characters.
+With 21 characters, there were 21! (factorial) possible keys, so the chances of spoofing a message were astronomically small.
+Moreover, as the System Handbook writes with understatement: "Much attention has been given to preventing execution of a catastrophic command should one component fail during flight."</p>
+<p>For details of the range safety system, see <a href="https://www.ibiblio.org/apollo/Documents/HSI-209540.pdf#page=325">Saturn Launch Vehicle Systems Handbook</a>, <a href="https://www.ibiblio.org/apollo/Documents/UAH-19650801-AstrionicsSystemHandbookSaturnLaunchVehicles.pdf#page=182">Astrionics System Handbook</a> (schematic in section 6.3),
+<a href="https://ntrs.nasa.gov/api/citations/20090015395/downloads/20090015395.pdf#page=34">Apollo Spacecraft &amp; Saturn V Launch Vehicle Pyrotechnics / Explosive Devices</a>,
+<a href="https://ntrs.nasa.gov/api/citations/19740014779/downloads/19740014779.pdf#page=18">The Evolution of Electronic Tracking, Optical, Telemetry, and Command Systems at the Kennedy Space Center</a>, and
+<a href="https://ntrs.nasa.gov/api/citations/20090016301/downloads/20090016301.pdf#page=73">Saturn V Stage I (S-IC) Overview</a>.&#160;<a class="footnote-backref" href="#fnref:destruct" title="Jump back to footnote 5 in the text">&#8617;</a></p>
+</li>
+<li id="fn:s-band">
+<p>I explained above how the Up-Data Link message was encoded into an audio signal using phase-shift keying.
+However, more steps were required before this signal could be transmitted over
+Apollo's complicated S-band radio system.
+Rather than using a separate communication link for each subsystem, Apollo unified most communication over a high-frequency <a href="https://en.wikipedia.org/wiki/S_band">S-band</a> link, calling this the "Unified S-Band".
+Apollo had many communication streams&mdash;voice, control data, scientific data, ranging, telemetry, television&mdash;so cramming them onto a single radio link required multiple layers of modulation, like nested Russian Matryoshka dolls with a message inside.</p>
+<p>For the Up-Data Link, the analog PSK signal was modulated onto a subcarrier using frequency modulation.
+It was combined with the voice signal from ground and the pseudo-random ranging signal, and the combined signal was phase-modulated at 2106.40625 MHz and transmitted to the spacecraft through an enormous dish antenna at a ground station.</p>
+<p><a href="https://static.righto.com/images/updata/spectrum.jpg"><img alt="The spectrum of the S-band signal to the Command Module. The Up-Data is transmitted on the 70 kHz subcarrier. Note the very wide spectrum of the pseudo-random ranging signal." class="hilite" height="157" src="https://static.righto.com/images/updata/spectrum-w600.jpg" title="The spectrum of the S-band signal to the Command Module. The Up-Data is transmitted on the 70 kHz subcarrier. Note the very wide spectrum of the pseudo-random ranging signal." width="600" /></a><div class="cite">The spectrum of the S-band signal to the Command Module. The Up-Data is transmitted on the 70 kHz subcarrier. Note the very wide spectrum of the <a href="https://www.righto.com/2022/04/the-digital-ranging-system-that.html">pseudo-random ranging signal</a>.</div></p>
+<p>Thus, the initial message was wrapped in several layers of modulation before transmission: the binary message was expanded to five times its length by the sub-bits, modulated with Phase-Shift Keying, modulated with frequency modulation, and modulated with phase modulation.</p>
+<p>On the spacecraft, the signal went through corresponding layers of demodulation to extract the message.
+A box called the Unified S-band Transceiver demodulated the phase-modulated signal and sent the data and voice signals to the <a href="https://www.righto.com/2022/05/talking-with-moon-inside-apollos.html">pre-modulation processor</a> (PMP).
+The PMP split out the voice and data subcarriers and demodulated the signals with FM discriminators.
+It sent the data signal (now a 2-kHz audio signal) to the Up-Data Link, where a phase-shift keying demodulator produced a binary output.
+Finally, each group of five sub-bits was converted to a single bit, revealing the message.&#160;<a class="footnote-backref" href="#fnref:s-band" title="Jump back to footnote 6 in the text">&#8617;</a></p>
+</li>
+<li id="fn:paper-tape">
+<p>The Test Set uses eight-bit paper tape, but the encoding is unusual.
+Each character of the paper tape consists of a three-bit octal digit, the same digit inverted, and two control bits.
+Because of this redundancy, the Test Set could detect errors while reading the tape.</p>
+<p>One puzzling aspect of the paper tape reader was that we got it working, but when we tilted the Test Set on its side,
+the reader completely stopped working.
+It turned out that the reader's motor was controlled by a mercury-wetted relay, a high-current relay that
+uses mercury for the switch. 
+Since mercury is a liquid, the relay would only work in the proper orientation; when we tilted the box, the mercury
+rolled away from the contacts.&#160;<a class="footnote-backref" href="#fnref:paper-tape" title="Jump back to footnote 7 in the text">&#8617;</a></p>
+</li>
+<li id="fn:top-view">
+<p>This view of the Test Set from the top shows the positions of the 25 circuit boards, A1 through A25.
+Most of the boards are mounted in pairs, although A1, A2, and A15 are mounted singly.
+Because boards A1 and A11 have larger components, they have empty slots next to them; these are not missing boards.
+Each board unit has two ejector levers to remove it, along with two metal tabs to lock the unit into position.
+The 15 numbered holes allow access to the test points for each board.
+(I don't know the meaning of the text "CTS" on each board unit.)
+The thirteen digit display modules are at the bottom, with their dropping resistors at the bottom right.</p>
+<p><a href="https://static.righto.com/images/updata/top-view.jpg"><img alt="Top view of the Test Set." class="hilite" height="474" src="https://static.righto.com/images/updata/top-view-w450.jpg" title="Top view of the Test Set." width="450" /></a><div class="cite">Top view of the Test Set.</div></p>
+<p><!-- -->&#160;<a class="footnote-backref" href="#fnref:top-view" title="Jump back to footnote 8 in the text">&#8617;</a><a class="footnote-backref" href="#fnref2:top-view" title="Jump back to footnote 8 in the text">&#8617;</a></p>
+</li>
+<li id="fn:drivers">
+<p>There are seven driver boards: A3 through A9. Board A3 is different from the others because it implements one digit
+instead of two. Instead, board A3 includes validation logic for the paper tape data.&#160;<a class="footnote-backref" href="#fnref:drivers" title="Jump back to footnote 9 in the text">&#8617;</a></p>
+</li>
+<li id="fn:numerik">
+<p>Here is the datasheet for the digit displays in the Test Set: "Numerik Indicator IND-0300".
+In current dollars, they cost over $200 each!
+The cutaway diagram shows how the bent plastic sheets are stacked and illuminated.</p>
+<p><a href="https://static.righto.com/images/updata/numerik.jpg"><img alt="Datasheet from General Radio Catalog, 1963." class="hilite" height="459" src="https://static.righto.com/images/updata/numerik-w500.jpg" title="Datasheet from General Radio Catalog, 1963." width="500" /></a><div class="cite">Datasheet from <a href="https://www.worldradiohistory.com/Archive-Catalogs/General-Radio/General-Radio-Catalog-R-1963.pdf#page=219">General Radio Catalog</a>, 1963.</div></p>
+<!-- -->
+<p>For amazing photos that show the internal structure of the displays, see <a href="https://www.industrialalchemy.org/articleview.php?item=1093">this article</a>.
+Fran Blanche's <a href="https://www.youtube.com/watch?v=LvJN4Maea9I">video</a> discusses a similar display.
+Wikipedia has a page on <a href="https://en.wikipedia.org/wiki/Lightguide_display">lightguide displays</a>.</p>
+<p>While restoring the Test Set, we discovered that a few of the light bulbs were burnt out.
+Since displaying an octal digit only uses eight of the ten bulbs, we figured that we could swap the failed bulbs
+with unused bulbs from "8" or "9". It turned out that we weren't the first people to think of this&mdash;many
+of the "unused" bulbs were burnt out.&#160;<a class="footnote-backref" href="#fnref:numerik" title="Jump back to footnote 10 in the text">&#8617;</a></p>
+</li>
+<li id="fn:count-to-five">
+<p>I'll give more details on the count-to-five ring counter.
+The first flip-flop gets its J input from the Q' output of the last flip-flop as expected, but it gets its
+K input from the Q output of the <em>second</em> flip-flop, not the last flip-flop.
+If you examine the states, this causes the transition from 110 to 011 (a toggle instead of a set to 111),
+resulting in five states instead of six.&#160;<a class="footnote-backref" href="#fnref:count-to-five" title="Jump back to footnote 11 in the text">&#8617;</a></p>
+</li>
+<li id="fn:psk">
+<p>To explain the phase-shift keying circuitry in a bit more detail, board A1 produces a 4 kHz clock signal.
+Board A2 divides the clock, producing a 2 kHz signal and a 1 kHz signal.
+The 2 kHz signal is fed into the transformer to be phase-shifted.
+Then the 1 kHz reference signal is mixed in to form the PSK output.
+Resonant filters on board A1 convert the square-wave clock signals to smooth sine waves.&#160;<a class="footnote-backref" href="#fnref:psk" title="Jump back to footnote 12 in the text">&#8617;</a></p>
+</li>
+<li id="fn:led">
+<p>I was surprised to find LED opto-isolators in a device from the mid-1960s.
+I expected that the Test Set isolator used a light bulb, but testing showed that it switches on at 550 mV (like a diode) and operated successfully at over 100 kHz, impossible with a light bulb or photoresistor.
+It turns out that Texas Instruments <a href="https://patents.google.com/patent/US3304431A">filed a patent</a> for an LED-based opto-isolator in 1963 and turned this into a <a href="https://www.worldradiohistory.com/Archive-Electronics/60s/64/Elelctronics-1964-05-18.pdf#page=15">product</a> in 1964.
+The "PEX 3002" used a gallium-arsenide LED and a silicon phototransistor.
+Strangely, TI called this product a "molecular multiplex switch/chopper".
+Nowadays, an opto-isolator costs pennies, but at the time, these devices were absurdly expensive: TI's device sold for $275 (almost $3000 in current dollars).
+For more, see <a href="https://www.worldradiohistory.com/Archive-Electronics-World/60s/1965/Electronics-World-1965-09.pdf#page=34">The Optical Link: A New Circuit Tool</a>, 1965.&#160;<a class="footnote-backref" href="#fnref:led" title="Jump back to footnote 13 in the text">&#8617;</a></p>
+</li>
+<li id="fn:burr-brown">
+<p>For more information on the Burr-Brown 1506 op amp module, see
+<a href="https://www.worldradiohistory.com/BOOKSHELF-ARH/Technology/Technology-General/Handbook-of-Operational-Amplifier-RC-Networks-Burr-Brown-1966.pdf">Burr-Brown Handbook of Operational Amplifier RC Networks</a>.
+Other documents are 
+<a href="https://dl.icdst.org/pdfs/files/3db5f8cbbdc6f23fdea4d5d8231dbe96.pdf">Burr-Brown Handbook of Operational Amplifier Applications</a>,
+<a href="https://www.analog.com/media/en/training-seminars/design-handbooks/Op-Amp-Applications/SectionH.pdf">Op-Amp History</a>,
+<a href="https://archive.computerhistory.org/resources/access/text/2017/03/102770853-05-01-acc.pdf">Operational Amplifier Milestones</a>,
+and an <a href="https://www.worldradiohistory.com/Archive-Electronics/50s/Electronics-1958-11-07.pdf#page=165">ad</a> for the Burr-Brown 130 op amp.&#160;<a class="footnote-backref" href="#fnref:burr-brown" title="Jump back to footnote 14 in the text">&#8617;</a></p>
+</li>
+<li id="fn:verification">
+<p>I'm not sure of the meaning of the Direct versus Remote verification codes.
+The Block I (earlier) UDL had an 8-bit code, while the Block II (flight) UDL had a 4-bit code.
+The Direct code presumably comes from the UDL itself, while the Remote code is perhaps supplied through telemetry?&#160;<a class="footnote-backref" href="#fnref:verification" title="Jump back to footnote 15 in the text">&#8617;</a></p>
+</li>
+<li id="fn:documentation">
+<p>The block diagram below shows the structure of the Up-Data Link (UDL). It uses the sub-bit decoder and a 24-stage
+register to deserialize the message. Based on the message, the UDL triggers relays (RTC), outputs data to
+the Apollo Guidance Computer (called the CMC, Command Module Computer here), sends pulses to the CTE clock, or
+sends validity signals back to Earth.</p>
+<p><a href="https://static.righto.com/images/updata/udl-internal.jpg"><img alt="UDL block diagram, from Apollo Operations Handbook, page 31" class="hilite" height="370" src="https://static.righto.com/images/updata/udl-internal-w500.jpg" title="UDL block diagram, from Apollo Operations Handbook, page 31" width="500" /></a><div class="cite">UDL block diagram, from <a href="https://www.ibiblio.org/apollo/ApolloProjectOnline/Documents/SMA2A-03-BLOCK%20II%20Volume%201%2019691015/aoh-v1-2-08-telecoms.pdf">Apollo Operations Handbook</a>, page 31</div></p>
+<p>For details of the Apollo Up-Data system, see the diagram below (click it for a very large image).
+This diagram is from the <a href="https://www.ibiblio.org/apollo/Documents/HSI-481260.pdf#page=80">Command/Service Module Systems Handbook</a> (PDF page 64); see page 80 for written specifications of the UDL.</p>
+<p><a href="https://static.righto.com/images/updata/udl-diagram.jpg"><img alt="This diagram of the Apollo Updata system specifies the message formats, relay usages, and internal structure of the UDL." class="hilite" height="178" src="https://static.righto.com/images/updata/udl-diagram-w600.jpg" title="This diagram of the Apollo Updata system specifies the message formats, relay usages, and internal structure of the UDL." width="600" /></a><div class="cite">This diagram of the Apollo Updata system specifies the message formats, relay usages, and internal structure of the UDL.</div></p>
+<p>Other important sources of information:
+<a href="https://www.ibiblio.org/apollo/Documents/TM-X-1146-ApolloDigitalUpDataLinkDescription-Lenett.pdf">Apollo Digital Up-Data Link Description</a> contains schematics and a detailed description of the UDL.
+<a href="https://www.ibiblio.org/apollo/Documents/telecommunication_systems_study_guide.pdf#page=223">Telecommunication Systems Study Guide</a> describes the earlier UDL that included a 450 MHz FM receiver.&#160;<a class="footnote-backref" href="#fnref:documentation" title="Jump back to footnote 16 in the text">&#8617;</a></p>
+</li>
+<li id="fn:videos">
+<p>The following CuriousMarc videos describe the Up-Data Link and the Test Set, so smash that Like button and subscribe :-)
+<ul>
+<li><a href="https://www.youtube.com/watch?v=VReePQJRRI0&amp;list=PL-_93BVApb58SXL-BCv4rVHL-8GuC2WGb&amp;index=9">Mystery Apollo Up-Data Box</a>
+<li><a href="https://www.youtube.com/watch?v=sv0aFLQvFxc&amp;list=PL-_93BVApb58SXL-BCv4rVHL-8GuC2WGb&amp;index=14">Up-Data Commands</a>
+<li><a href="https://www.youtube.com/watch?v=iegf7ZU6ciM&amp;list=PL-_93BVApb58SXL-BCv4rVHL-8GuC2WGb&amp;index=18">Up-Data Link Analog Mystery Solved</a>
+<li><a href="https://www.youtube.com/watch?v=9fGurEa3EVk&amp;list=PL-_93BVApb58SXL-BCv4rVHL-8GuC2WGb&amp;index=21">Looking inside Apollo components with Lumafield's 3D X-ray machine</a>
+<li><a href="https://www.youtube.com/watch?v=06evyO7aUVU&amp;list=PL-_93BVApb58SXL-BCv4rVHL-8GuC2WGb&amp;index=32">UDL Grand Opening and Power Up</a>
+<li><a href="https://www.youtube.com/watch?v=tBy1j9cTYKc&amp;list=PL-_93BVApb58SXL-BCv4rVHL-8GuC2WGb&amp;index=33">Breaking the Updata Link Code</a>
+<li><a href="https://www.youtube.com/watch?v=HFqWvtVVbgk&amp;list=PL-_93BVApb58SXL-BCv4rVHL-8GuC2WGb&amp;index=34">Is there something wrong with our NASA Up Data Link transmitter?</a>
+<li><a href="https://www.youtube.com/watch?v=2Jt0PsxLM7k&amp;list=PL-_93BVApb58SXL-BCv4rVHL-8GuC2WGb&amp;index=35">Trying every function of the Apollo command system</a>
+</ul>&#160;<a class="footnote-backref" href="#fnref:videos" title="Jump back to footnote 17 in the text">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

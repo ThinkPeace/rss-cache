@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A question about the maximimum number of values in a registry key raises questions about the question | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A question about the maximimum number of values in a registry key raises questions about the question</h1>
+        <div class="meta">The Old New Thing 2026-03-30T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260330-00/?p=112175">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-fdd707028dfde789.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Why is this even a question? The post A question about the maximimum number of values in a registry key raises questions about the question appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>A customer wanted to know the maximum number of values that can be stored in a single registry key. They found that they ran into problems when they reached a certain number of values, which was well over a quarter million.</p>
+<p>Okay, wait a second. Why are you adding over a quarter million values to a registry key!?</p>
+<p>The customer explained that they mark every file in their installer as <b>msidb­Component­Attributes­Shared­Dll­Ref­Count</b>, to avoid <a href="https://learn.microsoft.com/en-us/windows/win32/msi/component-table"> the problem described in the documentation</a>. And when I said every file, I really meant <i>every file</i>. Not just DLLs, but also text files, GIFs, XML files, everything. Just the names of the keys adds up to over 30 megabytes.</p>
+<p>Since their product supports multiple versions installed side-by-side, installing multiple versions of their product accumulates values in the <tt>HKEY_<wbr />LOCAL_<wbr />MACHINE\<wbr />SOFTWARE\<wbr />Microsoft\<wbr />Windows\<wbr />CurrentVersion\<wbr />SharedDLLs</tt> registry key.</p>
+<p>The customer saw the story about problems if you forget to mark a shared file as <b>msidb­Component­Attributes­Shared­Dll­Ref­Count</b>, and decided that they are going to fix it by saying that <i>every single file</i> should go into <tt>Shared­DLLs</tt>. But that&#8217;s the wrong lesson.</p>
+<p>The lesson is &#8220;If a file is shared, then mark it as shared.&#8221; And &#8220;shared&#8221; means &#8220;multiple products use the same DLL installed into the same directory&#8221; (such as the <tt>system32</tt> directory or the <tt>C:\Program Files\<wbr />Common Files\<wbr />Contoso\</tt> directory). Since the customer says that their programs install side-by-side, there are unlikely to be any shared files at all! They probably can just remove the <b>msidb­Component­Attributes­Shared­Dll­Ref­Count</b> attribute from <i>all</i> of their files.</p>
+<p>The <tt>SharedDLLs</tt> registry was created in Windows 95 as one of many attempts to address the problem of DLL management when multiple products all want to install the same DLL (for example, the C runtime library). Any DLL that was shared would be registered in the <tt>SharedDLLs</tt> registry key with a &#8220;usage count&#8221;. An installer would increment the count, and an uninstaller would decrement it.</p>
+<p>Now, this addressed only the &#8220;keeping track of when it is safe to delete a DLL uninstalling&#8221; problem. It doesn&#8217;t do anything to solve the &#8220;multiple versions of the same DLL&#8221; problem. For that, the assumption was that (1) installers would compare the version number of the DLL already on the system with the version they want to install, and replace the existing file only if the new file is a higher version nunber; and with that policy, you also have (2) all future versions of a DLL are backward compatible with any earlier versions.</p>
+<p>Now, that first rule is typically enforced by installers, <a title="Windows 95 defenses against installers that overwrite a file with an older version" href="https://devblogs.microsoft.com/oldnewthing/20260324-00/?p=112159"> though not always</a>. But that second rule is harder to enforce because it relies on the developers who created the shared DLLs to understand the backward compatibility contraints that they operate under. If a newer version of the DLL is not compatible with the old one, then any programs that used the old version will break once a program is installed that replaces it the shared DLL with a newer version.</p>
+<p>And from experience, we know that even the most harmless-looking change carries a risk that somebody was relying on the old behavior, perhaps entirely inadvertently, such as assuming that a function <a title="How a 20 year old bug in GTA San Andreas surfaced in Windows 11 24H2" href="https://cookieplmonster.github.io/2025/04/23/gta-san-andreas-win11-24h2-bug/"> consumes only a specific amount of stack space and in particular leaves certain stack memory unmodified</a>. This means that the simple act of adding a new local variable to your function is potentially a breaking change.</p>
+<p>Nowadays, programs avoid this problem by trying to be more self-contained with few shared DLLs, and by using packaging systems liks MSIX to allow unrelated programs to share a common installation of popular DLLs, while still avoiding the &#8220;unwanted version upgrade&#8221; problem.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260330-00/?p=112175">A question about the maximimum number of values in a registry key raises questions about the question</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

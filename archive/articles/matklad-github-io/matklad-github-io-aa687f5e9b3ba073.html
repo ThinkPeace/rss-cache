@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Considering Strictly Monotonic Time | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Considering Strictly Monotonic Time</h1>
+        <div class="meta">matklad 2026-01-23T00:00:00Z</div>
+        <div class="links">
+          <a href="https://matklad.github.io/2026/01/23/strictly-monotonic-time.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/matklad-github-io/matklad-github-io-aa687f5e9b3ba073.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Monotonic time is a frequently used, load bearing abstraction. Monotonicity is often enforced using the following code:</div>
+        <div class="content">
+          <header>
+  <h1>Considering Strictly Monotonic Time</h1>
+  <time class="meta" datetime="2026-01-23">Jan 23, 2026</time>
+</header>
+<p>Monotonic time is a frequently used, load bearing abstraction. Monotonicity is often enforced using
+the following code:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">fn</span><span class="hl-function"> now</span>(clock: <span class="hl-operator">*</span>Clock) Instant {</span>
+<span class="line">    <span class="hl-keyword">const</span> t_raw = os_time_monotonic();</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">const</span> t = <span class="hl-built_in">@max</span>(t_raw, clock.guard);</span>
+<span class="line">    assert(t &gt;= clock.guard);</span>
+<span class="line">    assert(t &gt;= t_raw);</span>
+<span class="line"></span>
+<span class="line">    clock.guard = t;</span>
+<span class="line">    <span class="hl-keyword">return</span> t;</span>
+<span class="line">}</span></code></pre>
+
+</figure>
+<p>That is, ask the OS about the current monotonic time, but don’t trust the result too much and clamp
+it using an in-process guard. Under normal scenarios, you can trust the OS promise of monotonicity,
+but, empirically, there’s a long tail of different scenarios where the promise isn’t upheld:
+<a href="https://github.com/rust-lang/rust/pull/56988" class="display url">https://github.com/rust-lang/rust/pull/56988</a></p>
+<p>Today I realized that, if you are doing the above, you might as well force the time to be <em>strictly</em>
+monotonic:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">const</span> t = <span class="hl-built_in">@max</span>(t_raw, clock.guard <span class="hl-operator">+</span> 1ns);</span>
+<span class="line">assert(t &gt; clock.guard);</span></code></pre>
+
+</figure>
+<p>The benefit of strict monotonicity is that you can tighten asserts,
+<span class="display"><code>assert(past &lt;= present)</code></span>
+can become
+<span class="display"><code>assert(past &lt; present)</code></span>
+and that <em>additionally</em> catches the bug where you pass in <em>exactly</em> the same instance.
+In other words, the <code>&lt;=</code> version explicitly allows either query-ing the time again, or using the old
+value directly.</p>
+<p>Conversely, with strictly monotonic time, you know that if you see two numerically identical time
+instances, they must have been ultimately derived from the exact same call to <code>now()</code>. Time becomes
+fundamentally less ambiguous.</p>
+<p>The constraint here is that the resolution of the time value (<em>not</em> the clock resolution) needs to
+be high enough, to make sure that repeated <code>+1</code> don’t move you into the future, but nanosecond
+precision seems fine for that.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

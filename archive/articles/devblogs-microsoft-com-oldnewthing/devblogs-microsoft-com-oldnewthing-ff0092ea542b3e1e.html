@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why doesn’t the system let you declare your own messages to have the same semantics as WM_COPY­DATA? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why doesn’t the system let you declare your own messages to have the same semantics as WM_COPY­DATA?</h1>
+        <div class="meta">The Old New Thing 2026-04-02T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260402-00/?p=112196">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-ff0092ea542b3e1e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Tempting but misleading. The post Why doesn’t the system let you declare your own messages to have the same semantics as &lt;CODE&gt;WM_&lt;WBR&gt;COPY­DATA&lt;/CODE&gt;? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>In a comment on my <a title="I can use WM_COPYDATA to send a block of data to another window, but how does it send data back?" href="https://devblogs.microsoft.com/oldnewthing/20251114-00/?p=111792"> discussion on how to return results back from the <code>WM_<wbr />COPY­DATA</code> message</a>, Jan Ringoš observed that it felt wasteful that there was this entire infrastructure for copying blocks of memory via a window message, yet only one message uses it! &#8220;<a href="https://devblogs.microsoft.com/oldnewthing/20251114-00/?p=111792&amp;commentid=143446#comment-143446">I always thought something like EnableWindowMessageDataCopy (HWND, UINT, .)</a> after RegisterWindowMessage and ChangeWindowMessageFilterEx to get application&#8217;s own private WM_COPYDATA would be a little more secure and convenient, should the programmer didn&#8217;t wish to bother with creating shared memory.&#8221;</p>
+<p>The infrastructure for copying blocks of memory via a window message is used by far more than just one message! The <code>WM_<wbr />SET­TEXT</code> and <code>WM_<wbr />GET­TEXT</code> message use it for passing string buffers, the <code>WM_<wbr />HELP</code> message uses it for passing the <code>HELPINFO</code> structure, the <code>WM_<wbr />MDICREATE</code> message uses it for passing the <code>MDICREATSTRUCT</code> structure, and plenty more where those came from. The infrastructure for copying blocks of memory had already existed; it wasn&#8217;t created just for the <code>WM_<wbr />COPY­DATA</code> message. adding <code>WM_<wbr />COPY­DATA</code> support was just adding a few lines of code to the common function whose job is to prepare messages to be sent between processes (including copying memory between processes).</p>
+<p>Suppose there were a way for a program to declare that one of its custom messages should have (say) its <code>lParam</code> be a pointer to data and its <code>wParam</code> be the size of the data. That could be misleading because the only behavior would be copying the memory block and not the data inside it. For example, if the structure contained pointers, the pointers would just be copied as raw values, rather than adding the pointed-to-data to the memory block and adjusting the pointers to point to the copy. It also doesn&#8217;t handle the case of sending the message between programs with different pointer or handle sizes, say between a 32-bit program and a 64-bit program.¹ If you need to copy data structures that consists of anything more than scalars (or aggregates of scalars), you&#8217;ll have to do your own marshaling to convert your source data structure into a transfer buffer. In practice, this means that sending the message directly with an as-is buffer is unlikely to be the common case; some type of conversion would have to be made anyway.</p>
+<p>Furthermore, the <code>WM_<wbr />COPY­DATA</code> already knew that you wanted to do this, because it left room for it in the <code>COPY­DATA­STRUCT</code>:</p>
+<pre>typedef struct tagCOPYDATASTRUCT {
+  ULONG_PTR dwData; // ← here
+  DWORD     cbData;
+  PVOID     lpData;
+} COPYDATASTRUCT, *PCOPYDATASTRUCT;
+</pre>
+<p>In addition to describing the memory buffer, there is this extra guy called <code>dwData</code>. You can put your &#8220;message number&#8221; in there, allowing you to multiplex multiple &#8220;messages&#8221; into a single <code>WM_<wbr />COPY­DATA</code> message.²</p>
+<p>You don&#8217;t need <code>Enable­Window­Message­Data­Copy</code> because you already have it at home. The window manager is more concerned with enabling things that weren&#8217;t possible before, rather than making it easier to do things that are already possible. For that, you can use a helper library.</p>
+<p><b>Bonus chatter</b>: In addition to adding complexity to the window manager implementation, allowing programs to customize how messages are marshaled between processes would also make it harder to explain how inter-process marshaling works. Instead of the simple rule &#8220;The system marshals messages in the system range, but not messages in the user-defined range,&#8221; it would be a much more ambiguous rule: &#8220;The system marshals messages in the system range, but not messages in the user-defined range, unless those messages have been customized by a call to <code>Enable­Window­Message­Data­Copy</code>, in which case they marshal by this alternate set of rules.&#8221; So now when you look at a message, you can&#8217;t tell how it marshals. You&#8217;d have to go back to the documentation for the message and hope the person who wrote the documentation remembered to go back and add a section to each page to say whether it follows custom marshaling.</p>
+<p>¹ Or between a 16-bit program and a 32-bit program, which was the more common case back in the days when <code>WM_<wbr />COPY­DATA</code> was designed. In 16-bit code, an <code>int</code> is a 16-bit integer, whereas it&#8217;s a 32-bit value in 32-bit code.</p>
+<p>² If the <code>dwData</code> was intended to be a message number, why is it pointer-sized? For the same reason <a title="Why are timer IDs and dialog control IDs 64-bit values on 64-bit Windows? Did you really expect people to create more than 4 billion timers or dialog controls?" href="https://devblogs.microsoft.com/oldnewthing/20191010-00/?p=102978"> timer IDs and dialog control IDs are 64-bit values</a>: &#8220;Pointers are like weeds. Anywhere it&#8217;s possible to fit a pointer, a pointer will try to squeeze in there.&#8221; In this case, people were putting handles (which are pointer-sized) in the <code>dwData</code>, so we had to make it big enough to hold a handle.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260402-00/?p=112196">Why doesn&#8217;t the system let you declare your own messages to have the same semantics as &lt;CODE&gt;WM_&lt;WBR&gt;COPY&shy;DATA&lt;/CODE&gt;?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

