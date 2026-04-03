@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import re
 import sys
@@ -17,7 +18,8 @@ from typing import Iterable
 
 
 DEFAULT_USER_AGENT = "rss-cache/1.0 (+https://github.com/ThinkPeace/rss-cache)"
-DEFAULT_TIMEOUT_SECONDS = 25
+DEFAULT_TIMEOUT_SECONDS = 12
+DEFAULT_WORKERS = 12
 MAX_ITEMS_PER_FEED = 30
 MAX_COMBINED_ITEMS = 250
 SUMMARY_PREVIEW_LIMIT = 360
@@ -43,15 +45,27 @@ def main() -> int:
 
     combined_items: list[dict[str, object]] = []
     feed_index: list[dict[str, object]] = []
+    ordered_results: list[tuple[dict[str, object], list[dict[str, object]]] | None] = [None] * len(feed_specs)
 
-    for spec in feed_specs:
-        record, items = fetch_and_parse_feed(
-            spec=spec,
-            output_dir=feeds_dir,
-            site_url=site_url,
-            timeout_seconds=args.timeout,
-            user_agent=args.user_agent,
-        )
+    with ThreadPoolExecutor(max_workers=max(args.workers, 1)) as executor:
+        future_map = {
+            executor.submit(
+                fetch_and_parse_feed,
+                spec=spec,
+                output_dir=feeds_dir,
+                site_url=site_url,
+                timeout_seconds=args.timeout,
+                user_agent=args.user_agent,
+            ): index
+            for index, spec in enumerate(feed_specs)
+        }
+        for future in as_completed(future_map):
+            ordered_results[future_map[future]] = future.result()
+
+    for result in ordered_results:
+        if result is None:
+            continue
+        record, items = result
         feed_index.append(record)
         combined_items.extend(items)
 
@@ -78,6 +92,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--site-url", required=True, help="Public base URL for the generated site.")
     parser.add_argument("--max-feeds", type=int, help="Optional limit for local smoke tests.")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS, help="Per-feed HTTP timeout in seconds.")
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="Concurrent feed fetch worker count.")
     parser.add_argument("--user-agent", default=DEFAULT_USER_AGENT, help="HTTP User-Agent sent to feed origins.")
     return parser.parse_args()
 
