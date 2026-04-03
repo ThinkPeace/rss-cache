@@ -18,7 +18,8 @@ The repository is designed for a GitHub Actions scheduled run:
    - combined item JSON at `feeds/combined.json`
    - a recent 72-hour full-text RSS feed at `feeds/fulltext.xml`
    - an explicit recent 72-hour full-text RSS feed at `feeds/fulltext-72h.xml`
-   - a historical summary RSS feed at `feeds/fulltext-all.xml`, with links to GitHub-hosted full article pages
+   - a recent 72-hour summary RSS feed at `feeds/history-72h.xml`, with links to GitHub-hosted full article pages
+   - a historical summary RSS feed at `feeds/history.xml`, with links to GitHub-hosted full article pages
 
 The workflow is scheduled every 5 minutes using GitHub Actions cron. To reduce GitHub's top-of-hour delay risk, it runs on minute `2,7,12,...,57` rather than exactly on `:00,:05,:10`.
 
@@ -30,7 +31,12 @@ After Pages is enabled, the default URLs are:
 - `https://ThinkPeace.github.io/rss-cache/feeds/combined.json`
 - `https://ThinkPeace.github.io/rss-cache/feeds/fulltext.xml` (recent 72 hours)
 - `https://ThinkPeace.github.io/rss-cache/feeds/fulltext-72h.xml` (recent 72 hours)
-- `https://ThinkPeace.github.io/rss-cache/feeds/fulltext-all.xml` (historical summary feed, links to GitHub-hosted article pages)
+- `https://ThinkPeace.github.io/rss-cache/feeds/history-72h.xml` (recent 72-hour summary feed, links to GitHub-hosted article pages)
+- `https://ThinkPeace.github.io/rss-cache/feeds/history.xml` (historical summary feed, links to GitHub-hosted article pages)
+
+Compatibility note:
+
+- `feeds/combined.xml` remains as a legacy alias of the 72-hour summary feed.
 
 ## Local run
 
