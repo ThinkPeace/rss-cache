@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Unsigned char std::basic_string&lt;&gt; in C++ | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Unsigned char std::basic_string&lt;&gt; in C++</h1>
+        <div class="meta">Bert Hubert&#x27;s writings 2026-01-03T22:00:02Z</div>
+        <div class="links">
+          <a href="https://berthub.eu/articles/posts/unsigned-char-std-string-cpp/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/berthub-eu/berthub-eu-85aa3694846f886e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Brief post on a somewhat vexing and irritating C++ problem I ran into some time ago. I hope that this page will help other people deal with this problem more quickly than I did. I’ve long used std::basic_string&lt;uint8_t&gt;, an unsigned char string, for fiddling with bits. You could use a regular char string, but especially when doing cryptographic or sub-byte…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>Unsigned char std::basic_string&lt;&gt; in C++</h1>
+    <p>Brief post on a somewhat vexing and irritating C++ problem I ran into some time ago. I hope that this page will help other people deal with this problem more quickly than I did.</p>
+    <p>I’ve long used <pre>std::basic_string&lt;uint8_t&gt;</pre>, an unsigned char string, for fiddling with bits. You could use a regular <pre>char</pre> string, but especially when doing cryptographic or sub-byte operations, it is more convenient to not have to deal with sign bits.</p>
+    <p>Now, you could of course also use a <pre>std::vector&lt;uint8_t&gt;</pre>, but <pre>std::vector</pre> lacks some conveniences like <pre>operator+</pre> or <pre>.substr()</pre>. Also, previously, passing around <pre>std::string</pre> could be faster due to some (<a href="https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2008/n2534.html">now outlawed</a>) copy on write magic. Meanwhile, in modern C++, returning a <pre>std::vector&lt;&gt;</pre> is also guaranteed to be fast, <a href="https://en.cppreference.com/w/cpp/language/copy_elision.html">since it will be constructed on the caller’s stack</a>. So there is less of a reason to use <pre>std::basic_string</pre> these days.</p>
+    <p>Now, my <pre>std::basic_string&lt;uint8_t&gt;</pre> started to break on FreeBSD and later on OpenBSD with confusing errors. At first I blamed the C++ libraries on those systems, but it turns out it is a bit more difficult.</p>
+    <p>My former co-workers Jeff Sipek and  Otto Moerbeek <a href="https://github.com/berthubert/galmon/issues/179#issuecomment-3417922711">helpfully found out what was going on</a>. Many <pre>std::basic_string&lt;T&gt;</pre> operations are actually powered by <pre>std::char_traits&lt;T&gt;</pre>. Libraries must provide these traits for regular <pre>char</pre> (and several other types), but there is no requirement that they do so for unsigned chars.</p>
+    <p>Gcc and clang for a long time however did provide a generic <pre>std::char_traits&lt;&gt;</pre> that worked for all types. However, in the libstdc++ source code we read:</p>
+    <pre>
+      <pre>/* @note For any given actual character type, this definition is
+*  probably wrong.  (Most of the member functions are likely to be
+*  right, but the int_type and state_type typedefs, and the eof()
+*  member function, are likely to be wrong.)  The reason this class
+*  exists is so users can specialize it.
+*/
+</pre>
+    </pre>
+    <p>“This definition is probably wrong”, but they note you could use this base class to build your own <pre>std::char_trait</pre> that would then be correct.</p>
+    <p>In the llvm release notes for 19.1.0, <a href="https://releases.llvm.org/19.1.0/projects/libcxx/docs/ReleaseNotes.html#:~:text=The%20base%20template">we read</a>:</p>
+    <blockquote>
+      <p>The base template for std::char_traits has been removed in LLVM 19. If you are using std::char_traits with types other than char, wchar_t, char8_t, char16_t, char32_t or a custom character type for which you specialized std::char_traits, your code will stop working. The Standard does not mandate that a base template is provided, and such a base template is bound to be incorrect for some types, which could currently cause unexpected behavior while going undetected.</p>
+    </blockquote>
+    <p>This is all true, and they warn us that code will stop working, which is nice enough.</p>
+    <p>So, if you get all kinds of errors compiling code that uses <pre>std::basic_string&lt;uint8_t&gt;</pre> or <pre>std::basic_string&lt;unsigned char&gt;</pre>, know that this previously only worked by accident. And that accident has been fixed now.</p>
+    <p>Which sadly means spending some quality time replacing string concatenation or uses of <pre>.substr()</pre> or <pre>.c_str()</pre> by their <pre>std::vector&lt;uint8_t&gt;</pre> equivalents. Alternatively, you could provide your own <pre>std::char_traits&lt;uint8_t&gt;</pre> but it appears <a href="https://stackoverflow.com/questions/19205531/why-does-this-specialized-char-traitsuint8-t-and-codecvtuint8-t-for-use-with">this could lead to some surprises</a>.</p>
+    <p>Good luck, and thanks are due to Jeff and Otto for telling me what was wrong with my code!</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

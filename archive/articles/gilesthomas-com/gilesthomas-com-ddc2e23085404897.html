@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Writing an LLM from scratch, part 32d -- Interventions: adding attention bias | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Writing an LLM from scratch, part 32d -- Interventions: adding attention bias</h1>
+        <div class="meta">Giles&#x27; blog 2026-02-06T23:55:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/02/llm-from-scratch-32d-interventions-adding-attention-bias">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-ddc2e23085404897.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I&#x27;m still seeing what I can do to improve the test loss for a from-scratch GPT-2 small base model, trained on code based on Sebastian Raschka &#x27;s book &quot; Build a Large Language Model (from Scratch) &quot;. This is the third intervention I&#x27;m trying: adding bias to the attention weight matrices. In the code from the book, we have this: class MultiHeadAttention ( nn…</div>
+        <div class="content">
+          <p>I'm still seeing what I can do to improve the test loss for a from-scratch GPT-2 small base model, trained on code based on
+<a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>".
+This is the third intervention I'm trying: adding bias to the attention weight matrices.</p>
+
+<p>In the code from the book, we have this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MultiHeadAttention</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">d_in</span><span class="p">,</span> <span class="n">d_out</span><span class="p">,</span>
+        <span class="n">context_length</span><span class="p">,</span>
+        <span class="n">dropout</span><span class="p">,</span>
+        <span class="n">num_heads</span><span class="p">,</span>
+        <span class="n">qkv_bias</span><span class="o">=</span><span class="kc">False</span>
+    <span class="p">):</span>
+        <span class="o">...</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_query</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_in</span><span class="p">,</span> <span class="n">d_out</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_key</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_in</span><span class="p">,</span> <span class="n">d_out</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_value</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_in</span><span class="p">,</span> <span class="n">d_out</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">)</span>
+
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="o">...</span>
+
+        <span class="n">keys</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_key</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">queries</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_query</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">values</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_value</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>So: we initialise the weights <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>W</mi><mi>q</mi></msub></mrow></math>, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>W</mi><mi>k</mi></msub></mrow></math> and <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>W</mi><mi>v</mi></msub></mrow></math> as linear layers rather than
+simple matrices of weights, and have a parameter <code>qkv_bias</code> to say whether or not we should
+add bias to those.  In all of our trains so far we've set that to <code>False</code>.</p>
+
+<p>Why do we have this parameter, and where did it come from?</p>
+<h3 id="the-background">The background</h3>
+
+<p>In Raschka's book, the use of the <code>nn.Linear</code> for these weights is introduced in section 3.4.2
+with the wording:</p>
+
+<blockquote>
+  <p>We can improve the <code>SelfAttention_v1</code> implementation further by utilizing PyTorch's
+  <code>nn.Linear</code> layers, which effectively perform matrix multiplication when the
+  bias units are disabled.  Additionally, a significant advantage of using <code>nn.Linear</code>
+  instead of manually implementing <code>nn.Parameter(torch.rand(...))</code> is that <code>nn.Linear</code>
+  has an optimized weight initialization scheme, contributing to more stable and
+  effective model training.</p>
+</blockquote>
+
+<p>So, it's presented essentially as a way of getting better weights for our untrained
+model, which makes good sense in and of itself -- but, if that's the only reason,
+why don't we just hard-wire it to have <code>bias=False</code>?  That would be the sensible thing
+to do if the initialisation were the only reason, but clearly there's more to it
+than that.</p>
+
+<p>Section 4.1 has a bit more information:</p>
+
+<blockquote>
+  <p><code>qkv_bias</code> determines whether to include a bias vector in the <code>Linear</code> layers
+  of the multi-head attention ... We will initially disable this, following the norms
+  of modern LLMs, but we will revisit it in chapter 6 when we load pretrained
+  GPT-2 weights from OpenAI into our model.</p>
+</blockquote>
+
+<p>That looks like a typo, as the real explanation is in chapter 5, section 5
+(page 164 in my copy), where we do indeed load the OpenAI weights:</p>
+
+<blockquote>
+  <p>OpenAI used bias vectors in the multi-head attention module's linear layers to
+  implement the query, key and value matrix computations.  Bias vectors are not
+  commonly used in LLMs anymore as they don't improve the modeling performance
+  and are thus unnecessary.</p>
+</blockquote>
+
+<p>So, that all makes sense so far.  QKV bias was part of the original GPT-2 models,
+perhaps just because it was standard at the time, inherited from something else,
+or perhaps for some other reason -- I can't find any reference to it in
+<a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf">the actual paper</a>.
+But people have found it doesn't help, so no-one uses it these days.</p>
+
+<p>But... is there some way in which an LLM of this
+specific size, or in some other way similar to the GPT-2 small model that we're
+training, might in some way benefit from having bias?</p>
+
+<p>That's what this experiment is for :-)</p>
+
+<h3 id="parameters">Parameters</h3>
+
+<p>One thing that occurred to me while setting this up is that we have been training
+on a Chinchilla-optimal number of tokens, 20x the number of parameters.  Without
+QKV bias, we have 163,009,536 parameters, so we've been training on 3,260,190,720 tokens,
+rounded up to the nearest batch size, which is 3,260,252,160 in our current setup for
+these experiments (per-GPU micro-batches of 12, with 8 GPUs, so a total batch size of 96).</p>
+
+<p>These extra bias terms will be parameters, though!  We're essentially making our
+model larger by adding them, which changes the Chinchilla calculation.  How much?</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">In</span> <span class="p">[</span><span class="mi">1</span><span class="p">]:</span> <span class="n">params</span> <span class="o">=</span> <span class="p">{</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="s2">&quot;vocab_size&quot;</span><span class="p">:</span> <span class="mi">50257</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="s2">&quot;context_length&quot;</span><span class="p">:</span> <span class="mi">1024</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="s2">&quot;emb_dim&quot;</span><span class="p">:</span> <span class="mi">768</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="s2">&quot;n_heads&quot;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="s2">&quot;n_layers&quot;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="s2">&quot;drop_rate&quot;</span><span class="p">:</span> <span class="mf">0.1</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="s2">&quot;qkv_bias&quot;</span><span class="p">:</span> <span class="kc">True</span>
+   <span class="o">...</span><span class="p">:</span> <span class="p">}</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">2</span><span class="p">]:</span> <span class="kn">from</span><span class="w"> </span><span class="nn">gpt</span><span class="w"> </span><span class="kn">import</span> <span class="n">GPTModel</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">3</span><span class="p">]:</span> <span class="n">model</span> <span class="o">=</span> <span class="n">GPTModel</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">4</span><span class="p">]:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">())</span>
+<span class="n">Out</span><span class="p">[</span><span class="mi">4</span><span class="p">]:</span> <span class="mi">163037184</span>
+</code></pre>
+</div>
+
+<p>OK, that's essentially nothing -- 27,648 extra total paramaters on top of 163 million.
+I make it less than two hundredths of a percentage
+point larger!  The correct number of tokens goes up to 3,260,743,680, so if we wanted
+to be very pedantic, we're under-training.  But I feel like training on a larger dataset
+is worse in terms of comparability between the baseline and our "intervened-on" model
+with QKV bias.</p>
+
+<p>So: we'll train a model with QKV bias on 3,260,252,160 tokens, accepting that it's a tiny bit less than
+Chinchilla-optimal.  Let's see how it goes!</p>
+
+<h3 id="the-run">The run</h3>
+
+<p>Here's the <a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/main/runs/8xa100m40-qkv-bias/model.json"><code>model.json</code> config file</a> for this train.
+Running it gives this training chart:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32d-interventions-adding-attention-bias/training-run-chart.png" alt="Training run with QKV bias" title="Training run with QKV bias" /></p>
+
+<p>Pretty standard, though the loss spikes look less prominent than they have been in
+the other trains.  Might QKV bias actually help with model stability in some way...?</p>
+
+<p>The train finished with these stats:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Training complete in 12,329.557 seconds</span>
+<span class="go">Tokens seen: 3,260,252,160</span>
+<span class="go">Throughput: 264,426 tokens/second</span>
+<span class="go">Final train loss: 3.719</span>
+</code></pre>
+</div>
+
+<p>Timing-wise, pretty much indistinguishable from the baseline train's 12,243.523 seconds.  The final train
+loss looks a tad better, but we can't rely on that -- the test set loss is the important
+one.</p>
+
+<p>So it was time to download it, <a href="https://huggingface.co/gpjt/8xa100m40-qkv-bias">upload it to Hugging Face Hub</a>, and then on
+to the evals.</p>
+
+<h3 id="evals">Evals</h3>
+
+<p>Firstly, our normal "how should you continue <code>Every effort moves you</code>":</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp">giles@perry:~/Dev/ddp-base-model-from-scratch (main)$ </span>uv<span class="w"> </span>run<span class="w"> </span>test_smoke.py<span class="w"> </span>runs/8xa100m40-qkv-bias/model.json<span class="w"> </span>runs/8xa100m40-qkv-bias/checkpoints/best/model.safetensors
+<span class="go">Every effort moves you toward success. The right questions are asked to become your business coach and help shape the future of their</span>
+</code></pre>
+</div>
+
+<p>Not bad at all, borderline coherent!  Next, the loss on the test set:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp">giles@perry:~/Dev/ddp-base-model-from-scratch (main)$ </span>uv<span class="w"> </span>run<span class="w"> </span>test_loss.py<span class="w"> </span>datasets<span class="w"> </span>runs/8xa100m40-qkv-bias/model.json<span class="w"> </span>runs/8xa100m40-qkv-bias/checkpoints/best/model.safetensors
+<span class="go">Fetching 4 files: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4/4 [00:00&lt;00:00, 1701.54it/s]</span>
+<span class="go">100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 3200/3200 [04:52&lt;00:00, 10.95it/s]</span>
+<span class="go">Loss against our test dataset: 3.669</span>
+</code></pre>
+</div>
+
+<p>Well, crap!  Now that's a surprise.  Let's look at that in the context of the other interventions to see
+how surprising that is, given Raschka's comments (which were undoubtedly backed
+up by serious research):</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test set loss</th>
+  <th>Improvement vs baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>8xa100m40-baseline</td>
+  <td>3.692</td>
+  <td>-</td>
+</tr>
+<tr>
+  <td>8xa100m40-gradient-clipping</td>
+  <td>3.678</td>
+  <td>0.014</td>
+</tr>
+<tr>
+  <td>8xa100m40-qkv-bias</td>
+  <td>3.669</td>
+  <td>0.023</td>
+</tr>
+<tr>
+  <td>8xa100m40-remove-dropout</td>
+  <td>3.641</td>
+  <td>0.051</td>
+</tr>
+</tbody>
+</table>
+
+<p>So, adding QKV bias actually improved our test set loss by more than gradient clipping
+did!</p>
+
+<p>The loss spikes in the training chart look smaller than in the other trains <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>, so, speculating
+wildly, perhaps with a model of this size, the bias stabilises things somehow?  Or perhaps
+what we're seeing is the model become that tiny bit smarter because it has some extra parameters
+-- albeit less than 0.02 <em>percent</em> more?</p>
+
+<p>I'm not going to spend time investigating things now, but this is a really interesting result.
+One extra thing that does occur to me is that the direction research has taken since GPT-2 has
+definitely been in the direction of larger models.  The attention weight matrices are
+sized <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub><mi>&#x000D7;</mi><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math>, so excluding bias they have <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msubsup><mi>d</mi><mtext>emb</mtext><mn>2</mn></msubsup></mrow></math> weights
+each.  Bias adds on another <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math>.  So, as a model scales up, the attention-related
+non-bias weights will scale quadratically -- doubling <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> will square their number --
+while the bias weights will scale linearly.</p>
+
+<p>So perhaps it's just that the effect -- whatever causes it -- gets rapidly swamped
+as you scale out of toy-model territory.  That, at least, seems pretty plausible.</p>
+
+<p>One final note to self, though: these improvements are small enough that I do find
+myself wondering whether or not it might be some kind of noise, despite the setting of
+the random seeds I'm doing:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">seed</span> <span class="o">=</span> <span class="mi">42</span>
+    <span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+    <span class="n">torch</span><span class="o">.</span><span class="n">manual_seed</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+    <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">manual_seed_all</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>I think that at the end of this, before I do a final train, it would be worth doing
+another baseline train and measuring the test set loss again, and doing another comparison.
+If it comes out exactly the same -- and I can bump up the number of significant figures
+in the output, it's just a formatting parameter -- then I don't need to worry.  But if
+they vary to some degree, perhaps I'll need to update my mental model of what level of
+finding is significant, and what isn't.</p>
+
+<h3 id="summing-up">Summing up</h3>
+
+<p>I think it goes without saying that QKV bias definitely goes onto the list of interventions
+we want to add when training our best-possible GPT-2 small-scale model, assuming that the
+random seed test goes well.  That surprises
+me a bit, I was expecting it to have negligible impact!  That, of course, is why it's worth
+doing these tests.</p>
+
+<p>Next up, I think, is trying to understand how we can tweak the learning rate, and its associated
+parameters like weight decay.  This will need a bit of a deep dive, so you can expect the next
+post late next week, or perhaps even later.  I'm sure you can't wait ;-)</p>
+
+<p><a href="/2026/03/llm-from-scratch-32e-interventions-learning-rate">Here's a link to the next post in this series</a>.</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>Note to self: is there some way I could quantitatively measure those?&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

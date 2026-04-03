@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workarounds for C11 _Generic | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Workarounds for C11 _Generic</h1>
+        <div class="meta">Simon Tatham&#x27;s quasi-blog 2023-07-29T00:00:00Z</div>
+        <div class="links">
+          <a href="https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/c11-generic/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/chiark-greenend-org-uk-sgtatham/chiark-greenend-org-uk-sgtatham-f9091d8f3924bdda.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A description of the big design limitation of C11&#x27;s _Generic feature, and various workarounds, mostly involving using more instances of _Generic to patch up the original one.</div>
+        <div class="content">
+          <html>
+  <body><pre>_Generic</pre><p>[Simon Tatham, 2023-07-29]</p><pre>_Generic</pre><pre>_Generic</pre> as the default of another<p>The C programming language has a limited form of type-generic
+      programming, based on ‘selection expressions’ using the
+      keyword <pre>_Generic</pre>. These expressions look a bit like
+      a <pre>switch</pre>, but on types rather than values: based on
+      the type of their first argument, they select one of the
+      remaining arguments, each of which is of the form ‘type: output
+      expression’.</p><p>Usually you put these in macro definitions, so that they can make the macro test the type of one of its parameters and do the right thing for more than one possible answer:</p><blockquote>#define my_macro(x, y) _Generic(x, \ int : some expression, \ double : some other expression, \ struct Whatnot : something else again, \ default : fallback expression)</blockquote><p>You can include a <pre>default</pre> clause that matches all
+      remaining types, as shown above. Or you can leave it out, so
+      that your macro will generate a compile error rather than try to
+      operate on a type it isn’t designed to handle.</p><p><pre>_Generic</pre> was introduced in the C11 revision of the
+      standard. The previous revision, C99, had introduced one
+      specific set of type-generic macros
+      in <pre>&lt;tgmath.h&gt;</pre> (for selecting the right
+      version of a maths function for the particular floating point
+      type – <pre>float</pre> vs <pre>double</pre>, real vs
+      complex). But it had provided no specification for the
+      underlying system for making choices, so that programmers
+      couldn’t reuse the same facility for similar cases of their own.
+      C11 filled in this gap, by standardising <pre>_Generic</pre>,
+      which can be used to implement <pre>&lt;tgmath.h&gt;</pre> and
+      things like it.</p><p>Once you have a reusable type-generic facility in C, there are lots of things you can imagine using it for.</p><p>As a simple example, suppose you have a structure type of your
+      own that stores a string in some kind of allocated buffer. You
+      might want to write a ‘string length’ macro that automatically
+      chooses between returning <pre>strlen(x)</pre> (if it’s an
+      ordinary C string) or <pre>x-&gt;length</pre> (if it’s an
+      instance of your buffer structure).</p><p>More complicated examples might involve having a macro that
+      switches its output based on the types of two of its
+      parameters, or one that accepts an open-ended set of types by
+      providing a <pre>default</pre> clause. (In a following section
+      I’ll show an example that’s the reverse of this ‘string length’
+      one, in which we want to pull out a named field
+      from lots of structure types, and make only one
+      exception.)</p><p>Unfortunately, this kind of thing isn’t as easy as it looks!
+      The specification of <pre>_Generic</pre> has a huge bug (from
+      the point of view of someone wanting to use it for lots of
+      different things). It doesn’t affect the original use case
+      of <pre>&lt;tgmath.h&gt;</pre>, but it starts to cause
+      problems with most of the more complicated use cases
+      you might think of.</p><p>In this article, I describe the bug, and multiple possible workarounds. But none of them is perfect, and even after you’ve used the workarounds, the results still won’t be very good.</p><p>Here’s the big problem with <pre>_Generic</pre>.</p><p>Depending on the type of the selection argument, one of the output expressions will be selected at compile time, and the rest will be thrown away completely, and generate no code. But the discarded expressions still have to be semantically valid – they have to get through all of the same checking the compiler would apply to any other C expression, including type-checking successfully.</p><p>For example, here’s how we might implement the ‘string length’
+      macro mentioned in the previous section, which provides a
+      uniform way to find the length of two different string types, by
+      deciding whether to call the standard C <pre>strlen</pre> or
+      look up a structure field:</p><blockquote>#define string_length_broken(x) _Generic(x, \ const char * : strlen(x), \ struct MyStringBuffer * : (x)-&gt;length)</blockquote><p>This looks clear and simple. It might even have been one of the first kinds of idea you had, if you’d sat down and wondered “What useful things could I do with a spot of type-based selection in C?”</p><p>But it won’t work. As soon as you actually try calling this
+      macro with a <pre>const char *</pre> parameter pointing to an
+      ordinary C string, you’ll get a compile error, because the
+      expression <pre>x-&gt;length</pre> is illegal, because the
+      type <pre>char</pre> isn’t a structure type with
+      a <pre>length</pre> field.</p><p>Of course, you know that! That’s why you
+      wrote an alternative branch of the <pre>_Generic</pre>
+      expression: in this case, where you
+      knew <pre>x-&gt;length</pre> wouldn’t work, you wanted to
+      use <pre>strlen(x)</pre> instead. But unfortunately, even
+      though <pre>_Generic</pre> would end up selecting
+      the <pre>strlen</pre> expression, it will still fail to
+      compile because the other branch isn’t semantically
+      valid.</p><p>This is likely to affect almost any use
+      of <pre>_Generic</pre> that reuses the macro parameter inside
+      any of the expressions being selected, because it’s so likely
+      that the use of the parameter in one branch of the selection
+      will become illegal if the parameter has the type from another
+      branch. So it severely restricts what you can do
+      with <pre>_Generic</pre>, at least if you do it in the obvious
+      way.</p><p>It doesn’t just affect reusing the same macro
+      parameter, either. Here’s a different example: suppose you have
+      a macro with two parameters, and you want to switch on the types
+      of both of them at once, with not all combinations of types
+      legal. You’d expect that this would be possible by
+      nesting <pre>_Generic</pre>s, and for each type of one
+      argument, having a sub-switch on whatever types for the other
+      argument go with it. For example:</p><blockquote>#define switch_on_both_types(x,y) _Generic(x, \ const char * : _Generic(y, int : this, const char * : that), \ struct Foo * : _Generic(y, int : this, struct Bar * : that))</blockquote><p>This code is intended to accept two types for
+      argument <pre>x</pre>, namely <pre>const char *</pre>
+      and <pre>struct Foo *</pre>. For either type
+      of <pre>x</pre>, it will accept an <pre>int</pre> for
+      argument <pre>y</pre>, but it also wants to let you combine
+      a <pre>const char *x</pre> with another <pre>const char
+      *y</pre>, or a <pre>struct Foo *x</pre> with a <pre>struct Bar
+      *y</pre>, but not vice versa.</p><p>But again, it doesn’t work – not even if the output expressions
+      are as simple as possible and don’t mention <pre>x</pre>
+      or <pre>y</pre> at all.</p><p>Why not? For the same reason again: a compile error
+      in either branch is fatal, even if it’s the branch not
+      selected. So, suppose I call this macro with types <pre>struct
+      Foo *</pre> and <pre>struct Bar *</pre>, expecting the second
+      branch of the outer <pre>_Generic</pre> to be selected. But
+      the subsidiary <pre>_Generic</pre> in the first
+      branch will cause a compile error, because that’s switching on
+      the type of argument <pre>y</pre>, and <pre>struct Bar
+      *</pre> isn’t in its list of acceptable types.</p><p>When this first happened to me, it was a complete surprise. I
+      thought the wrong branch of the <pre>_Generic</pre> must have
+      been selected by mistake. It took me a long time to
+      even think of the possibility that the compile error
+      from the unwanted branch was happening even though it
+      wasn’t selected!</p><p>Even after I decided that that must be the answer, I couldn’t quite believe it. To my way of thinking, one of the main reasons you’d want to select at compile time between several alternative pieces of code was because not all of them would be legal, and you wanted to pick the one that was!</p><p>Perhaps this was just a bug in the particular compiler I happened to try this with?</p><p>I don’t think so, because every compiler I’ve tried agrees that this is how it works. Unless you want to believe that multiple completely independent C compilers all managed to have an identical enormous bug, the only other option is that they did it on purpose, because they agree that this was the genuine intent of the standard.</p><p>But that seemed unlikely too, so I went and checked the standard myself.</p><p>It’s not quite as unambiguous as you’d like it to be. C11 §6.5.1 clause 3 says that the unselected expressions are not evaluated, meaning they do not cause any code to be executed at run time, but it doesn’t say whether they should still be checked at compile time for semantic validity.</p><p>But here’s the thing: nothing else in C has the
+      syntactic form of an expression, without the requirement to be
+      semantically valid. (Unlike C++, where it happens all the time
+      in template-related contexts.) So if the unselected branches
+      of <pre>_Generic</pre> didn’t have to be valid, then
+      they’d be the only kind of expression with that property in the
+      whole of C, and so I’d expect the standard to call them out
+      explicitly as an exception to the usual rule. It does not.</p><p>So, if all those compilers think the intent of the standard is
+      that even the untaken branches of <pre>_Generic</pre> have to
+      be semantically valid, then I can’t disagree with them. If I’m
+      going to complain about anything, it has to be the standard
+      itself!</p><p>The C standards working group (WG14) doesn’t just publish the final standard. It also publishes records of the process leading to the standard: proposals, arguments for and against, minutes of meetings, etc. So you can at least try to find out why a decision was made a particular way, by looking in those documents.</p><p>According to
+      the <a href="https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1404.htm">original
+      proposal</a>, the idea for <pre>_Generic</pre> originated in a
+      GCC language extension feature – or rather, multiple
+      features:</p><pre>__typeof</pre> takes an expression and gives you its
+        type<pre>__builtin_types_compatible_p</pre> takes two type
+        names and tells you if they’re compatible (returning a
+        boolean).<pre>__builtin_choose_expr</pre> is like a compile-time
+        version of the <pre>?:</pre> ternary operator: depending on
+        its first argument, it returns either its second or third. But
+        unlike <pre>?:</pre>, it requires the first argument to be a
+        compile-time constant, so that the unselected branch is not
+        emitted as code at all, and so that the two output arguments
+        can have incompatible types.<p>The GCC
+      manual <a href="https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html#index-_005f_005fbuiltin_005fchoose_005fexpr">gives
+      an example</a> of using these features together to implement
+      type-based selection, by
+      making <pre>__builtin_choose_expr</pre>’s controlling
+      expression the result of
+      a <pre>__builtin_types_compatible_p</pre> test which
+      checks <pre>__typeof(parameter)</pre> against a known type
+      (and then maybe chaining multiple such tests via their ‘else’
+      operand).</p><p>WG14 apparently found that cumbersome (fair enough!), and instead provided a single syntax to do the whole job, adding the ability to give a whole list of type associations instead of just one.</p><p>So the next question is, did the WG introduce the actual bug?
+      Or does GCC’s original <pre>__builtin_choose_expr</pre> also
+      insist on semantic validity of both its potential output
+      expressions?</p><p>The latter, it turns out – if you try to do type-based selection using GCC’s builtins, you find exactly the same problem:</p><blockquote>#define demo(x) __builtin_choose_expr( \ __builtin_types_compatible_p(__typeof(x), struct Foo *), \ (x)-&gt;field_of_struct_foo, \ -1)</blockquote><p>Just as before, we’re trying to pull out a field from a
+      particular structure type if we’re given one, and fall back to a
+      default return value of −1 otherwise. But you see exactly the
+      same problem if you evaluate, say, <pre>demo(42)</pre>:</p><blockquote>test.c:5:8: error: invalid type argument of ‘-&gt;’ (have ‘int’) 5 | (x)-&gt;field_of_struct_foo, \ | ^~ test.c:8:27: note: in expansion of macro ‘demo’ 8 | int thing(int f) { return demo(42); } | ^~~~</blockquote><p>So GCC’s original design has the same limitation – WG14 didn’t introduce it.</p><p>The really curious thing is that I didn’t find any
+      discussion in the WG14 proposal of the question I’m addressing
+      here. I was expecting to find that they had carefully considered
+      the question “Should <pre>_Generic</pre> require even its
+      unselected output expressions to be semantically valid?”,
+      weighed up the pros and cons, and decided the answer was yes
+      (for some reason that I currently can’t imagine, but would have
+      been very interested to find out). But instead,
+      it looks as if nobody even considered it at all.</p><p>There are a lot of things you might want to do
+      with <pre>_Generic</pre> which are prevented by this design
+      feature. But it does work for the one case it was
+      originally meant for: selecting between a family of related
+<pre>&lt;math.h&gt;</pre> and <pre>&lt;complex.h&gt;</pre>
+      functions, such
+      as <pre>sin()</pre>, <pre>sinf()</pre>, <pre>sinl()</pre>, <pre>csin()</pre>, <pre>csinf()</pre>
+      and <pre>csinl()</pre>, so that the user can just
+      write <pre>sin()</pre> every time, and the compiler will
+      figure it out for you.</p><p>This works because you only need to select between the functions, not the whole function call expressions. In other words, instead of writing this ...</p><blockquote>#define dangerous(x) _Generic(x, \ this_type : this_fn(x), \ that_type : that_fn(x))</blockquote><p>... you instead write this, which puts the call
+      operation outside the <pre>_Generic</pre>, and the only
+      thing inside it is function names:</p><blockquote>#define safer(x) _Generic(x, \ this_type : this_fn, \ that_type : that_fn) (x)</blockquote><p>With the first form, the <pre>x</pre> you provide will be
+      type-checked against both functions, and there will be a
+      compile error if it isn’t compatible with either one. So
+      if <pre>this_fn</pre> can’t take a value
+      of <pre>that_type</pre>, or vice versa, then the macro
+      won’t do its job.</p><p>But with the second form, the function name isn’t type-checked
+      against its argument until after
+      the <pre>_Generic</pre> has decided which function it is. And
+      each branch of the <pre>_Generic</pre> is a semantically valid
+      C expression by itself, regardless of the type
+      of <pre>x</pre>, because it doesn’t mention <pre>x</pre> at
+      all – it’s just a bare function name, fixed at compile time. So
+      this version works.</p><p>(I suppose it’s possible that, in this mode of use,
+      it’s mildly useful to have the compiler check all the
+      possible output expressions, rather than only the selected one?
+      If the output expressions are independent of the type-variable
+      input that might make them illegal, then they should
+      all be legal, and in that case, it’s better to detect a mistake
+      in one as soon as possible, without having to wait until you
+      actually exercise the faulty branch. For example, in this case,
+      if you misspelled one of the possible function names, you’d get
+      an error whether you’d tried to use that branch or not. But this
+      still seems like a small consideration next to the huge number
+      of useful things you could do if the feature worked the more
+      permissive way. And, as I say in the previous section, I found
+      no evidence that <pre>_Generic</pre> works this way on purpose
+      for the sake of any specific advantage, including this one.)</p><p>In the previous section, I describe the one mode of use
+      of <pre>_Generic</pre> that isn’t inconvenienced by
+      the requirement for all the output expressions to be valid.</p><p>So an obvious workaround is: write your own generic
+        expressions in that form if you possibly can. Then they
+      should work, for the same reason
+      that <pre>&lt;tgmath.h&gt;</pre> works.</p><p>For example, instead of this example from a previous section ...</p><blockquote>#define string_length_broken(x) _Generic(x, \ const char * : strlen(x), \ struct MyStringBuffer * : (x)-&gt;length)</blockquote><p>... we could write this:</p><blockquote>static inline size_t mystrbuf_len(struct MyStringBuffer *msb) { return msb-&gt;length; } #define string_length_fixed(x) _Generic(x, \ const char * : strlen, \ struct MyStringBuffer * : mystrbuf_len) (x)</blockquote><p>This version of the string-length macro is just selecting a
+      function name, in exactly the same way as
+      the <pre>&lt;tgmath.h&gt;</pre> selector macros do. And the
+      function isn’t applied to <pre>x</pre> until after
+      the <pre>_Generic</pre> has finished selecting one of its
+      branches and thrown the rest away. So it never matters
+      that <pre>strlen</pre> can’t accept a <pre>struct
+      MyStringBuffer *</pre>, or that the <pre>mystrbuf_len</pre>
+      function I’ve defined here can’t accept a <pre>const char
+      *</pre>. This version of the macro will never need them to.</p><p>It’s wordier than the first version, and (I think) less readable, because it’s less self-contained. But at least it works.</p><p>This inline-functions workaround only works in cases where every branch of the generic can be written as a function call. But there are lots of reasons why that might not be true.</p><p>One reason is if you want to do something non-trivial in the default clause of the generic expression. Then that clause has to match more than one input type, so you probably can’t write a C function that has a general enough type signature.</p><p>As I mentioned in the introduction, an example case of this is
+      if you want to pull out a named structure field from an open-ended set of
+      different structure types. You might do this in order
+      to treat them all as different implementations of the same
+      ‘interface’ or ‘trait’. Say, you might have lots of structure
+      types contain a <pre>struct Foo foo</pre> field, and then have
+      a macro that would take an object of any of those types and
+      operate on <pre>obj-&gt;foo</pre>.</p><p>You don’t even need a <pre>_Generic</pre> to do that much.
+      But suppose you also want the same macro to handle <pre>struct
+      Foo</pre> itself, for the case where a function is
+      already operating on a generic instance of the trait
+      rather than a specific type of implementing object?</p><p>So we’d like to write code along these lines, analogous to the
+    ‘broken’ version of the previous <pre>string_length</pre>
+    example:</p><blockquote>#define foo_upcast_broken(x) _Generic(x, \ struct Foo * : (x), \ default : &amp;(x)-&gt;foo)</blockquote><p>which responds to the one special case of a <pre>struct
+        Foo</pre> pointer by just returning the pointer itself, and in
+      all other cases, assumes you’ve passed it the address of
+      a structure containing a <pre>struct Foo foo</pre>, and extracts
+      a pointer to that.</p><p>Of course, this won’t work, for the same reason
+      that <pre>string_length_broken</pre> didn’t work: in the case
+      where <pre>x</pre> has type <pre>struct Foo *</pre>,
+      the default clause will turn out not to be semantically
+      valid, because <pre>struct Foo</pre> doesn’t itself have a field
+      of type <pre>foo</pre>.</p><p>(In this example, you could work around that in turn by
+      just adding one: give <pre>struct Foo</pre> a dummy
+      member called <pre>foo</pre> of any type you like, simply to
+      make the default branch of this <pre>_Generic</pre> happy. But
+      in a more complicated case, where the expression in the default
+      branch also needed <pre>x-&gt;foo</pre> to have the
+      right type, even that wouldn’t help.)</p><p>This workaround also doesn’t help with the other case shown
+      above, of selecting based on two argument types by nesting a
+      different <pre>_Generic(y, ...)</pre> within each branch of
+      the outer <pre>_Generic(x, ...)</pre>. There’s no way to turn
+      each of those generics into a function call.</p><p>Here are some other cases I’ve seen which would prevent you from converting one (or all) of your output expressions into a function call:</p><pre>_Generic</pre>, because a compiler builtin name is
+        often not a valid expression by itself. So you have to write
+        the parameters right next to the builtin name, i.e. right
+        inside the <pre>_Generic</pre>.<pre>asm</pre> expression as an immediate operand
+        to a machine instruction. Then the <pre>asm</pre> expression
+        can’t be wrapped in a function.<p>I’m sure there are more cases I haven’t thought of. The point is: this inline-functions workaround is the best thing if you can do it, but there are lots of reasons you can’t always do it.</p><pre>_Generic</pre><p>Here’s an alternative workaround which can work in cases where the inline functions approach doesn’t.</p><p>Within each output expression of the
+      main <pre>_Generic</pre>, if you need to refer to a macro
+      parameter whose type you’re switching on, you can force it to
+      have a type appropriate to that particular output expression by
+      means of wrapping it in a secondary instance
+      of <pre>_Generic</pre>.</p><p>How do you force it to have an appropriate type? By checking if it already does have that type, and if not, replacing it completely with some completely made-up expression that does have the type you want.</p><p>The made-up alternative expression is selected to have the
+      right type, so that the semantic checks on this branch
+      of the <pre>_Generic</pre> won’t fail. It won’t have the
+      right value at all – but that would only matter if this
+      branch were selected. The idea is that the dummy
+      wrong-value-of-the-right-type is only used in cases where the
+      whole containing branch was going to be thrown away.</p><p>For example, here’s a macro you might use to generate an
+      expression of type <pre>struct MyStringBuffer *</pre>, which
+      matches the input expression if that is of that type, and
+      otherwise makes something up:</p><blockquote>void *dummy(void); #define coerce_to_MyStringBuffer(x) _Generic(x, \ struct MyStringBuffer * : (x), \ default : (struct MyStringBuffer *)dummy())</blockquote><p>Using this coercion macro, we can fix the original
+      attempt to implement our <pre>string_length</pre> macro, by
+      modifying the dangerous <pre>(x)-&gt;length</pre> output
+      expression to wrap the parameter <pre>x</pre> in our new
+      coercion macro:</p><blockquote>#define string_length_refixed(x) _Generic(x, \ const char * : strlen(x), \ struct MyStringBuffer * : coerce_to_MyStringBuffer(x)-&gt;length)</blockquote><p>This version of the macro will still compile if
+      you give it a <pre>const char *</pre>, because in the
+      unselected output expression,
+      the <pre>coerce_to_MyStringBuffer()</pre> macro call will
+      deliver its dummy expression (calling the <pre>dummy()</pre>
+      function and casting its output type), which is of a type
+      that can validly take ‘<pre>-&gt;length</pre>’ after
+      it. But once it’s passed its semantic checks, that expression is
+      thrown away completely, so that it doesn’t matter that
+      its value couldn’t possibly have been anything useful.</p><p>On the other hand, if you give this macro a <pre>struct
+        MyStringBuffer *</pre>, then the coercion macro will act as a
+      no-op, returning the same pointer it was passed. So when the
+      second clause of the main <pre>_Generic</pre> is
+      selected, it will have a useful value in it.</p><p>If you’re reading this and you have even an ounce of instinct
+      for defensive programming, this probably looks pretty dangerous
+      to you! We’re relying here on two
+      separate <pre>_Generic</pre>s making their choices the same
+      way. Get it wrong, and we might accidentally emit code into the
+      object file that really calls the <pre>dummy()</pre>
+      function and casts its return type to something it was never
+      meant to be.</p><p>My answer to that is: I haven’t yet mentioned
+      what <pre>dummy()</pre> actually is. In fact, it’s nothing at
+      all: it’s a non-existent function. It exists only as a
+      declaration in whatever header file defines the code
+      base’s <pre>_Generic</pre> macros. No definition of
+      it exists in any translation unit.</p><p>Therefore, if the compiler emits an actual call to that
+      function into any object file, the effect will be a link
+      failure, when the function turns out not to be defined anywhere
+      at link time. The only way the program can be compiled
+      successfully is if no use of this generic macro ends up
+      capable of actually calling <pre>dummy()</pre> at run time.</p><p>So it’s not as unsafe as all that! It is possible that a coding
+      error in one of these <pre>_Generic</pre>s might mismatch the
+      inner and outer expressions – but if so, a link failure will
+      prevent the mistake from getting as far as executable code, let
+      alone actually being executed.</p><p>One case where even that workaround doesn’t help is if you want to switch based on the types of two expressions at once.</p><p>Of course, if the sets of permitted types for the two
+      expressions are independent – that is, expression <pre>x</pre>
+      can have any of these types, <pre>y</pre> can have
+      any of those types, and any of the former goes with any
+      of the latter – then there’s no problem with this, and you can
+      just nest a <pre>_Generic</pre> switch on the type
+      of <pre>y</pre> inside each branch of the
+      outer <pre>_Generic</pre> for <pre>x</pre>. But if there’s
+      any type of <pre>y</pre> that goes with one type
+      of <pre>x</pre> and not with another, then that won’t work, as
+      we’ve already discussed above.</p><p>Neither of the previous workarounds will help. You can’t wrap
+      the inner <pre>_Generic</pre> into an inline function, because
+      inline functions can’t themselves be type-generic. And if you
+      try to mimic the type-coercion approach, by giving each
+      inner <pre>_Generic</pre> some kind of a default clause that
+      prevents it from failing spuriously, then the same default
+      clause will apply when it is the selected branch of the
+      outer <pre>_Generic</pre>, and the effect is that you won’t
+      get the compile failures you did want, when you
+      actually gave your macro a pair of types that don’t go together.</p><p>What you really want, in this case, is not to have to
+      nest two switches in the first place. You want to make a
+      combined type that encapsulates the types of both your
+      controlling arguments <pre>x</pre> and <pre>y</pre>, and
+      write a single one-layer <pre>_Generic</pre> expression that
+      switches on the set of acceptable tuples of types.</p><p>In some languages, you could just do that, because
+      type tuples (or something like them) exist in the language
+      already. If this were C++, for example, you can combine any two
+      types into a single type by using them as parameters of a
+      template – either one you make up yourself, or something
+      pre-existing like <pre>std::pair</pre>
+      or <pre>std::tuple</pre>. But then, if this were C++, you
+      wouldn’t be trying to get <pre>_Generic</pre> to do something
+      useful in the first place, because it wouldn’t exist, and even
+      if it did, there are other ways!</p><p>In C, the problem is not that type tuples don’t exist.
+      You could imagine, for example, representing a tuple of two
+      types using the type of a function pointer taking two arguments
+      with those types, e.g. <pre>void (*)(int, const char *)</pre>
+      might be used to represent the type pair <pre>(int, const char
+      *)</pre>. The problem is that you have no way
+      to construct one of those out of the
+      expressions <pre>x,y</pre> passed to your macro.</p><p>If you have any language extension available to help, then the
+      problem becomes easier. With the GNU
+      extension <pre>__typeof</pre>, for example, you could do this
+      just fine:</p><blockquote>#define type_tuple_switch(x, y) _Generic((void (*)(__typeof(x), __typeof(y)))NULL, \ void (*)(int, int) : "got two ints", \ void (*)(int, char *) : "got an int and a string", \ void (*)(char *, int) : "got a string and an int")</blockquote><p>Here, we’ve recovered the types of <pre>x,y</pre>
+      via <pre>__typeof</pre>; made a function pointer type with those
+      types as arguments; and cast <pre>NULL</pre> to that function
+      pointer type for the sake of having an expression of that type to
+      use as the first argument to <pre>_Generic</pre>. Then we can
+      test pairs of acceptable types by making further
+      function-pointer-shaped tuples.</p><p>But what if your code needs to compile in standard C, without benefit of any dialect-specific extension?</p><p>As in the previous section, you can work around the
+      difficulties of <pre>_Generic</pre> by using yet
+      another <pre>_Generic</pre>, because that’s the closest thing
+      we do have in standard C to <pre>__typeof</pre>. We
+      can’t make it output the actual type, but we can use it
+      to test the type of an input argument and
+      output something we can use when constructing another
+      type.</p><p>Specifically: we can convert each input type into
+      an integer, so that the problem of switching on a pair
+      of types is reduced to switching on a pair of integers. Then we
+      can wrap our integers back up into a thing <pre>_Generic</pre>
+      can switch on by making a multidimensional array with those
+      integers as dimensions.</p><p>This is the longest example yet, because we need three stages: an enumeration of type ids, a macro that returns the type id of an input, and finally, a switch on arrays with type ids as dimensions.</p><blockquote>enum MyTypeId { MTI_NONE, // avoid using 0 as a type id, because it’s illegal as an array dimension MTI_INT, MTI_CHAR_PTR, MTI_SOME_STRUCT, }; #define MYTYPEID(x) _Generic(x, \ int : MTI_INT, \ char * : MTI_CHAR_PTR, \ struct SomeStruct : MTI_SOME_STRUCT) #define type_tuple_switch(x, y) _Generic((int (*)[MYTYPEID(x)][MYTYPEID(y)])NULL, \ int (*)[MTI_INT][MTI_INT] : "got two ints", \ int (*)[MTI_INT][MTI_CHAR_PTR] : "got an int and a string", \ int (*)[MTI_CHAR_PTR][MTI_INT] : "got a string and an int")</blockquote><p>The enumeration and the <pre>MYTYPEID</pre> macro are
+      reusable: if you have more than one macro that needs to switch
+      on multiple types, you can use the same system of type ids for
+      all of them, as long as you make an enum value for every type
+      that any of them wants to use. (To demonstrate this,
+      I’ve included a value in the example above which isn’t used
+      in <pre>type_tuple_switch</pre> – we imagine that elsewhere in
+      the same program is some other similar macro that can
+      take an argument of type <pre>struct SomeStruct</pre>.)</p><p>In this example case, I’ve kept the output expressions simple:
+      those don’t mention the arguments <pre>x,y</pre> at all. If
+      they did, then it works fine to combine this workaround for the
+      pair-based switch with the previous section’s workaround for
+      referring to the arguments in the output expressions. As long as
+      each output expression only coerces inputs to types that they
+      would have to have anyway for that expression to be
+      selected, the combination works fine.</p><pre>_Generic</pre> as the default of another<p>One annoying edge case in all of the above is: what if you want to select between lots of different integer types?</p><p>You could imagine wanting to do that in order to treat all the
+      integer types the same (e.g. pass all of them to the
+      one of your functions that accepts integers in general), or to
+      treat them differently (e.g. return some value specific
+      to an integer type, like the location of the high bit, or an
+      appropriate <pre>printf</pre> format-string directive).</p><p>The problem with this in C is that you don’t reliably know
+      which integer types are the same as each other. The
+      basic
+      types <pre>short</pre>, <pre>int</pre>, <pre>long</pre>
+      and <pre>long long</pre> are all guaranteed to be distinct
+      types, but which of those is the same as,
+      say, <pre>int32_t</pre>? It could be either
+      of <pre>int</pre> or <pre>long</pre> (in practice, and
+      perhaps others in theory). Similarly, <pre>int64_t</pre> might
+      very reasonably be an alias of <pre>long</pre>, or
+      of <pre>long long</pre>.</p><p>This leads to a problem if you’re
+      constructing <pre>_Generic</pre> expressions, because you’re not
+      allowed to have two clauses specifying the same type. But
+      you don’t know what types are the same time, so how do
+      you avoid it?</p><blockquote>#define MYTYPEID_INTEGER_EDITION(i) _Generic(i, \ int : MTI_INT, \ long : MTI_LONG, \ int64_t : MTI_INT64_T)</blockquote><p>This example macro tries to convert integer types into type
+      ids, in the style of the previous section. It will work fine
+      if <pre>int64_t</pre> is an alias for <pre>long long</pre>
+      on the platform where you try to compile it. But
+      if <pre>int64_t</pre> turns out to be an alias
+      for <pre>long</pre> instead, you’ve got a compile error – two
+      clauses of this <pre>_Generic</pre> specify the same type. And
+      if you remove the <pre>long</pre> case and replace it with
+      a <pre>long long</pre> case, now you’ll get a compile error on
+      the other platform.</p><p>(Obviously, I’ve left out several of the other C integer types here. That’s just for the sake of keeping this example short.)</p><p>We can work around this annoyance in a similar way to the
+      previous two workarounds I’ve shown: use yet another
+      instance of <pre>_Generic</pre> to avoid the problems with the
+      first one. In this case, we can chain together
+      two <pre>_Generic</pre>s by their default clause, both
+      switching on the type of the same expression:</p><blockquote>#define MYTYPEID_INTEGER_EDITION(i) \ _Generic(i, \ int : MTI_INT, \ long : MTI_LONG, \ long long : MTI_LONG_LONG, \ default: _Generic(i, \ int32_t : MTI_INT32_T, \ int64_t : MTI_INT64_T, \ default : MTI_NONE))</blockquote><p>Now it doesn’t matter any more whether <pre>int64_t</pre> is
+      an alias for <pre>long</pre>, because those two types don’t
+      appear together in the same <pre>_Generic</pre>: one
+      is in the outer one, and the other is in the inner one. And
+      if <pre>int64_t</pre> is an alias for <pre>long long</pre>
+      instead, there’s still no problem, because those two
+      don’t appear together. Generally, the idea is that I’ve put all
+      the language’s basic integer types in one of the lists,
+      and the <pre>&lt;stdint.h&gt;</pre> type aliases in the other,
+      and as long as no two types in the same list collide,
+      things should work.</p><p>However, a couple of things to note about this workaround:</p><p>Firstly, not all the output expressions can be generated at
+      all, on a given platform. Suppose that our compiler’s
+      headers define <pre>int64_t</pre> to be an alias
+      for <pre>long</pre>. Then the macro above will never
+      return <pre>MTI_INT64_T</pre> at all, because that branch of
+      the inner <pre>_Generic</pre> will always have been pre-empted
+      by the branch of the outer one that
+      returns <pre>MTI_LONG</pre>. Conversely, on a different
+      system, this macro might map an <pre>int64_t</pre> input
+      to <pre>MTI_LONG_LONG</pre>.</p><p>(In fact, is there any integer type capable of getting
+      through the non-default cases of the outer <pre>_Generic</pre>
+      and reaching the inner one? Perhaps not! But writing it like this,
+      we should cope even if there is.)</p><p>Secondly, note that even
+      the inner <pre>_Generic</pre> has a default clause.
+      This isn’t optional: it’s necessary for the same reason as
+      usual, namely that the inner <pre>_Generic</pre> as a whole
+      will be checked for semantic validity even if one of
+      the other branches of the outer <pre>_Generic</pre> is
+      selected. So if any type handled by the
+      outer <pre>_Generic</pre> is not also handled by the inner
+      one, then you’ll get a compile error.</p><p>The simplest fix is to always return something from
+      the expression as a whole. Here, we return the dummy
+      value <pre>MTI_NONE</pre>, shown in the enum in the previous
+      section. The idea would be that any attempt to use that value in
+      an array-based type tuple would provoke a compile error in its
+      own right, or even if not, it wouldn’t match any of the branches
+      of a tuple-based <pre>_Generic</pre> you were writing.</p><p>“Phew! Are we done yet?”</p><p>I’ve presented a variety of different workarounds for the
+      various reasons why you might get unwanted compile errors when
+      trying to do anything interesting with <pre>_Generic</pre>. Is
+      there anything left that will still go wrong?</p><p>Unfortunately, yes. There are two problems left, and I’ve run out of workarounds.</p><p>Firstly: if you do all of this trickery with multiple
+      nested <pre>_Generic</pre> expressions, and something goes
+      wrong, the compiler error messages are terrible. If you
+      define a macro that accepts three types, you’d like to see an
+      error message saying something comprehensible like “Sorry, you
+      gave this type and I wanted one of these.”</p><p>You can just about get that from a really simple use
+      of <pre>_Generic</pre>: if an input type doesn’t match any
+      clause then gcc’s or clang’s error message will tell you what
+      the input type was, and will point at the source
+      location of the generic expression that it didn’t match. You’ll
+      still have to go through the source expression yourself to find
+      out what types would have matched, but at least you
+      know where to look for that.</p><p>But the more workarounds you add, the more the errors start
+      talking about things in the workaround system and not things in
+      the user’s actual code. For example, if you’re using the type-id
+      system I’ve shown here, and it generates a type id that isn’t
+      matched by a particular <pre>_Generic</pre>, the error message
+      will tell you that the mismatching type is some nonsense
+      multidimensional array type like <pre>int (*)[5][2]</pre>,
+      which has no relation to the types you specified at the call
+      site of your generic macro. Of course, we had to map
+      the input types to opaque integers to make the system work at
+      all – but a side effect is that those integers are now what you
+      see in the error report.</p><p>The first duty of compile-time error checking is to only let code through if it’s right. The second is to tell the user something useful if it’s wrong. With all these workarounds, we’ve only managed to fulfill the first of those!</p><p>Secondly, the expansions of these macros become enormous.</p><p>A macro containing multiple workarounds of this kind will have
+      to expand its parameters in lots of different places: at least
+      one macro argument will need to appear in the controlling
+      argument of each <pre>_Generic</pre> (inner or outer), and if
+      the point of the workarounds was to let you use the macro
+      argument again in the output expressions, then you’ll want to do
+      that as well. It’s very easy to write a macro that expands its
+      argument ten times.</p><p>This isn’t dangerous in correctness terms, which is
+      the usual reason why people worry about multiply
+      expanding macro parameters. In all the examples here, there’s no
+      reason to expand any parameter in a way that will make it
+      be evaluated twice (e.g. doubling its side effects).
+      The controlling expression of <pre>_Generic</pre> is never
+      evaluated, and at most one of its output expressions is. So you
+      can perfectly well employ all the workarounds in this article,
+      and still put at most one copy of the macro parameter in each
+      output expression in a context where it will generate code. And
+      only one of those output expressions will be evaluated, so you
+      can easily arrange to get the expression’s side effects (if any)
+      at most once.</p><p>But in some cases, even the multiple expansion can
+      cause a problem. For example, suppose I’ve defined a macro
+      that’s packed with complicated <pre>_Generic</pre>
+      expressions, with workarounds everywhere. And then suppose
+      someone innocently writes this in their source code:</p><blockquote>int x = MY_MACRO(MY_MACRO(MY_MACRO(MY_MACRO(MY_MACRO(y)))));</blockquote><p>Suppose the macro expands its parameter 10 times. Then the
+      expansion of the innermost <pre>MY_MACRO(y)</pre> will still
+      be reasonably small, because the text mentioned ten times is
+      just the single identifier <pre>y</pre>. But the expansion of
+      the next layer, <pre>MY_MACRO(MY_MACRO(y))</pre>, will repeat
+      ten times the entire innermost expansion. And each of
+      the next three layers will multiply that by another
+      factor of ten.</p><p>The combined effect will be that the C preprocessor generates
+      a huge amount of output, which the main C compiler has
+      to painstakingly parse, store in an internal data structure,
+      semantically validate, and then process to the point of deciding
+      which branch of each <pre>_Generic</pre> to take. In the end,
+      it will throw away nearly all of that huge amount of text, and
+      emit just the single short expression that ended up being
+      selected. But your compiler will go very slowly in the
+      process – and it might even consume too much of the system’s
+      memory, and crash, or start starving other processes of
+      resources!</p><p>A user who knows that this is going on has an easy workaround, which is to avoid nesting expansions of macros that do this kind of trick. Instead, add extra intermediate variables, and use just a simple variable name in the next expansion:</p><blockquote>int y1 = MY_MACRO(y); int y2 = MY_MACRO(y1); int y3 = MY_MACRO(y2); int y4 = MY_MACRO(y3); int x = MY_MACRO(y4);</blockquote><p>But not all users will be sympathetic to being told to do that!</p><p>Even the intended use of <pre>_Generic</pre> has
+      this problem, to some extent. If you switch on your macro
+      parameter to select one of a list of function names, and then
+      write the parameter again after closing
+      the <pre>_Generic</pre>, then you’ve expanded the parameter
+      twice overall. So a nest of macro invocations like the above
+      will still exponentially inflate the amount of preprocessor
+      output. But it will only inflate by a factor of 2 each time,
+      instead of 10 or more.</p><p>So the moral of this section is the same thing I’ve said
+      already: if you can, it’s better to
+      use <pre>_Generic</pre> in a mode where it just selects between
+      function names – even if you have to write some functions
+      specially to be selected.</p><p>In summary:</p><pre>_Generic</pre> has a huge design limitation that
+        makes a lot of things you wanted to do with it not work.<pre>_Generic</pre>. This avoids almost all the
+        inconvenience, if you can write your code in that style.<pre>_Generic</pre> to present the outer one
+        with something it can handle.<p>It’s tempting to ask: is there anything
+      that <pre>_Generic</pre> is useful for, if it’s so hard
+      to make it do any of the things I’ve mentioned here?</p><p>Apart from the most obvious answer (that it’s useful for things
+      exactly like <pre>&lt;tgmath.h&gt;</pre>), the best
+      thing I’ve thought of to do with <pre>_Generic</pre> is to use
+      it for deliberate error checking. The annoyance in all the
+      previous sections was that it was very hard to avoid
+      compile errors, when we wanted our code to actually compile, run
+      and do something useful. But if what we wanted was to
+      provoke compile errors on a hair-trigger basis, then perhaps we
+      could use it for that more reliably?</p><p>An example: in a code base of mine I once refactored some
+      open-coded uses of arrays for a particular purpose, replacing
+      them with an abstract data type that had a documented API. One
+      part of this refactoring involved finding all the places where I
+      passed one of those arrays to <pre>free()</pre> – or rather,
+      to the wrapper function <pre>sfree()</pre> that I habitually
+      use in code bases of my own – and instead, pass the new ADT to
+      its own dedicated free function. If I failed to do that, there
+      would be a memory leak (secondary memory allocations hanging off
+      the main object wouldn’t be cleaned up).
+      But <pre>sfree()</pre> (just like
+      standard <pre>free()</pre>) accepted a <pre>void *</pre>, so
+      it wouldn’t throw an error if I used it for the new ADT.</p><p>My solution was to turn <pre>sfree()</pre> itself into a
+      macro that checked the input type using <pre>_Generic</pre>:</p><blockquote>extern void dummy(void *); #define sfree(x) _Generic(x, \ MyNewADT * : dummy, \ default : sfree) (x)</blockquote><p>Just like the dummy function in a previous
+      section, <pre>dummy()</pre> here exists only as a declaration,
+      and isn’t defined anywhere. So if I had any remaining cases of
+      the new ADT being passed to <pre>sfree()</pre>, then this
+      generic expression would select a call to a nonexistent
+      function, and cause a link-time failure. Meanwhile,
+      everything else gets freed as normal.</p><p>(I decided this was ugly enough that I should only do it during
+      the refactoring process, as a one-off check that I’d converted
+      all the old <pre>sfree()</pre> calls. Once the refactoring was
+      complete, I removed the scaffolding, turned <pre>sfree</pre>
+      back to the way it normally was, and trusted myself to carry on
+      freeing instances of the new ADT using its own free function
+      when I add new code in future.)</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

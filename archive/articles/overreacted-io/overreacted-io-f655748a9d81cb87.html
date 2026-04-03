@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Progressive JSON | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Progressive JSON</h1>
+        <div class="meta">overreacted — A blog by Dan Abramov 2025-05-31T00:00:00Z</div>
+        <div class="links">
+          <a href="https://overreacted.io/progressive-json/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/overreacted-io/overreacted-io-f655748a9d81cb87.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Why streaming isn&#x27;t enough.</div>
+        <div class="content">
+          <html>
+  <body><h1>Progressive JSON</h1><p>May 31, 2025</p><p>Do you know about Progressive JPEGs? Here’s a <a href="https://www.liquidweb.com/blog/what-is-a-progressive-jpeg/">nice explanation</a> of what a Progressive JPEG is. The idea is that instead of loading the image top to bottom, the image instead is fuzzy at first and then progressively becomes more crisp.</p><p>What if we apply the same idea to transferring JSON?</p><p>Suppose you have a JSON tree with some data:</p><pre><pre>{
+  header: 'Welcome to my blog',
+  post: {
+    content: 'This is my article',
+    comments: [
+      'First comment',
+      'Second comment',
+      // ...
+    ]
+  },
+  footer: 'Hope you like it'
+}</pre></pre><p>Now imagine you want to transfer it over the wire. Because the format is JSON, you’re not going to have a valid object tree until the last byte loads. You have to wait for the entire thing to load, then call <pre>JSON.parse</pre>, and then process it.</p><p>The client can’t do anything with JSON until the server sends the last byte. If a part of the JSON was slow to generate on the server (e.g. loading <pre>comments</pre> took a slow database trip), the client can’t start any work until the server finishes all the work.</p><p>Would you call that good engineering? And yet it’s the status quo—that’s how 99.9999%* of apps send and process JSON. Do we dare to improve on that?</p><p>* I made it up</p><h3><a href="https://overreacted.io#streaming-json"/> Streaming JSON</h3>
+<p>We can try to improve this by implementing a streaming JSON parser. A streaming JSON parser would be able to produce an object tree from an incomplete input:</p><pre><pre>{
+  header: 'Welcome to my blog',
+  post: {
+    content: 'This is my article',
+    comments: [
+      'First comment',
+      'Second comment'</pre></pre><p>If you ask for the result at this point, a streaming parser would hand you this:</p><pre><pre>{
+  header: 'Welcome to my blog',
+  post: {
+    content: 'This is my article',
+    comments: [
+      'First comment',
+      'Second comment'
+      // (The rest of the comments are missing)
+    ]
+  }
+  // (The footer property is missing)
+}</pre></pre><p>However, this isn’t too great either.</p><p>One downside of this approach is that the objects are kind of malformed. For example, the top-level object was supposed to have three properties (<pre>header</pre>, <pre>post</pre>, and <pre>footer</pre>), but the <pre>footer</pre> is missing because it hasn’t appeared in the stream yet. The <pre>post</pre> was supposed to have three <pre>comments</pre>, but you can’t actually tell whether more <pre>comments</pre> are coming or if this was the last one.</p><p>In a way, this is inherent to streaming—didn’t we want to get incomplete data?—but this makes it very difficult to actually use this data on the client. None of the types “match up” due to missing fields. We don’t know what’s complete and what’s not. That’s why streaming JSON isn’t popular aside from niche use cases. It’s just too hard to actually take advantage of it in the application logic which generally assumes the types are correct, “ready” means “complete”, and so on.</p><p>In the analogy with JPEG, this naïve approach to streaming matches the default “top-down” loading mechanism. The picture you see is crisp but you only see the top 10%. So despite the high fidelity, you don’t actually see what’s on the picture.</p><p>Curiously, this is also how streaming HTML itself works by default. If you load an HTML page on a slow connection, it will be streamed in the document order:</p><pre><pre>&lt;html&gt;
+  &lt;body&gt;
+    &lt;header&gt;Welcome to my blog&lt;/header&gt;
+    &lt;article&gt;
+      &lt;p&gt;This is my article&lt;/p&gt;
+        &lt;ul class="comments"&gt;
+          &lt;li&gt;First comment&lt;/li&gt;
+          &lt;li&gt;Second comment&lt;/li&gt;</pre></pre><p>This has some upsides—the browser is able to display the page partially—but it has the same issues. The cutoff point is arbitrary and can be visually jarring or even mess up the page layout. It’s unclear if more content is coming. Whatever’s below—like the footer—is cut off, even if it was ready on the server and could have been sent earlier. When we stream data in order, one slow part delays everything.</p><p>Let’s repeat that: when we stream things in order they appear, a single slow part delays everything that comes after it. Can you think of some way to fix this?</p><h3><a href="https://overreacted.io#progressive-json"/> Progressive JSON</h3>
+<p>There is another way to approach streaming.</p><p>So far we’ve been sending things depth-first. We start with the top-level object’s properties, we go into that object’s <pre>post</pre> property, then we go into that object’s <pre>comments</pre> property, and so on. If something is slow, everything else gets held up.</p><p>However, we could also send data breadth-first.</p><p>Suppose we send the top-level object like this:</p><pre><pre>{
+  header: "$1",
+  post: "$2",
+  footer: "$3"
+}</pre></pre><p>Here, <pre>"$1"</pre>, <pre>"$2"</pre>, <pre>"$3"</pre> refer to pieces of information that have not been sent yet. These are placeholders that can progressively be filled in later in the stream.</p><p>For example, suppose the server sends a few more rows of data to the stream:</p><pre><pre>{
+  header: "$1",
+  post: "$2",
+  footer: "$3"
+}
+/* $1 */
+"Welcome to my blog"
+/* $3 */
+"Hope you like it"</pre></pre><p>Notice that we’re not obligated to send the rows in any particular order. In the above example, we’ve just sent both <pre>$1</pre> and <pre>$3</pre>—but the <pre>$2</pre> row is still pending!</p><p>If the client tried to reconstruct the tree at this point, it could look like this:</p><pre><pre>{
+  header: "Welcome to my blog",
+  post: new Promise(/* ... not yet resolved ... */),
+  footer: "Hope you like it"
+}</pre></pre><p>We’ll represent the parts that haven’t loaded yet as Promises.</p><p>Then suppose the server could stream in a few more rows:</p><pre><pre>{
+  header: "$1",
+  post: "$2",
+  footer: "$3"
+}
+/* $1 */
+"Welcome to my blog"
+/* $3 */
+"Hope you like it"
+/* $2 */
+{
+  content: "$4",
+  comments: "$5"
+}
+/* $4 */
+"This is my article"</pre></pre><p>This would “fill in” some of the missing pieces from the client’s perspective:</p><pre><pre>{
+  header: "Welcome to my blog",
+  post: {
+    content: "This is my article",
+    comments: new Promise(/* ... not yet resolved ... */),
+  },
+  footer: "Hope you like it"
+}</pre></pre><p>The Promise for the <pre>post</pre> would now resolve to an object. However, we still don’t know what’s inside the <pre>comments</pre>, so now those are represented as a Promise.</p><p>Finally, the comments could stream in:</p><pre><pre>{
+  header: "$1",
+  post: "$2",
+  footer: "$3"
+}
+/* $1 */
+"Welcome to my blog"
+/* $3 */
+"Hope you like it"
+/* $2 */
+{
+  content: "$4",
+  comments: "$5"
+}
+/* $4 */
+"This is my article"
+/* $5 */
+["$6", "$7", "$8"]
+/* $6 */
+"This is the first comment"
+/* $7 */
+"This is the second comment"
+/* $8 */
+"This is the third comment"</pre></pre><p>Now, from the client’s perspective, the entire tree would be complete:</p><pre><pre>{
+  header: "Welcome to my blog",
+  post: {
+    content: "This is my article",
+    comments: [
+      "This is the first comment",
+      "This is the second comment",
+      "This is the third comment"
+    ]
+  },
+  footer: "Hope you like it"
+}</pre></pre><p>By sending data breadth-first in chunks, we gained the ability to progressively handle it on the client. As long as the client can deal with some parts being “not ready” (represented as Promises) and process the rest, this is an improvement!</p><h3><a href="https://overreacted.io#inlining"/> Inlining</h3>
+<p>Now that we have the basic mechanism, we’ll adjust it for more efficient output. Let’s have another look at the entire streaming sequence from the last example:</p><pre><pre>{
+  header: "$1",
+  post: "$2",
+  footer: "$3"
+}
+/* $1 */
+"Welcome to my blog"
+/* $3 */
+"Hope you like it"
+/* $2 */
+{
+  content: "$4",
+  comments: "$5"
+}
+/* $4 */
+"This is my article"
+/* $5 */
+["$6", "$7", "$8"]
+/* $6 */
+"This is the first comment"
+/* $7 */
+"This is the second comment"
+/* $8 */
+"This is the third comment"</pre></pre><p>We may have gone a little too far with streaming here. Unless generating some parts actually is slow, we don’t gain anything from sending them as separate rows.</p><p>Suppose that we have two different slow operations: loading a post and loading a post’s comments. In that case, it would make sense to send three chunks in total.</p><p>First, we would send the outer shell:</p><pre><pre>{
+  header: "Welcome to my blog",
+  post: "$1",
+  footer: "Hope you like it"
+}</pre></pre><p>On the client, this would immediately become:</p><pre><pre>{
+  header: "Welcome to my blog",
+  post: new Promise(/* ... not yet resolved ... */),
+  footer: "Hope you like it"
+}</pre></pre><p>Then we’d send the <pre>post</pre> data (but without the <pre>comments</pre>):</p><pre><pre>{
+  header: "Welcome to my blog",
+  post: "$1",
+  footer: "Hope you like it"
+}
+/* $1 */
+{
+  content: "This is my article",
+  comments: "$2"
+}</pre></pre><p>From the client’s perspective:</p><pre><pre>{
+  header: "Welcome to my blog",
+  post: {
+    content: "This is my article",
+    comments: new Promise(/* ... not yet resolved ... */),
+  },
+  footer: "Hope you like it"
+}</pre></pre><p>Finally, we’d send the comments in a single chunk:</p><pre><pre>{
+  header: "Welcome to my blog",
+  post: "$1",
+  footer: "Hope you like it"
+}
+/* $1 */
+{
+  content: "This is my article",
+  comments: "$2"
+}
+/* $2 */
+[
+  "This is the first comment",
+  "This is the second comment",
+  "This is the third comment"
+]</pre></pre><p>That would give us the whole tree on the client:</p><pre><pre>{
+  header: "Welcome to my blog",
+  post: {
+    content: "This is my article",
+    comments: [
+      "This is the first comment",
+      "This is the second comment",
+      "This is the third comment"
+    ]
+  },
+  footer: "Hope you like it"
+}</pre></pre><p>This is more compact and achieves the same purpose.</p><p>In general, this format gives us leeway to decide when to send things as a single chunks vs. multiple chunks. As long as the client is resilient to chunks arriving out-of-order, the server can pick different batching and chunking heuristics.</p><h3><a href="https://overreacted.io#outlining"/> Outlining</h3>
+<p>One interesting consequence of this approach is that it also gives us a natural way to reduce repetition in the output stream. If we’re serializing an object we’ve already seen before, we can just outline it as a separate row, and reuse it.</p><p>For example, suppose we have an object tree like this:</p><pre><pre>const userInfo = { name: 'Dan' };
+ 
+[
+  { type: 'header', user: userInfo },
+  { type: 'sidebar', user: userInfo },
+  { type: 'footer', user: userInfo }
+]</pre></pre><p>If we were to serialize it to plain JSON, we’d end up repeating <pre>{ name: 'Dan' }</pre>:</p><pre><pre>[
+  { type: 'header', user: { name: 'Dan' } },
+  { type: 'sidebar', user: { name: 'Dan' } },
+  { type: 'footer', user: { name: 'Dan' } }
+]</pre></pre><p>However, if we’re serving JSON progressively, we could choose to outline it:</p><pre><pre>[
+  { type: 'header', user: "$1" },
+  { type: 'sidebar', user: "$1" },
+  { type: 'footer', user: "$1" }
+]
+/* $1 */
+{ name: "Dan" }</pre></pre><p>We could also pursue a more balanced strategy—for example, to inline objects by default (for compactness) until we see some object being used two or more times, at which point we’ll emit it separately and dedupe the rest of them in the stream.</p><p>This also means that, unlike with plain JSON, we can support serializing cyclic objects. A cyclic object just has a property that points to its own stream “row”.</p><h3><a href="https://overreacted.io#streaming-data-vs-streaming-ui"/> Streaming Data vs Streaming UI</h3>
+<p>The approach above is essentially how React Server Components (RSC) work.</p><p>Suppose you write a page with React Server Components:</p><pre><pre>function Page() {
+  return (
+    &lt;html&gt;
+      &lt;body&gt;
+        &lt;header&gt;Welcome to my blog&lt;/header&gt;
+        &lt;Post /&gt;
+        &lt;footer&gt;Hope you like it&lt;/footer&gt;
+      &lt;/body&gt;
+    &lt;/html&gt;
+  );
+}
+ 
+async function Post() {
+  const post = await loadPost();
+  return (
+    &lt;article&gt;
+      &lt;p&gt;{post.text}&lt;/p&gt;
+      &lt;Comments /&gt;
+    &lt;/article&gt;
+  );
+}
+ 
+async function Comments() {
+  const comments = await loadComments();
+  return &lt;ul&gt;{comments.map(c =&gt; &lt;li key={c.id}&gt;{c.text}&lt;/li&gt;)}&lt;/ul&gt;;
+}</pre></pre><p>React will serve the output of the <pre>Page</pre> as a progressive JSON stream. On the client, it will be reconstructed as a progressively loaded React tree.</p><p>Initially, the React tree on the client will appear like this:</p><pre><pre>&lt;html&gt;
+  &lt;body&gt;
+    &lt;header&gt;Welcome to my blog&lt;/header&gt;
+    {new Promise(/* ... not resolved yet */)}
+    &lt;footer&gt;Hope you like it&lt;/footer&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</pre></pre><p>Then, as <pre>loadPost</pre> resolves on the server, more will stream in:</p><pre><pre>&lt;html&gt;
+  &lt;body&gt;
+    &lt;header&gt;Welcome to my blog&lt;/header&gt;
+    &lt;article&gt;
+      &lt;p&gt;This is my post&lt;/p&gt;
+      {new Promise(/* ... not resolved yet */)}
+    &lt;/article&gt;
+    &lt;footer&gt;Hope you like it&lt;/footer&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</pre></pre><p>Finally, when <pre>loadComments</pre> resolves on the server, the client receives the rest:</p><pre><pre>&lt;html&gt;
+  &lt;body&gt;
+    &lt;header&gt;Welcome to my blog&lt;/header&gt;
+    &lt;article&gt;
+      &lt;p&gt;This is my post&lt;/p&gt;
+      &lt;ul&gt;
+        &lt;li key="1"&gt;This is the first comment&lt;/li&gt;
+        &lt;li key="2"&gt;This is the second comment&lt;/li&gt;
+        &lt;li key="3"&gt;This is the third comment&lt;/li&gt;
+      &lt;/ul&gt;
+    &lt;/article&gt;
+    &lt;footer&gt;Hope you like it&lt;/footer&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</pre></pre><p>However, here’s the kicker.</p><p>You don’t actually want the page to jump arbitrarily as the data streams in. For example, maybe you never want to show the page without the post’s content.</p><p>This is why React doesn’t display “holes” for pending Promises. Instead, it displays the closest declarative loading state, indicated by <a href="https://react.dev/reference/react/Suspense"> &lt;Suspense&gt;</a>.</p><p>In the above example, there are no <pre>&lt;Suspense&gt;</pre> boundaries in the tree. This means that, although React will receive the data as a stream, it will not actually display a “jumping” page to the user. It will wait for the entire page to be ready.</p><p>However, you can opt into a progressively revealed loading state by wrapping a part of the UI tree into <pre>&lt;Suspense&gt;</pre>. This doesn’t change how the data is sent (it’s still as “streaming” as possible), but it changes when React reveals it to the user.</p><p>For example:</p><pre><pre>import { Suspense } from 'react';
+ 
+function Page() {
+  return (
+    &lt;html&gt;
+      &lt;body&gt;
+        &lt;header&gt;Welcome to my blog&lt;/header&gt;
+        &lt;Post /&gt;
+        &lt;footer&gt;Hope you like it&lt;/footer&gt;
+      &lt;/body&gt;
+    &lt;/html&gt;
+  );
+}
+ 
+async function Post() {
+  const post = await loadPost();
+  return (
+    &lt;article&gt;
+      &lt;p&gt;{post.text}&lt;/p&gt;
+      &lt;Suspense fallback={&lt;CommentsGlimmer /&gt;}&gt;
+        &lt;Comments /&gt;
+      &lt;/Suspense&gt;
+    &lt;/article&gt;
+  );
+}
+ 
+async function Comments() {
+  const comments = await loadComments();
+  return &lt;ul&gt;{comments.map(c =&gt; &lt;li key={c.id}&gt;{c.text}&lt;/li&gt;)}&lt;/ul&gt;;
+}</pre></pre><p>Now the user will perceive the loading sequence in two stages:</p><ul><li>First, the post “pops in” together with the header, the footer, and a glimmer for comments. The header and the footer never appear on their own.</li><li>Then, the comments “pop in” on their own.</li></ul><p>In other words, the stages in which the UI gets revealed are decoupled from how the data arrives. The data is streamed as it becomes available, but we only want to reveal things to the user according to intentionally designed loading states.</p><p>In a way, you can see those Promises in the React tree acting almost like a <pre>throw</pre>, while <pre>&lt;Suspense&gt;</pre> acts almost like a <pre>catch</pre>. The data arrives as fast as it can in whatever order the server is ready to send it, but React takes care to present the loading sequence gracefully and let the developer control the visual reveal.</p><p>Note that what I described so far has nothing to do with “SSR” or HTML. I was describing a general mechanism for streaming a UI tree represented as JSON. You can turn that JSON tree into progressively revealed HTML (and <a href="https://gal.hagever.com/posts/out-of-order-streaming-from-scratch">React can do that</a>), but the idea is broader than HTML and applies to SPA-like navigations as well.</p><h3><a href="https://overreacted.io#in-conclusion"/> In Conclusion</h3>
+<p>In this post, I’ve sketched out one of the core innovations of RSC. Instead of sending data as a single big chunk, it sends the props for your component tree outside-in. As a result, as soon as there’s an intentional loading state to display, React can do that while the rest of the data for your page is being streamed in.</p><p>I’d like to challenge more tools to adopt progressive streaming of data. If you have a situation where you can’t start doing something on the client until the server stops doing something, that’s a clear example of where streaming can help. If a single slow thing can slow down everything after it, that’s another warning sign.</p><p>Like I showed in this post, streaming alone is not enough—you also need a programming model that can take advantage of streaming and gracefully handle incomplete information. React solves that with intentional <pre>&lt;Suspense&gt;</pre> loading states. If you know systems that solve this differently, I’d love to hear about them!</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

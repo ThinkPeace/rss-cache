@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Type-based alias analysis in the Toy Optimizer | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Type-based alias analysis in the Toy Optimizer</h1>
+        <div class="meta">Max Bernstein&#x27;s Blog 2026-02-16T00:00:00Z</div>
+        <div class="links">
+          <a href="https://bernsteinbear.com/blog/toy-tbaa/?utm_source=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/bernsteinbear-com/bernsteinbear-com-d2b968bfeac4c9db.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Another entry in the Toy Optimizer series . Last time, we did load-store forwarding in the context of our Toy Optimizer. We managed to cache the results of both reads from and writes to the heap—at compile-time! We were careful to mind object aliasing: we separated our heap information into alias classes based on what offset the reads/writes referenced. Thi…</div>
+        <div class="content">
+          <p><em>Another entry in the <a href="https://pypy.org/categories/toy-optimizer.html">Toy Optimizer series</a></em>.</p>
+
+<p>Last time, we did <a href="/blog/toy-load-store/">load-store forwarding</a> in the context
+of our Toy Optimizer. We managed to cache the results of both reads from and
+writes to the heap—at compile-time!</p>
+
+<p>We were careful to mind object aliasing: we separated our heap information into
+alias classes based on what offset the reads/writes referenced. This way, if we
+didn’t know if object <code class="language-plaintext highlighter-rouge">a</code> and <code class="language-plaintext highlighter-rouge">b</code> aliased, we could at least know that
+different offsets would never alias (assuming our objects don’t overlap and
+memory accesses are on word-sized slots). This is a coarse-grained heuristic.</p>
+
+<p>Fortunately, we often have much more information available at compile-time than
+just the offset, so we should use it. I mentioned in a footnote that we could
+use type information, for example, to improve our alias analysis. We’ll add
+a lightweight form of <a href="/assets/img/tbaa.pdf">type-based alias analysis (TBAA)</a>
+(PDF) in this post.</p>
+
+<h2 id="representing-types">Representing types</h2>
+
+<p>We return once again to Fil Pizlo land, specifically <a href="https://gist.github.com/pizlonator/cf1e72b8600b1437dda8153ea3fdb963">How I implement SSA
+form</a>.
+We’re going to be using the hierarchical heap effect representation from the
+post in our implementation, but you can use your own type representation if you
+have one already.</p>
+
+<p>This representation divides the heap into disjoint regions by type. Consider,
+for example, that <code class="language-plaintext highlighter-rouge">Array</code> objects and <code class="language-plaintext highlighter-rouge">String</code> objects do not overlap. A
+<code class="language-plaintext highlighter-rouge">LinkedList</code> pointer is never going to alias an <code class="language-plaintext highlighter-rouge">Integer</code> pointer. They can
+therefore be reasoned about separately.</p>
+
+<p>But sometimes you don’t have perfect type information available. If you have in
+your language an <code class="language-plaintext highlighter-rouge">Object</code> base class of all objects, then the <code class="language-plaintext highlighter-rouge">Object</code> heap
+overlaps with, say, the <code class="language-plaintext highlighter-rouge">Array</code> heap. So you need some way to represent that
+too—just having an enum doesn’t work cleanly.</p>
+
+<p>Here is an example simplified type hierarchy:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Any
+  Object
+    Array
+    String
+  Other
+</code></pre></div></div>
+
+<p>Where <code class="language-plaintext highlighter-rouge">Other</code> might represent different parts of the runtime’s data structures,
+and could be further segmented into <code class="language-plaintext highlighter-rouge">GC</code>, <code class="language-plaintext highlighter-rouge">Thread</code>, etc.</p>
+
+<p>Fil’s idea is that we can represent each node in that hierarchy with a tuple of
+integers <code class="language-plaintext highlighter-rouge">[start, end)</code> (inclusive, exclusive) that represent the pre- and
+post-order traversals of the tree. Or, if tree traversals are not engraved into
+your bones, they represent the range of all the nested objects within them.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Any [0, 3)
+  Object [0, 2)
+    Array [0, 1)
+    String [1, 2)
+  Other [2, 3)
+</code></pre></div></div>
+
+<p>Then the “does this write interfere with this read” check—the aliasing
+check—is a range overlap query.</p>
+
+<p>Here’s a perhaps over-engineered Python implementation of the range and heap
+hierarchy based on the Ruby generator and C++ runtime code from JavaScriptCore:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">HeapRange</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">start</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">end</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">start</span> <span class="o">=</span> <span class="n">start</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">end</span> <span class="o">=</span> <span class="n">end</span>
+
+    <span class="k">def</span> <span class="nf">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s">"[</span><span class="si">{</span><span class="bp">self</span><span class="p">.</span><span class="n">start</span><span class="si">}</span><span class="s">, </span><span class="si">{</span><span class="bp">self</span><span class="p">.</span><span class="n">end</span><span class="si">}</span><span class="s">)"</span>
+
+    <span class="k">def</span> <span class="nf">is_empty</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="p">.</span><span class="n">start</span> <span class="o">==</span> <span class="bp">self</span><span class="p">.</span><span class="n">end</span>
+
+    <span class="k">def</span> <span class="nf">overlaps</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="s">"HeapRange"</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="c1"># Empty ranges interfere with nothing
+</span>        <span class="k">if</span> <span class="bp">self</span><span class="p">.</span><span class="n">is_empty</span><span class="p">()</span> <span class="ow">or</span> <span class="n">other</span><span class="p">.</span><span class="n">is_empty</span><span class="p">():</span>
+            <span class="k">return</span> <span class="bp">False</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="p">.</span><span class="n">end</span> <span class="o">&gt;</span> <span class="n">other</span><span class="p">.</span><span class="n">start</span> <span class="ow">and</span> <span class="n">other</span><span class="p">.</span><span class="n">end</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="p">.</span><span class="n">start</span>
+
+
+<span class="k">class</span> <span class="nc">AbstractHeap</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">parent</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">children</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="p">.</span><span class="nb">range</span> <span class="o">=</span> <span class="bp">None</span>
+
+    <span class="k">def</span> <span class="nf">add_child</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">AbstractHeap</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="n">result</span><span class="p">.</span><span class="n">parent</span> <span class="o">=</span> <span class="bp">self</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">children</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span> <span class="nf">compute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">start</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="n">current</span> <span class="o">=</span> <span class="n">start</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="p">.</span><span class="n">children</span><span class="p">:</span>
+            <span class="bp">self</span><span class="p">.</span><span class="nb">range</span> <span class="o">=</span> <span class="n">HeapRange</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">current</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="k">for</span> <span class="n">child</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">.</span><span class="n">children</span><span class="p">:</span>
+            <span class="n">child</span><span class="p">.</span><span class="n">compute</span><span class="p">(</span><span class="n">current</span><span class="p">)</span>
+            <span class="n">current</span> <span class="o">=</span> <span class="n">child</span><span class="p">.</span><span class="nb">range</span><span class="p">.</span><span class="n">end</span>
+        <span class="bp">self</span><span class="p">.</span><span class="nb">range</span> <span class="o">=</span> <span class="n">HeapRange</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">current</span><span class="p">)</span>
+
+
+<span class="n">Any</span> <span class="o">=</span> <span class="n">AbstractHeap</span><span class="p">(</span><span class="s">"Any"</span><span class="p">)</span>
+<span class="n">Object</span> <span class="o">=</span> <span class="n">Any</span><span class="p">.</span><span class="n">add_child</span><span class="p">(</span><span class="s">"Object"</span><span class="p">)</span>
+<span class="n">Array</span> <span class="o">=</span> <span class="n">Object</span><span class="p">.</span><span class="n">add_child</span><span class="p">(</span><span class="s">"Array"</span><span class="p">)</span>
+<span class="n">String</span> <span class="o">=</span> <span class="n">Object</span><span class="p">.</span><span class="n">add_child</span><span class="p">(</span><span class="s">"String"</span><span class="p">)</span>
+<span class="n">Other</span> <span class="o">=</span> <span class="n">Any</span><span class="p">.</span><span class="n">add_child</span><span class="p">(</span><span class="s">"Other"</span><span class="p">)</span>
+<span class="n">Any</span><span class="p">.</span><span class="n">compute</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Where <code class="language-plaintext highlighter-rouge">Any.compute(0)</code> kicks off the tree-numbering scheme.</p>
+
+<p>Fil’s implementation also covers a bunch of abstract heaps such as SSAState and
+Control because his is used for code motion and whatnot. That can be added on
+later but we will not do so in this post.</p>
+
+<p>So there you have it: a type representation. Now we need to use it in our
+load-store forwarding.</p>
+
+<h2 id="load-store-forwarding">Load-store forwarding</h2>
+
+<p>Recall that our load-store optimization pass looks like this:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">def</span> <span class="nf">optimize_load_store</span><span class="p">(</span><span class="n">bb</span><span class="p">:</span> <span class="n">Block</span><span class="p">):</span>
+    <span class="n">opt_bb</span> <span class="o">=</span> <span class="n">Block</span><span class="p">()</span>
+    <span class="c1"># Stores things we know about the heap at... compile-time.
+</span>    <span class="c1"># Key: an object and an offset pair acting as a heap address
+</span>    <span class="c1"># Value: a previous SSA value we know exists at that address
+</span>    <span class="n">compile_time_heap</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">Value</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">Value</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">op</span> <span class="ow">in</span> <span class="n">bb</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">op</span><span class="p">.</span><span class="n">name</span> <span class="o">==</span> <span class="s">"store"</span><span class="p">:</span>
+            <span class="n">obj</span> <span class="o">=</span> <span class="n">op</span><span class="p">.</span><span class="n">arg</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">offset</span> <span class="o">=</span> <span class="n">get_num</span><span class="p">(</span><span class="n">op</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">store_info</span> <span class="o">=</span> <span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span>
+            <span class="n">current_value</span> <span class="o">=</span> <span class="n">compile_time_heap</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">store_info</span><span class="p">)</span>
+            <span class="n">new_value</span> <span class="o">=</span> <span class="n">op</span><span class="p">.</span><span class="n">arg</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">eq_value</span><span class="p">(</span><span class="n">current_value</span><span class="p">,</span> <span class="n">new_value</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">compile_time_heap</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="n">load_info</span><span class="p">:</span> <span class="n">value</span>
+                <span class="k">for</span> <span class="n">load_info</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">compile_time_heap</span><span class="p">.</span><span class="n">items</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">load_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="n">offset</span>
+            <span class="p">}</span>
+            <span class="n">compile_time_heap</span><span class="p">[</span><span class="n">store_info</span><span class="p">]</span> <span class="o">=</span> <span class="n">new_value</span>
+        <span class="k">elif</span> <span class="n">op</span><span class="p">.</span><span class="n">name</span> <span class="o">==</span> <span class="s">"load"</span><span class="p">:</span>
+            <span class="n">load_info</span> <span class="o">=</span> <span class="p">(</span><span class="n">op</span><span class="p">.</span><span class="n">arg</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">get_num</span><span class="p">(</span><span class="n">op</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">load_info</span> <span class="ow">in</span> <span class="n">compile_time_heap</span><span class="p">:</span>
+                <span class="n">op</span><span class="p">.</span><span class="n">make_equal_to</span><span class="p">(</span><span class="n">compile_time_heap</span><span class="p">[</span><span class="n">load_info</span><span class="p">])</span>
+                <span class="k">continue</span>
+            <span class="n">compile_time_heap</span><span class="p">[</span><span class="n">load_info</span><span class="p">]</span> <span class="o">=</span> <span class="n">op</span>
+        <span class="n">opt_bb</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">op</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">opt_bb</span>
+</code></pre></div></div>
+
+<p>At its core, it iterates over the instructions, keeping a representation of the
+heap at compile-time. Reads get cached, writes get cached, and writes also
+invalidate the state of compile-time information about fields that may alias.</p>
+
+<p>In this case, our <em>may alias</em> asks only if the offsets overlap. This means that
+the following unit test will fail:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">def</span> <span class="nf">test_store_to_same_offset_different_heaps_does_not_invalidate_load</span><span class="p">():</span>
+    <span class="n">bb</span> <span class="o">=</span> <span class="n">Block</span><span class="p">()</span>
+    <span class="n">var0</span> <span class="o">=</span> <span class="n">bb</span><span class="p">.</span><span class="n">getarg</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">var0</span><span class="p">.</span><span class="n">info</span> <span class="o">=</span> <span class="n">Array</span>
+    <span class="n">var1</span> <span class="o">=</span> <span class="n">bb</span><span class="p">.</span><span class="n">getarg</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">var1</span><span class="p">.</span><span class="n">info</span> <span class="o">=</span> <span class="n">String</span>
+    <span class="n">var2</span> <span class="o">=</span> <span class="n">bb</span><span class="p">.</span><span class="n">store</span><span class="p">(</span><span class="n">var0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="n">var3</span> <span class="o">=</span> <span class="n">bb</span><span class="p">.</span><span class="n">store</span><span class="p">(</span><span class="n">var1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+    <span class="n">var4</span> <span class="o">=</span> <span class="n">bb</span><span class="p">.</span><span class="n">load</span><span class="p">(</span><span class="n">var0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">bb</span><span class="p">.</span><span class="n">escape</span><span class="p">(</span><span class="n">var4</span><span class="p">)</span>
+    <span class="n">opt_bb</span> <span class="o">=</span> <span class="n">optimize_load_store</span><span class="p">(</span><span class="n">bb</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="p">(</span>
+        <span class="n">bb_to_str</span><span class="p">(</span><span class="n">opt_bb</span><span class="p">)</span>
+        <span class="o">==</span> <span class="s">"""</span><span class="se">\
+</span><span class="s">var0 = getarg(0)
+var1 = getarg(1)
+var2 = store(var0, 0, 3)
+var3 = store(var1, 0, 4)
+var4 = escape(3)"""</span>
+    <span class="p">)</span>
+</code></pre></div></div>
+
+<p>This test is expecting the write to <code class="language-plaintext highlighter-rouge">var0</code> to still remain cached even though
+we wrote to the same offset in <code class="language-plaintext highlighter-rouge">var1</code>—because we have annotated <code class="language-plaintext highlighter-rouge">var0</code> as
+being an <code class="language-plaintext highlighter-rouge">Array</code> and <code class="language-plaintext highlighter-rouge">var1</code> as being a <code class="language-plaintext highlighter-rouge">String</code>. If we account for type
+information in our alias analysis, we can get this test to pass.</p>
+
+<p>After doing a bunch of fussing around with the load-store forwarding (many
+rewrites), I eventually got it down to a very short diff:</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gi">+def may_alias(left: Value, right: Value) -&gt; bool:
++    return (left.info or Any).range.overlaps((right.info or Any).range)
++
++
+</span> def optimize_load_store(bb: Block):
+     opt_bb = Block()
+     # Stores things we know about the heap at... compile-time.
+<span class="p">@@ -138,6 +210,10 @@</span> def optimize_load_store(bb: Block):
+                 load_info: value
+                 for load_info, value in compile_time_heap.items()
+                 if load_info[1] != offset
+<span class="gi">+                or not may_alias(load_info[0], obj)
+</span>             }
+             compile_time_heap[store_info] = new_value
+</code></pre></div></div>
+
+<p>If we don’t have any type/alias information, we default to “I know nothing”
+(<code class="language-plaintext highlighter-rouge">Any</code>) for each object. Then we check range overlap.</p>
+
+<p>The boolean logic in <code class="language-plaintext highlighter-rouge">optimize_load_store</code> looks a little weird, maybe. But we
+can also rewrite (via DeMorgan’s law) as:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span>
+    <span class="p">...</span> <span class="k">for</span> <span class="p">...</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">load_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="n">offset</span>
+            <span class="ow">and</span> <span class="n">may_alias</span><span class="p">(</span><span class="n">load_info</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">obj</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>So, keeping all the cached field state about fields that are known by offset
+and by type not to alias. Maybe that is clearer (but not as nice a diff).</p>
+
+<blockquote>
+  <p>Note that the type representation is not so important here! You could use a
+bitset version of the type information if you want. The important things are
+that you can cheaply construct types and check overlap between them.</p>
+</blockquote>
+
+<!--
+Note that we do not currently have a notion of "must-alias" other than if two
+SSA values are equal. Therefore we can't make use of writes to object A for
+loads from object B even if A and B must alias.
+-->
+
+<p>Nice, now our test passes! We can differentiate between memory accesses on
+objects of different types.</p>
+
+<p>But what if we knew more?</p>
+
+<h2 id="object-provenance--allocation-site">Object provenance / allocation site</h2>
+
+<p>Sometimes we know where an object came from. For example, we may have seen it
+get allocated in the trace. If we saw an object’s allocation, we know that it
+does not alias (for example) any object that was passed in via a parameter. We
+can use this kind of information to our advantage.</p>
+
+<p>For example, in the following made up IR snippet:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>trace(arg0):
+  v0 = malloc(8)
+  v1 = malloc(16)
+  ...
+</code></pre></div></div>
+
+<p>We know that (among other facts) <code class="language-plaintext highlighter-rouge">v0</code> doesn’t alias <code class="language-plaintext highlighter-rouge">arg0</code> or <code class="language-plaintext highlighter-rouge">v1</code> because we
+have seen its allocation site.</p>
+
+<p>I saw this in the old V8 IR Hydrogen’s lightweight alias analysis<sup id="fnref:fork" role="doc-noteref"><a href="#fn:fork" class="footnote" rel="footnote">1</a></sup>:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">enum</span> <span class="n">HAliasing</span> <span class="p">{</span>
+  <span class="n">kMustAlias</span><span class="p">,</span>
+  <span class="n">kMayAlias</span><span class="p">,</span>
+  <span class="n">kNoAlias</span>
+<span class="p">};</span>
+
+<span class="n">HAliasing</span> <span class="n">Query</span><span class="p">(</span><span class="n">HValue</span><span class="o">*</span> <span class="n">a</span><span class="p">,</span> <span class="n">HValue</span><span class="o">*</span> <span class="n">b</span><span class="p">)</span> <span class="p">{</span>
+  <span class="c1">// The same SSA value always references the same object.</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">a</span> <span class="o">==</span> <span class="n">b</span><span class="p">)</span> <span class="k">return</span> <span class="n">kMustAlias</span><span class="p">;</span>
+
+  <span class="k">if</span> <span class="p">(</span><span class="n">a</span><span class="o">-&gt;</span><span class="n">IsAllocate</span><span class="p">()</span> <span class="o">||</span> <span class="n">a</span><span class="o">-&gt;</span><span class="n">IsInnerAllocatedObject</span><span class="p">())</span> <span class="p">{</span>
+    <span class="c1">// Two non-identical allocations can never be aliases.</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">b</span><span class="o">-&gt;</span><span class="n">IsAllocate</span><span class="p">())</span> <span class="k">return</span> <span class="n">kNoAlias</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">b</span><span class="o">-&gt;</span><span class="n">IsInnerAllocatedObject</span><span class="p">())</span> <span class="k">return</span> <span class="n">kNoAlias</span><span class="p">;</span>
+    <span class="c1">// An allocation can never alias a parameter or a constant.</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">b</span><span class="o">-&gt;</span><span class="n">IsParameter</span><span class="p">())</span> <span class="k">return</span> <span class="n">kNoAlias</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">b</span><span class="o">-&gt;</span><span class="n">IsConstant</span><span class="p">())</span> <span class="k">return</span> <span class="n">kNoAlias</span><span class="p">;</span>
+  <span class="p">}</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">b</span><span class="o">-&gt;</span><span class="n">IsAllocate</span><span class="p">()</span> <span class="o">||</span> <span class="n">b</span><span class="o">-&gt;</span><span class="n">IsInnerAllocatedObject</span><span class="p">())</span> <span class="p">{</span>
+    <span class="c1">// An allocation can never alias a parameter or a constant.</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">a</span><span class="o">-&gt;</span><span class="n">IsParameter</span><span class="p">())</span> <span class="k">return</span> <span class="n">kNoAlias</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">a</span><span class="o">-&gt;</span><span class="n">IsConstant</span><span class="p">())</span> <span class="k">return</span> <span class="n">kNoAlias</span><span class="p">;</span>
+  <span class="p">}</span>
+
+  <span class="c1">// Constant objects can be distinguished statically.</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">a</span><span class="o">-&gt;</span><span class="n">IsConstant</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="n">b</span><span class="o">-&gt;</span><span class="n">IsConstant</span><span class="p">())</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="n">a</span><span class="o">-&gt;</span><span class="n">Equals</span><span class="p">(</span><span class="n">b</span><span class="p">)</span> <span class="o">?</span> <span class="n">kMustAlias</span> <span class="o">:</span> <span class="n">kNoAlias</span><span class="p">;</span>
+  <span class="p">}</span>
+  <span class="k">return</span> <span class="n">kMayAlias</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>There is plenty of other useful information such as:</p>
+
+<ul>
+  <li>If we know at compile-time that object A has 5 at offset 0 and object B has 7
+at offset 0, then A and B don’t alias (thanks, CF)
+    <ul>
+      <li>In the RPython JIT in PyPy, this is used to determine if two user (Python)
+objects don’t alias because we know the contents of the user (Python) class
+field</li>
+    </ul>
+  </li>
+  <li>Object size (though perhaps that is a special case of the above bullet)</li>
+  <li>Field size/type</li>
+  <li>Deferring alias checks to run-time
+    <ul>
+      <li>Have a branch <code class="language-plaintext highlighter-rouge">if (a == b) { ... } else { ... }</code></li>
+    </ul>
+  </li>
+  <li>…</li>
+</ul>
+
+<p>If you have other fun ones, please write in.</p>
+
+<h2 id="interacting-with-other-instructions">Interacting with other instructions</h2>
+
+<p>We only handle loads and stores in our optimizer. Unfortunately, this means we
+may accidentally cache stale information. Consider: what happens if a function
+call (or any other opaque instruction) writes into an object we are tracking?</p>
+
+<p>The conservative approach is to invalidate all cached information on a function
+call. This is definitely correct, but it’s a bummer for the optimizer. Can we
+do anything?</p>
+
+<p>Well, perhaps we are calling a well-known function or a specific IR
+instruction. In that case, we can annotate it with effects in the same abstract
+heap model: if the instruction does not write, or only writes to some heaps, we
+can at least only partially invalidate our heap.</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">known_builtin_functions</span> <span class="o">=</span> <span class="p">{</span>
+  <span class="s">"Array_length"</span><span class="p">:</span> <span class="n">Effects</span><span class="p">(</span><span class="n">reads</span><span class="o">=</span><span class="n">Array</span><span class="p">,</span> <span class="n">writes</span><span class="o">=</span><span class="n">Empty</span><span class="p">()),</span>
+  <span class="s">"Object_setShape"</span><span class="p">:</span> <span class="n">Effects</span><span class="p">(</span><span class="n">reads</span><span class="o">=</span><span class="n">Empty</span><span class="p">(),</span> <span class="n">writes</span><span class="o">=</span><span class="n">Object</span><span class="p">),</span>
+  <span class="s">"String_setEncoding"</span><span class="p">:</span> <span class="n">Effects</span><span class="p">(</span><span class="n">reads</span><span class="o">=</span><span class="n">Empty</span><span class="p">(),</span> <span class="n">writes</span><span class="o">=</span><span class="n">String</span><span class="p">),</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>However, if the function is unknown or otherwise opaque, we need at least more
+advanced alias information and perhaps even (partial) escape analysis.</p>
+
+<p>Consider: even if an instruction takes no operands, we have no idea what state
+it has access to. If it writes to any object A, we cannot safely cache
+information about any other object B unless we know <em>for sure</em> that A and B do
+not alias. And we don’t know what the instruction writes to. So we may only
+know we can cache information about B because it was allocated locally and has
+not escaped.</p>
+
+<h2 id="storing-vs-computing-on-the-fly">Storing vs computing on the fly</h2>
+
+<p>Some runtimes such as ART <a href="https://github.com/LineageOS/android_art/blob/8ce603e0c68899bdfbc9cd4c50dcc65bbf777982/compiler/optimizing/load_store_analysis.h#L395">pre-compute all of their alias information</a> in a bit
+matrix. This makes more sense if you are using alias information in a full
+control-flow graph, where you might need to iterate over the graph a few times.
+In a trace context, you can do a lot in one single pass—no need to make a
+matrix.</p>
+
+<h2 id="when-is-this-useful-how-much">When is this useful? How much?</h2>
+
+<p>As usual, this is a toy IR and a toy optimizer, so it’s hard to say how much
+faster it makes its toy programs.</p>
+
+<p>In general, though, there is a dial for analysis and optimization that goes
+between precision and speed. This is a happy point on that dial, only a tiny
+incremental analysis cost bump above offset-only invalidation, but for higher
+precision. I like that tradeoff.</p>
+
+<p>Also, it is very useful in JIT compilers where generally the managed language
+is a little <a href="https://blog.regehr.org/archives/959">better-behaved than a C-like
+language</a>. Somewhere in your IR there
+will be a lot of duplicate loads and stores from a strength reduction pass, and
+this can clean up the mess.</p>
+
+<!--
+## In other languages
+
+Taking address of objects throws a wrench in it
+
+Can't really do it in C, even though UB
+-->
+
+<!--
+https://github.com/WebKit/WebKit/blob/main/Source/JavaScriptCore/dfg/DFGObjectAllocationSinkingPhase.cpp
+-->
+
+<h2 id="wrapping-up">Wrapping up</h2>
+
+<p>See the <a href="https://github.com/tekknolagi/tekknolagi.github.com/blob/67a1c5cbcf81d96cc63f8b3904619c018d1f2be1/loadstore.py">full code</a>.</p>
+
+<p>Thanks for joining as I work through a small use of type-based alias analysis
+for myself. I hope you enjoyed.</p>
+
+<p>See also <a href="https://wingolog.org/archives/2026/02/18/two-mechanisms-for-dynamic-type-checks">two mechanisms for dynamic type
+checks</a>
+by Andy Wingo. CRuby uses the latter technique described in the article.</p>
+
+<h2 id="thanks">Thanks</h2>
+
+<p>Thank you to <a href="https://www.chrisgregory.me/">Chris Gregory</a> for helpful feedback.</p>
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:fork" role="doc-endnote">
+      <p>I made <a href="https://github.com/tekknolagi/v8">a fork of V8</a> to go spelunk
+around the Hydrogen IR. I reset the V8 repo to the last commit before they
+deleted it in favor of their new Sea of Nodes based IR called TurboFan. <a href="#fnref:fork" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

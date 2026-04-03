@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MicroAlloc | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>MicroAlloc</h1>
+        <div class="meta">BogdanTheGeek&#x27;s Blog 2025-09-21T15:13:00Z</div>
+        <div class="links">
+          <a href="https://bogdanthegeek.github.io/blog/projects/microalloc/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/bogdanthegeek-github-io/bogdanthegeek-github-io-99c9acb2dda75ae5.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">TLDR; You can find the project repository here. What? How? Why? A few Christmases ago, I was browsing the source code for the esp-idf heap allocator1 and thought: This is quite interesting, I should write my own allocator After a bit of looking around, I discovered that general purpose heap allocators are one of those problems that has no perfect solution (…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>
+      <a href="https://bogdanthegeek.github.io/blog/projects/microalloc/">MicroAlloc</a>
+    </h1>
+    <graphic src="https://bogdanthegeek.github.io/blog/images/heap.png" alt="MicroAlloc" title="Cover Image"/>
+    <h1>TLDR;<a href="https://bogdanthegeek.github.io#tldr">#</a></h1>
+    <p>You can find the project repository <a href="https://github.com/BogdanTheGeek/microalloc">here</a>.</p>
+    <h1>What? How? Why?<a href="https://bogdanthegeek.github.io#what-how-why">#</a></h1>
+    <p>A few Christmases ago, I was browsing the source code for the esp-idf <a href="https://github.com/espressif/esp-idf/blob/release/v4.1/components/heap/multi_heap.c">heap allocator</a><a href="https://bogdanthegeek.github.io#fn:1">1</a> and thought:</p>
+    <blockquote>
+      <p>This is quite interesting, I should write my own allocator</p>
+    </blockquote>
+    <p>After a bit of looking around, I discovered that general purpose heap allocators are one of those problems that has no perfect solution (which is the kind of problem I really enjoy). It’s all about trade-offs. You can optimise for speed (which seems very much like the wrong thing to optimise for), allocation overhead, memory fragmentation, or all of them at the same time.</p>
+    <p>It took me a few hours to get a working first-fit free list allocator. Just an allocator, no <pre>free()</pre> which is actually where the complexity really lives, but we’ll get to that. With my itched scratched I committed all my work on a local git repo and returned to my roasted turkey and pickled cabbages (we have a very multi-cultural Christmas).</p>
+    <p>Few months ago, I got interested once again in memory allocators after finding a great paper talking about <a href="https://trepo.tuni.fi/bitstream/handle/10024/140229/AuvinenEetu.pdf?sequence=2">Embedded Dynamic Memory Allocator Optimisation</a>.</p>
+    <p>After reading the paper end to end, I realised that as far as I could tell, very few people have tried pushing the limit when it came to minimising allocation overhead. With my renewed interest, I sat down and finished implementing <pre>free()</pre>, so that I could start playing with optimisations.</p>
+    <h1>Public Service Announcement<a href="https://bogdanthegeek.github.io#public-service-announcement">#</a></h1>
+    <p>Before going any further, please allow me to share some industry secrets. Every self-respecting embedded engineer avoids dynamic allocations like the plague, myself included. There are much simpler, faster, and safer ways to deal with data of flexible sizes.</p>
+    <p>Statically allocating all your memory up front is by far the safest (as long as you leave enough room for your stack to grow), so you should always start with that.</p>
+    <p>If you need to allocate some large buffers depending on some configuration at startup, it’s perfectly safe to allocate it dynamically and never free it.</p>
+    <p>For anything else, use a scratch buffer, block allocator (a.k.a. object pool), or arena allocator.</p>
+    <p>I don’t think you should never use a dynamic allocator, but it should be a last resort, especially for embedded applications.</p>
+    <p>Now, with that out of the way, lets get back to our horses.</p>
+    <h1>The Meat and Potatoes<a href="https://bogdanthegeek.github.io#the-meat-and-potatoes">#</a></h1>
+    <p>A first-fit free list allocator is quite a simple thing. Each block of memory has some metadata associated with it:</p>
+    <pre>
+      <pre>typedef struct
+{
+    ua_base_t metadata; // LSB is used to indicate if the block is free
+    union
+    {
+        unsigned char data[1]; // The actual data
+        ua_base_t next_free;   // Pointer to the next free block
+    };
+} ua_block_t;
+</pre>
+    </pre>
+    <p>We keep track of these blocks as a linked list:</p>
+    <pre>
+      <pre>typedef struct
+{
+    ua_block_t *last_block;
+    ua_block_t *first_free_block;
+} ua_heap_t;
+</pre>
+    </pre>
+    <p>We can actually do a little trick and allocate the <pre>ua_heap_t</pre> structure at the beginning of our <pre>heap</pre>. We then create a single large free block with the remaining memory.</p>
+    <p>When we want to allocate some memory, we traverse the list of free blocks until we find one that fits. If its bigger than we need, we can split it.
+Crucially, we then return to the user the address of <pre>block.data</pre> instead of the address of the block. When we need to free, we can just look “above” the pointer provided by the user to find the metadata. We can use the metadata to store a pointer to the next block in the linked list.</p>
+    <p>After a block is freed, we can use the space inside the block to store a second linked list that points us to the next free block. This means that our effective overhead is just the size of the metadata.</p>
+    <p>Here is where we try to do something novel. Pretty much every other similar allocator uses a full <pre>word</pre> to store the pointers in the metadata field. What if you don’t need more than 64kiB of heap? If we actually store an offset into the heap instead of an absolute pointer, we can get away with only 2 bytes of overhead per allocation.</p>
+    <h1>Garbage collection<a href="https://bogdanthegeek.github.io#garbage-collection">#</a></h1>
+    <p>While implementing <pre>free()</pre>, I realised that I had to have a way of joining adjacent free blocks, otherwise I could run out of large blocks.
+To keep overhead low, I didn’t want to use a two way linked list, so it’s quite slow to find a previous free block, but what if we could defer this merge?</p>
+    <p>I added a compile time flag to disable “merge on free” and allow the user to call <pre>micro_alloc_defrag()</pre> whenever they need to tidy up things. Depending on the application, manual merging may produce a more fragmented heap, but it does improve performance significantly.</p>
+    <h1>Closing thoughts<a href="https://bogdanthegeek.github.io#closing-thoughts">#</a></h1>
+    <p>Dynamic allocation is not magic, and writing your own allocator is a surprisingly rewarding exercise. It took me a while to iron out most of the bugs, though some probably still remain. For a bit of extra fun, here’s how the heap looks after some “stress testing”:</p>
+    <p>
+      <graphic src="/blog/images/heap.png" alt="heap"/>
+    </p>
+    <p>Green blocks are free, blue ones are allocated and red is all the metadata. All the code used to generate it is in the repo linked above.</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Solving the NYTimes Pips puzzle with a constraint solver | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Solving the NYTimes Pips puzzle with a constraint solver</h1>
+        <div class="meta">Ken Shirriff&#x27;s blog 2025-10-18T15:41:00Z</div>
+        <div class="links">
+          <a href="http://www.righto.com/2025/10/solve-nyt-pips-with-constraints.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/righto-com/righto-com-b898e817b817b2ed.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The New York Times recently introduced a new daily puzzle called Pips . You place a set of dominoes on a grid, satisfying various conditions. For instance, in the puzzle below, the pips (dots) in the purple squares must sum to 8, there must be fewer than 5 pips in the red square, and the pips in the three green squares must be equal. (It doesn&#x27;t take much t…</div>
+        <div class="content">
+          <p>The New York Times recently introduced a new daily puzzle called <a href="https://www.nytimes.com/games/pips">Pips</a>.
+You place a set of dominoes on a grid, satisfying various conditions.
+For instance, in the puzzle below,
+the pips (dots) in the purple squares must sum to 8,
+there must be fewer than 5 pips in the red square, and the pips in the three green squares must be equal.
+(It doesn't take much thought to solve this "easy" puzzle, but the "medium" and "hard" puzzles
+are more challenging.)</p>
+<p><a href="https://static.righto.com/images/pips/pips-10-5-easy.jpg"><img alt="The New York Times Pips puzzle from Oct 5, 2025 (easy). Hint: What value must go in the three green squares?" class="hilite" height="223" src="https://static.righto.com/images/pips/pips-10-5-easy-w300.jpg" title="The New York Times Pips puzzle from Oct 5, 2025 (easy). Hint: What value must go in the three green squares?" width="300" /></a><div class="cite">The New York Times Pips puzzle from Oct 5, 2025 (easy). Hint: What value must go in the three green squares?</div></p>
+<p>I was wondering about how to solve these puzzles with a computer.
+Recently, I saw an article on <a href="https://news.ycombinator.com/item?id=45222695">Hacker News</a>&mdash;"<a href="https://buttondown.com/hillelwayne/archive/many-hard-leetcode-problems-are-easy-constraint/">Many hard LeetCode problems are easy constraint problems</a>"&mdash;that described the benefits and flexibility of a system called
+a constraint solver.
+A constraint solver takes a set of constraints and finds solutions that satisfy the constraints: exactly
+what Pips requires.</p>
+<p>I figured that solving Pips with a constraint solver would be a good way to learn more about these
+solvers, but I had several questions.
+Did constraint solvers require incomprehensible mathematics?
+How hard was it to express a problem? Would the solver quickly solve the problem, or
+would it get caught in an exponential search?</p>
+<p>It turns out that using a constraint solver was straightforward; it took me under two hours from
+knowing nothing about constraint solvers to solving the problem.
+The solver found solutions in milliseconds (for the most part).
+However, there were a few bumps along the way.
+In this blog post, I'll discuss my experience with the <a href="https://www.minizinc.org/">MiniZinc</a><span id="fnref:alternatives"><a class="ref" href="#fn:alternatives">1</a></span> constraint
+modeling system and show how it can solve Pips.</p>
+<h2>Approaching the problem</h2>
+<p>Writing a program for a constraint solver is very different from writing a regular program.
+Instead of telling the computer <em>how</em> to solve the problem, you tell it <em>what</em> you want:
+the conditions that must be satisfied.
+The solver then "magically" finds solutions that satisfy the problem.</p>
+<p>To solve the problem, I created an array called <code>pips</code> that holds the number of domino pips at each position
+in the grid.
+Then, the three constraints for the above problem can be expressed as follows.
+You can see how the constraints directly express the conditions in the puzzle.</p>
+<pre>
+constraint pips[1,1] + pips[2,1] == 8;
+constraint pips[2,3] < 5;
+constraint all_equal([pips[3,1], pips[3,2], pips[3,3]]);
+</pre>
+
+<p>Next, I needed to specify where dominoes could be placed for the puzzle.
+To do this, I defined an array called <code>grid</code> that indicated the allowable positions: 1 indicates a valid
+position and 0 indicates an invalid position. (If you compare with the puzzle at the top of the article,
+you can see that the grid below matches its shape.)</p>
+<pre>
+grid = [|
+1,1,0|
+1,1,1|
+1,1,1|];
+</pre>
+
+<p>I also defined the set of dominoes for the problem above, specifying the number of spots in each half:</p>
+<pre>
+spots = [|5,1| 1,4| 4,2| 1,3|];
+</pre>
+
+<p>So far, the constraints directly match the problem.
+However, I needed to write some more code to specify how these pieces interact.
+But
+before I describe that code, I'll show a solution.
+I wasn't sure what to expect: would the constraint solver give me a solution or would it spin
+forever?
+It turned out to find the unique solution in 109 milliseconds, printing out the
+solution arrays.
+The <code>pips</code> array shows the number of pips in each position, while the <code>dominogrid</code> array shows which
+domino (1 through 4) is in each position.</p>
+<pre>
+pips = 
+[| 4, 2, 0
+ | 4, 5, 3
+ | 1, 1, 1
+ |];
+dominogrid = 
+[| 3, 3, 0
+ | 2, 1, 4
+ | 2, 1, 4
+ |];
+</pre>
+
+<p>The text-based solution above is a bit ugly.
+But it is easy to create graphical output.
+MiniZinc provides a JavaScript API, so you can easily display
+solutions on a web page.
+I wrote a few lines of JavaScript to draw the solution, as shown below.
+(I just display the numbers since I was too lazy to draw the dots.)
+Solving this puzzle is not too impressive&mdash;it's an "easy" puzzle after all&mdash;but I'll show below that
+the solver can also handle considerably more difficult puzzles.</p>
+<p><a href="https://static.righto.com/images/pips/solution-10-5-easy.jpg"><img alt="Graphical display of the solution." class="hilite" height="223" src="https://static.righto.com/images/pips/solution-10-5-easy-w300.jpg" title="Graphical display of the solution." width="300" /></a><div class="cite">Graphical display of the solution.</div></p>
+<h3>Details of the code</h3>
+<p>While the above code specifies a particular puzzle, a bit more code is required to define
+how dominoes and the grid interact.
+This code may appear strange because it is implemented as constraints, rather than the
+procedural operations in a normal program.</p>
+<p>My main design decision was how to specify the locations of dominoes.
+I considered assigning a grid position and orientation
+to each domino, but it seemed inconvenient to deal with multiple orientations.
+Instead, I decided to position each half of the domino independently, with an <code>x</code> and <code>y</code> coordinate in
+the grid.<span id="fnref:xy"><a class="ref" href="#fn:xy">2</a></span> I added a constraint that the two halves of each domino had to be in neighboring cells,
+that is, either the X or Y coordinates had to differ by 1.</p>
+<pre>
+constraint forall(i in DOMINO) (abs(x[i, 1] - x[i, 2]) + abs(y[i, 1] - y[i, 2]) == 1);
+</pre>
+
+<p>It took a bit of thought to fill in the <code>pips</code> array with the number of spots on each domino.
+In a normal programming language, one would loop over the dominoes and store the values into <code>pips</code>.
+However, here it is done with a constraint so the solver makes sure the values are assigned.
+Specifically, for each half-domino, the <code>pips</code> array entry at
+the domino's x/y coordinate must equal the corresponding <code>spots</code> on the domino:</p>
+<pre>
+constraint forall(i in DOMINO, j in HALF) (pips[y[i,j], x[i, j]] == spots[i, j]);
+</pre>
+
+<p>I decided to add another array to keep track of which domino is in which position.
+This array is useful to see the domino locations in the output, but it also
+keeps dominoes from overlapping.
+I used a constraint to put each domino's number (1, 2, 3, etc.) into the occupied position of <code>dominogrid</code>:</p>
+<pre>
+constraint forall(i in DOMINO, j in HALF) (dominogrid[y[i,j], x[i, j]] == i);
+</pre>
+
+<p>Next, how do we make sure that dominoes only go into positions allowed by <code>grid</code>?
+I used a constraint that a square in <code>dominogrid</code> must be empty or the corresponding <code>grid</code> must allow a domino.<span id="fnref:iff"><a class="ref" href="#fn:iff">3</a></span>
+This uses the "or" condition, which is expressed as <code>\/</code>, an unusual stylistic
+choice. (Likewise, "and" is expressed as <code>/\</code>. These correspond to the logical symbols
+∨ and ∧.)</p>
+<pre>
+constraint forall(i in 1..H, j in 1..W) (dominogrid[i, j] == 0 \/ grid[i, j] != 0);
+</pre>
+
+<p>Honestly, I was worried that I had too many arrays and the solver would end up in a rathole ensuring that the arrays were consistent.
+But I figured I'd try this brute-force approach and see if it worked.
+It turns out that it worked for the most part, so I didn't need to do anything more clever.</p>
+<p>Finally, the program requires a few lines to define some constants and variables.
+The constants below define the number of dominoes and the size of the grid for a particular problem:</p>
+<pre>
+int: NDOMINO = 4; % Number of dominoes in the puzzle
+int: W = 3; % Width of the grid in this puzzle
+int: H = 3; % Height of the grid in this puzzle
+</pre>
+
+<p>Next, datatypes are defined to specify the allowable values.
+This is very important for the solver; it is a "finite domain" solver, so limiting the size of
+the domains reduces the size of the problem.
+For this problem, the values are integers in a particular range, called a <code>set</code>:</p>
+<pre>
+set of int: DOMINO = 1..NDOMINO; % Dominoes are numbered 1 to NDOMINO
+set of int: HALF = 1..2; % The domino half is 1 or 2
+set of int: xcoord = 1..W; % Coordinate into the grid
+set of int: ycoord = 1..H;
+</pre>
+
+<p>At last, I define the sizes and types of the various arrays that I use.
+One very important syntax is <code>var</code>, which indicates variables that the solver must determine.
+Note that the first two arrays, <code>grid</code> and <code>spots</code> do not have <code>var</code> since they are constant,
+initialized to specify the problem.</p>
+<pre>
+array[1..H,1..W] of 0..1: grid; % The grid defining where dominoes can go
+array[DOMINO, HALF] of int: spots; % The number of spots on each half of each domino
+array[DOMINO, HALF] of var xcoord: x; % X coordinate of each domino half
+array[DOMINO, HALF] of var ycoord: y; % Y coordinate of each domino half
+array[1..H,1..W] of var 0..6: pips; % The number of pips (0 to 6) at each location.
+array[1..H,1..W] of var 0..NDOMINO: dominogrid; % The domino sequence number at each location
+</pre>
+
+<p>You can find all the code on <a href="https://github.com/shirriff/pips">GitHub</a>.
+One weird thing is that because the code is not procedural, the lines can be in any order.
+You can use arrays or constants before you use them.
+You can even move <code>include</code> statements to the end of the file if you want!</p>
+<h2>Complications</h2>
+<p>Overall, the solver was much easier to use than I expected. However, there were a few complications.</p>
+<p>By changing a setting, the solver can find multiple solutions instead of stopping after the first.
+However, when I tried this, the solver generated thousands of meaningless solutions.
+A closer look showed that the problem was that the solver was putting arbitrary numbers into the "empty"
+cells, creating valid but pointlessly different solutions.
+It turns out that I didn't explicitly forbid this, so the sneaky constraint solver went ahead and
+generated tons of solutions that I didn't want.
+Adding another constraint fixed the problem.
+The moral is that even if you think your constraints are clear, solvers are very good at finding unwanted
+solutions that technically satisfy the constraints.
+<span id="fnref:multiple"><a class="ref" href="#fn:multiple">4</a></span></p>
+<p>A second problem is that if you do something wrong, the solver simply says that the problem is
+unsatisfiable. Maybe there's a clever way of debugging, but I ended up removing constraints until
+the problem can be satisfied, and then see what I did wrong with that constraint.
+(For instance, I got the array indices backward at one point, making the problem insoluble.)</p>
+<p>The most concerning issue is the unpredictability of the solver:
+maybe it will take milliseconds or maybe it will take hours.
+For instance, the Oct 5 hard Pips puzzle (below) caused the solver to take minutes for no apparent reason.
+However, the MiniZinc IDE supports different solver backends. I switched from the default <a href="https://www.gecode.dev/publications.html">Gecode</a> solver to
+<a href="https://github.com/chuffed/chuffed">Chuffed</a>, and it immediately found numerous solutions, 384 to
+be precise.
+(Sometimes the Pips puzzles sometimes have multiple solutions, which players find <a href="https://www.reddit.com/r/nytpips/comments/1nyfk5u/sunday_oct_5_2025_pips_49_thread/">controversial</a>.)
+I suspect that the multiple solutions messed up the Gecode solver somehow, perhaps because
+it couldn't narrow down a "good" branch in the search tree.
+For a benchmark of the different solvers, see the footnote.<span id="fnref:comparison"><a class="ref" href="#fn:comparison">5</a></span></p>
+<p><a href="https://static.righto.com/images/pips/solutions-10-5-hard.jpg"><img alt="Two of the 384 solutions to the NYT Pips puzzle from Oct 5, 2025 (hard difficulty)." class="hilite" height="408" src="https://static.righto.com/images/pips/solutions-10-5-hard-w600.jpg" title="Two of the 384 solutions to the NYT Pips puzzle from Oct 5, 2025 (hard difficulty)." width="600" /></a><div class="cite">Two of the 384 solutions to the NYT Pips puzzle from Oct 5, 2025 (hard difficulty).</div></p>
+<h2>How does a constraint solver work?</h2>
+<p>If you were writing a program to solve Pips from scratch, you'd probably have a loop to try
+assigning dominoes to positions.
+The problem is that the problem grows exponentially. If you have 16 dominoes, there are 16 choices
+for the first domino, 15 choices for the second, and so forth, so about 16! combinations in total,
+and that's ignoring orientations.
+You can think of this as a search tree: at the first step, you have 16 branches. For the next step,
+each branch has 15 sub-branches. Each sub-branch has 14 sub-sub-branches, and so forth.</p>
+<p>An easy optimization is to check the constraints after each domino is added. For instance, as soon
+as the 
+"less than 5" constraint is violated, you can <a href="https://en.wikipedia.org/wiki/Backtracking">backtrack</a> and skip that entire
+section of the tree.
+In this way, only a subset of the tree needs to be searched; the number of branches will be large, but
+hopefully manageable.</p>
+<p>A constraint solver works similarly, but in a more abstract way.
+The constraint solver assigns values to the variables, backtracking when a conflict is detected.
+Since the underlying problem is typically NP-complete, the solver uses heuristics to attempt to
+improve performance.
+For instance, variables can be assigned in different orders. The solver attempts to generate
+conflicts as soon as possible so large pieces of the search tree can be pruned sooner rather than later.
+(In the domino case, this corresponds to placing dominoes in places with the tightest constraints, rather
+than scattering them around the puzzle in "easy" spots.)</p>
+<p>Another technique is constraint propagation. The idea is that you can derive new constraints and
+catch conflicts earlier. For instance, suppose you have a problem with the constraints "a equals c" and "b equals c".
+If you assign "a=1" and "b=2", you won't find a conflict until later, when you try to find a value for "c".
+But with constraint propagation, you can derive a new constraint "a equals b", and the problem will
+turn up immediately.
+(Solvers handle more complicated constraint propagation, such as inequalities.)
+The tradeoff is that generating new constraints takes time and makes the problem larger, so constraint
+propagation can make the solver slower. Thus, heuristics are used to decide when to apply constraint propagation.</p>
+<p>Researchers are actively developing new
+algorithms, heuristics, and optimizations<span id="fnref:solvers"><a class="ref" href="#fn:solvers">6</a></span> such as backtracking more aggressively
+(called "backjumping"),
+keeping track of failing variable assignments (called "nogoods"), and
+leveraging Boolean SAT (satisfiability) solvers.
+Solvers compete in <a href="https://www.minizinc.org/challenge/">annual challenges</a> to test
+these techniques against each other.
+The nice thing about a constraint solver is that you don't need to know anything about these techniques;
+they are applied automatically.</p>
+<h2>Conclusions</h2>
+<p>I hope this has convinced you that constraint solvers are interesting, not too scary, and can solve
+real problems with little effort.
+Even as a beginner, I was able to get started with MiniZinc quickly.
+(I read half the <a href="https://docs.minizinc.dev/en/stable/modelling.html">tutorial</a> and then jumped into programming.)</p>
+<p>One reason to look at constraint solvers is that they are a completely different programming paradigm.
+Using a constraint solver is like programming on a higher level, not worrying about how the problem
+gets solved or what algorithm gets used.
+Moreover, analyzing a problem in terms of constraints is a different way of thinking about algorithms.
+Some of the time it's frustrating when you can't use familiar constructs such as loops and assignments,
+but it expands your horizons.</p>
+<p>Finally,
+writing code to solve Pips is more fun than solving the problems by hand, at least in my opinion,
+so give it a try!</p>
+<p>For more, follow me on
+ Bluesky (<a href="https://bsky.app/profile/righto.com">@righto.com</a>),
+Mastodon (<a href="https://oldbytes.space/@kenshirriff">@kenshirriff@oldbytes.space</a>),
+<a href="http://www.righto.com/feeds/posts/default">RSS</a>, or subscribe <a href="https://righto.kit.com/20bf534dff">here</a>.</p>
+<p><a href="https://static.righto.com/images/pips/solution-9-21-hard.jpg"><img alt="Solution to the Pips puzzle, September 21, 2005 (hard). This puzzle has regions that must all be equal (=) and regions that must all be different (≠). Conveniently, MiniZinc has all_equal and alldifferent constraint functions." class="hilite" height="465" src="https://static.righto.com/images/pips/solution-9-21-hard-w330.jpg" title="Solution to the Pips puzzle, September 21, 2005 (hard). This puzzle has regions that must all be equal (=) and regions that must all be different (≠). Conveniently, MiniZinc has all_equal and alldifferent constraint functions." width="330" /></a><div class="cite">Solution to the Pips puzzle, September 21, 2005 (hard). This puzzle has regions that must all be equal (=) and regions that must all be different (≠). Conveniently, MiniZinc has <code>all_equal</code> and <code>alldifferent</code> constraint functions.</div></p>
+<h2>Notes and references</h2>
+<div class="footnote">
+<ol>
+<li id="fn:alternatives">
+<p>
+I started by downloading the <a href="https://www.minizinc.org/">MiniZinc IDE</a> and reading the
+<a href="https://docs.minizinc.dev/en/stable/part_2_tutorial.html">MiniZinc tutorial</a>. The MiniZinc IDE is straightforward, with an editor window at the top and an output window at
+the bottom. Clicking the "Run" button causes it to generate a solution.</p>
+<p><a href="https://static.righto.com/images/pips/ide.jpg"><img alt="Screenshot of the MiniZinc IDE. Click for a larger view." class="hilite" height="411" src="https://static.righto.com/images/pips/ide-w600.jpg" title="Screenshot of the MiniZinc IDE. Click for a larger view." width="600" /></a><div class="cite">Screenshot of the MiniZinc IDE. Click for a larger view.</div></p>
+<p><!-- -->&#160;<a class="footnote-backref" href="#fnref:alternatives" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+</li>
+<li id="fn:xy">
+<p>It might be cleaner to combine the X and Y coordinates into a single <code>Point</code> type, using a MiniZinc <a href="https://docs.minizinc.dev/en/stable/tuple_and_record_types.html">record type</a>.&#160;<a class="footnote-backref" href="#fnref:xy" title="Jump back to footnote 2 in the text">&#8617;</a></p>
+</li>
+<li id="fn:iff">
+<p>I later decided that it made more sense to enforce that <code>dominogrid</code> is empty if and only if
+<code>grid</code> is 0 at that point, although it doesn't affect the solution.
+This constraint uses the "if and only if" operator <code>&lt;-&gt;</code>.</p>
+<p><pre>
+constraint forall(i in 1..H, j in 1..W) (dominogrid[i, j] == 0 &lt;-&gt; grid[i, j] == 0);
+</pre>&#160;<a class="footnote-backref" href="#fnref:iff" title="Jump back to footnote 3 in the text">&#8617;</a></p>
+</li>
+<li id="fn:multiple">
+<p>To prevent the solver from putting arbitrary numbers in the unused positions of <code>pips</code>, I added a
+constraint to force these values to be zero:</p>
+<p><pre>
+constraint forall(i in 1..H, j in 1..W) (grid[i, j] == 0 -&gt; pips[i, j] == 0);
+</pre></p>
+<p>Generating multiple solutions had a second issue, which I expected: A symmetric domino can be
+placed in two redundant ways.
+For instance, a double-six domino can be flipped to produce a solution that is technically
+different but looks the same. I fixed this by adding constraints for each symmetric domino
+to allow only one of the two redundant positions. The constraint below forces a preferred
+orientation for symmetric dominoes.</p>
+<p><pre>
+constraint forall(i in DOMINO) (spots[i,1] != spots[i,2] \/ x[i,1] &gt; x[i,2] \/ (x[i,1] == x[i,2] /\ y[i,1] &gt; y[i,2]));
+</pre></p>
+<p>To enable multiple solutions in MiniZinc, the setting is under Show Configuration Editor &gt; User Defined Behavior &gt;
+Satisfaction Problems or the <code>--all</code> flag from the command line.&#160;<a class="footnote-backref" href="#fnref:multiple" title="Jump back to footnote 4 in the text">&#8617;</a></p>
+</li>
+<li id="fn:comparison">
+<p>MiniZinc has five solvers that can solve this sort of integer problem: <a href="https://github.com/chuffed/chuffed">Chuffed</a>,
+<a href="https://developers.google.com/optimization/cp/cp_solver">OR Tools CP-SAT</a>,
+<a href="https://github.com/Gecode/gecode">Gecode</a>,
+<a href="https://highs.dev/">HiGHS</a>,
+and <a href="https://github.com/coin-or/Cbc">Coin-OR BC</a>.
+I measured the performance of the five solvers against 20 different Pips puzzles.
+Most of the solvers found solutions in under a second, most of the time, but there is a lot
+of variation.</p>
+<p><a href="https://static.righto.com/images/pips/benchmarks.jpg"><img alt="Timings for different solvers on 20 Pip puzzles." class="hilite" height="337" src="https://static.righto.com/images/pips/benchmarks-w600.jpg" title="Timings for different solvers on 20 Pip puzzles." width="600" /></a><div class="cite">Timings for different solvers on 20 Pip puzzles.</div></p>
+<p>Overall, Chuffed had the best performance on the puzzles that I tested, taking well under a second.
+Google's OR-Tools won all
+the categories in the <a href="https://www.minizinc.org/challenge/2025/results/">2025 MiniZinc challenge</a>,
+but it was considerably slower than Chuffed for my Pips programs.
+The default Gecode solver performed very well most of the time, but it did terribly on a few
+problems, taking over 15 minutes.
+HiGHs was slower in general, taking a few minutes on the hardest problems, but it didn't fail
+as badly as Gecode.
+(Curiously, Gecode and HiGHS sometimes found different problems to be difficult.)
+Finally, Coin-OR BC was uniformly bad; at best it took a few seconds, but one puzzle took almost two
+hours and others weren't solved before I gave up after two hours.
+(I left Coin-OR BC off the graph because it messed up the scale.)</p>
+<p>Don't treat these results too seriously because different solvers are optimized for
+different purposes. (In particular, Coin-OR BC is designed for linear problems.)
+But the results demonstrate the unpredictability of solvers: maybe you get a solution in a second
+and maybe you get a solution in hours.&#160;<a class="footnote-backref" href="#fnref:comparison" title="Jump back to footnote 5 in the text">&#8617;</a></p>
+</li>
+<li id="fn:solvers">
+<p>If you want to read more about solvers, <a href="https://zoo.cs.yale.edu/classes/cs470/lectures/s2019/07-CSP.pdf">Constraint Satisfaction Problems</a> is an overview presentation.
+The Gecode algorithms are described in a nice technical report: <a href="https://www.researchgate.net/publication/311953428_Constraint_Programming_Algorithms_used_in_Gecode">Constraint Programming Algorithms used in Gecode</a>.
+Chuffed is more complicated: "Chuffed is a state of the art lazy clause solver designed from the ground up with lazy clause generation in mind. Lazy clause generation is a hybrid approach to constraint solving that combines features of finite domain propagation and Boolean satisfiability."
+The Chuffed paper <a href="https://people.eng.unimelb.edu.au/pstuckey/papers/cp09-lc.pdf">Lazy clause generation reengineered</a>
+and <a href="https://school.a4cp.org/summer2011/slides/Gent/Peter%20Stuckey%20-%20Lazy%20Clause%20Generation.pdf">slides</a> are more of a challenge.
+<!--
+Advanced techniques such as finite domain propagation, lazy clause generation, and SAT solvers
+are described in semi-incomprehensible <a href="https://www.cis.upenn.edu/~cis1890/files/Lecture10.pdf">lecture slides</a>.
+-->&#160;<a class="footnote-backref" href="#fnref:solvers" title="Jump back to footnote 6 in the text">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

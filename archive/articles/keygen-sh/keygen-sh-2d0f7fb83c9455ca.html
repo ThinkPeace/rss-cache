@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to License and Distribute a Private Ruby Gem | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How to License and Distribute a Private Ruby Gem</h1>
+        <div class="meta">Keygen Blog 2021-12-16T06:00:00Z</div>
+        <div class="links">
+          <a href="https://keygen.sh/blog/how-to-license-and-distribute-a-private-rubygem/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/keygen-sh/keygen-sh-2d0f7fb83c9455ca.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Learn how to license and distribute commercial Ruby gems with Keygen&#x27;s software licensing and distribution API.</div>
+        <div class="content">
+          <html>
+  <body><h1>How to License and Distribute a Private Ruby Gem</h1><p>Thursday, December 16th 2021</p><p>This blog post is outdated. We now offer an official Rubygems engine for distributing
+private Ruby gems. Please see <a href="https://keygen.sh/docs/api/engines/#engines-rubygems">the docs</a> to get
+started. We're leaving this blog post up for posterity, because it may still be helpful
+for those wanting to use an S3-compatible service for distributing gems.</p><p>Earlier this week, we learned how to license and distribute private <a href="https://keygen.sh/blog/how-to-license-and-distribute-a-private-docker-image/">Docker images</a>.
+Before that, we took a deep dive into <a href="https://keygen.sh/blog/how-to-license-and-distribute-commercial-node-modules/">Node packages</a>, and <a href="https://keygen.sh/blog/how-to-license-and-distribute-an-electron-app/">Electron apps</a>.
+Today, we'll be going over how to use Keygen to license and distribute a private Ruby gem.</p><p>If you're a Rubyist, you've probably heard of <a href="https://sidekiq.org/">Sidekiq</a>. Sidekiq is an open-source background
+job processing library, and I've never written a Rails code base without it. It's ubiquitous in the
+Ruby and Rails ecosystems.</p><p>But Sidekiq is not just an open-source library. It also has a paid version — and the creator of Sidekiq, Mike Perham, makes over a million dollars a year licensing the commercial closed-source "add-on" to Sidekiq called Sidekiq Pro. This type of business model, called an "open-core" licensing model, is becoming increasingly popular, and it seems to work well, both for users and for the maintainers.</p><p>Today, we're going to dive into how you can use Keygen to license a commercial Ruby gem of
+your own. (Into Node instead of Ruby? Check out <a href="https://keygen.sh/blog/how-to-license-and-distribute-commercial-node-modules/">this post</a>.)</p><h2>Building our Ruby gem</h2><p>Like our other posts in this series, we'll be creating a simple <pre>hello</pre> Ruby gem.</p><p>To start out, let's create our gem's directory structure. This will follow <a href="https://guides.rubygems.org/make-your-own-gem/">best practices</a>
+on building a gem.</p><pre><pre>mkdir -p lib/ touch lib/hello.rb</pre></pre>
+<p>Then we'll add our <pre>Hello</pre> class to our <pre>hello.rb</pre> file.</p><pre><pre>class Hello  def self.world    puts "Hello, world!"  endend</pre></pre>
+<p>Next, we'll create our gem's <pre>gemspec</pre>.</p><pre><pre>touch hello.gemspec</pre></pre>
+<p>And fill it with the following. (Of course, adjusting based on your actual gem.)</p><pre><pre>Gem::Specification.new do |s|  s.name        = 'hello'  s.version     = '1.0.0'  s.summary     = 'Hello, world!'  s.description = 'A simple hello world gem'  s.authors     = ['Zeke Gabrielse']  s.files       = ['lib/hello.rb']  s.licenses    = ['Nonstandard']end</pre></pre>
+<p>Lastly, we'll build our gem. This will pack up our Ruby gem into a <pre>.gem</pre> file. But before
+we do that, we'll want to create a new directory for these files. We'll be managing our private
+<pre>.gem</pre> files inside of a directory called <pre>gems/</pre>, itself inside of a <pre>build/</pre> directory.</p><pre><pre>mkdir -p build/gems/</pre></pre>
+<p>Next, we'll build our gemspec using <a href="https://guides.rubygems.org/command-reference/#gem-build">the  gem CLI</a>.</p><pre><pre>gem build hello.gemspec --output=build/gems/hello-1.0.0.gem</pre></pre>
+<p>Now that we've got a basic gem created, how do we go from gem to gem server? Well, we're not actually going to be running a full RubyGems server. But we will be using Keygen as a static private gem source.</p><h2>Creating our gem source</h2><p>Like I mentioned, we're going to be using Keygen's API as a static file store, very similar
+to how one would <a href="https://guides.rubygems.org/using-s3-source/">use AWS S3 to host a private RubyGem</a>. The immediate benefit of using
+Keygen over something like S3, is that you're able assert that gems are only accessible to
+licensed users with a valid license for the product.</p><p>This makes common things, such as timed trials, much easier to manage compared to managing IAM policies in S3 for each customer, and revoking access after a trial license has expired or has otherwise been suspended. With Keygen, all of this is automatic.</p><p>For a static gem source (i.e. a gem source that isn't running a full RubyGems server), we'll need a
+handful of files. And we currently only have one of them, <pre>hello-1.0.0.gem</pre>.</p><p>To create the required files for a private gem source, we'll generate an "index", also using the <pre>gem</pre>
+CLI. The "index" is what <pre>bundler</pre> will use to request our gem from Keygen, making it a true gem source.
+An index can include more than 1 gem, as long as their <pre>.gem</pre> files are all in the <pre>gems/</pre>
+directory at the time the index is generated.</p><pre><pre>gem generate_index --directory build/</pre></pre>
+<p>Now, if we list out the generated files, we should see something like below.</p><pre><pre>find build/* -type f# =&gt; build/gems/hello-1.0.0.gem#    build/latest_specs.4.8#    build/latest_specs.4.8.gz#    build/prerelease_specs.4.8#    build/prerelease_specs.4.8.gz#    build/quick/Marshal.4.8/hello-1.0.0.gemspec.rz#    build/specs.4.8#    build/specs.4.8.gz</pre></pre>
+<h2>Publishing our gem</h2><p>Next, we're going to upload our files, or "artifacts", to Keygen's API. We'll use <a href="https://keygen.sh/docs/cli/">Keygen's
+new CLI</a> for this, which makes publishing super easy. You could also use the Dashboard
+to create and upload each release artifact.</p><p>But first, we'll want to set a few environment variables, to save us some typing later on.
+(Alternatively, you can specify these using the <pre>--account</pre>, <pre>--product</pre> and <pre>--token</pre>
+flags, respectively.)</p><pre><pre>export KEYGEN_ACCOUNT_ID="&lt;YOUR_KEYGEN_ACCOUNT_UUID&gt;"export KEYGEN_PRODUCT_ID="&lt;YOUR_KEYGEN_PRODUCT_UUID&gt;"export KEYGEN_PRODUCT_TOKEN="&lt;YOUR_KEYGEN_PRODUCT_API_TOKEN&gt;"</pre></pre>
+<p>After we've set those vars, we can use the <pre>keygen</pre> CLI to publish our files. Using the <pre>dist</pre>
+command, we'll create a release for each file in the <pre>build/</pre> directory.</p><pre><pre># Create a new releasekeygen new --version '1.0.0' # Publish our hello gemkeygen upload build/gems/hello-1.0.0.gem \  --filename 'gems/hello-1.0.0.gem' \  --release '1.0.0' # Publish various specs for our gem sourcekeygen upload build/latest_specs.4.8 --filetype '' --release '1.0.0'keygen upload build/latest_specs.4.8.gz --release '1.0.0'keygen upload build/prerelease_specs.4.8 --filetype '' --release '1.0.0'keygen upload build/prerelease_specs.4.8.gz --release '1.0.0'keygen upload build/specs.4.8 --filetype '' --release '1.0.0'keygen upload build/specs.4.8.gz --release '1.0.0' # Publish the quick gem speckeygen upload build/quick/Marshal.4.8/hello-1.0.0.gemspec.rz \  --filename 'quick/Marshal.4.8/hello-1.0.0.gemspec.rz' \  --release '1.0.0' # Publish the new releasekeygen publish --release '1.0.0' # Untag our previous release if it exists (feel free to use a different tag e.g. 'latest')keygen untag gems --release 'gems' # Tag our new releasekeygen tag gems --release '1.0.0'</pre></pre>
+<p>By default, the CLI uses the file's <pre>basename()</pre> as an artifact's <pre>filename</pre> (which excludes any directories),
+so we're providing the <pre>--filename</pre> flag so that our artifacts have the full filepath e.g. any files
+under the <pre>gems/</pre> and <pre>quick/</pre> directories.</p><p>To publish a new version of your gem, you'd build the new version's <pre>.gem</pre> file, and then you'd
+want to regenerate the index.</p><pre><pre>gem generate_index --directory build/ --update</pre></pre>
+<p>And finally, re-upload the index files.</p><h2>Installing our gem</h2><p>Now that we've gotten our gem uploaded... how do we use it? Well, pretty much like any other gem! Simply provide a license token in the source URL's auth part and Keygen will automatically assert the token belongs to a valid license for the product.</p><p>For example, see this <pre>Gemfile</pre>:</p><pre><pre>auth = 'license:C1B6DE-39A6E3-DE1529-8559A0-4AF593-V3' source "https://#{auth}@api.keygen.sh/v1/accounts/demo/artifacts" do  gem 'hello', '~&gt; 1.0'end</pre></pre>
+<p>Which can then be executed like this,</p><pre><pre>require 'hello' Hello.world# =&gt; Hello, world!</pre></pre>
+<p>You can also install it like so,</p><pre><pre>gem install hello -v '1.0.0' \</pre></pre>
+<h2>In conclusion</h2><p>Today we've covered how to create and build a simple Ruby gem. We then learned how we can use
+<pre>gem generate_index</pre> to generate a set of files that can be hosted on Keygen, or another service
+such as S3, turning it into a private Ruby gem source.</p><p>Pack all of this up into a <pre>Rakefile</pre> and publishing a new gem release could be as simple
+as invoking a single Rake task. In fact, <a href="https://gist.github.com/alexrudall/077a9c279a6541945af5124bdad784c0">somebody did just that!</a></p><p>We're excited to see what people build.</p><p>Until next time.</p><p>
+  If you find any errors in my code, or if you can think of ways to improve things, <a href="https://x.com/_m27e">ping me via Twitter</a>.
+</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

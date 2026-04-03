@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vector Sets are part of Redis | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Vector Sets are part of Redis</h1>
+        <div class="meta">&lt;antirez&gt; 2025-04-03T18:01:20Z</div>
+        <div class="links">
+          <a href="http://antirez.com/news/149">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/antirez-com/antirez-com-ef112a2b4f9f9078.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Yesterday we finally merged vector sets into Redis, here you can find the README that explains in detail what you get: https://github.com/redis/redis/blob/unstable/modules/vector-sets/README.md The goal of the new data structure is, in short, to create a new “Set alike” data type, similar to Sorted Sets, where instead of having a scalar as a score, you have…</div>
+        <div class="content">
+          Yesterday we finally merged vector sets into Redis, here you can find the README that explains in detail what you get:
+<br>
+<br>https://github.com/redis/redis/blob/unstable/modules/vector-sets/README.md
+<br>
+<br>The goal of the new data structure is, in short, to create a new “Set alike” data type, similar to Sorted Sets, where instead of having a scalar as a score, you have a vector, and you can add and remove elements the Redis way, without caring about anything except the properties of the abstract data structure Redis implements, ask for elements similar to a given query vector (or a vector associated to some element already in the set), and so forth. But more about that later, a bit of background, first:
+<br>
+<br>From the path of the README itself, you can see the implementation is into “modules”, but actually, Vector Sets are not a module, it’s a part of the Redis core, the thing is that I started developing them as a module, and later I suggested that the implementation should still use the modules API, in order to promote modularity of the internals of Redis, in order to have both the advantages: every Redis instance starting from Redis 8 will have Vector Sets as a native data type, and there are clear boundaries between the core and the implementation
+<br>
+<br>## The first new main data type of Redis after… some time
+<br>
+<br>I think that the latest big data structure of Redis were Streams, also developed by me. I resigned, returned, forks happened in the meantime, and it still it looks like the burden to introduce a new data type in Redis is mine :D I must say: I’m ok with that, because as much as I like programming, I also like design, a lot, and I had a feeling, that vectors, and vector similarity, are conceptually very simple, so they deserved a very simple API. And that was what I tried to do. Vector Sets are still a beta feature but I can tell you something, I can guarantee you can learn the API in 3 minutes.
+<br>
+<br>I decided that a fundamental requirement for implementing vector similarity was to also reimplement from scratch HNSWs (you can see my implementation in hnsw.c), because that was going to be my core data structure, and I didn’t want to grab some random code from GitHub and be happy with it. However, as I started reading the papers, I started to understand that a few pieces were missing.
+<br>
+<br>So, as I did in the past with HyperLogLog, where I had to fill a few gaps (here: https://antirez.com/news/75), there was already some new algorithmic challenges. Especially I wanted two things:
+<br>
+<br>1. To have true deletions of nodes. In Vector Sets you can add new elements with VADD, and you can remove elements with VREM. And I wanted the memory to be reclaimed ASAP.
+<br>
+<br>2. I wanted to be sure that as you delete elements, the connectivity properties of the HNSW graph were retained.
+<br>
+<br>So this lead me to a few differences compared to other implementations of HNSW. I don’t use tombstone deletions, but effectively unlink the node in the moment it gets deleted, relinking it back with other potential good neighbors. To do so, in turn, my implementation is designed to enforce that links must be reciprocal, it’s no longer a best effort property: this in turn changes quite a bit what you need to do during insertions.
+<br>
+<br>Another modification I did in the HNSW was to support the ability to scan the graph with a predicate function, so that you can ask for nodes matching a given expression. This requires to modify the greedy graph scanning algorithm in some way: to collect potential nodes to visit, and to collect the result set, but also to have some early stop condition in case there is too much selectivity in the query. We don’t want trigger a full graph scan, of course.
+<br>
+<br>Other than the HNSW modifications, I wanted a few more things that are more pragmatic and obvious:
+<br>
+<br>1. Threading of all the vector similarity requests. Yeah, that’s new in Redis land, but as much as I believe single thread and shared nothing was a good design in general, I think that vectors are special. They are slow, a lot slower than other data structures modeled by Redis. As a bonus point, as I was implementing threaded VSIM (the command that performs vector similarity queries) I also discovered that with a few tricks you can split the read half and the write half of writes in two parts, so that neighbors candidate collections happen in the background, and the actual insertion is performed in the foreground. This splitting however is not the default, and you need to force it with the CAS option of VADD.
+<br>
+<br>2. I wanted to support quantization and even make it the default. So Vector Sets ship with both 8 bit quantization and binary quantization. There is also support for random projection for dimensionality reduction. However as much as I like RP and having bin quants, the reality is that the “killer” for me is int8 quants. They are super fast, take 25% of the memory of FP32, and the results are nearly identical to those from full vectors for most vectors generated via embedding AI models.
+<br>
+<br>Btw the end result is, I believe, a very fast implementation. For instance in my machine, with a 3 million items vector set of 300 components each, I get 50/60k VSIM (top 10 items) per second on my laptop. But I encourage you to do your benchmarks.
+<br>
+<br>Also note that Vector Sets are serialized on disk as a graph, so when they are loaded back in memory, after a Redis restart, you don’t pay back the insertion time: loading every million of elements take a few seconds and not the minutes needed otherwise to add back into the in-memory HNSW.
+<br>
+<br>## Data structures, not indexes
+<br>
+<br>What I’ve said so far is all about the low level stuff. But for me the most interesting part of Vector Sets is the data model and the API supporting it. Many databases propose vector similarity as a kind of index, but that’s Redis, and things in Redis are data structures: no exception this time. You add stuff like that:
+<br>
+<br>> VADD mykey FP32 …blob of data… item1
+<br>
+<br>And so forth. So you can have many small vector sets if you want, one per key. And an important thing here is that if you split your vectors into N different keys (hashing the item you are inserting or alike to select which key to pick), then you can merge different VSIM calls against different keys into a single reply:
+<br>
+<br>> VSIM word_embeddings_int8 ele "banana" WITHSCORES COUNT 4
+<br>1) "banana"
+<br>2) "0.9997616112232208"
+<br>3) "bananas"
+<br>4) "0.8758847117424011"
+<br>5) "pineapple"
+<br>6) "0.8288004100322723"
+<br>7) "mango"
+<br>8) "0.8179697692394257"
+<br>
+<br>If I get a few of those results from different keys and instances, I can sort by the score (where 1 means identical, 0 opposite vector) and that’s it.
+<br>
+<br>So, my feeling is that Vector Sets can be composed into different patterns to handle having many vectors (they consume quite a bit of RAM) into different instances and so forth. Also it is interesting that splitting linearly scale writes, since each subset will hit a given key, and multiple insertions are possible in parallel.
+<br>
+<br>As usually, the Redis community will likely figure many usage patterns that are now not obvious.
+<br>
+<br>## How filtering works
+<br>
+<br>About filtering, if threading was not common in Redis, let’s imagine JSON! But for the first time, I found a good reason to expose JSON directly in the Redis API, user facing:
+<br>
+<br>> VGETATTR word_embeddings_int8 banana
+<br>{"len": 6}
+<br>
+<br>So basically with VSETATTR / VGETATTR (and equivalent option to set the JSON attribute directly when adding the item in VADD) you can associate a string to the items you want.
+<br>
+<br>Then you can do things like that:
+<br>
+<br>> VSIM word_embeddings_int8 ele "banana" FILTER ".len == 3"
+<br> 1) "yam"
+<br> 2) "pea"
+<br> 3) "fig"
+<br> 4) "rum"
+<br> 5) "ube"
+<br> 6) "oat"
+<br> 7) "nut"
+<br> 8) "gum"
+<br> 9) "soy"
+<br>10) "pua"
+<br>
+<br>The filter expression is not a programming language, is what you could write inside the if() statement of high level programming languages, with &&, ||, all the obvious operators and so forth (but I bet we will add a few more).
+<br>
+<br>Well, the details are into the doc, there are also memory usage examples, in depth discussions about specific features, and so forth. I will extend the documentation soon, I hope. For now I really (really!) hope you’ll enjoy Vector Sets. Please, ping me if you find bugs :)
+<a href="http://antirez.com/news/149">Comments</a>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

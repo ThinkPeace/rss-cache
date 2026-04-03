@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Soju User Delete Hash | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Soju User Delete Hash</h1>
+        <div class="meta">Susam Pal 2026-02-14T00:00:00Z</div>
+        <div class="links">
+          <a href="https://susam.net/soju-user-delete-hash.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/susam-net/susam-net-e479468195fd0c06.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">In my last post , I talked about switching from ZNC to Soju as my IRC bouncer. One thing that caught my attention while creating and deleting Soju users was that the delete command asks for a confirmation, like so: $ sudo sojuctl user delete soju To confirm user deletion, send &quot;user delete soju 4664cd&quot; $ sudo sojuctl user delete soju 4664cd deleted user &quot;so…</div>
+        <div class="content">
+          <p>
+  In <a href="from-znc-to-soju.html">my last post</a>, I talked about
+  switching from ZNC to Soju as my IRC bouncer.  One thing that caught
+  my attention while creating and deleting Soju users was that the
+  delete command asks for a confirmation, like so:
+</p>
+<pre><samp>$ <kbd>sudo sojuctl user delete soju</kbd>
+To confirm user deletion, send "user delete soju 4664cd"
+$ <kbd>sudo sojuctl user delete soju 4664cd</kbd>
+deleted user "soju"</samp></pre>
+<p>
+  That confirmation token for a specific user never changes, no matter
+  how many times we create or delete it.  The confirmation token is
+  not saved in the Soju database, as can be confirmed here:
+</p>
+<pre><samp>$ <kbd>sudo sqlite3 -table /var/lib/soju/main.db 'SELECT * FROM User'</kbd>
++----+----------+--------------------------------------------------------------+-------+----------+------+--------------------------+---------+--------------------------+--------------+
+| id | username |                           password                           | admin | realname | nick |        created_at        | enabled | downstream_interacted_at | max_networks |
++----+----------+--------------------------------------------------------------+-------+----------+------+--------------------------+---------+--------------------------+--------------+
+| 1  | soju     | $2a$10$yRj/oYlR2Zwd8YQxZPuAQuNo2j7FVJWeNdIAHF2MinYkKLmBjtf0y | 0     |          |      | 2026-02-16T13:49:46.119Z | 1       |                          | -1           |
++----+----------+--------------------------------------------------------------+-------+----------+------+--------------------------+---------+--------------------------+--------------+</samp></pre>
+<p>
+  Surely, then, the confirmation token is derived from the user
+  definition?  Yes, indeed it is.  This can be confirmed at the
+  <a href="https://codeberg.org/emersion/soju/src/commit/v0.10.1/service.go#L1185-L1203">source
+  code here</a>.  Quoting the most relevant part from the source code:
+</p>
+<pre><code>hashBytes := sha1.Sum([]byte(username))
+hash := fmt.Sprintf("%x", hashBytes[0:3])</code></pre>
+<p>
+  Indeed if we compute the same hash ourselves, we get the same token:
+</p>
+<pre><samp>$ <kbd>printf soju | sha1sum | head -c6</kbd>
+4664cd</samp></pre>
+<p>
+  This allows us to automate the two step Soju user deletion process
+  in a single command:
+</p>
+<pre><code>sudo sojuctl user delete soju "$(printf soju | sha1sum | head -c6)"</code></pre>
+<p>
+  But of course, the implementation of the confirmation token may
+  change in future and Soju helpfully outputs the deletion command
+  with the confirmation token when we first invoke it without the
+  token, so it is perhaps more prudent to just take that output and
+  feed it back to Soju, like so:
+</p>
+<pre><code>sudo sojuctl $(sudo sojuctl user delete soju | sed 's/.*"\(.*\)"/\1/')</code></pre>
+<!-- ### -->
+<p>
+  <a href="https://susam.net/soju-user-delete-hash.html">Read on website</a> |
+  <a href="https://susam.net/tag/shell.html">#shell</a> |
+  <a href="https://susam.net/tag/irc.html">#irc</a> |
+  <a href="https://susam.net/tag/technology.html">#technology</a> |
+  <a href="https://susam.net/tag/how-to.html">#how-to</a>
+</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

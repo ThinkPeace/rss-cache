@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ghostty Devlog 001 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Ghostty Devlog 001</h1>
+        <div class="meta">Mitchell Hashimoto 2023-07-13T00:00:00Z</div>
+        <div class="links">
+          <a href="https://mitchellh.com/writing/ghostty-devlog-001">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/mitchellh-com/mitchellh-com-208f67f630b1bb60.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body><h1><a href="https://mitchellh.com/">Mitchell Hashimoto</a></h1><h1>Ghostty Devlog 001</h1><p>An inaugural devlog for <a href="https://mitchellh.com/ghostty">Ghostty</a> 👻! Ghostty is the
+terminal emulator I've been working on as a side project since 2021.
+I recently <a href="https://twitter.com/mitchellh/status/1662217955424493570">shared that Ghostty exists</a> and since then there's been a ton of interest in it!</p><p>I'm not ready to open it to the public (but I promise I plan to, fully FOSS), but for historical reasons I wanted to start a devlog to share details about the terminal and progress reports about how its all going. I think there are generally interesting engineering things to share and I hope people enjoy this and maybe learn a thing or two (or, reach out and teach me a thing or two).</p><p>These devlogs are all going to be written in a very casual, almost conversational tone. They aren't going to be on any specific cadence. They'll cover anything related to the terminal: features, weird bugs, my own ignorance, etc.</p><h1><a href="https://mitchellh.com#tech-stack"/>Tech Stack</h1>
+<p>As this is the first devlog ever, let's talk about the tech stack behind Ghostty. Ghostty is a cross-platform (macOS and Linux today, but written in a way that Windows support will come later), GPU-accelerated terminal emulator.</p><ul><li>Written in <a href="https://ziglang.org/">Zig</a></li><li><a href="https://github.com/mitchellh/libxev">Libxev</a>event loop (written and extracted specifically from Ghostty)</li><li>OpenGL on Linux, Metal on macOS</li><li>Fontconfig, <a href="https://freetype.org/">Freetype</a>,<a href="https://harfbuzz.github.io/">Harfbuzz</a>for font rendering on Linux</li><li><a href="https://developer.apple.com/documentation/coretext/">CoreText</a>and<a href="https://harfbuzz.github.io/">Harfbuzz</a>for font rendering on macOS</li><li><a href="https://developer.apple.com/xcode/swiftui/">SwiftUI</a>frontend on macOS,<a href="https://gtk.org/">GTK</a>on Linux, also a<a href="https://www.glfw.org/">GLFW</a>option</li><li>Almost everything else is fully custom written in Zig</li></ul><p>I'm not going to talk about the "why" for any of this. I'm just laying out the tech stack as-is for people who are interested. Take it as you will.</p><h1><a href="https://mitchellh.com#automatic-shell-integration-injection-191"/>Automatic Shell Integration Injection (#191)</h1>
+<p>Let's talk about our first feature!</p><p>Did you know that modern terminal emulators can communicate with shells (when properly configured) to enable a lot of nice to have features? Talking to at least my close circle of developer friends, most people do not know this and do not have this enabled or do not use a terminal emulator that supports it. 😢</p><p>Shell integration with the terminal
+<a href="https://sw.kovidgoyal.net/kitty/shell-integration/">does a lot of stuff (see Kitty)</a>.
+There are a few base features with shell integration that requires zero
+workflow knowledge that really improve quality of life:</p><ul><li>Complex prompt redrawing on resize. This makes resizing your terminal way less glitchy with modern, complex prompts.</li><li>Working directory reporting. This allows new tabs, splits, etc. to inherit the working directory of the previously focused terminal.</li><li>Active process detection. This can be used to safely close the terminal without asking the user for confirmation if the terminal emulator knows the user is sitting at an idle shell prompt.</li></ul><p>I love demos, so let's look at one example: complex prompt redrawing. The video below is not Ghostty, it is some other popular terminal emulator on macOS. This shows resizing my fish prompt without shell integration.</p><p>Notice the prompt becomes garbage. The terminal emulator is not doing anything wrong here. It is reflowing text but because the shell doesn't (and can't, today) know that it reflowed the prompt onto multiple lines, it gets redrawn on the bottom new line and duplicates a bunch.</p><p>Next is Ghostty, with shell integration configured.</p><p>Much better! The shell can communicate to the terminal that it can redraw the prompt on resize. On resize, Ghostty clears the terminal line (you can see the flashing -- I want to improve that later). This prevents the text reflow which prevents new lines and results in perfect reflow on resize.</p><p>Okay, but how do you configure this? This requires shell-specific (zsh code for zsh, fish code for fish, garbage for bash, etc.) configuration to make work. Prior to #191, I just documented how users can set this up manually.</p><p>But now, Ghostty does this 🪄 automagically 🪄 (for fish and zsh so far). This can be disabled, but the way this works is that it does a simple basename on your shell and if its "fish" it assumes its fish" and if its "zsh" it assumes its "zsh", and sets the correct environment variables so that some embedded configuration files are loaded with your shell and set all this up automatically.</p><p>Since Ghostty isn't public at the time of writing this, the terminal
+with the best shell integration today is
+<a href="https://sw.kovidgoyal.net/kitty">Kitty</a>. Kitty also does automatic
+shell integration. If you want features like
+this today, use Kitty. Other terminal emulators also support some of
+these features, too!</p><h1><a href="https://mitchellh.com#auto-italicize-fonts-179"/>Auto-Italicize Fonts (#179)</h1>
+<p>This fixes one bug, and adds one feature.</p><p>The basics: regular, bold, italic, and bold italic are different
+font faces. If you have a font <pre>MyAwesomeFont.ttf</pre> -- it is just a single
+face (regular,  probably). I'm doing a lot of hand-waving here but
+this is generally the case.</p><p>When a user says they want to use <pre>MyAwesomeFont</pre>, Ghostty has to
+not only find this font, but find all the faces associated with this
+font. A lot of programming fonts do not have italic or bold faces.
+(Aside, the process of finding a font and all associatd faces is usually
+called the problem of font discovery. This is a more general problem:
+if a user doesn't specify a font, what font do you use by default? etc.)</p><h2><a href="https://mitchellh.com#first-the-bug"/>First, The Bug</h2>
+<p>Another important bit of background: fonts often do not have every possible glyph (a single drawable character). For example, a standard monospace programming font probably doesn't have Chinese characters (i.e., grass = 草 if that rendered for you).</p><p>If a program tries to draw a character that isn't in your configured font, Ghostty tries to find any other font that has it. This is usually better behavior than just rendering a box and forcing your font file to have every glyph in existence. There are some complexities about drawing this glyph in a way that matches your configured font but this isn't about that -- just know those problems exist and figuring out the solution personally feels like some form of self-harm.</p><p>The bug was this: previously, if a character didn't exist in the given style in your font, Ghostty would search for any font that had that character in that style. This resulted in... really ugly rendering because if a monospace font didn't have a character, Ghostty would find a non-monospace font and it'd end up looking like this:</p><graphic src="/_next/image?url=https%3A%2F%2Fstatic.mitchellh.com%2Fghostty%2Fdev001%2Ffallback_before.png&amp;w=3840&amp;q=75"/><p>Oh no. The bug fix: if a character doesn't exist in the given style, and the style is not "regular", try regular first. The result is that the style is ignored, but it renders correctly. Cool.</p><p>Note that Ghostty would already try to search monospace fonts first. It may seem reasonable to never choose to use a non-monospace (proportional) font, but characters such as Chinese characters tend to work just fine from proportional fonts so I don't think this limitation is necessary.</p><h2><a href="https://mitchellh.com#better-make-italics-programmatically"/>Better, Make Italics Programmatically</h2>
+<p>For italics in particular, we can do better. If a font doesn't provide an italic font, we can skew the regular font to create fake italics. It won't look as good because it wasn't artisanally designed while sipping a single-origin pour-over but it'll... pass.</p><p>So that's what Ghostty now does. If an italicized character is requested and the font in use doesn't support italics, we rasterize the regular glyph with a skew and make fake italics:</p><graphic src="/_next/image?url=https%3A%2F%2Fstatic.mitchellh.com%2Fghostty%2Fdev001%2Fskew.png&amp;w=3840&amp;q=75"/><p>The font above doesn't support italics. The italics are fake. They look alright! And they definitely look better than just rendering no italics at all.</p><p>If you're curious about the internals of this works: font rasterization
+libraries such as FreeType or CoreText allow callers to provide a
+transformation matrix. For CoreText, the transformation matrix
+can be provided when <a href="https://developer.apple.com/documentation/coretext/1511225-ctfontcreatecopywithattributes?language=objc">initializing the font with  CTFontCreateCopyWithAttributes</a>.</p><p>For Ghostty, we just have a hardcoded 15 degree skew (see below), but you can see how you could customize this to skew a glyph any way you want.</p><pre><pre>pub const italic_skew: macos.graphics.AffineTransform = .{
+    .a = 1,
+    .b = 0,
+    .c = 0.267949, // approx. tan(15)
+    .d = 1,
+    .tx = 0,
+    .ty = 0,
+};</pre></pre><h1><a href="https://mitchellh.com#fin"/>Fin</h1>
+<p>That concludes the first ever Ghostty devlog. I hope you learned a thing or two or found this interesting. Given its the first one, there were so many more things I could've covered but I'll save them for future devlogs (though, I'll try to focus on newer developments).</p><p>If you want to keep up to date, follow me on Twitter or Mastodon
+(links in footer). This blog also has an <a href="https://mitchellh.com/feed.xml">RSS feed</a>.</p><p>Boo. 👻</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

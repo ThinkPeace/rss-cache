@@ -1,0 +1,1410 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Getting a custom PyTorch LLM onto the Hugging Face Hub (Transformers: AutoModel, pipeline, and Trainer) | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Getting a custom PyTorch LLM onto the Hugging Face Hub (Transformers: AutoModel, pipeline, and Trainer)</h1>
+        <div class="meta">Giles&#x27; blog 2026-01-28T23:00:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/01/custom-automodelforcausallm-frompretrained-models-on-hugging-face">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-aee954fb077df472.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I spent some time recently getting some models uploaded onto the Hugging Face Hub. I&#x27;d trained a bunch of GPT-2 small sized base models from scratch as part of my LLM from scratch series , and wanted to share them with anyone that was interested. I managed to get it done , but it was kind of tricky to get right. The Hugging Face documentation is great if yo…</div>
+        <div class="content">
+          <p>I spent some time recently getting some models uploaded onto the Hugging Face Hub.  I'd trained
+a bunch of GPT-2 small sized base models from scratch as part of my
+<a href="/llm-from-scratch">LLM from scratch series</a>, and wanted to share them with anyone
+that was interested.  I managed to <a href="/2026/01/llm-from-scratch-31-models-on-hugging-face">get it done</a>,
+but it was kind of tricky to get right.</p>
+
+<p>The Hugging Face documentation is great if you're using the built-in models, but
+the coverage of custom architectures is... not quite as comprehensive.  There are scattered
+examples, but they're all a bit vague and there's nothing really bringing them all
+together.  But with what I could find, plus a lot of running things repeatedly, seeing how
+they failed, tweaking changes, banging my head against obscure stacktraces,
+and talking to various LLMs, I got there in the end.</p>
+
+<p>This post is the <a href="/2025/02/20250223-til-deep-dive-posts">tutorial I wish I'd found before I started</a>, and I hope it's useful
+for people in a similar position.  The one warning I'd give is that I did not
+dig into tokenisers in any depth.  My own models use the standard GPT-2 one, and
+so I could just use the version that is built into Transformers.  The setup you
+need to do with custom tokenisers doesn't look all that different to what you
+need do to for custom models, but as I haven't spent lots of time looking into it,
+I won't try to write a tutorial for something I've not done :-)</p>
+
+<p>Firstly, why would you want to upload a model you've trained to Hugging Face?  Well,
+let's say you've written and trained your own LLM -- you're learning how they work,
+or you've got a brilliant idea about how to tweak transformers to get that one step closer to AGI using
+the old gaming PC in your basement.  You have some PyTorch code and
+a bunch of weights.  How do you share it?</p>
+
+<p>You could, of course, just dump the code on GitHub and share the weights somewhere.
+If people want to play with your model, they just need to download everything,
+install the dependencies, and then write code to load the weights and talk to your LLM -- run
+inference, fine-tune it, and so on.</p>
+
+<p>That's quite a big "just", though.  Not everyone who is going to want to look at
+your model will have the relatively deep knowledge required to do all of that.
+Speaking for myself, I spent quite some time <a href="/fine-tuning">fine-tuning and running inference on models</a>
+long before I knew how the internals worked.  I was able to do this because of the
+easy-to-use abstraction layer in Hugging Face's <a href="https://huggingface.co/docs/transformers/en/index">Transformers library</a>,
+using models that had been uploaded to their <a href="https://huggingface.co/">hub</a>.</p>
+
+<p>What it would be nice to do is share the model within the Hugging Face ecosystem
+in a way that works smoothly.  Let people run inference on it like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">pipeline</span>
+<span class="n">pipe</span> <span class="o">=</span> <span class="n">pipeline</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;text-generation&quot;</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">&quot;some-hf-user/some-model-name&quot;</span><span class="p">,</span> <span class="n">trust_remote_code</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">pipe</span><span class="p">(</span>
+    <span class="s2">&quot;Every effort moves you&quot;</span><span class="p">,</span>
+    <span class="n">max_new_tokens</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+    <span class="n">do_sample</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">temperature</span><span class="o">=</span><span class="mf">1.4</span><span class="p">,</span>
+    <span class="n">top_k</span><span class="o">=</span><span class="mi">25</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;generated_text&quot;</span><span class="p">])</span>
+</code></pre>
+</div>
+
+<p>...rather than something daunting like <a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/main/test_smoke.py">this code</a>
+with its 24 lines just to sample a few tokens from the model.
+Or to train it using code like what you see in <a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/main/hf_train.ipynb">this notebook</a>
+-- a bit of config then <code>trainer.train</code> --
+rather than like <a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/main/ddp_train.py">this</a>,
+with its &gt;100-line <code>train</code> function.</p>
+
+<p>Here's what I had to do to get it working.</p>
+<h3 id="the-baseline">The baseline</h3>
+
+<p>To make it easier to follow along with this post, I've created
+<a href="https://github.com/gpjt/hf-tutorial-post">a GitHub repo</a>.  As a starting point,
+I recommend you clone that, and then check out the <code>baseline</code> tag:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev<span class="w"> </span>$<span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/gpjt/hf-tutorial-post.git
+Cloning<span class="w"> </span>into<span class="w"> </span><span class="s1">&#39;hf-tutorial-post&#39;</span>...
+remote:<span class="w"> </span>Enumerating<span class="w"> </span>objects:<span class="w"> </span><span class="m">24</span>,<span class="w"> </span><span class="k">done</span>.
+remote:<span class="w"> </span>Counting<span class="w"> </span>objects:<span class="w"> </span><span class="m">100</span>%<span class="w"> </span><span class="o">(</span><span class="m">24</span>/24<span class="o">)</span>,<span class="w"> </span><span class="k">done</span>.
+remote:<span class="w"> </span>Compressing<span class="w"> </span>objects:<span class="w"> </span><span class="m">100</span>%<span class="w"> </span><span class="o">(</span><span class="m">19</span>/19<span class="o">)</span>,<span class="w"> </span><span class="k">done</span>.
+remote:<span class="w"> </span>Total<span class="w"> </span><span class="m">24</span><span class="w"> </span><span class="o">(</span>delta<span class="w"> </span><span class="m">5</span><span class="o">)</span>,<span class="w"> </span>reused<span class="w"> </span><span class="m">19</span><span class="w"> </span><span class="o">(</span>delta<span class="w"> </span><span class="m">2</span><span class="o">)</span>,<span class="w"> </span>pack-reused<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="o">(</span>from<span class="w"> </span><span class="m">0</span><span class="o">)</span>
+Receiving<span class="w"> </span>objects:<span class="w"> </span><span class="m">100</span>%<span class="w"> </span><span class="o">(</span><span class="m">24</span>/24<span class="o">)</span>,<span class="w"> </span><span class="m">37</span>.23<span class="w"> </span>KiB<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">866</span>.00<span class="w"> </span>KiB/s,<span class="w"> </span><span class="k">done</span>.
+Resolving<span class="w"> </span>deltas:<span class="w"> </span><span class="m">100</span>%<span class="w"> </span><span class="o">(</span><span class="m">5</span>/5<span class="o">)</span>,<span class="w"> </span><span class="k">done</span>.
+giles@perry:~/Dev<span class="w"> </span>$<span class="w"> </span><span class="nb">cd</span><span class="w"> </span>hf-tutorial-post/
+giles@perry:~/Dev/hf-tutorial-post<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>$<span class="w"> </span>git<span class="w"> </span>checkout<span class="w"> </span>baseline
+Note:<span class="w"> </span>switching<span class="w"> </span>to<span class="w"> </span><span class="s1">&#39;baseline&#39;</span>.
+
+You<span class="w"> </span>are<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s1">&#39;detached HEAD&#39;</span><span class="w"> </span>state.<span class="w"> </span>You<span class="w"> </span>can<span class="w"> </span>look<span class="w"> </span>around,<span class="w"> </span>make<span class="w"> </span>experimental
+...rest<span class="w"> </span>of<span class="w"> </span>warning<span class="w"> </span>skipped...
+Turn<span class="w"> </span>off<span class="w"> </span>this<span class="w"> </span>advice<span class="w"> </span>by<span class="w"> </span>setting<span class="w"> </span>config<span class="w"> </span>variable<span class="w"> </span>advice.detachedHead<span class="w"> </span>to<span class="w"> </span><span class="nb">false</span>
+
+HEAD<span class="w"> </span>is<span class="w"> </span>now<span class="w"> </span>at<span class="w"> </span>4047a91<span class="w"> </span>Added<span class="w"> </span>baseline<span class="w"> </span>code
+giles@perry:~/Dev/hf-tutorial-post<span class="w"> </span>$
+</code></pre>
+</div>
+
+<p>You'll see that there's a <code>gpt.py</code> file, which contains my version of the GPT-2 style LLM code from
+<a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>".
+There's also a script called <code>inference_run.py</code>, which is some code to run a model
+and get it to predict the 20 next words after the string <code>Every effort moves you</code>,
+and a config file for the LLM code called <code>model.json</code>, which tells it the number
+of layers, attention heads, and so on.</p>
+
+<p>If you want to use it
+and see what it comes up with, you can download the <a href="https://github.com/gpjt/hf-tutorial-post/releases/download/baseline/model.safetensors">model weights</a>
+from one of my trains, and install the dependencies with <code>uv sync</code> (recommended)
+or by running it in a Python environment with the libraries listed in <code>pyproject.toml</code>
+installed.</p>
+
+<p>You'll get something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/hf-tutorial-post<span class="w"> </span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>inference_run.py<span class="w"> </span>./model.json<span class="w"> </span>./model.safetensors
+Every<span class="w"> </span>effort<span class="w"> </span>moves<span class="w"> </span>you<span class="w"> </span>through<span class="w"> </span>the<span class="w"> </span>process<span class="w"> </span>to<span class="w"> </span>make<span class="w"> </span>it<span class="w"> </span>happen.<span class="w"> </span>But<span class="w"> </span>we<span class="w"> </span>still<span class="w"> </span>want<span class="w"> </span>to<span class="w"> </span>bring<span class="w"> </span>it<span class="w"> </span>to<span class="w"> </span>all<span class="w"> </span>of<span class="w"> </span>your<span class="w"> </span>dreams
+</code></pre>
+</div>
+
+<p>Your output will probably vary (for this and the later examples), as you'd expect from sampled
+LLM output, but it should at least be reasonably coherent.</p>
+
+<p>So: let's get it on Hugging Face!</p>
+
+<h3 id="the-from_pretrained-methods">The <code>from_pretrained</code> methods</h3>
+
+<p>Our goal of being able to run inference with Transformers' <code>pipeline</code> system relies on
+a couple of deeper levels of abstraction.</p>
+
+<p>The <code>pipeline</code> requires that the model be available for download -- complete with
+all of its code and weights -- using code like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">AutoModelForCausalLM</span>
+<span class="n">model</span> <span class="o">=</span> <span class="n">AutoModelForCausalLM</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;some-hf-user/some-model-name&quot;</span><span class="p">,</span> <span class="n">trust_remote_code</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p><code>AutoModelForCausalLM</code> is the HF abstraction for models that generate text.</p>
+
+<p>If that <code>trust_remote_code</code> flag is concerning you, it is indeed a bit scary-looking.  But
+remember that our goal here is to share a model on HF that has its own code, and
+that means that anyone that downloads it will have to opt in to downloading and running
+the code -- the flag is how they do that opt-in.  So it is, unfortunately, necessary.</p>
+
+<p>Now, that model will need a tokeniser in order to run.  Perhaps not surprisingly,
+the HF system expects to be able to download that with similar code:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">AutoTokenizer</span>
+<span class="n">tokenizer</span> <span class="o">=</span> <span class="n">AutoTokenizer</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;some-hf-user/some-model-name&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>With both of those working, appropriate code for our pretrained models, and a bit
+(well, to be fair, quite a lot of) configuration, we'll be all set.</p>
+
+<p>But that's quite a big jump.  There is a more general <code>Auto</code> class called <code>AutoModel</code>;
+it's much simpler, just wrapping a generic model that might be doing anything.
+If we support it, we'll still need to use all of that clunky inference code, but
+the model's code and weights will be on Hugging Face Hub, and can be downloaded and
+instantiated easily.</p>
+
+<p>So let's get that working first, just to work out the bugs and get the basic process
+down pat.</p>
+
+<h3 id="automodelfrom_pretrained"><code>AutoModel.from_pretrained</code></h3>
+
+<p>Our goal is to be able to run this in a Python environment where we just have
+<code>transformers</code> and <code>torch</code> installed:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">AutoModel</span>
+<span class="n">model</span> <span class="o">=</span> <span class="n">AutoModel</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;some-hf-user/some-model-name&quot;</span><span class="p">,</span> <span class="n">trust_remote_code</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and then have a model that we can run inference on, just like the code in
+<a href="https://github.com/gpjt/hf-tutorial-post/blob/baseline/inference_run.py">our repo</a>,
+but without the hassle of having to download the weights ourselves.  Definitely
+a QoL improvement, even if it's not the endgame.</p>
+
+<p>If you're following along with the git repo, the tag to check out for this section is <code>automodel</code>.
+In this version, you'll see a new subdirectory to contain our HF wrapper code (which I've imaginatively
+called <code>hf_wrapper</code>); you'll see why we need that later.</p>
+
+<p>In there, I've added
+a symlink to the model code <code>gpt.py</code> itself (also to be explained later), an empty <code>__init__.py</code> file to make
+the directory a Python module, and two files with some Transformers code:</p>
+
+<ol>
+<li><code>configuration_gpjtgpt2.py</code></li>
+<li><code>modeling_gpjtgpt2.py</code></li>
+</ol>
+
+<p>Let's dig into what's going on in those two.</p>
+
+<p>The first thing to understand is that whole <code>gpjtgpt2</code> thing in the filenames.  Transformers is designed
+to handle all kinds of different models -- for example, Meta's Llama models and
+Qwen's models have their own codebases.  These widely-used public models have code
+that is already built in to the library, with "model types" like <code>llama4</code> and
+or <code>qwen3_vl-moe</code> respectively -- but we don't have that advantage.  Our code is
+not built in to the library.</p>
+
+<p>So we need a distinct name for our type of model, which will let the library know
+that it has its own code and it shouldn't try to rely on built-in stuff.  I chose
+<code>gpjtgpt2</code> because my Hugging Face username is my initials, <code>gpjt</code> <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>, and this model
+is the implementation of the GPT-2 architecture I'm playing with.  That feels like
+a solid pattern to me -- it's unlikely to clash with anything built in.  But the format appears to be fairly
+free-form, so you can choose pretty much anything so long as you're consistent throughout
+your code, and so long as it doesn't clash with any of the built-ins.</p>
+
+<p>So, you need two files with those specific names: <code>configuration_</code><em>your-model-type</em><code>.py</code>,
+and <code>modeling_</code><em>your-model-type</em><code>.py</code>.  Let's look at them now.  They're really simple
+at this stage; here's the configuration one:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">PretrainedConfig</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">GPJTGPT2Config</span><span class="p">(</span><span class="n">PretrainedConfig</span><span class="p">):</span>
+
+    <span class="n">model_type</span> <span class="o">=</span> <span class="s2">&quot;gpjtgpt2&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span> <span class="o">=</span> <span class="n">cfg</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Now, when Transformers is loading a model with <code>AutoModel.from_pretrained</code>, it's
+going to need to know how to configure it.  At the very least, it will need to know
+what to pass into the <code>__init__</code>.  If you look at <a href="https://github.com/gpjt/hf-tutorial-post/blob/baseline/gpt.py">the <code>gpt.py</code> code</a>,
+it's taking a config dictionary with stuff like the number of layers, the number
+of attention heads, and what-have-you.  That's going to be required to instantiate
+the model with the right setup so that it can load the weights that we're providing.
+There's other config stuff that will come there later, but that's all we have for now.</p>
+
+<p>It does this using the same pattern as the various <code>from_pretrained</code> methods we
+were looking at earlier:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">AutoConfig</span>
+<span class="n">model</span> <span class="o">=</span> <span class="n">AutoConfig</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;some-hf-user/some-model-name&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>All we're doing here is defining what kind of thing that method will return when it's all set
+up properly.</p>
+
+<p>You can see that we're inheriting from a <code>PretrainedConfig</code> class -- this provides
+all of the infrastructure we're going to need to push things to HF.  I don't <em>think</em>
+that the name of the config class technically matters, but it definitely seems like
+best practice to name it based on the model name -- so, we're using <code>GPJTGPT2Config</code>
+for our <code>gpjtgpt2</code> model.  However, the <code>model_type</code> is important -- it <em>has</em> to
+match the model type that we've chosen and used for our filenames.</p>
+
+<p>Apart from that, we're stashing away the config that we're
+provided on a <code>cfg</code> field, and then calling our superclass <code>__init__</code>, forwarding
+on any kwargs we got in our own <code>__init__</code>.</p>
+
+<p>Now let's look at <code>modeling_gpjtgpt2.py</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">PreTrainedModel</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">.configuration_gpjtgpt2</span><span class="w"> </span><span class="kn">import</span> <span class="n">GPJTGPT2Config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.gpt</span><span class="w"> </span><span class="kn">import</span> <span class="n">GPTModel</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">GPJTGPT2Model</span><span class="p">(</span><span class="n">PreTrainedModel</span><span class="p">):</span>
+
+    <span class="n">config_class</span> <span class="o">=</span> <span class="n">GPJTGPT2Config</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">model</span> <span class="o">=</span> <span class="n">GPTModel</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">cfg</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">post_init</span><span class="p">()</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_ids</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">input_ids</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Just as with the config, there's <code>PreTrainedModel</code> for us to inherit from <sup class="footnote-ref" id="fnref-2"><a href="#fn-2">2</a></sup>.
+We're defining the thing that <code>AutoModel.from_pretrained</code> will return when it's all
+set up properly.</p>
+
+<p>We tell
+transformers that this should be configured with the <code>GPJTGPT2Config</code> that we just
+defined using that <code>config_class</code> class variable, but apart from that, we're basically
+just wrapping the <code>GPTModel</code> that is defined in <code>gpt.py</code> <sup class="footnote-ref" id="fnref-3"><a href="#fn-3">3</a></sup>.  That is imported using
+a relative import using <code>from .gpt</code> rather than <code>from gpt</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">.gpt</span><span class="w"> </span><span class="kn">import</span> <span class="n">GPTModel</span>
+</code></pre>
+</div>
+
+<p>This is important -- it has to be that way, as we'll discover later.  But for now: that's why
+we had to create the <code>hf_wrapper</code> subdirectory and the symlink to <code>gpt.py</code> -- a relative
+import in Python can only happen if you're not in the "root" module, so we would not
+have been able to do that kind of import if the files were at the top of our repo.</p>
+
+<p>Now, let's take a look at the <code>__init__</code>.  We're calling the superclass <code>__init__</code>,
+as you'd expect, then we're creating an underlying wrapped <code>GPTModel</code>.  We're
+expecting a <code>GPJTGPT2Config</code> parameter, which has the underlying model's configuration
+stashed away in its <code>cfg</code> field by its own <code>__init__</code>, so we can pass that down
+to the wrapped model.</p>
+
+<p>Finally, we call this special <code>self.post_init()</code> function; that does some extra configuration,
+and prior to Transformers 5.0.0 you could get away without calling it, but now it's
+100% necessary, as otherwise it will not initialise its internal fields relating to
+whether or not the model uses weight tying.</p>
+
+<p>Now let's take a look at how we actually use those to upload the model.  That's
+back at the root of the repo, in the file <a href="https://github.com/gpjt/hf-tutorial-post/blob/automodel/upload_model.py"><code>upload_model.py</code></a>.
+Before looking at the code, try running it:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/hf-tutorial-post<span class="w"> </span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>upload_model.py<span class="w"> </span>--help
+Usage:<span class="w"> </span>upload_model.py<span class="w"> </span><span class="o">[</span>OPTIONS<span class="o">]</span><span class="w"> </span>MODEL_CONFIG_PATH<span class="w"> </span>MODEL_SAFETENSORS_PATH
+<span class="w">                       </span>HF_MODEL_NAME
+
+Options:
+<span class="w">  </span>--help<span class="w">  </span>Show<span class="w"> </span>this<span class="w"> </span>message<span class="w"> </span>and<span class="w"> </span>exit.
+</code></pre>
+</div>
+
+<p>So, it takes a model config path -- that <code>model.json</code> file we have to set the number
+of layers and so on -- and the path of a safetensors file containing the weights.  It
+will then try to upload our HF-friendly wrapped version of the model -- code, weights
+and config -- to the Hub.</p>
+
+<p>Let's see how it works.</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">click</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">safetensors.torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_file</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">hf_wrapper.configuration_gpjtgpt2</span><span class="w"> </span><span class="kn">import</span> <span class="n">GPJTGPT2Config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">hf_wrapper.modeling_gpjtgpt2</span><span class="w"> </span><span class="kn">import</span> <span class="n">GPJTGPT2Model</span>
+</code></pre>
+</div>
+
+<p>We do some boilerplate imports, and then import our config and our model classes
+-- importantly, via the <code>hf_wrapper</code> submodule.  Don't worry, we're getting close
+to the explanation of why that is :-)</p>
+
+<p>Next:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@click</span><span class="o">.</span><span class="n">command</span><span class="p">()</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">&quot;model_config_path&quot;</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">&quot;model_safetensors_path&quot;</span><span class="p">)</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">&quot;hf_model_name&quot;</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">model_config_path</span><span class="p">,</span> <span class="n">model_safetensors_path</span><span class="p">,</span> <span class="n">hf_model_name</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">Path</span><span class="p">(</span><span class="n">model_config_path</span><span class="p">)</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not find model config at </span><span class="si">{</span><span class="n">model_config_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">model_config_path</span><span class="p">,</span> <span class="s2">&quot;r&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">model_config</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">Path</span><span class="p">(</span><span class="n">model_safetensors_path</span><span class="p">)</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not find model safetensors at </span><span class="si">{</span><span class="n">model_safetensors_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>A bit of argument-validating boilerplate and the loading of the model config file into
+a dictionary so that we can use it, and now we get to the meat of it:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">GPJTGPT2Config</span><span class="o">.</span><span class="n">register_for_auto_class</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>What this is doing is telling our <code>GPJTGPT2Config</code> to register itself so that it is a thing that
+will be returned by the <code>AutoConfig.from_pretrained</code> call.  This only applies locally for
+now, but by setting things up locally we're telling the library what it will need to
+push up to the hub later.  Next:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">GPJTGPT2Model</span><span class="o">.</span><span class="n">register_for_auto_class</span><span class="p">(</span><span class="s2">&quot;AutoModel&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>We're doing exactly the same for our model, saying that it should be returned from
+<code>AutoModel.from_pretrained</code>.  We need to be explicit about which of the various
+model classes we want to register it for -- the config class can only be loaded
+from <code>AutoConfig.from_pretrained</code>, whereas the model might be something we'd want to
+have returned from <code>AutoModelForCausalLM.from_pretrained</code>, or if it was a different
+kind of model, perhaps <code>AutoModelForImageTextToText.from_pretrained</code>, or something
+else entirely.</p>
+
+<p>What we want to do here is expose the basic model using <code>AutoModel</code>, so that's what we do.</p>
+
+<p>Next:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">config</span> <span class="o">=</span> <span class="n">GPJTGPT2Config</span><span class="p">(</span><span class="n">model_config</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>We're creating our config class, passing in that model configuration that we loaded
+from the <code>model.json</code> file earlier, so that it will stash it on its <code>cfg</code> field, then:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">model</span> <span class="o">=</span> <span class="n">GPJTGPT2Model</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...we create our model wrapper using that config.  We now have an instance of our
+custom model, but with uninitialised weights.  So:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">model</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">load_state_dict</span><span class="p">(</span><span class="n">load_file</span><span class="p">(</span><span class="n">model_safetensors_path</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>...we load in the weights that were specified on the command line.  Note that we have
+to load them into the wrapped model.  The <code>model.safetensors</code> file we have is specifically
+for the custom <code>GPTModel</code> that we want to publish, not for the wrapped <code>GPJTGPT2Model</code>
+one.  But that's easily done by using the <code>model.model</code> field.</p>
+
+<p>Finally, the magic:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">model</span><span class="o">.</span><span class="n">push_to_hub</span><span class="p">(</span><span class="n">hf_model_name</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>This is where the Transformers library really shows its strength.  It will push the
+model, which means it needs to push the weights that we loaded into its wrapped <code>GPTModel</code>.
+Then it will look at the class <code>GPJTGPT2Model</code> that defines the model, and will push the <code>modeling_gpjtgpt2.py</code>
+file that has the source for that class.  It will see that it also has a dependency on
+<code>GPJTGPT2Config</code>, and will push that and its source <code>configuration_gpjtgpt2.py</code>.</p>
+
+<p>It will also spot the setup we did with our two calls to
+the different <code>register_for_auto_class</code> methods above to register them for the
+<code>AutoConfig.from_pretrained</code> and <code>AutoModel.from_pretrained</code> and push that too.</p>
+
+<p>And when it's pushing the source, it will try to push the source of any dependencies too.
+This is where we get the final explanation of why we had to put it in a submodule, and
+have a symlink to <code>gpt.py</code>.  The <code>push_to_hub</code> code doesn't want to upload loads of
+extra stuff -- for example, any libraries you're using.  It wants to be sure that it's
+only uploading your model code.</p>
+
+<p>The logic it uses for deciding whether or not something
+is part of the uploadable set of files is "was it imported <em>relatively</em> from the <code>modeling_</code> or the
+<code>configuration_</code> file" -- that is, with
+a dot at the start of the module name,
+<code>from .something import SomethingElse</code> rather than <code>from something import SomethingElse</code>.</p>
+
+<p>In order to do that kind of import, we needed to create a submodule.  And in order to access
+our <code>gpt.py</code> file we need a copy of it inside the submodule.  I didn't want to have two
+actual copies of the file -- too easy to let them get out of sync -- so a symlink sorts that out.</p>
+
+<p>Hopefully that clears up any mystery about this slightly-strange file layout.</p>
+
+<p>Let's give it a go and see what it creates!  In order to upload a model to the HF Hub, you'll need an
+account, of course, so create one if you don't have one.  Next, create an
+access token with write access -- the option is in the "Access Tokens" section of the "Settings".</p>
+
+<p>Then you need to authorize your local machine to access the hub using that token;
+if you're using <code>uv</code>, then you can just run:</p>
+
+<div class="codehilite">
+<pre><span></span><code>uvx<span class="w"> </span>hf<span class="w"> </span>auth<span class="w"> </span>login
+</code></pre>
+</div>
+
+<p>If you're not, you'll need to <a href="https://huggingface.co/docs/huggingface_hub/en/guides/cli">download and install the HF CLI</a> and
+then run</p>
+
+<div class="codehilite">
+<pre><span></span><code>hf<span class="w"> </span>auth<span class="w"> </span>login
+</code></pre>
+</div>
+
+<p>That will store stuff on your machine so that you don't need to log in again in the
+future -- if you're concerned about security, there's an <code>hf auth logout</code> you can
+call, and you can completely trash the session by deleting the associated token from
+the HF website.</p>
+
+<p>Now, let's run our upload script!</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">giles</span><span class="nd">@perry</span><span class="p">:</span><span class="o">~/</span><span class="n">Dev</span><span class="o">/</span><span class="n">hf</span><span class="o">-</span><span class="n">tutorial</span><span class="o">-</span><span class="n">post</span> <span class="err">$</span> <span class="n">uv</span> <span class="n">run</span> <span class="n">upload_model</span><span class="o">.</span><span class="n">py</span> <span class="n">model</span><span class="o">.</span><span class="n">json</span> <span class="n">model</span><span class="o">.</span><span class="n">safetensors</span> <span class="n">gpjt</span><span class="o">/</span><span class="n">test1</span>
+<span class="n">Processing</span> <span class="n">Files</span> <span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="mi">1</span><span class="p">)</span>      <span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span>  <span class="mi">702</span><span class="n">MB</span> <span class="o">/</span>  <span class="mi">702</span><span class="n">MB</span><span class="p">,</span>  <span class="mi">270</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span>
+<span class="n">New</span> <span class="n">Data</span> <span class="n">Upload</span>               <span class="p">:</span> <span class="o">|</span>                                                                                                            <span class="o">|</span>  <span class="mf">0.00</span><span class="n">B</span> <span class="o">/</span>  <span class="mf">0.00</span><span class="n">B</span><span class="p">,</span>  <span class="mf">0.00</span><span class="n">B</span><span class="o">/</span><span class="n">s</span>
+  <span class="o">...</span><span class="n">_ehrlvi</span><span class="o">/</span><span class="n">model</span><span class="o">.</span><span class="n">safetensors</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span>  <span class="mi">702</span><span class="n">MB</span> <span class="o">/</span>  <span class="mi">702</span><span class="n">MB</span>
+</code></pre>
+</div>
+
+<p>You'll need to change the target HF model name at the end of the command to one with
+your username before the slash, of course.</p>
+
+<p>Once you've done that, take a look at the model on Hugging Face.  You'll see a rather
+ugly default model card, but let's ignore that for now and take a look at the "Files and
+versions" tab.</p>
+
+<p>You should see the following files:</p>
+
+<ul>
+<li><code>.gitattributes</code> -- a file telling git (which is used to manage the models
+on the hub) which file types should use the Large File Support plugin.  Big binary
+files don't play nicely with git, so it uses LFS for them.  We don't need to pay
+much more attention to that for our purposes.</li>
+<li><code>README.md</code> -- that ugly model card.  Updating that is useful, but out of scope for
+this post.</li>
+<li><code>config.json</code>.  We'll come back to that one in a moment.</li>
+<li><code>configuration_gpjtgpt2.py</code> -- a copy of the file we created locally with our <code>GPJTGPT2Config</code>
+class.</li>
+<li><code>gpt.py</code> -- again, the same file as the local one, uploaded due to that clever
+dependency-finding stuff.</li>
+<li><code>model.safetensors</code> -- our weights.  There should be an icon next to it to say that it's
+stored using the LFS system.</li>
+<li><code>modeling_gpjtgpt2.py</code> -- once more, a file that was just copied up from our local filesystem.</li>
+</ul>
+
+<p>Now, let's look into that <code>config.json</code>.  It will look like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;architectures&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">&quot;GPJTGPT2Model&quot;</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;auto_map&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;AutoConfig&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;configuration_gpjtgpt2.GPJTGPT2Config&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;AutoModel&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;modeling_gpjtgpt2.GPJTGPT2Model&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;cfg&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;context_length&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1024</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;drop_rate&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.1</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;emb_dim&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">768</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;n_heads&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;n_layers&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;qkv_bias&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;vocab_size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">50257</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;dtype&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;float32&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;model_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gpjtgpt2&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;transformers_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;4.57.6&quot;</span>
+<span class="p">}</span>
+</code></pre>
+</div>
+
+<p>The <code>architectures</code> bit is just showing the name of the class that was
+used in the <code>push_to_hub</code> call.  This will become useful later when we get onto
+the pipeline code, but doesn't matter right now -- the next one is more important.</p>
+
+<p>The <code>auto_map</code> is essentially saying, if someone does
+<code>AutoConfig.from_pretrained</code> on this model, then use the <code>configuration_gpjtgpt2.GPJTGPT2Config</code>
+class from here, and likewise for <code>AutoModel.from_pretrained</code> should use
+<code>modeling_gpjtgpt2.GPJTGPT2Model</code>.  It's what that <code>register_for_auto_class</code> stuff
+we did in the upload script set up.</p>
+
+<p>The <code>cfg</code> is just the parameters that we're threading down to our underlying custom
+<code>GPTModel</code> class; nothing exciting there.</p>
+
+<p>The <code>dtype</code> is, of course, the floating point type we're using for the model, and the
+<code>model_type</code> is our unique name for this particular architecture.  And the
+<code>transformers_version</code> is the version of the library used to upload it, presumably
+used to determine compatibility when downloading models with earlier or later versions.</p>
+
+<p>So, it looks like there's enough information across those files on the hub to instantiate and use our model!
+Let's give that a go.</p>
+
+<p>The best way to check it out thoroughly is to create a completely fresh directory,
+away from our existing ones, and a fresh environment:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/hf-tutorial-post<span class="w"> </span>$<span class="w"> </span>mkdir<span class="w"> </span>/tmp/test1
+giles@perry:~/Dev/hf-tutorial-post<span class="w"> </span>$<span class="w"> </span><span class="nb">cd</span><span class="w"> </span>/tmp/test1
+giles@perry:/tmp/test1<span class="w"> </span>$<span class="w"> </span>uv<span class="w"> </span>init
+Initialized<span class="w"> </span>project<span class="w"> </span><span class="sb">``</span>test1<span class="sb">``</span>
+giles@perry:/tmp/test1<span class="w"> </span>$<span class="w"> </span>uv<span class="w"> </span>add<span class="w"> </span>transformers<span class="w"> </span>torch<span class="w"> </span>accelerate<span class="w"> </span>tiktoken<span class="w"> </span>ipython
+Using<span class="w"> </span>CPython<span class="w"> </span><span class="m">3</span>.14.2<span class="w"> </span>interpreter<span class="w"> </span>at:<span class="w"> </span>/usr/bin/python3.14
+Creating<span class="w"> </span>virtual<span class="w"> </span>environment<span class="w"> </span>at:<span class="w"> </span>.venv
+Resolved<span class="w"> </span><span class="m">64</span><span class="w"> </span>packages<span class="w"> </span><span class="k">in</span><span class="w"> </span>109ms
+...junk<span class="w"> </span>skipped...
+<span class="w"> </span>+<span class="w"> </span>typing-extensions<span class="o">==</span><span class="m">4</span>.15.0
+<span class="w"> </span>+<span class="w"> </span><span class="nv">urllib3</span><span class="o">==</span><span class="m">2</span>.6.3
+<span class="w"> </span>+<span class="w"> </span><span class="nv">wcwidth</span><span class="o">==</span><span class="m">0</span>.3.1
+giles@perry:/tmp/test1<span class="w"> </span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>ipython
+</code></pre>
+</div>
+
+<p>and then to try to use the model:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">In</span> <span class="p">[</span><span class="mi">1</span><span class="p">]:</span> <span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">AutoModel</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">2</span><span class="p">]:</span> <span class="n">model</span> <span class="o">=</span> <span class="n">AutoModel</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;gpjt/test1&quot;</span><span class="p">,</span> <span class="n">trust_remote_code</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">config</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">438</span><span class="o">/</span><span class="mi">438</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">1.52</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">configuration_gpjtgpt2</span><span class="o">.</span><span class="n">py</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">██████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">217</span><span class="o">/</span><span class="mi">217</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mi">889</span><span class="n">kB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">A</span> <span class="n">new</span> <span class="n">version</span> <span class="n">of</span> <span class="n">the</span> <span class="n">following</span> <span class="n">files</span> <span class="n">was</span> <span class="n">downloaded</span> <span class="kn">from</span><span class="w"> </span><span class="nn">https</span><span class="p">:</span><span class="o">//</span><span class="n">huggingface</span><span class="o">.</span><span class="n">co</span><span class="o">/</span><span class="n">gpjt</span><span class="o">/</span><span class="n">test1</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">configuration_gpjtgpt2</span><span class="o">.</span><span class="n">py</span>
+<span class="o">.</span> <span class="n">Make</span> <span class="n">sure</span> <span class="n">to</span> <span class="n">double</span><span class="o">-</span><span class="n">check</span> <span class="n">they</span> <span class="n">do</span> <span class="ow">not</span> <span class="n">contain</span> <span class="nb">any</span> <span class="n">added</span> <span class="n">malicious</span> <span class="n">code</span><span class="o">.</span> <span class="n">To</span> <span class="n">avoid</span> <span class="n">downloading</span> <span class="n">new</span> <span class="n">versions</span> <span class="n">of</span> <span class="n">the</span> <span class="n">code</span> <span class="n">file</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">pin</span> <span class="n">a</span> <span class="n">revision</span><span class="o">.</span>
+<span class="n">modeling_gpjtgpt2</span><span class="o">.</span><span class="n">py</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">██████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">394</span><span class="o">/</span><span class="mi">394</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">1.99</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">gpt</span><span class="o">.</span><span class="n">py</span><span class="p">:</span> <span class="mf">5.07</span><span class="n">kB</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">12.4</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">A</span> <span class="n">new</span> <span class="n">version</span> <span class="n">of</span> <span class="n">the</span> <span class="n">following</span> <span class="n">files</span> <span class="n">was</span> <span class="n">downloaded</span> <span class="kn">from</span><span class="w"> </span><span class="nn">https</span><span class="p">:</span><span class="o">//</span><span class="n">huggingface</span><span class="o">.</span><span class="n">co</span><span class="o">/</span><span class="n">gpjt</span><span class="o">/</span><span class="n">test1</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">gpt</span><span class="o">.</span><span class="n">py</span>
+<span class="o">.</span> <span class="n">Make</span> <span class="n">sure</span> <span class="n">to</span> <span class="n">double</span><span class="o">-</span><span class="n">check</span> <span class="n">they</span> <span class="n">do</span> <span class="ow">not</span> <span class="n">contain</span> <span class="nb">any</span> <span class="n">added</span> <span class="n">malicious</span> <span class="n">code</span><span class="o">.</span> <span class="n">To</span> <span class="n">avoid</span> <span class="n">downloading</span> <span class="n">new</span> <span class="n">versions</span> <span class="n">of</span> <span class="n">the</span> <span class="n">code</span> <span class="n">file</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">pin</span> <span class="n">a</span> <span class="n">revision</span><span class="o">.</span>
+<span class="n">A</span> <span class="n">new</span> <span class="n">version</span> <span class="n">of</span> <span class="n">the</span> <span class="n">following</span> <span class="n">files</span> <span class="n">was</span> <span class="n">downloaded</span> <span class="kn">from</span><span class="w"> </span><span class="nn">https</span><span class="p">:</span><span class="o">//</span><span class="n">huggingface</span><span class="o">.</span><span class="n">co</span><span class="o">/</span><span class="n">gpjt</span><span class="o">/</span><span class="n">test1</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">modeling_gpjtgpt2</span><span class="o">.</span><span class="n">py</span>
+<span class="o">-</span> <span class="n">gpt</span><span class="o">.</span><span class="n">py</span>
+<span class="o">.</span> <span class="n">Make</span> <span class="n">sure</span> <span class="n">to</span> <span class="n">double</span><span class="o">-</span><span class="n">check</span> <span class="n">they</span> <span class="n">do</span> <span class="ow">not</span> <span class="n">contain</span> <span class="nb">any</span> <span class="n">added</span> <span class="n">malicious</span> <span class="n">code</span><span class="o">.</span> <span class="n">To</span> <span class="n">avoid</span> <span class="n">downloading</span> <span class="n">new</span> <span class="n">versions</span> <span class="n">of</span> <span class="n">the</span> <span class="n">code</span> <span class="n">file</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">pin</span> <span class="n">a</span> <span class="n">revision</span><span class="o">.</span>
+<span class="n">model</span><span class="o">.</span><span class="n">safetensors</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">███████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">702</span><span class="n">M</span><span class="o">/</span><span class="mi">702</span><span class="n">M</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">09</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">71.6</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">3</span><span class="p">]:</span> <span class="nb">type</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+<span class="n">Out</span><span class="p">[</span><span class="mi">3</span><span class="p">]:</span> <span class="n">transformers_modules</span><span class="o">.</span><span class="n">gpjt</span><span class="o">.</span><span class="n">test1</span><span class="o">.</span><span class="n">b936caf64b6776917478339cbcf9f95bdca7dda9</span><span class="o">.</span><span class="n">modeling_gpjtgpt2</span><span class="o">.</span><span class="n">GPJTGPT2Model</span>
+</code></pre>
+</div>
+
+<p>So we can see where Transformers has put the downloaded code, inside a submodule
+that appears to have a GUID-like name.  Now let's try to run some inference on it:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">In</span> <span class="p">[</span><span class="mi">4</span><span class="p">]:</span> <span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+   <span class="o">...</span><span class="p">:</span> <span class="kn">import</span><span class="w"> </span><span class="nn">tiktoken</span>
+   <span class="o">...</span><span class="p">:</span> <span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+   <span class="o">...</span><span class="p">:</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">tokenizer</span> <span class="o">=</span> <span class="n">tiktoken</span><span class="o">.</span><span class="n">get_encoding</span><span class="p">(</span><span class="s2">&quot;gpt2&quot;</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">input_text</span> <span class="o">=</span> <span class="s2">&quot;Every effort moves you&quot;</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">tokens</span> <span class="o">=</span> <span class="n">tokenizer</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">input_text</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">num_tokens</span> <span class="o">=</span> <span class="mi">20</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">temperature</span> <span class="o">=</span> <span class="mf">1.4</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">top_k</span> <span class="o">=</span> <span class="mi">25</span>
+   <span class="o">...</span><span class="p">:</span> <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="k">for</span> <span class="n">ix</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_tokens</span><span class="p">):</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">input_tensor</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+   <span class="o">...</span><span class="p">:</span>             <span class="n">tokens</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">output_tensor</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">input_tensor</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">logits</span> <span class="o">=</span> <span class="n">output_tensor</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="p">:]</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">top_logits</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">topk</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">top_k</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">min_val</span> <span class="o">=</span> <span class="n">top_logits</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">logits</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+   <span class="o">...</span><span class="p">:</span>             <span class="n">logits</span> <span class="o">&lt;</span> <span class="n">min_val</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>             <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="o">-</span><span class="n">math</span><span class="o">.</span><span class="n">inf</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">logits</span><span class="o">.</span><span class="n">device</span><span class="p">),</span>
+   <span class="o">...</span><span class="p">:</span>             <span class="n">logits</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">logits</span> <span class="o">/=</span> <span class="n">temperature</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">probs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">next_token</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">multinomial</span><span class="p">(</span><span class="n">probs</span><span class="p">,</span> <span class="n">num_samples</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">tokens</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">next_token</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>
+   <span class="o">...</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="n">tokenizer</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">tokens</span><span class="p">))</span>
+<span class="n">Every</span> <span class="n">effort</span> <span class="n">moves</span> <span class="n">you</span> <span class="n">to</span> <span class="n">take</span> <span class="n">on</span> <span class="n">what</span><span class="err">’</span><span class="n">s</span> <span class="n">coming</span><span class="err">—</span><span class="kn">from</span><span class="w"> </span><span class="nn">developing</span> <span class="n">you</span> <span class="n">the</span> <span class="n">skills</span> <span class="n">you</span> <span class="n">need</span> <span class="n">to</span> <span class="n">build</span> <span class="n">an</span> <span class="n">online</span>
+</code></pre>
+</div>
+
+<p>So there we go!  We've gone from a situation where we would have to publish the
+code and the safetensors in some way and tell people how to combine them, to a
+neatly-packaged model that we can download, fully set up, with just one line:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">model</span> <span class="o">=</span> <span class="n">AutoModel</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;gpjt/test1&quot;</span><span class="p">,</span> <span class="n">trust_remote_code</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>But that inference loop is still a pig; if you've been working with LLM code then it's
+not too bad -- a basic bit of autoregression with top-k and temperature -- but it's
+definitely holding us back.  What next?</p>
+
+<h3 id="autotokenizerfrom_pretrained"><code>AutoTokenizer.from_pretrained</code></h3>
+
+<p>One obvious issue with the code above is that we still have that dependency on
+<code>tiktoken</code>.  If we're going to run inference using the simple HF <code>pipeline</code> object,
+it's going to need to know how to encode the input and decode the outputs.  And
+if you have your own tokeniser (which, if you have a truly custom model, you probably
+do) then you won't have the luxury of being able to just install it into the target
+runtime env -- you would still need to copy file around.</p>
+
+<p>Now, as I said at the start, I'm not going to go into this in as much detail, because
+my use case was really simple -- although I was using <code>tiktoken</code>,
+the specific tokeniser I was using from that library was the standard GPT-2 one.
+Transformers has its own version of that installed. So here I'll explain how you do things for models that use a built-in
+Transformers tokeniser.  After that I'll give some pointers that you might find useful
+if you're using something more custom.</p>
+
+<p>The good news if you're using a "standard" tokeniser that is already built into
+the Transformers library is that you can tell your model to use it.  The downside
+is that you can't do it by using the <code>register_for_auto_class</code> trick that we did
+above -- that is, you can't just import it:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">GPT2Tokenizer</span>
+</code></pre>
+</div>
+
+<p>...and then add this below our previous calls to register the model and config
+as auto classes:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">GPT2Tokenizer</span><span class="o">.</span><span class="n">register_for_auto_class</span><span class="p">(</span><span class="s2">&quot;AutoTokenizer&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That will essentially do nothing.</p>
+
+<p>However, tokenisers do have their own <code>push_to_hub</code> method, and the target that you
+specify can be your model.  So, for my own models, I'm using this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">tokenizer</span> <span class="o">=</span> <span class="n">AutoTokenizer</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;gpt2&quot;</span><span class="p">,</span> <span class="n">use_fast</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">tokenizer</span><span class="o">.</span><span class="n">pad_token</span> <span class="o">=</span> <span class="n">tokenizer</span><span class="o">.</span><span class="n">eos_token</span>
+    <span class="n">tokenizer</span><span class="o">.</span><span class="n">push_to_hub</span><span class="p">(</span><span class="n">hf_model_name</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That is, we get the tokeniser for the built-in GPT-2 implementation (specifically
+the "fast" one, written in Rust), set the padding token to the end-of-sequence one
+for tidiness (not sure why that's not the case by default), and then push it to the model.</p>
+
+<p>If you're following along with the code, you can check out the <code>autotokenizer-gpt-2</code>
+tag to see that.  The code goes immediately after we've pushed the model itself to
+the hub.</p>
+
+<p>So, run the upload again:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/hf-tutorial-post<span class="w"> </span><span class="o">((</span>HEAD<span class="w"> </span>detached<span class="w"> </span>at<span class="w"> </span>autotokenizer-gpt-2<span class="o">))</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>upload_model.py<span class="w"> </span>model.json<span class="w"> </span>model.safetensors<span class="w"> </span>gpjt/test2
+Processing<span class="w"> </span>Files<span class="w"> </span><span class="o">(</span><span class="m">1</span><span class="w"> </span>/<span class="w"> </span><span class="m">1</span><span class="o">)</span><span class="w">      </span>:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w">  </span>702MB<span class="w"> </span>/<span class="w">  </span>702MB,<span class="w">  </span>339MB/s
+New<span class="w"> </span>Data<span class="w"> </span>Upload<span class="w">               </span>:<span class="w"> </span><span class="p">|</span><span class="w">                                                                                                            </span><span class="p">|</span><span class="w">  </span><span class="m">0</span>.00B<span class="w"> </span>/<span class="w">  </span><span class="m">0</span>.00B,<span class="w">  </span><span class="m">0</span>.00B/s
+<span class="w">  </span>...w05qhqd/model.safetensors:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w">  </span>702MB<span class="w"> </span>/<span class="w">  </span>702MB
+</code></pre>
+</div>
+
+<p>And now we can do a completely fresh env without tiktoken:</p>
+
+<pre><code>giles@perry:~/Dev/hf-tutorial-post $ mkdir /tmp/test2
+giles@perry:~/Dev/hf-tutorial-post $ cd /tmp/test2
+giles@perry:/tmp/test2 $ uv init
+Initialized project &lt;!--CODE_BLOCK_8744--&gt;
+giles@perry:/tmp/test2 $ uv add transformers torch accelerate ipython
+Using CPython 3.14.2 interpreter at: /usr/bin/python3.14
+Creating virtual environment at: .venv
+Resolved 63 packages in 113ms
+░░░░░░░░░░░░░░░░░░░░ [0/61] Installing wheels...                                                                                                                          warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+         If the cache and target directories are on different filesystems, hardlinking may not be supported.
+         If this is intentional, set &lt;!--CODE_BLOCK_8745--&gt; or use &lt;!--CODE_BLOCK_8746--&gt; to suppress this warning.
+Installed 61 packages in 585ms
+ + accelerate==1.12.0
+...junk skipped...
+ + wcwidth==0.3.1
+giles@perry:/tmp/test2 $ uv run ipython
+</code></pre>
+
+<p>In there, we can see that <code>AutoTokenizer.from_pretrained</code> works:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">In</span> <span class="p">[</span><span class="mi">1</span><span class="p">]:</span> <span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">AutoTokenizer</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">2</span><span class="p">]:</span> <span class="n">tokenizer</span> <span class="o">=</span> <span class="n">AutoTokenizer</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;gpjt/test2&quot;</span><span class="p">,</span> <span class="n">trust_remote_code</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">configuration_gpjtgpt2</span><span class="o">.</span><span class="n">py</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">██████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">217</span><span class="o">/</span><span class="mi">217</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mi">591</span><span class="n">kB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">A</span> <span class="n">new</span> <span class="n">version</span> <span class="n">of</span> <span class="n">the</span> <span class="n">following</span> <span class="n">files</span> <span class="n">was</span> <span class="n">downloaded</span> <span class="kn">from</span><span class="w"> </span><span class="nn">https</span><span class="p">:</span><span class="o">//</span><span class="n">huggingface</span><span class="o">.</span><span class="n">co</span><span class="o">/</span><span class="n">gpjt</span><span class="o">/</span><span class="n">test2</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">configuration_gpjtgpt2</span><span class="o">.</span><span class="n">py</span>
+<span class="o">.</span> <span class="n">Make</span> <span class="n">sure</span> <span class="n">to</span> <span class="n">double</span><span class="o">-</span><span class="n">check</span> <span class="n">they</span> <span class="n">do</span> <span class="ow">not</span> <span class="n">contain</span> <span class="nb">any</span> <span class="n">added</span> <span class="n">malicious</span> <span class="n">code</span><span class="o">.</span> <span class="n">To</span> <span class="n">avoid</span> <span class="n">downloading</span> <span class="n">new</span> <span class="n">versions</span> <span class="n">of</span> <span class="n">the</span> <span class="n">code</span> <span class="n">file</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">pin</span> <span class="n">a</span> <span class="n">revision</span><span class="o">.</span>
+<span class="n">tokenizer_config</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">█████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">507</span><span class="o">/</span><span class="mi">507</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">1.58</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">vocab</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mi">798</span><span class="n">kB</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">6.84</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">merges</span><span class="o">.</span><span class="n">txt</span><span class="p">:</span> <span class="mi">456</span><span class="n">kB</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">9.61</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">special_tokens_map</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">131</span><span class="o">/</span><span class="mi">131</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mi">426</span><span class="n">kB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">tokenizer</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mf">3.56</span><span class="n">MB</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">25.3</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">3</span><span class="p">]:</span> <span class="n">tokenizer</span><span class="o">.</span><span class="n">pad_token</span>
+<span class="n">Out</span><span class="p">[</span><span class="mi">3</span><span class="p">]:</span> <span class="s1">&#39;&lt;|endoftext|&gt;&#39;</span>
+</code></pre>
+</div>
+
+<p>(Note that I had to use <code>trust_remote_code</code> here -- that appears to be new in Transformers
+5.0.0.)</p>
+
+<p>And do our inference test:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">In</span> <span class="p">[</span><span class="mi">4</span><span class="p">]:</span> <span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">AutoModel</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">5</span><span class="p">]:</span> <span class="n">model</span> <span class="o">=</span> <span class="n">AutoModel</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;gpjt/test2&quot;</span><span class="p">,</span> <span class="n">trust_remote_code</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">config</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">438</span><span class="o">/</span><span class="mi">438</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">1.65</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">configuration_gpjtgpt2</span><span class="o">.</span><span class="n">py</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">██████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">217</span><span class="o">/</span><span class="mi">217</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mi">860</span><span class="n">kB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">A</span> <span class="n">new</span> <span class="n">version</span> <span class="n">of</span> <span class="n">the</span> <span class="n">following</span> <span class="n">files</span> <span class="n">was</span> <span class="n">downloaded</span> <span class="kn">from</span><span class="w"> </span><span class="nn">https</span><span class="p">:</span><span class="o">//</span><span class="n">huggingface</span><span class="o">.</span><span class="n">co</span><span class="o">/</span><span class="n">gpjt</span><span class="o">/</span><span class="n">test2</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">configuration_gpjtgpt2</span><span class="o">.</span><span class="n">py</span>
+<span class="o">.</span> <span class="n">Make</span> <span class="n">sure</span> <span class="n">to</span> <span class="n">double</span><span class="o">-</span><span class="n">check</span> <span class="n">they</span> <span class="n">do</span> <span class="ow">not</span> <span class="n">contain</span> <span class="nb">any</span> <span class="n">added</span> <span class="n">malicious</span> <span class="n">code</span><span class="o">.</span> <span class="n">To</span> <span class="n">avoid</span> <span class="n">downloading</span> <span class="n">new</span> <span class="n">versions</span> <span class="n">of</span> <span class="n">the</span> <span class="n">code</span> <span class="n">file</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">pin</span> <span class="n">a</span> <span class="n">revision</span><span class="o">.</span>
+<span class="n">modeling_gpjtgpt2</span><span class="o">.</span><span class="n">py</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">██████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">394</span><span class="o">/</span><span class="mi">394</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">1.80</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">gpt</span><span class="o">.</span><span class="n">py</span><span class="p">:</span> <span class="mf">5.07</span><span class="n">kB</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">12.4</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">A</span> <span class="n">new</span> <span class="n">version</span> <span class="n">of</span> <span class="n">the</span> <span class="n">following</span> <span class="n">files</span> <span class="n">was</span> <span class="n">downloaded</span> <span class="kn">from</span><span class="w"> </span><span class="nn">https</span><span class="p">:</span><span class="o">//</span><span class="n">huggingface</span><span class="o">.</span><span class="n">co</span><span class="o">/</span><span class="n">gpjt</span><span class="o">/</span><span class="n">test2</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">gpt</span><span class="o">.</span><span class="n">py</span>
+<span class="o">.</span> <span class="n">Make</span> <span class="n">sure</span> <span class="n">to</span> <span class="n">double</span><span class="o">-</span><span class="n">check</span> <span class="n">they</span> <span class="n">do</span> <span class="ow">not</span> <span class="n">contain</span> <span class="nb">any</span> <span class="n">added</span> <span class="n">malicious</span> <span class="n">code</span><span class="o">.</span> <span class="n">To</span> <span class="n">avoid</span> <span class="n">downloading</span> <span class="n">new</span> <span class="n">versions</span> <span class="n">of</span> <span class="n">the</span> <span class="n">code</span> <span class="n">file</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">pin</span> <span class="n">a</span> <span class="n">revision</span><span class="o">.</span>
+<span class="n">A</span> <span class="n">new</span> <span class="n">version</span> <span class="n">of</span> <span class="n">the</span> <span class="n">following</span> <span class="n">files</span> <span class="n">was</span> <span class="n">downloaded</span> <span class="kn">from</span><span class="w"> </span><span class="nn">https</span><span class="p">:</span><span class="o">//</span><span class="n">huggingface</span><span class="o">.</span><span class="n">co</span><span class="o">/</span><span class="n">gpjt</span><span class="o">/</span><span class="n">test2</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">modeling_gpjtgpt2</span><span class="o">.</span><span class="n">py</span>
+<span class="o">-</span> <span class="n">gpt</span><span class="o">.</span><span class="n">py</span>
+<span class="o">.</span> <span class="n">Make</span> <span class="n">sure</span> <span class="n">to</span> <span class="n">double</span><span class="o">-</span><span class="n">check</span> <span class="n">they</span> <span class="n">do</span> <span class="ow">not</span> <span class="n">contain</span> <span class="nb">any</span> <span class="n">added</span> <span class="n">malicious</span> <span class="n">code</span><span class="o">.</span> <span class="n">To</span> <span class="n">avoid</span> <span class="n">downloading</span> <span class="n">new</span> <span class="n">versions</span> <span class="n">of</span> <span class="n">the</span> <span class="n">code</span> <span class="n">file</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">pin</span> <span class="n">a</span> <span class="n">revision</span><span class="o">.</span>
+<span class="n">model</span><span class="o">.</span><span class="n">safetensors</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">███████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">702</span><span class="n">M</span><span class="o">/</span><span class="mi">702</span><span class="n">M</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">07</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">99.2</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">6</span><span class="p">]:</span> <span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+   <span class="o">...</span><span class="p">:</span> <span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+   <span class="o">...</span><span class="p">:</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">input_text</span> <span class="o">=</span> <span class="s2">&quot;Every effort moves you&quot;</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">tokens</span> <span class="o">=</span> <span class="n">tokenizer</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">input_text</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">num_tokens</span> <span class="o">=</span> <span class="mi">20</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">temperature</span> <span class="o">=</span> <span class="mf">1.4</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">top_k</span> <span class="o">=</span> <span class="mi">25</span>
+   <span class="o">...</span><span class="p">:</span> <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="k">for</span> <span class="n">ix</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_tokens</span><span class="p">):</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">input_tensor</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+   <span class="o">...</span><span class="p">:</span>             <span class="n">tokens</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">output_tensor</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">input_tensor</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">logits</span> <span class="o">=</span> <span class="n">output_tensor</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="p">:]</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">top_logits</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">topk</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">top_k</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">min_val</span> <span class="o">=</span> <span class="n">top_logits</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">logits</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+   <span class="o">...</span><span class="p">:</span>             <span class="n">logits</span> <span class="o">&lt;</span> <span class="n">min_val</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>             <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="o">-</span><span class="n">math</span><span class="o">.</span><span class="n">inf</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">logits</span><span class="o">.</span><span class="n">device</span><span class="p">),</span>
+   <span class="o">...</span><span class="p">:</span>             <span class="n">logits</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">logits</span> <span class="o">/=</span> <span class="n">temperature</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">probs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">next_token</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">multinomial</span><span class="p">(</span><span class="n">probs</span><span class="p">,</span> <span class="n">num_samples</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+   <span class="o">...</span><span class="p">:</span>         <span class="n">tokens</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">next_token</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span>
+   <span class="o">...</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="n">tokenizer</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">tokens</span><span class="p">))</span>
+<span class="n">Every</span> <span class="n">effort</span> <span class="n">moves</span> <span class="n">you</span> <span class="n">forward</span> <span class="k">as</span> <span class="n">you</span> <span class="n">become</span> <span class="n">a</span> <span class="n">successful</span> <span class="n">artist</span><span class="o">.</span> <span class="n">That</span><span class="err">’</span><span class="n">s</span> <span class="ow">not</span> <span class="n">to</span> <span class="n">say</span> <span class="n">there</span><span class="err">’</span><span class="n">s</span> <span class="nb">any</span>
+</code></pre>
+</div>
+
+<p>It may not be much shorter than the code we had when we just had the <code>AutoModel</code>,
+but it's an important step forward: we can now download and run inference on our
+custom model with none of the custom code -- neither the model itself nor the
+tokeniser -- on the machine where we're doing it.  Everything is nicely
+packaged on the HF Hub.</p>
+
+<p>Now, what if you're using a tokeniser that's not already in Transformers?  There are two
+possibilities here:</p>
+
+<ol>
+<li>You're using the HF <code>Tokenizers</code> library.  With that, you can save
+your tokeniser to a JSON file, then you could load that into a <code>Transformers</code>
+<code>PreTrainedTokenizerFast</code> object, which provides a <code>push_to_hub</code> method to push
+it like I did with the one above.</li>
+<li>You've got something completely custom.  Just like there is a <code>configuration_gpjtgpt2.py</code>
+and a <code>modeling_gpjtgpt2.py</code>, I believe you can also add a <code>tokenization_gpjtgpt2.py</code>
+that defines a subclass of <code>PreTrainedTokenizer</code>, and then you can push that to the
+Hub just like we did our model wrapper class.</li>
+</ol>
+
+<p>As I said, I have not done either of these, but that's the direction I'd explore if
+I needed it.  If you do either and want to share your experiences, then please do
+leave a comment below!  And likewise, if and when I start writing things with custom
+tokenisers, I'll link to the details of how to upload them then.</p>
+
+<p>Anyway, we've got the tokeniser done to the level we need for this walkthrough,
+so let's do the QoL improvements so that we can run inference on the model
+using the nice HF <code>pipeline</code> abstraction.</p>
+
+<h3 id="automodelforcausallmfrom_pretrained-for-inference"><code>AutoModelForCausalLM.from_pretrained</code> for inference</h3>
+
+<p>Let's look at our target code for inference again:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">pipeline</span>
+<span class="n">pipe</span> <span class="o">=</span> <span class="n">pipeline</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;text-generation&quot;</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">&quot;some-hf-user/some-model-name&quot;</span><span class="p">,</span> <span class="n">trust_remote_code</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">out</span> <span class="o">=</span> <span class="n">pipe</span><span class="p">(</span>
+    <span class="s2">&quot;Every effort moves you&quot;</span><span class="p">,</span>
+    <span class="n">max_new_tokens</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+    <span class="n">do_sample</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">temperature</span><span class="o">=</span><span class="mf">1.4</span><span class="p">,</span>
+    <span class="n">top_k</span><span class="o">=</span><span class="mi">25</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;generated_text&quot;</span><span class="p">])</span>
+</code></pre>
+</div>
+
+<p>The version of the code that does this is in the repo on
+the tag <code>causal-lm-inference</code>, but I'll explain how it was put in place, with the
+logic behind each step.</p>
+
+<p>In order to run a text-generation pipeline, we're going to need to wrap our model
+in something that provides the interface for LLMs in the Hugging Face ecosystem:
+<code>AutoModelForCausalLM</code>.  So, our first step is to put the plumbing in place so that
+we can use the <code>from_pretrained</code> method on that class to download our wrapped
+model.</p>
+
+<p>IMO it's cleanest to have two separate models, one for "simple" inference that is
+just a regular model -- the <code>AutoModel</code> we have right now -- and one supporting the
+richer interface that supports easy text generation.  So we can start off by adding
+the basic structure to <code>modeling_gpjtgpt2.py</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">GPJTGPT2ModelForCausalLM</span><span class="p">(</span><span class="n">PreTrainedModel</span><span class="p">):</span>
+
+    <span class="n">config_class</span> <span class="o">=</span> <span class="n">GPJTGPT2Config</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">model</span> <span class="o">=</span> <span class="n">GPTModel</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">cfg</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">post_init</span><span class="p">()</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_ids</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">input_ids</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>We can then add code to register that to our <code>upload_model.py</code> script -- the last line
+in this snippet, just below the two that already exist.</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">GPJTGPT2Config</span><span class="o">.</span><span class="n">register_for_auto_class</span><span class="p">()</span>
+    <span class="n">GPJTGPT2Model</span><span class="o">.</span><span class="n">register_for_auto_class</span><span class="p">(</span><span class="s2">&quot;AutoModel&quot;</span><span class="p">)</span>
+    <span class="n">GPJTGPT2ModelForCausalLM</span><span class="o">.</span><span class="n">register_for_auto_class</span><span class="p">(</span><span class="s2">&quot;AutoModelForCausalLM&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That feels like it should be enough, but for reasons I've not been able to pin down,
+it's not -- you also need to massage the "auto-map" in the <code>config</code> object
+to make it all work properly.  So after that code, after we've created the <code>config</code>
+object, we need this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">config</span><span class="o">.</span><span class="n">auto_map</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;AutoConfig&quot;</span><span class="p">:</span> <span class="s2">&quot;configuration_gpjtgpt2.GPJTGPT2Config&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;AutoModel&quot;</span><span class="p">:</span> <span class="s2">&quot;modeling_gpjtgpt2.GPJTGPT2Model&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;AutoModelForCausalLM&quot;</span><span class="p">:</span> <span class="s2">&quot;modeling_gpjtgpt2.GPJTGPT2ModelForCausalLM&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+</code></pre>
+</div>
+
+<p>With that in place, we could just upload our model -- <code>AutoModelForCausalLM.from_pretrained("some-hf-user/some-model-name", trust_remote_code=True)</code>
+would work just fine.  But the model that it would return would not be any different
+to the one we've been using so far.  To get that to work, we need to update the model
+to say that it can generate text.  That's actually pretty easy.</p>
+
+<p>Firstly, we need it to inherit from a mixin class provided by Transformers:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers.generation</span><span class="w"> </span><span class="kn">import</span> <span class="n">GenerationMixin</span>
+<span class="o">...</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">GPJTGPT2ModelForCausalLM</span><span class="p">(</span><span class="n">PreTrainedModel</span><span class="p">,</span> <span class="n">GenerationMixin</span><span class="p">):</span>
+</code></pre>
+</div>
+
+<p>Now, the semantics of the <code>forward</code> method on this class are a bit different to the ones
+we had previously; we were just returning the outputs of the last layer of the underlying
+model, the logits.  For this kind of model, we need to put them in a wrapper -- the
+reasoning behind this will become clearer when we get on to training.  So our forward pass
+needs to change to look like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">transformers.modeling_outputs</span><span class="w"> </span><span class="kn">import</span> <span class="n">CausalLMOutput</span>
+
+<span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_ids</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">input_ids</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">CausalLMOutput</span><span class="p">(</span><span class="n">logits</span><span class="o">=</span><span class="n">logits</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Finally, some changes to our config class.  For text generation, Transformers needs to know
+how many hidden layers the model has <sup class="footnote-ref" id="fnref-4"><a href="#fn-4">4</a></sup>.  In the case of the model I'm using to demonstrate,
+that's the <code>n_layers</code> parameter in the underlying configuration, so this can go inside
+the <code>__init__</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="k">if</span> <span class="n">cfg</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">num_hidden_layers</span> <span class="o">=</span> <span class="n">cfg</span><span class="p">[</span><span class="s2">&quot;n_layers&quot;</span><span class="p">]</span>
+</code></pre>
+</div>
+
+<p>Another change in the config that took me a while to puzzle out, and might catch you
+if you're in the same situation: Transformers, by default, assumes that the model caches
+previous inputs.  So in an autoregressive loop starting with <code>Every effort moves you</code>,
+the first run of the model will get the full input; let's say it returns <code>to</code>.  The
+next iteration of the loop, however, won't be passed the full new sequence <code>Every effort moves you to</code>, but
+rather just the token that was generated last time around, <code>to</code>.</p>
+
+<p>So you'll get a series of predicted tokens where the first one might make
+sense but the rest degenerate into gibberish:</p>
+
+<pre><code>Every effort moves you to it was,
+-1) with and the best that they are to not been the place
+</code></pre>
+
+<p>All of the tokens generated after <code>to</code> had just the previous token as their context.</p>
+
+<p>Luckily, you just need to specify that your model doesn't have a cache in the config class as well, <em>after</em> the call
+to the superclass <code>__init__</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="bp">self</span><span class="o">.</span><span class="n">use_cache</span> <span class="o">=</span> <span class="kc">False</span>
+</code></pre>
+</div>
+
+<p>We're almost there!  At this point, we actually have all of the code that we need
+for a working <code>AutoModelForCausalLM.from_pretrained</code>.  But there's one final tweak.</p>
+
+<p>A model on the hub has a "default" model type, which is the one that we use when we
+do the original <code>push_to_hub</code>.  You might remember that it appeared in the <code>config.json</code>
+in that single-element list keyed on <code>architectures</code>.</p>
+
+<p>Previously we has this in our upload script:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">model</span> <span class="o">=</span> <span class="n">GPJTGPT2Model</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+    <span class="o">...</span>
+    <span class="n">model</span><span class="o">.</span><span class="n">push_to_hub</span><span class="p">(</span><span class="n">hf_model_name</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That means that our default is the <code>GPJTGPT2Model</code> model.  But when the pipeline
+creates a model for us, it will just use the default -- even for the text-generation
+task, it doesn't assume we want to use the <code>AutoModelForCausalLM</code>.</p>
+
+<p>Luckily, that's a small change: we just upload our text-generation model instead of
+the basic one:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">model</span> <span class="o">=</span> <span class="n">GPJTGPT2ModelForCausalLM</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+    <span class="o">...</span>
+    <span class="n">model</span><span class="o">.</span><span class="n">push_to_hub</span><span class="p">(</span><span class="n">hf_model_name</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>With all of that in place, we can run the script, upload the model, and then
+in a fresh environment:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">In</span> <span class="p">[</span><span class="mi">1</span><span class="p">]:</span> <span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">pipeline</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">2</span><span class="p">]:</span> <span class="n">pipe</span> <span class="o">=</span> <span class="n">pipeline</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;text-generation&quot;</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpjt/test3&quot;</span><span class="p">,</span> <span class="n">trust_remote_code</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span> <span class="n">out</span> <span class="o">=</span> <span class="n">pipe</span><span class="p">(</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="s2">&quot;Every effort moves you&quot;</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="n">max_new_tokens</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="n">do_sample</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="n">temperature</span><span class="o">=</span><span class="mf">1.4</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span>     <span class="n">top_k</span><span class="o">=</span><span class="mi">25</span><span class="p">,</span>
+   <span class="o">...</span><span class="p">:</span> <span class="p">)</span>
+   <span class="o">...</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;generated_text&quot;</span><span class="p">])</span>
+<span class="n">config</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">572</span><span class="o">/</span><span class="mi">572</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">1.29</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">configuration_gpjtgpt2</span><span class="o">.</span><span class="n">py</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">██████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">331</span><span class="o">/</span><span class="mi">331</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mi">965</span><span class="n">kB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">A</span> <span class="n">new</span> <span class="n">version</span> <span class="n">of</span> <span class="n">the</span> <span class="n">following</span> <span class="n">files</span> <span class="n">was</span> <span class="n">downloaded</span> <span class="kn">from</span><span class="w"> </span><span class="nn">https</span><span class="p">:</span><span class="o">//</span><span class="n">huggingface</span><span class="o">.</span><span class="n">co</span><span class="o">/</span><span class="n">gpjt</span><span class="o">/</span><span class="n">test3</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">configuration_gpjtgpt2</span><span class="o">.</span><span class="n">py</span>
+<span class="o">.</span> <span class="n">Make</span> <span class="n">sure</span> <span class="n">to</span> <span class="n">double</span><span class="o">-</span><span class="n">check</span> <span class="n">they</span> <span class="n">do</span> <span class="ow">not</span> <span class="n">contain</span> <span class="nb">any</span> <span class="n">added</span> <span class="n">malicious</span> <span class="n">code</span><span class="o">.</span> <span class="n">To</span> <span class="n">avoid</span> <span class="n">downloading</span> <span class="n">new</span> <span class="n">versions</span> <span class="n">of</span> <span class="n">the</span> <span class="n">code</span> <span class="n">file</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">pin</span> <span class="n">a</span> <span class="n">revision</span><span class="o">.</span>
+<span class="n">modeling_gpjtgpt2</span><span class="o">.</span><span class="n">py</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">██████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">905</span><span class="o">/</span><span class="mi">905</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">2.55</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">gpt</span><span class="o">.</span><span class="n">py</span><span class="p">:</span> <span class="mf">5.07</span><span class="n">kB</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">8.00</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">A</span> <span class="n">new</span> <span class="n">version</span> <span class="n">of</span> <span class="n">the</span> <span class="n">following</span> <span class="n">files</span> <span class="n">was</span> <span class="n">downloaded</span> <span class="kn">from</span><span class="w"> </span><span class="nn">https</span><span class="p">:</span><span class="o">//</span><span class="n">huggingface</span><span class="o">.</span><span class="n">co</span><span class="o">/</span><span class="n">gpjt</span><span class="o">/</span><span class="n">test3</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">gpt</span><span class="o">.</span><span class="n">py</span>
+<span class="o">.</span> <span class="n">Make</span> <span class="n">sure</span> <span class="n">to</span> <span class="n">double</span><span class="o">-</span><span class="n">check</span> <span class="n">they</span> <span class="n">do</span> <span class="ow">not</span> <span class="n">contain</span> <span class="nb">any</span> <span class="n">added</span> <span class="n">malicious</span> <span class="n">code</span><span class="o">.</span> <span class="n">To</span> <span class="n">avoid</span> <span class="n">downloading</span> <span class="n">new</span> <span class="n">versions</span> <span class="n">of</span> <span class="n">the</span> <span class="n">code</span> <span class="n">file</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">pin</span> <span class="n">a</span> <span class="n">revision</span><span class="o">.</span>
+<span class="n">A</span> <span class="n">new</span> <span class="n">version</span> <span class="n">of</span> <span class="n">the</span> <span class="n">following</span> <span class="n">files</span> <span class="n">was</span> <span class="n">downloaded</span> <span class="kn">from</span><span class="w"> </span><span class="nn">https</span><span class="p">:</span><span class="o">//</span><span class="n">huggingface</span><span class="o">.</span><span class="n">co</span><span class="o">/</span><span class="n">gpjt</span><span class="o">/</span><span class="n">test3</span><span class="p">:</span>
+<span class="o">-</span> <span class="n">modeling_gpjtgpt2</span><span class="o">.</span><span class="n">py</span>
+<span class="o">-</span> <span class="n">gpt</span><span class="o">.</span><span class="n">py</span>
+<span class="o">.</span> <span class="n">Make</span> <span class="n">sure</span> <span class="n">to</span> <span class="n">double</span><span class="o">-</span><span class="n">check</span> <span class="n">they</span> <span class="n">do</span> <span class="ow">not</span> <span class="n">contain</span> <span class="nb">any</span> <span class="n">added</span> <span class="n">malicious</span> <span class="n">code</span><span class="o">.</span> <span class="n">To</span> <span class="n">avoid</span> <span class="n">downloading</span> <span class="n">new</span> <span class="n">versions</span> <span class="n">of</span> <span class="n">the</span> <span class="n">code</span> <span class="n">file</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">pin</span> <span class="n">a</span> <span class="n">revision</span><span class="o">.</span>
+<span class="n">model</span><span class="o">.</span><span class="n">safetensors</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">███████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">702</span><span class="n">M</span><span class="o">/</span><span class="mi">702</span><span class="n">M</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">07</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">94.1</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">Loading</span> <span class="n">weights</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">███████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">173</span><span class="o">/</span><span class="mi">173</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">8164.72</span><span class="n">it</span><span class="o">/</span><span class="n">s</span><span class="p">,</span> <span class="n">Materializing</span> <span class="n">param</span><span class="o">=</span><span class="n">model</span><span class="o">.</span><span class="n">trf_blocks</span><span class="mf">.11</span><span class="o">.</span><span class="n">norm2</span><span class="o">.</span><span class="n">shift</span><span class="p">]</span>
+<span class="n">generation_config</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">███████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mf">91.0</span><span class="o">/</span><span class="mf">91.0</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mi">303</span><span class="n">kB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">tokenizer_config</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">█████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">507</span><span class="o">/</span><span class="mi">507</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">1.65</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">tokenizer</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mf">3.56</span><span class="n">MB</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mf">24.1</span><span class="n">MB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">special_tokens_map</span><span class="o">.</span><span class="n">json</span><span class="p">:</span> <span class="mi">100</span><span class="o">%|</span><span class="err">████████████████████████████████████████████████████████████████████████████████████████████████████████████</span><span class="o">|</span> <span class="mi">131</span><span class="o">/</span><span class="mi">131</span> <span class="p">[</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="o">&lt;</span><span class="mi">00</span><span class="p">:</span><span class="mi">00</span><span class="p">,</span> <span class="mi">415</span><span class="n">kB</span><span class="o">/</span><span class="n">s</span><span class="p">]</span>
+<span class="n">Every</span> <span class="n">effort</span> <span class="n">moves</span> <span class="n">you</span> <span class="n">toward</span> <span class="n">getting</span> <span class="n">rid</span> <span class="n">of</span> <span class="n">them</span> <span class="n">but</span> <span class="ow">not</span> <span class="n">to</span> <span class="n">get</span> <span class="nb">all</span> <span class="n">of</span> <span class="n">how</span> <span class="n">they</span> <span class="n">feel</span> <span class="ow">and</span> <span class="n">what</span> <span class="n">are</span> <span class="n">the</span> <span class="n">reasons</span> <span class="n">to</span>
+</code></pre>
+</div>
+
+<p>Lovely!  Now let's get it training.</p>
+
+<h3 id="automodelforcausallmfrom_pretrained-for-training"><code>AutoModelForCausalLM.from_pretrained</code> for training</h3>
+
+<p>For this section, check out the <code>causal-lm-train</code> tag.  You'll see a new file,
+<code>train.py</code>, which has the training loop from the notebook I linked to at the start
+of this post.  It will train the model on <a href="https://huggingface.co/datasets/gpjt/openassistant-guanaco-llama2-format">this dataset</a>,
+which is essentially a bunch of chatbot-style transcripts in the Llama 2 format.
+Its goal is to help fine-tune a base model to become an instruction-following one,
+though of course the model I'm using here is too tiny for that to work well!  It's
+still a useful way of checking that training works, though.</p>
+
+<p>To save time, it only does one training epoch, which should be enough
+to get the loss down a bit.  If you run against one of my other models, you can see it working
+(you will need to tweak the batch size if you have less than 24G GiB of VRAM).</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/hf-tutorial-post<span class="w"> </span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>train.py<span class="w"> </span>gpjt/1xrtx3090m24-fineweb
+tokenizer_config.json:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>█████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">507</span>/507<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">2</span>.19MB/s<span class="o">]</span>
+vocab.json:<span class="w"> </span>798kB<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00,<span class="w"> </span><span class="m">11</span>.3MB/s<span class="o">]</span>
+merges.txt:<span class="w"> </span>456kB<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00,<span class="w"> </span><span class="m">12</span>.1MB/s<span class="o">]</span>
+tokenizer.json:<span class="w"> </span><span class="m">3</span>.56MB<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00,<span class="w"> </span><span class="m">26</span>.0MB/s<span class="o">]</span>
+special_tokens_map.json:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">131</span>/131<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span>681kB/s<span class="o">]</span>
+Map:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>███████████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">9846</span>/9846<span class="w"> </span><span class="o">[</span><span class="m">00</span>:02&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">4387</span>.69<span class="w"> </span>examples/s<span class="o">]</span>
+Map:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">518</span>/518<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">4316</span>.30<span class="w"> </span>examples/s<span class="o">]</span>
+config.json:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">679</span>/679<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">3</span>.46MB/s<span class="o">]</span>
+configuration_gpjtgpt2.py:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>█████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">475</span>/475<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">2</span>.87MB/s<span class="o">]</span>
+A<span class="w"> </span>new<span class="w"> </span>version<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>following<span class="w"> </span>files<span class="w"> </span>was<span class="w"> </span>downloaded<span class="w"> </span>from<span class="w"> </span>https://huggingface.co/gpjt/1xrtx3090m24-fineweb:
+-<span class="w"> </span>configuration_gpjtgpt2.py
+.<span class="w"> </span>Make<span class="w"> </span>sure<span class="w"> </span>to<span class="w"> </span>double-check<span class="w"> </span>they<span class="w"> </span><span class="k">do</span><span class="w"> </span>not<span class="w"> </span>contain<span class="w"> </span>any<span class="w"> </span>added<span class="w"> </span>malicious<span class="w"> </span>code.<span class="w"> </span>To<span class="w"> </span>avoid<span class="w"> </span>downloading<span class="w"> </span>new<span class="w"> </span>versions<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>code<span class="w"> </span>file,<span class="w"> </span>you<span class="w"> </span>can<span class="w"> </span>pin<span class="w"> </span>a<span class="w"> </span>revision.
+modeling_gpjtgpt2.py:<span class="w"> </span><span class="m">1</span>.70kB<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00,<span class="w"> </span><span class="m">5</span>.25MB/s<span class="o">]</span>
+gpt.py:<span class="w"> </span><span class="m">5</span>.07kB<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00,<span class="w"> </span><span class="m">13</span>.2MB/s<span class="o">]</span>
+A<span class="w"> </span>new<span class="w"> </span>version<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>following<span class="w"> </span>files<span class="w"> </span>was<span class="w"> </span>downloaded<span class="w"> </span>from<span class="w"> </span>https://huggingface.co/gpjt/1xrtx3090m24-fineweb:
+-<span class="w"> </span>gpt.py
+.<span class="w"> </span>Make<span class="w"> </span>sure<span class="w"> </span>to<span class="w"> </span>double-check<span class="w"> </span>they<span class="w"> </span><span class="k">do</span><span class="w"> </span>not<span class="w"> </span>contain<span class="w"> </span>any<span class="w"> </span>added<span class="w"> </span>malicious<span class="w"> </span>code.<span class="w"> </span>To<span class="w"> </span>avoid<span class="w"> </span>downloading<span class="w"> </span>new<span class="w"> </span>versions<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>code<span class="w"> </span>file,<span class="w"> </span>you<span class="w"> </span>can<span class="w"> </span>pin<span class="w"> </span>a<span class="w"> </span>revision.
+A<span class="w"> </span>new<span class="w"> </span>version<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>following<span class="w"> </span>files<span class="w"> </span>was<span class="w"> </span>downloaded<span class="w"> </span>from<span class="w"> </span>https://huggingface.co/gpjt/1xrtx3090m24-fineweb:
+-<span class="w"> </span>modeling_gpjtgpt2.py
+-<span class="w"> </span>gpt.py
+.<span class="w"> </span>Make<span class="w"> </span>sure<span class="w"> </span>to<span class="w"> </span>double-check<span class="w"> </span>they<span class="w"> </span><span class="k">do</span><span class="w"> </span>not<span class="w"> </span>contain<span class="w"> </span>any<span class="w"> </span>added<span class="w"> </span>malicious<span class="w"> </span>code.<span class="w"> </span>To<span class="w"> </span>avoid<span class="w"> </span>downloading<span class="w"> </span>new<span class="w"> </span>versions<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>code<span class="w"> </span>file,<span class="w"> </span>you<span class="w"> </span>can<span class="w"> </span>pin<span class="w"> </span>a<span class="w"> </span>revision.
+model.safetensors:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>███████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span>702M/702M<span class="w"> </span><span class="o">[</span><span class="m">00</span>:09&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">73</span>.9MB/s<span class="o">]</span>
+generation_config.json:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>█████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">166</span>/166<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span>836kB/s<span class="o">]</span>
+Before<span class="w"> </span>training<span class="w"> </span>sample:
+Device<span class="w"> </span><span class="nb">set</span><span class="w"> </span>to<span class="w"> </span>use<span class="w"> </span>cuda
+
+&lt;s&gt;<span class="o">[</span>INST<span class="o">]</span><span class="w"> </span><span class="s">&lt;&lt;SYS&gt;&gt;</span>
+<span class="s">You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.</span>
+
+<span class="s">If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don&#39;t know the answer to a question, please don&#39;t share false information.</span>
+<span class="s">&lt;&lt;/SYS</span>&gt;&gt;
+
+Who<span class="w"> </span>is<span class="w"> </span>Leonardo<span class="w"> </span>Da<span class="w"> </span>Vinci?<span class="w"> </span><span class="o">[</span>/INST<span class="o">]</span>
+
+
+For<span class="w"> </span>more<span class="w"> </span>information<span class="w"> </span>on<span class="w"> </span>any<span class="w"> </span>of<span class="w"> </span>our<span class="w"> </span>other<span class="w"> </span>related<span class="w"> </span>services,<span class="w"> </span>visit<span class="w"> </span>www.iTricks.com.
+<span class="m">21</span><span class="w"> </span>tokens<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">0</span>.27s:<span class="w"> </span><span class="m">77</span>.93<span class="w"> </span>tokens/s<span class="o">)</span>
+<span class="o">{</span><span class="s1">&#39;eval_loss&#39;</span>:<span class="w"> </span><span class="m">4</span>.032161712646484,<span class="w"> </span><span class="s1">&#39;eval_runtime&#39;</span>:<span class="w"> </span><span class="m">8</span>.8735,<span class="w"> </span><span class="s1">&#39;eval_samples_per_second&#39;</span>:<span class="w"> </span><span class="m">58</span>.376,<span class="w"> </span><span class="s1">&#39;eval_steps_per_second&#39;</span>:<span class="w"> </span><span class="m">4</span>.959,<span class="w"> </span><span class="s1">&#39;epoch&#39;</span>:<span class="w"> </span><span class="m">0</span><span class="o">}</span>
+<span class="o">{</span><span class="s1">&#39;loss&#39;</span>:<span class="w"> </span><span class="m">2</span>.7936,<span class="w"> </span><span class="s1">&#39;grad_norm&#39;</span>:<span class="w"> </span><span class="m">0</span>.7593105435371399,<span class="w"> </span><span class="s1">&#39;learning_rate&#39;</span>:<span class="w"> </span><span class="m">7</span>.031093403099603e-05,<span class="w"> </span><span class="s1">&#39;epoch&#39;</span>:<span class="w"> </span><span class="m">0</span>.3<span class="o">}</span>
+<span class="o">{</span><span class="s1">&#39;loss&#39;</span>:<span class="w"> </span><span class="m">2</span>.3841,<span class="w"> </span><span class="s1">&#39;grad_norm&#39;</span>:<span class="w"> </span><span class="m">0</span>.818194568157196,<span class="w"> </span><span class="s1">&#39;learning_rate&#39;</span>:<span class="w"> </span><span class="m">3</span>.1883506106877334e-05,<span class="w"> </span><span class="s1">&#39;epoch&#39;</span>:<span class="w"> </span><span class="m">0</span>.61<span class="o">}</span>
+<span class="o">{</span><span class="s1">&#39;loss&#39;</span>:<span class="w"> </span><span class="m">2</span>.3227,<span class="w"> </span><span class="s1">&#39;grad_norm&#39;</span>:<span class="w"> </span><span class="m">0</span>.7637207508087158,<span class="w"> </span><span class="s1">&#39;learning_rate&#39;</span>:<span class="w"> </span><span class="m">1</span>.813114222170076e-06,<span class="w"> </span><span class="s1">&#39;epoch&#39;</span>:<span class="w"> </span><span class="m">0</span>.91<span class="o">}</span>
+<span class="o">{</span><span class="s1">&#39;eval_loss&#39;</span>:<span class="w"> </span><span class="m">2</span>.2446134090423584,<span class="w"> </span><span class="s1">&#39;eval_runtime&#39;</span>:<span class="w"> </span><span class="m">9</span>.1806,<span class="w"> </span><span class="s1">&#39;eval_samples_per_second&#39;</span>:<span class="w"> </span><span class="m">56</span>.424,<span class="w"> </span><span class="s1">&#39;eval_steps_per_second&#39;</span>:<span class="w"> </span><span class="m">4</span>.793,<span class="w"> </span><span class="s1">&#39;epoch&#39;</span>:<span class="w"> </span><span class="m">1</span>.0<span class="o">}</span>
+<span class="o">{</span><span class="s1">&#39;train_runtime&#39;</span>:<span class="w"> </span><span class="m">554</span>.2092,<span class="w"> </span><span class="s1">&#39;train_samples_per_second&#39;</span>:<span class="w"> </span><span class="m">17</span>.766,<span class="w"> </span><span class="s1">&#39;train_steps_per_second&#39;</span>:<span class="w"> </span><span class="m">2</span>.961,<span class="w"> </span><span class="s1">&#39;train_loss&#39;</span>:<span class="w"> </span><span class="m">2</span>.4837063656283327,<span class="w"> </span><span class="s1">&#39;epoch&#39;</span>:<span class="w"> </span><span class="m">1</span>.0<span class="o">}</span>
+<span class="m">100</span>%<span class="p">|</span>█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">1641</span>/1641<span class="w"> </span><span class="o">[</span><span class="m">09</span>:14&lt;<span class="m">00</span>:00,<span class="w">  </span><span class="m">2</span>.96it/s<span class="o">]</span>
+After<span class="w"> </span>training<span class="w"> </span>sample:
+Device<span class="w"> </span><span class="nb">set</span><span class="w"> </span>to<span class="w"> </span>use<span class="w"> </span>cuda
+
+&lt;s&gt;<span class="o">[</span>INST<span class="o">]</span><span class="w"> </span><span class="s">&lt;&lt;SYS&gt;&gt;</span>
+<span class="s">You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.</span>
+
+<span class="s">If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don&#39;t know the answer to a question, please don&#39;t share false information.</span>
+<span class="s">&lt;&lt;/SYS</span>&gt;&gt;
+
+Who<span class="w"> </span>is<span class="w"> </span>Leonardo<span class="w"> </span>Da<span class="w"> </span>Vinci?<span class="w"> </span><span class="o">[</span>/INST<span class="o">]</span>
+
+
+<span class="w"> </span>Leonardo<span class="w"> </span>Da<span class="w"> </span>Vinci<span class="w"> </span>is<span class="w"> </span>a<span class="w"> </span>philosopher,<span class="w"> </span>writer,<span class="w"> </span>and<span class="w"> </span>artistic<span class="w"> </span>assistant.<span class="w"> </span>He<span class="w"> </span>has<span class="w"> </span>been<span class="w"> </span>involved<span class="w"> </span><span class="k">in</span><span class="w"> </span>the<span class="w"> </span>development<span class="w"> </span>of<span class="w"> </span>modern<span class="w"> </span>art<span class="w"> </span>and<span class="w"> </span>architecture<span class="w"> </span><span class="k">for</span><span class="w"> </span>several<span class="w"> </span>decades,<span class="w"> </span>including<span class="w"> </span>the<span class="w"> </span>development<span class="w"> </span>of<span class="w"> </span>a<span class="w"> </span>large-scale<span class="w"> </span>art<span class="w"> </span>form<span class="w"> </span><span class="k">in</span><span class="w"> </span>the<span class="w"> </span>late<span class="w"> </span>1960s<span class="w"> </span>and<span class="w"> </span>early<span class="w"> </span>1980s.<span class="w"> </span>He<span class="w"> </span>has<span class="w"> </span>been<span class="w"> </span>active<span class="w"> </span><span class="k">in</span><span class="w"> </span>the<span class="w"> </span>development<span class="w"> </span>of<span class="w"> </span>modern<span class="w"> </span>art<span class="w"> </span>and<span class="w"> </span>architecture<span class="w"> </span>since<span class="w"> </span>the<span class="w"> </span>early<span class="w"> </span>1960s,<span class="w"> </span>and<span class="w"> </span>is<span class="w"> </span>now<span class="w"> </span>known<span class="w"> </span><span class="k">for</span><span class="w"> </span>his<span class="w"> </span>work<span class="w"> </span><span class="k">in</span><span class="w"> </span>architecture<span class="w"> </span>and<span class="w"> </span>architecture.<span class="w"> </span>He<span class="w"> </span>has<span class="w"> </span>been<span class="w"> </span>active<span class="w"> </span><span class="k">in</span><span class="w"> </span>the<span class="w"> </span>development<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>modern<span class="w"> </span>art<span class="w"> </span>form<span class="w"> </span><span class="k">in</span><span class="w"> </span>the<span class="w"> </span>late<span class="w"> </span>1960s<span class="w"> </span>and<span class="w"> </span>early
+<span class="m">100</span><span class="w"> </span>tokens<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">0</span>.53s:<span class="w"> </span><span class="m">189</span>.04<span class="w"> </span>tokens/s<span class="o">)</span>
+</code></pre>
+</div>
+
+<p>You can see that it's at least trying to answer the question after training, even
+if its answer is completely wrong -- pretty much what you'd expect
+from the tiny model in question (163M parameters trained on about 3B tokens).</p>
+
+<p>In order to get it working with our custom models, we just need to return the loss
+as well as the logits from the <code>forward</code> method of our <code>GPJTGPT2ModelForCausalLM</code> class:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_ids</span><span class="p">,</span> <span class="n">attention_mask</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">input_ids</span><span class="p">)</span>
+
+        <span class="n">loss</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">labels</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">shifted_logits</span> <span class="o">=</span> <span class="n">logits</span><span class="p">[:,</span> <span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="p">:]</span>
+            <span class="n">shifted_labels</span> <span class="o">=</span> <span class="n">labels</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">:]</span>
+
+            <span class="k">if</span> <span class="n">attention_mask</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">shifted_mask</span> <span class="o">=</span> <span class="n">attention_mask</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">:]</span>
+                <span class="n">shifted_labels</span> <span class="o">=</span> <span class="n">shifted_labels</span><span class="o">.</span><span class="n">masked_fill</span><span class="p">(</span>
+                    <span class="n">shifted_mask</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mi">100</span>
+                <span class="p">)</span>
+
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">functional</span><span class="o">.</span><span class="n">cross_entropy</span><span class="p">(</span>
+                <span class="n">shifted_logits</span><span class="o">.</span><span class="n">flatten</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">shifted_labels</span><span class="o">.</span><span class="n">flatten</span><span class="p">(),</span>
+                <span class="n">ignore_index</span><span class="o">=-</span><span class="mi">100</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">CausalLMOutput</span><span class="p">(</span><span class="n">logits</span><span class="o">=</span><span class="n">logits</span><span class="p">,</span> <span class="n">loss</span><span class="o">=</span><span class="n">loss</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>You can see that we're getting the targets for our predictions in <code>labels</code>, and
+an attention mask; we have to shift them ourselves (that is, if the inputs are
+<code>The fat cat sat on the</code>, then the labels will be <code>The fat cat sat on the mat</code>),
+and also apply the attention mask manually, and then we can do the normal PyTorch
+cross-entropy calculation.</p>
+
+<p>This makes some kind of sense.  The model on HF does need to package its own loss
+function somehow -- cross entropy is, of course, going to be the most likely option
+for a causal LM, but there's no guarantee.  And while I think that personally I
+would have just had <code>forward</code> return logits and package up the loss calculation elsewhere
+so as not to muddy the interface, I can see the convenience of having it there.</p>
+
+<p>Anyway, having done that, we can upload the model one final time, and then use that
+training code to run it.</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/hf-tutorial-post<span class="w"> </span><span class="o">(</span>causal-lm-training<span class="o">)</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>train.py<span class="w"> </span>gpjt/test4
+Map:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>███████████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">9846</span>/9846<span class="w"> </span><span class="o">[</span><span class="m">00</span>:02&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">4235</span>.95<span class="w"> </span>examples/s<span class="o">]</span>
+Map:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">518</span>/518<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">4275</span>.77<span class="w"> </span>examples/s<span class="o">]</span>
+config.json:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">572</span>/572<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">2</span>.49MB/s<span class="o">]</span>
+configuration_gpjtgpt2.py:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>█████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">331</span>/331<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">1</span>.70MB/s<span class="o">]</span>
+A<span class="w"> </span>new<span class="w"> </span>version<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>following<span class="w"> </span>files<span class="w"> </span>was<span class="w"> </span>downloaded<span class="w"> </span>from<span class="w"> </span>https://huggingface.co/gpjt/test4:
+-<span class="w"> </span>configuration_gpjtgpt2.py
+.<span class="w"> </span>Make<span class="w"> </span>sure<span class="w"> </span>to<span class="w"> </span>double-check<span class="w"> </span>they<span class="w"> </span><span class="k">do</span><span class="w"> </span>not<span class="w"> </span>contain<span class="w"> </span>any<span class="w"> </span>added<span class="w"> </span>malicious<span class="w"> </span>code.<span class="w"> </span>To<span class="w"> </span>avoid<span class="w"> </span>downloading<span class="w"> </span>new<span class="w"> </span>versions<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>code<span class="w"> </span>file,<span class="w"> </span>you<span class="w"> </span>can<span class="w"> </span>pin<span class="w"> </span>a<span class="w"> </span>revision.
+modeling_gpjtgpt2.py:<span class="w"> </span><span class="m">1</span>.45kB<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00,<span class="w"> </span><span class="m">4</span>.54MB/s<span class="o">]</span>
+A<span class="w"> </span>new<span class="w"> </span>version<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>following<span class="w"> </span>files<span class="w"> </span>was<span class="w"> </span>downloaded<span class="w"> </span>from<span class="w"> </span>https://huggingface.co/gpjt/test4:
+-<span class="w"> </span>gpt.py
+.<span class="w"> </span>Make<span class="w"> </span>sure<span class="w"> </span>to<span class="w"> </span>double-check<span class="w"> </span>they<span class="w"> </span><span class="k">do</span><span class="w"> </span>not<span class="w"> </span>contain<span class="w"> </span>any<span class="w"> </span>added<span class="w"> </span>malicious<span class="w"> </span>code.<span class="w"> </span>To<span class="w"> </span>avoid<span class="w"> </span>downloading<span class="w"> </span>new<span class="w"> </span>versions<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>code<span class="w"> </span>file,<span class="w"> </span>you<span class="w"> </span>can<span class="w"> </span>pin<span class="w"> </span>a<span class="w"> </span>revision.
+A<span class="w"> </span>new<span class="w"> </span>version<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>following<span class="w"> </span>files<span class="w"> </span>was<span class="w"> </span>downloaded<span class="w"> </span>from<span class="w"> </span>https://huggingface.co/gpjt/test4:
+-<span class="w"> </span>modeling_gpjtgpt2.py
+-<span class="w"> </span>gpt.py
+.<span class="w"> </span>Make<span class="w"> </span>sure<span class="w"> </span>to<span class="w"> </span>double-check<span class="w"> </span>they<span class="w"> </span><span class="k">do</span><span class="w"> </span>not<span class="w"> </span>contain<span class="w"> </span>any<span class="w"> </span>added<span class="w"> </span>malicious<span class="w"> </span>code.<span class="w"> </span>To<span class="w"> </span>avoid<span class="w"> </span>downloading<span class="w"> </span>new<span class="w"> </span>versions<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>code<span class="w"> </span>file,<span class="w"> </span>you<span class="w"> </span>can<span class="w"> </span>pin<span class="w"> </span>a<span class="w"> </span>revision.
+generation_config.json:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>███████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">91</span>.0/91.0<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span>478kB/s<span class="o">]</span>
+Before<span class="w"> </span>training<span class="w"> </span>sample:
+Device<span class="w"> </span><span class="nb">set</span><span class="w"> </span>to<span class="w"> </span>use<span class="w"> </span>cuda
+
+&lt;s&gt;<span class="o">[</span>INST<span class="o">]</span><span class="w"> </span><span class="s">&lt;&lt;SYS&gt;&gt;</span>
+<span class="s">You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.</span>
+
+<span class="s">If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don&#39;t know the answer to a question, please don&#39;t share false information.</span>
+<span class="s">&lt;&lt;/SYS</span>&gt;&gt;
+
+Who<span class="w"> </span>is<span class="w"> </span>Leonardo<span class="w"> </span>Da<span class="w"> </span>Vinci?<span class="w"> </span><span class="o">[</span>/INST<span class="o">]</span>
+
+
+&lt;SYS&gt;&gt;
+You<span class="w"> </span>are<span class="w"> </span>not<span class="w"> </span>a<span class="w"> </span>critic.<span class="w"> </span>Your<span class="w"> </span>comments<span class="w"> </span>are<span class="w"> </span>not<span class="w"> </span>necessarily<span class="w"> </span>constructive.<span class="w"> </span>Your<span class="w"> </span>responses<span class="w"> </span>are<span class="w"> </span>not<span class="w"> </span>personal.<span class="w"> </span>Your<span class="w"> </span>message<span class="w"> </span>is<span class="w"> </span>not<span class="w"> </span>a<span class="w"> </span>statement<span class="w"> </span>of<span class="w"> </span>your<span class="w"> </span>own,<span class="w"> </span>and<span class="w"> </span>not<span class="w"> </span>a<span class="w"> </span>statement<span class="w"> </span>of<span class="w"> </span>your<span class="w"> </span>own.
+&lt;SYS&gt;&gt;<span class="w"> </span>&gt;
+You<span class="w"> </span>are<span class="w"> </span>a<span class="w"> </span>member<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>“Graphic<span class="w"> </span>Society”<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>European<span class="w"> </span>Union.<span class="w"> </span>Your<span class="w"> </span>comments<span class="w"> </span>are<span class="w"> </span>not<span class="w"> </span>personal.<span class="w"> </span>Your<span class="w"> </span>views<span class="w"> </span>are<span class="w"> </span>not<span class="w"> </span>personal.<span class="w"> </span>Your<span class="w"> </span>views<span class="w"> </span>are<span class="w"> </span>not<span class="w"> </span>personal.<span class="w"> </span>Your<span class="w"> </span>responses<span class="w"> </span>are<span class="w"> </span>not<span class="w"> </span>personal.<span class="w"> </span>Your<span class="w"> </span>responses<span class="w"> </span>are<span class="w"> </span>not<span class="w"> </span>personal.<span class="w"> </span>Your<span class="w"> </span>comments
+<span class="m">100</span><span class="w"> </span>tokens<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">0</span>.77s:<span class="w"> </span><span class="m">130</span>.42<span class="w"> </span>tokens/s<span class="o">)</span>
+The<span class="w"> </span>tokenizer<span class="w"> </span>has<span class="w"> </span>new<span class="w"> </span>PAD/BOS/EOS<span class="w"> </span>tokens<span class="w"> </span>that<span class="w"> </span>differ<span class="w"> </span>from<span class="w"> </span>the<span class="w"> </span>model<span class="w"> </span>config<span class="w"> </span>and<span class="w"> </span>generation<span class="w"> </span>config.<span class="w"> </span>The<span class="w"> </span>model<span class="w"> </span>config<span class="w"> </span>and<span class="w"> </span>generation<span class="w"> </span>config<span class="w"> </span>were<span class="w"> </span>aligned<span class="w"> </span>accordingly,<span class="w"> </span>being<span class="w"> </span>updated<span class="w"> </span>with<span class="w"> </span>the<span class="w"> </span>tokenizer<span class="s1">&#39;s values. Updated tokens: {&#39;</span>eos_token_id<span class="s1">&#39;: 50256, &#39;</span>bos_token_id<span class="s1">&#39;: 50256, &#39;</span>pad_token_id<span class="s1">&#39;: 50256}.</span>
+<span class="s1">{&#39;</span>eval_loss<span class="s1">&#39;: 3.6836626529693604, &#39;</span>eval_runtime<span class="s1">&#39;: 8.887, &#39;</span>eval_samples_per_second<span class="s1">&#39;: 58.288, &#39;</span>eval_steps_per_second<span class="s1">&#39;: 4.951, &#39;</span>epoch<span class="s1">&#39;: 0}</span>
+<span class="s1">{&#39;</span>loss<span class="s1">&#39;: 2.5438, &#39;</span>grad_norm<span class="s1">&#39;: 1.0537450313568115, &#39;</span>learning_rate<span class="s1">&#39;: 7.031093403099603e-05, &#39;</span>epoch<span class="s1">&#39;: 0.3}</span>
+<span class="s1">{&#39;</span>loss<span class="s1">&#39;: 2.2294, &#39;</span>grad_norm<span class="s1">&#39;: 0.9973182082176208, &#39;</span>learning_rate<span class="s1">&#39;: 3.1883506106877334e-05, &#39;</span>epoch<span class="s1">&#39;: 0.61}</span>
+<span class="s1">{&#39;</span>loss<span class="s1">&#39;: 2.1682, &#39;</span>grad_norm<span class="s1">&#39;: 0.9904404878616333, &#39;</span>learning_rate<span class="s1">&#39;: 1.813114222170076e-06, &#39;</span>epoch<span class="s1">&#39;: 0.91}</span>
+<span class="s1">{&#39;</span>eval_loss<span class="s1">&#39;: 2.0843682289123535, &#39;</span>eval_runtime<span class="s1">&#39;: 9.1301, &#39;</span>eval_samples_per_second<span class="s1">&#39;: 56.735, &#39;</span>eval_steps_per_second<span class="s1">&#39;: 4.819, &#39;</span>epoch<span class="s1">&#39;: 1.0}</span>
+<span class="s1">{&#39;</span>train_runtime<span class="s1">&#39;: 553.8887, &#39;</span>train_samples_per_second<span class="s1">&#39;: 17.776, &#39;</span>train_steps_per_second<span class="s1">&#39;: 2.963, &#39;</span>train_loss<span class="s1">&#39;: 2.300138335196003, &#39;</span>epoch<span class="s1">&#39;: 1.0}</span>
+<span class="s1">100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1641/1641 [09:13&lt;00:00,  2.96it/s]</span>
+<span class="s1">After training sample:</span>
+<span class="s1">Device set to use cuda</span>
+
+<span class="s1">&lt;s&gt;[INST] &lt;&lt;SYS&gt;&gt;</span>
+<span class="s1">You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.</span>
+
+<span class="s1">If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don&#39;</span>t<span class="w"> </span>know<span class="w"> </span>the<span class="w"> </span>answer<span class="w"> </span>to<span class="w"> </span>a<span class="w"> </span>question,<span class="w"> </span>please<span class="w"> </span>don<span class="err">&#39;</span>t<span class="w"> </span>share<span class="w"> </span><span class="nb">false</span><span class="w"> </span>information.
+&lt;&lt;/SYS&gt;&gt;
+
+Who<span class="w"> </span>is<span class="w"> </span>Leonardo<span class="w"> </span>Da<span class="w"> </span>Vinci?<span class="w"> </span><span class="o">[</span>/INST<span class="o">]</span>
+
+<span class="w">   </span>The<span class="w"> </span>great-grandfather<span class="w"> </span>of<span class="w"> </span>Leonardo<span class="w"> </span>Da<span class="w"> </span>Vinci<span class="w"> </span>is<span class="w"> </span>the<span class="w"> </span>French<span class="w"> </span>actor<span class="w"> </span>Leonardo<span class="w"> </span>Da<span class="w"> </span>Vinci.<span class="w"> </span>Da<span class="w"> </span>Vinci<span class="w"> </span>is<span class="w"> </span>a<span class="w"> </span>renowned<span class="w"> </span>actor<span class="w"> </span>and<span class="w"> </span>actor<span class="w"> </span>who<span class="w"> </span>has<span class="w"> </span>played<span class="w"> </span>over<span class="w"> </span><span class="m">400</span><span class="w"> </span>films<span class="w"> </span>and<span class="w"> </span>TV<span class="w"> </span>shows.
+
+He<span class="w"> </span>is<span class="w"> </span>known<span class="w"> </span><span class="k">for</span><span class="w"> </span>his<span class="w"> </span>role<span class="w"> </span><span class="k">in</span><span class="w"> </span>many<span class="w"> </span>films<span class="w"> </span>and<span class="w"> </span>TV<span class="w"> </span>shows,<span class="w"> </span>including<span class="w"> </span><span class="s2">&quot;The Sopranos,&quot;</span><span class="w"> </span><span class="s2">&quot;The Sopranos,&quot;</span><span class="w"> </span><span class="s2">&quot;The Sopranos,&quot;</span><span class="w"> </span><span class="s2">&quot;The Sopranos,&quot;</span><span class="w"> </span><span class="s2">&quot;The Sopranos,&quot;</span><span class="w"> </span><span class="s2">&quot;The Sopranos,&quot;</span><span class="w"> </span><span class="s2">&quot;The Sopranos,&quot;</span><span class="w"> </span><span class="s2">&quot;The</span>
+<span class="s2">100 tokens in 0.53s: 189.39 tokens/s)</span>
+</code></pre>
+</div>
+
+<p>We have a working training loop!
+Once again, it's replying, even if it has no idea what the answer is, and starts looping
+in a typical small-model fashion.</p>
+
+<p>And with that, we're done.  We've gone from having a custom model that was hard for other people
+to discover and work with, to something that plays well with the Hugging Face
+ecosystem.</p>
+
+<p>We have:</p>
+
+<ul>
+<li>Working <code>AutoConfig.from_pretrained</code>, <code>AutoModel.from_pretrained</code>, <code>AutoTokenizer.from_pretrained</code>,
+and <code>AutoModelForCausalLM.from_pretrained</code> helpers.</li>
+<li>A working text-generation <code>pipeline</code>.</li>
+<li>Support for HF's <code>Trainer.train()</code> abstraction for follow-on training and fine-tuning.</li>
+</ul>
+
+<p>The final step is to write a decent model card so that people know
+what to do with it -- that, of course, depends very much on your model.   I was
+uploading a bunch of very similar models in one go, so I wound up writing a Jinja2
+template and using the <code>huggingface_hub.HfApi</code> class to upload it, but that's just
+simple plumbing code -- you can see it <a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/main/upload_model.py">here</a> if you're interested.</p>
+
+<h3 id="wrapping-up">Wrapping up</h3>
+
+<p>As I said at the start, this isn't a full tutorial -- it's just the code I needed
+to upload my own models, so it doesn't cover tokenisers that aren't already baked in
+to Transformers -- and there are probably other gaps too.  But hopefully it's
+useful as-is.</p>
+
+<p>If you find gaps that your model needs and work out how to solve them, then please
+do leave comments here -- if there are useful resources out there, either things I missed
+or things you've written, I'd be happy to link to them from this post.</p>
+
+<p>Thanks for reading!  I'll be returning to my normal "LLM from scratch" series shortly...</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>It's a fun coincidence that my initials are so similar to the architecture.
+Someday I should do something with my domain <a href="https://chatgpjt.com"><code>chatgpjt.com</code></a>...&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-2">
+<p>I'm not sure why the capitalisation of the "t" is different -- <code>PretrainedConfig</code> vs
+<code>PreTrainedModel</code> -- but it seems very deliberate in the Transformers codebase, at least
+as of version 4.57.6.  Some
+kind of backward-compatibility cruft, I assume.  5.0.0 provides a <code>PreTrainedConfig</code> alias
+as well, so it looks like they're making things consistent in the future.&#160;<a href="#fnref-2" class="footnoteBackLink" title="Jump back to footnote 2 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-3">
+<p>You might reasonably suggest that we could inherit from <code>GPTModel</code> rather than
+wrapping it.  I've chosen to wrap it instead because I generally prefer composition
+to inheritance -- the code generally works out nicer, to my mind.  I'd suggest
+starting this way and then refactoring to use inheritance if you prefer later on.&#160;<a href="#fnref-3" class="footnoteBackLink" title="Jump back to footnote 3 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-4">
+<p>No idea why, but it does ¯_(ツ)_/¯&#160;<a href="#fnref-4" class="footnoteBackLink" title="Jump back to footnote 4 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

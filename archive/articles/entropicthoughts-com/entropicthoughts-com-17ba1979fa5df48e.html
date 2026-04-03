@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Esqueleto Tutorial | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Esqueleto Tutorial</h1>
+        <div class="meta">Entropic Thoughts 2026-03-16T23:00:00Z</div>
+        <div class="links">
+          <a href="https://entropicthoughts.com/esqueleto-tutorial">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/entropicthoughts-com/entropicthoughts-com-17ba1979fa5df48e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body><h1>Esqueleto Tutorial</h1><p><graphic src="../image/banner/esqueleto-tutorial.jpg" alt="esqueleto-tutorial.jpg"/></p><h1>Table of Contents</h1><p>When interacting with databases in Haskell, we use a library called Persistent to create mappings between database content and Haskell data types. This library can also query for records and update them, as long as the operations involved are very basic.1 Get a record with an id, get a record matching a unique constraint, see if a record matching a unique constrant exists, upsert by unique constraint, insert a batch of records, select all records from a table matching a filter, and a few more along those lines.</p><p>
+Once operations become more complicated, we turn to Esqueleto, a lower-level
+library which reuses Persistent data mappings but let us write nearly raw
+sql queries. The main difference between raw sql and Esqueleto is that
+Esqueleto is type safe, meaning the compiler will complain if we write invalid
+Esqueleto queries. If we accidentally try to cram a <pre>varchar</pre> column into an
+<pre>UTCTime</pre> field in a Haskell object, the compiler will let us know. Not the
+pager going off at 3 AM.
+</p><p>
+Another strength of Esqueleto is that it is, in a sense, plain Haskell code.
+This is also its drawback. I have long struggled with learning to write
+Esqueleto fluently. Some colleagues suggested that maybe the problem is I don’t
+practice writing it enough. So I picked up <a href="https://www.sqlitetutorial.net/">an arbitrary sql tutorial</a> I found on
+the web, and followed it but writing Esqueleto instead.
+</p><p>I’ll write down what I learned, and hopefully it helps someone else in the same situation as I was. If you’re just curious what production Haskell database access can look like, you might also enjoy skimming this article.</p><h1><a href="https://entropicthoughts.com#haskell-and-sql-are-prerequisites">Haskell and SQL are prerequisites</a></h1>
+<p>Note that although I hope this tutorial will help someone else, it’s most decidedly written for someone in my situation: someone who has a decent grasp of both Haskell and sql, but struggle to merge the two into an understanding of Esqueleto.</p><p>In that situation, it’s probably best to replicate what I did: pick any sql tutorial you find, and work through its exercises in Esqueleto. Running into compiler errors and being forced to follow the types is probably one of the best ways to figure out how Esqueleto works.2 Follow the types is an expression that means to learn a library by figuring out how functions can be called based on their type signatures and how the types interlock to produce the desired result. This is a good general skill to have, because not all third-party libraries are well documented in any ecosystem, but almost all Haskell third-party libraries have good types. That said, if you still want this article as a reference or a guide along the way, go ahead.</p><h1><a href="https://entropicthoughts.com#we-ll-use-new-style-esqueleto">We’ll use new style Esqueleto</a></h1>
+<p>
+Just before the pandemic, Esqueleto received a new module called
+<pre>Database.Esqueleto.Experimental</pre>. This contained a new syntax for specifying
+<pre>from</pre> clauses in a way that is both safer and more sensible than the old style.
+The new style is what I have found most of in the production code I read, and it
+became the default in the Esqueleto library a few months ago, after a five-year
+deprecation period of the legacy style.
+</p><p>Thus, this tutorial covers the new style. However, if you know the new style, adapting to the old style should be fairly simple. The following query gets the most expensive departments in the organisation:</p><blockquote>select d.name, sum(p.salary) from payroll p inner join department d on p.department = d.id group by d.name order by sum(p.salary) desc;</blockquote><p>
+The new style of Esqueleto binds identifiers to table with the <pre>from</pre> function
+and a monadic bind operator.
+</p><blockquote>select $ do (p :&amp; d) &lt;- from $ table @Payroll `innerJoin` table @Department `on` (\(p :&amp; d) -&gt; p^.PayrollDepartment ==. d^.Id) groupBy (d^.DepartmentName) orderBy [desc (sum (p^.PayrollSalary))] pure (d^.DepartmentName, sum (p^.PayrollSalary))</blockquote><p>in contrast, the old style of Esqueleto takes the entire rest of the query as a function which receives table identifiers as arguments:</p><blockquote>select . from $ \(p `InnerJoin` d) -&gt; do on (p^.PayrollDepartment ==. d^.Id) groupBy (d^.DepartmentName) orderBy [desc (sum (p^.PayrollSalary))] pure (d^.DepartmentName, sum (p^.PayrollSalary))</blockquote><p>
+This code looks less clumsy, but it is also less flexible and relies on the
+programmer remembering to specify the <pre>on</pre> clause. The new style lets the
+compiler automatically detect a missing <pre>on</pre> clause.
+</p><h1><a href="https://entropicthoughts.com#setting-up-the-sandbox">Setting up the sandbox</a></h1>
+<p>
+You will get the most out of this tutorial if you follow along actively: look at
+the sql query, and try to translate it to Esqueleto before looking at the
+solution in this article. To be able to follow along, you need to download the
+sample sqlite database <pre>chinook.db</pre>, used in the tutorial above.3 If the
+file is no longer available at that domain, <a href="https://web.archive.org/web/20250415142735/https://www.sqlitetutorial.net/wp-content/uploads/2018/03/chinook.zip">it exists in the Internet Archive</a>.
+Create a Haskell project with dependencies esqueleto, persistent,
+persistent-sqlite, template-haskell, and text.
+</p><p>We’ll scaffold the sandbox application with something like</p><blockquote>{-# LANGUAGE TypeApplications #-} module Main where import Control.Monad.IO.Class (MonadIO, liftIO) import Data.Foldable (for_) import qualified Data.Text as Text import Database.Esqueleto.Experimental import Database.Persist.Sqlite (runSqlite) import Text.Printf (printf) -- | Print an action label, run the IO action, -- then print the returned values, numbered -- on their own lines. printResults :: (Show a, MonadIO m) =&gt; String -&gt; m [a] -&gt; m () printResults label query = do liftIO (putStrLn ("# " &lt;&gt; label)) results &lt;- query liftIO . for_ (zip [1..] results) $ \(i, v) -&gt; do printf "%8i. " (i :: Int) print v main :: IO () main = runSqlite (Text.pack "chinook.db") $ do printResults "traditional greeting" $ pure ["Hello, world!"]</blockquote><p>Once we have placed the sample database in the same directory as this program, it should print out a warning about an unused import and then run and print</p><blockquote># traditional greeting 1. "Hello, world!"</blockquote><p>Congrats! This connects to the sqlite database and then does nothing with it. Let’s do something.</p><h1><a href="https://entropicthoughts.com#part-1--querying-data-with-select">Part 1: Querying data with select</a></h1>
+<p>It might seem overkill to start at this very basic level, but it is beneficial because it allows us to really dig into the fundamentals, and learn differences which will become important later on.</p><h2><a href="https://entropicthoughts.com#section-1-1--selecting-some-arithmetic">Section 1.1: Selecting some arithmetic</a></h2>
+<p>
+The sqlite tutorial starts off by selecting 1+1, to which sqlite helpfully
+responds with <pre>2</pre>. We can do the same in Haskell – but it does get complicated
+right away. This is typical of type safe libraries for interacting with external
+components: they are built for handling a bunch of edge cases, so the most basic
+examples become a little more complicated than we’d like.
+</p><p>After the traditional greeting, we’ll add a sql query.</p><blockquote>printResults "select 1 + 1;" $ select $ pure (val @Int 1 +. val @Int 1)</blockquote><p>This will print</p><blockquote># select 1 + 1; 1. Value {unValue = 2}</blockquote><p>which is correct, so that is good!</p><p>
+To figure out how this works, let’s start from the inside and work our way out.
+We need a way to get the number <pre>1</pre> into a query. The <pre>val</pre> function is provided
+by Esqueleto to convert a Haskell value into a sql expression. In the specific
+case of numeric literals, their types are ambiguous (is <pre>1</pre> an <pre>Int</pre> or a <pre>Word</pre>
+or a <pre>Ratio</pre> or …?) so we disambiguate with the type application <pre>@Int</pre>.
+</p><p>
+Thus, the Haskell code <pre>val @Int 1</pre> generates the sql expression <pre>1</pre>. The
+Esqueleto operator <pre>+.</pre> translates to the sql operator <pre>+</pre>. The complete
+Haskell expression
+</p><blockquote>val @Int 1 +. val @Int 1</blockquote><p>
+translates to the sql expression <pre>1+1</pre>. Esqueleto, however, does not allow us
+to <pre>select</pre> sql expressions directly. We have to convert the expression into
+a query first, and the <pre>pure</pre> function does this.
+</p><p>Whereas the previous code represented a sql expression, by making it</p><blockquote>pure (val @Int 1 +. val @Int 1)</blockquote><p>
+we have turned it into a sql query. When we pass this to the <pre>select</pre>
+function, it gets run in the database and the results are returned.
+</p><p>But what is returned, really? This prints out</p><blockquote># select 1 + 1; 1. Value {unValue = 2}</blockquote><p>
+The <pre>Value</pre> thing is a newtype wrapper around plain values returned from the
+database. It turns out the <pre>select</pre> function can also return other things than
+plain values, but for now we’ll just accept that this is what we get out of the
+database.
+</p><h2><a href="https://entropicthoughts.com#section-1-2--selecting-multiple-things">Section 1.2: Selecting multiple things</a></h2>
+<p>Based on what we already know, we can probably guess the result of this query where we select a tuple of values.</p><blockquote>printResults "select 10/5, 2*4;" $ select $ pure ( val @Int 10 /. val @Int 5 , val @Int 2 *. val @Int 4 )</blockquote><p>
+this prints out the desired4 It does really print out the <pre>unValue</pre>
+deconstructor, but I’m going to ignore it in the rest of this tutorial for ease
+of reading.
+</p><blockquote># select 10/5, 2*4; 1. (Value 2, Value 8)</blockquote><h2><a href="https://entropicthoughts.com#section-1-3--selecting-from-a-table">Section 1.3: Selecting from a table</a></h2>
+<p>
+Now, in order to select from a table in a type safe way, Esqueleto needs to know
+the schema of our tables. By using Persistent macros for generating code from a
+schema, we will also get Haskell data types and other goodies for free.5 The
+Persistent macros use a lot of language extensions, but fortunately the compiler
+is of great help in figuring out which are needed. Most of the list is given up
+front, and then when one is missing, it clearly indicates which. We put these
+macro calls in a separate module called <pre>Model.hs</pre>.
+</p><p>This is a faithful translation of the parts we will use from the sqlite tutorial database. Note that if we ran this in production, with the right settings, Persistent would complain that the database schema does not match the Haskell schema. We are okay with this here, because we are only looking at a subset of the database in this tutorial.</p><blockquote>{-# LANGUAGE DataKinds #-} {-# LANGUAGE DerivingStrategies #-} {-# LANGUAGE FlexibleInstances #-} {-# LANGUAGE GADTs #-} {-# LANGUAGE GeneralizedNewtypeDeriving #-} {-# LANGUAGE MultiParamTypeClasses #-} {-# LANGUAGE OverloadedStrings #-} {-# LANGUAGE QuasiQuotes #-} {-# LANGUAGE StandaloneDeriving #-} {-# LANGUAGE TemplateHaskell #-} {-# LANGUAGE TypeFamilies #-} {-# LANGUAGE TypeOperators #-} {-# LANGUAGE UndecidableInstances #-} module Model where import Database.Persist.TH import ChinookPersistSettings share [mkPersist sqlSettings] [chinookPersistSettings| Track sql=tracks Id sql=TrackId name String albumId AlbumId Maybe mediaTypeId Int composer String Maybe milliseconds Int unitPrice Double deriving Show Customer sql=customers Id sql=CustomerId city String Maybe Invoice sql=invoices Id sql=InvoiceId billingAddress String Maybe billingCity String Maybe total Double Album sql=albums Id sql=AlbumId title String artistId ArtistId Artist sql=artists Id sql=ArtistId name String |]</blockquote><p>
+This also references a tiny module called <pre>ChinookPersistSettings</pre>6 Named
+Chinook after the name of the database, to be clear. which we use to help
+Persistent pick the right database column names for the tutorial data.7 It
+needs to be a separate module thanks to a ghc stage restriction, which
+prevents top-level splices to reference values defined earlier in the same
+module. I understand nothing of this. The compiler asked me to put the
+definition in a separate module and so I did.
+</p><blockquote>module ChinookPersistSettings where import Control.Arrow (first) import qualified Data.Text as Text import Database.Persist.Quasi import Database.Persist.TH import Language.Haskell.TH.Quote (QuasiQuoter) chinookPersistSettings :: QuasiQuoter chinookPersistSettings = persistWith $ flip setPsToDBName lowerCaseSettings $ uncurry (&lt;&gt;) . first Text.toUpper . Text.splitAt 1</blockquote><p>
+Now we can select plain values from that table in Esqueleto. We use the <pre>select</pre>
+function as before, but we construct the sql query from two things:
+</p><ul><li>We bind an identifier for a table using the <pre>from</pre>function, and</li><li>We extract values from that table using the <pre>^.</pre>operator.</li></ul><p>It looks like</p><blockquote>printResults "select t.trackid, t.name, t.composer, t.unitprice from tracks t;" $ select $ do t &lt;- from (table @Track) pure ( t^.TrackId , t^.TrackName , t^.TrackComposer , t^.TrackUnitPrice )</blockquote><p>This starts to print</p><blockquote># select t.trackid, t.name, t.composer, t.unitprice from tracks t; 1. (Value (TrackKey {unTrackKey = SqlBackendKey {unSqlBackendKey = 1}}), Value "For Those About To Rock (We Salute You)", Value (Just "Angus Young, Malcolm Young, Brian Johnson"), Value 0.99) 2. (Value (TrackKey {unTrackKey = SqlBackendKey {unSqlBackendKey = 2}}), Value "Balls to the Wall", Value Nothing, Value 0.99) 3. (Value (TrackKey {unTrackKey = SqlBackendKey {unSqlBackendKey = 3}}), Value "Fast As a Shark", Value (Just "F. Baltes, S. Kaufman, U. Dirkscneider &amp; W. Hoffman"), Value 0.99) ...</blockquote><p>and then goes on for a long time.</p><h2><a href="https://entropicthoughts.com#section-1-4--selecting-an-entire-record">Section 1.4: Selecting an entire record</a></h2>
+<p>
+The sql tutorial I’m basing this on warns the user against writing <pre>select *</pre>
+queries in application logic.
+</p><blockquote><p>What if someone removes a column, your application would not be working properly, because it assumes that there are three columns returned, and the logic to process those three columns would be broken.</p></blockquote><p>This warning does not apply to us, because Persistent and Esqueleto are type safe. If the schema changes, Persistent and the Haskell compiler will be on our side, and help us work out all the places where we have assumed a field exists but it no longer does. This is not a midnight page, it is a failed ci build.</p><p>
+To select a full record, we replace the tuple from the previous example by
+returning the identifier brought into scope with <pre>from</pre>.
+</p><blockquote>printResults "select t.* from tracks t;" $ select $ do t &lt;- from (table @Track) pure t</blockquote><p>
+When we do this, we will not get a <pre>Value</pre> newtype wrapper from Esqueleto, but
+proper Persistent <pre>Entity</pre> objects.
+</p><p>The above can, following monad laws, be simplified to</p><blockquote>printResults "select * from tracks;" $ select $ from (table @track)</blockquote><h2><a href="https://entropicthoughts.com#section-1-5--reducing-the-number-of-records-returned">Section 1.5: Reducing the number of records returned</a></h2>
+<p>
+I’m going to cheat a little and jump straight to the <pre>limit</pre> keyword. The
+sqlite tutorial does not present this until later, but I wish to be able to show
+output. To restrict the number of records returned to a fixed amount, we add a
+call to the Esqueleto <pre>limit</pre> function somewhere in the expression where the
+query is constructed.
+</p><blockquote>printResults "select t.* from tracks t limit 5;" $ select $ do t &lt;- from (table @Track) limit 5 pure t</blockquote><p>This prints the more sensible-length</p><blockquote># select t.* from tracks t limit 5; 1. Entity {entityKey = TrackKey {unTrackKey = SqlBackendKey {unSqlBackendKey = 1}}, entityVal = Track {trackName = "For Those About To Rock (We Salute You)", trackAlbumId = 1, trackMediaTypeId = 1, trackGenreId = 1, trackComposer = Just "Angus Young, Malcolm Young, Brian Johnson", trackMilliseconds = 343719, trackBytes = 11170334, trackUnitPrice = 0.99}} 2. Entity {entityKey = TrackKey {unTrackKey = SqlBackendKey {unSqlBackendKey = 2}}, entityVal = Track {trackName = "Balls to the Wall", trackAlbumId = 2, trackMediaTypeId = 2, trackGenreId = 1, trackComposer = Nothing, trackMilliseconds = 342562, trackBytes = 5510424, trackUnitPrice = 0.99}} 3. Entity {entityKey = TrackKey {unTrackKey = SqlBackendKey {unSqlBackendKey = 3}}, entityVal = Track {trackName = "Fast As a Shark", trackAlbumId = 3, trackMediaTypeId = 2, trackGenreId = 1, trackComposer = Just "F. Baltes, S. Kaufman, U. Dirkscneider &amp; W. Hoffman", trackMilliseconds = 230619, trackBytes = 3990994, trackUnitPrice = 0.99}} 4. Entity {entityKey = TrackKey {unTrackKey = SqlBackendKey {unSqlBackendKey = 4}}, entityVal = Track {trackName = "Restless and Wild", trackAlbumId = 3, trackMediaTypeId = 2, trackGenreId = 1, trackComposer = Just "F. Baltes, R.A. Smith-Diesel, S. Kaufman, U. Dirkscneider &amp; W. Hoffman", trackMilliseconds = 252051, trackBytes = 4331779, trackUnitPrice = 0.99}} 5. Entity {entityKey = TrackKey {unTrackKey = SqlBackendKey {unSqlBackendKey = 5}}, entityVal = Track {trackName = "Princess of the Dawn", trackAlbumId = 3, trackMediaTypeId = 2, trackGenreId = 1, trackComposer = Just "Deaffy &amp; R.A. Smith-Diesel", trackMilliseconds = 375418, trackBytes = 6290521, trackUnitPrice = 0.99}}</blockquote><p>
+Note that in order to get the effect of <pre>select * from tracks</pre> we still need to
+return the object we bring into scope with the <pre>from</pre> function. We could
+simplify the query above to
+</p><blockquote>select $ do limit 5 from (table @Track)</blockquote><p>
+because the <pre>limit</pre> function sets a limit to the query – it doesn’t matter where
+it is called. We could also argue that <pre>do</pre> notation is not needed here, and
+write the query as
+</p><blockquote>select $ from (table @Track) &lt;* limit 5</blockquote><p>
+As long as we only add things to the query that does not depend on fields in the
+table we are selecting from, and we want to return full records, we can get by
+with applicative sequencing (<pre>&lt;*</pre>) and we don’t need any monadic bind.
+</p><h2><a href="https://entropicthoughts.com#section-1-6--sorting-results">Section 1.6: Sorting results</a></h2>
+<p>Following the tutorial, we will make a query that sorts on album id ascending, and then track length in milliseconds descending.</p><blockquote>printResults "select t.name, t.milliseconds, t.albumid from tracks t order by t.albumid asc, t.milliseconds desc limit 5;" $ select $ do t &lt;- from (table @Track) limit 5 orderBy [asc (t^.TrackAlbumId), desc (t^.TrackMilliseconds)] pure (t^.TrackName, t^.TrackMilliseconds, t^.TrackAlbumId)</blockquote><p>
+Here, we have to give a name to the value returned by <pre>from</pre> (i.e. we use a
+monadic bind), since we need the name to extract the column values used for
+sorting. This prints
+</p><blockquote># select t.name, t.milliseconds, t.albumid from tracks t order by t.albumid asc, t.milliseconds desc limit 5; 1. (Value "For Those About To Rock (We Salute You)", Value 343719, Value 1) 2. (Value "Spellbound", Value 270863, Value 1) 3. (Value "Evil Walks", Value 263497, Value 1) 4. (Value "Breaking The Rules", Value 263288, Value 1) 5. (Value "Let's Get It Up", Value 233926, Value 1})</blockquote><p>as expected.</p><p>We note that in sql, we specify first what we select, then where it is selected from. In Esqueleto, we specify first from where we will select, and then we optionally extract individual components from those things. This is similar to e.g. linq queries in C#.</p><h1><a href="https://entropicthoughts.com#part-2--filtering-in-select-queries">Part 2: Filtering in select queries</a></h1>
+<p>At this point, the tutorial dives into what makes sql powerful: the ability to cut out the data of interest from other stuff.</p><h2><a href="https://entropicthoughts.com#section-2-1--getting-unique-results-with-a-distinct-query">Section 2.1: Getting unique results with a distinct query</a></h2>
+<p>
+The Esqueleto <pre>distinct</pre> function takes a query object and makes it into a
+<pre>distinct</pre> sql query. The Esqueleto function is intended to be called composed
+with the <pre>select</pre> function, as in this example.
+</p><blockquote>printResults "select distinct c.city from customers c order by c.city limit 5;" $ select . distinct $ do c &lt;- from (table @Customer) limit 5 orderBy [asc (c^.CustomerCity)] pure (c^.CustomerCity)</blockquote><blockquote># select distinct c.city from customers c order by c.city limit 5; 1. Value Just "Amsterdam" 2. Value Just "Bangalore" 3. Value Just "Berlin" 4. Value Just "Bordeaux" 5. Value Just "Boston"</blockquote><p>
+However, it is worth knowing that the Esqueleto <pre>distinct</pre> function really only
+sets a flag in the query object, so it could also be called like <pre>limit</pre>, by
+supplying a noop query as an argument. That would look like
+</p><blockquote>select $ do c &lt;- from (table @Customer) limit 5 distinct (pure ()) orderBy [asc (c^.CustomerCity)] pure (c^.CustomerCity)</blockquote><p>and it has the same effect.</p><h2><a href="https://entropicthoughts.com#section-2-2--adding-a-where-clause">Section 2.2: Adding a where clause</a></h2>
+<p>
+The Esqueleto <pre>where_</pre> function takes a sql conditional
+object8 Technically this is just a sql expression object that is known
+to have type <pre>Bool</pre>. and limits the query to the items matching that
+conditional expression. The conditional expression is formed by using what looks
+like regular Haskell operators (<pre>==</pre>, <pre>&amp;&amp;</pre>, <pre>&gt;</pre>, etc.) but appending a period to
+their end. These get translated to the corresponding sql operators.
+</p><blockquote>printResults "select t.name from tracks t where t.albumid = 2 and t.milliseconds &gt; 250000 limit 5;" $ select $ do t &lt;- from (table @Track) limit 5 where_ $ t^.TrackAlbumId ==. val (Just (AlbumKey 1)) &amp;&amp;. t^.TrackMilliseconds &gt;. val 250000 pure (t^.TrackName)</blockquote><blockquote># select t.name from tracks t where t.albumid = 2 and t.milliseconds &gt; 250000 limit 5; 1. Value "For Those About To Rock (We Salute You)" 2. Value "Evil Walks" 3. Value "Breaking The Rules" 4. Value "Spellbound"</blockquote><p>
+As was perhaps clear from the above, the <pre>trackAlbumId</pre> field in our code is not
+a plain <pre>Int</pre>, but a type safe <pre>AlbumId</pre>. To select based on this, we have to
+convert the integer 1 into the right type, by passing it through the <pre>AlbumKey</pre>
+constructor.
+</p><h2><a href="https://entropicthoughts.com#section-2-3--primitive-string-matching-with-the-like-operator">Section 2.3: Primitive string matching with the like operator</a></h2>
+<p>
+The Esqueleto <pre>like</pre> function takes two sql expression objects that return
+strings, and creates a conditional expression from them, where they are compared
+with the sql <pre>like</pre> operator. This is a place where the type safety of
+Esqueleto shines. In raw sql, we can accidentally call <pre>like</pre> on an integer.
+In Haskell, that would be a compiler error.
+</p><blockquote>printResults "select t.name, t.albumid, t.composer from tracks t where t.composer like '%Smith%' order by t.albumid limit 5;" $ select $ do t &lt;- from (table @Track) limit 5 orderBy [asc (t^.TrackAlbumId)] where_ $ like (t^.TrackComposer) (val (Just "%Smith%")) pure (t^.TrackName, t^.TrackAlbumId, t^.TrackComposer)</blockquote><p>
+Here, we called <pre>like</pre> as a regular function. We could also have called it with
+infix backticks to make it look like an operator:
+</p><blockquote>t^.TrackComposer `like` val (Just "%Smith%")</blockquote><p>However, I don’t like infix backticks and avoid them in my code.9 I think for the most part they make code more difficult to follow. People struggle with precedence rules, and it’s annoying enough to have to deal with them with operators, but with functions also?! Either way, we get the results we expect:</p><blockquote># select t.name, t.albumid, t.composer from tracks t where t.composer like '%Smith%' order by t.albumid limit 5; 1. (Value "Restless and Wild", Value (Just 3), Value (Just "F. Baltes, R.A. Smith-Diesel, S. Kaufman, U. Dirkscneider &amp; W. Hoffman")) 2. (Value "Princess of the Dawn", Value (Just 3), Value (Just "Deaffy &amp; R.A. Smith-Diesel")) 3. (Value "Killing Floor", Value (Just 19), Value (Just "Adrian Smith")) 4. (Value "Machine Men", Value (Just 19), Value (Just "Adrian Smith")) 5. (Value "2 Minutes To Midnight", Value (Just 95), Value (Just "Adrian Smith/Bruce Dickinson"))</blockquote><h2><a href="https://entropicthoughts.com#section-2-4--combining-conditional-expressions">Section 2.4: Combining conditional expressions</a></h2>
+<p>We combine conditional expressions and ensure precedence between operators using regular Haskell parentheses.</p><blockquote>printResults "select i.total from invoices i where i.total &gt; 5 and (i.billingcity = 'Chicago' or i.billingaddress like '% Broadway');" $ select $ do i &lt;- from (table @Invoice) limit 5 where_ $ i^.InvoiceTotal &gt;. val 5 &amp;&amp;. ( i^.InvoiceBillingCity ==. val (Just "Chicago") ||. like (i^.InvoiceBillingAddress) (val (Just "% Broadway")) ) pure (i^.InvoiceTotal)</blockquote><blockquote># select i.total from invoices i where i.total &gt; 5 and (i.billingcity = 'Chicago' or i.billingaddress like '% Broadway'); 1. Value 15.86 2. Value 5.94 3. Value 8.91 4. Value 7.96 5. Value 5.94</blockquote><h2><a href="https://entropicthoughts.com#section-2-5--querying-based-on-set-inclusion">Section 2.5: Querying based on set inclusion</a></h2>
+<p>
+The Esqueleto <pre>in_</pre> function works as one might expect by now. The second
+argument must be a sql expression object that returns a value list. The
+easiest way to construct such a list from Haskell literals is through <pre>valList</pre>.
+</p><blockquote>printResults "select t.name, t.albumid, t.mediatypeid from tracks t where t.mediatypeid in (2, 3) limit 5;" $ select $ do t &lt;- from (table @Track) limit 5 where_ $ in_ (t^.TrackMediaTypeId) (valList [2, 3]) pure (t^.TrackName, t^.TrackAlbumId, t^.TrackMediaTypeId)</blockquote><blockquote># select name, albumid, mediatypeid from tracks where mediatypeid in (2, 3) limit 5 1. (Value "Balls to the Wall", Value (Just 2), Value 2) 2. (Value "Fast As a Shark", Value (Just 3), Value 2}) 3. (Value "Restless and Wild", Value (Just 3), Value 2}) 4. (Value "Princess of the Dawn", Value (Just 3), Value 2) 5. (Value "Welcome to the Jungle", Value (Just 90), Value 2)</blockquote><p>
+Again, the <pre>in_</pre> function could have been called with infix backticks:
+</p><blockquote>t^.TrackMediaTypeId `in_` valList [2, 3]</blockquote><p>It saves some parentheses at the cost of making people confused about the order in which code runs.</p><h2><a href="https://entropicthoughts.com#section-2-6--checking-for-membership-in-subquery">Section 2.6: Checking for membership in subquery</a></h2>
+<p>
+We just used the Esqueleto <pre>in_</pre> function to check for membership in a literal
+list using the <pre>valList</pre> function. We can also use the results of a subquery as
+the list to check for membership in. This query finds all tracks that come from
+albums by the artist with id 12.
+</p><blockquote>printResults "select t.name from tracks t where t.albumid in (select a.albumid from albums a where a.artistid = 12) limit 5;" $ select $ do t &lt;- from (table @Track) limit 5 where_ $ in_ (t^.TrackAlbumId) . subList_select $ do a &lt;- from (table @Album) where_ $ a^.AlbumArtistId ==. val (ArtistKey 12) pure (just (a^.AlbumId)) pure (t^.TrackName)</blockquote><blockquote># select t.name from tracks t where t.albumid in (select a.albumid from albums a where a.artistid = 12) limit 5; 1. Value "Black Sabbath" 2. Value "The Wizard" 3. Value "Behind The Wall Of Sleep" 4. Value "N.I.B." 5. Value "Evil Woman"</blockquote><p>There’s a lot going on in that query, but the new bit is the subquery:</p><blockquote>subList_select $ do a &lt;- from (table @Album) where_ $ a^.AlbumArtistId ==. val 12 pure (just (a^.AlbumId))</blockquote><p>
+The Esqueleto <pre>select</pre> function executes a query, but the <pre>subList_select</pre>
+function merely translates code into a sql expression that can be inserted
+into another query where a value list is expected. The only new thing about this
+subquery is the <pre>just</pre> function, which we use to convert the <pre>AlbumId</pre> into a
+<pre>Maybe AlbumId</pre>, in order to make it possible to compare against <pre>TrackAlbumId</pre>
+which is nullable in the database.10 We might be tempted to <pre>fmap</pre> the <pre>Just</pre>
+constructor over <pre>a^.AlbumId</pre>, but the <pre>SqlExpr</pre> type is not a real functor, so
+this cannot be done. Thus, the Esqueleto authors have given us a <pre>just</pre> function
+to perform that specific operation in a sql-aware way.
+</p><p>
+We compose this subquery with the <pre>in_</pre> function as the outer filter. Since the
+<pre>subList_select</pre> function returns a sql expression object, we could also have
+assigned it to a variable separately, like-a-so:
+</p><blockquote>printResults "select t.name from tracks t where t.albumid in (select a.albumid from albums a where a.artistid = 12) limit 5;" $ let albumIdSubquery = subList_select $ do a &lt;- from (table @Album) where_ $ a^.AlbumArtistId ==. val 12 pure (just (a^.AlbumId)) in select $ do t &lt;- from (table @Track) limit 5 where_ $ in_ (t^.TrackAlbumId) albumIdSubquery pure (t^.TrackName)</blockquote><p>This is why Esqueleto queries being plain Haskell code is a strength. It gives us more opportunities to organise our code and break it apart into manageable chunks.</p><h2><a href="https://entropicthoughts.com#section-2-7--checking-for-nullity">Section 2.7: Checking for nullity</a></h2>
+<p>
+The Esqueleto <pre>isNothing</pre> and <pre>not_ . isNothing</pre> functions can be used to check
+for nullness and non-nullness respectively. For example
+</p><blockquote>printResults "select t.name from tracks t where t.composer is null order by t.name limit 5;" $ select $ do t &lt;- from (table @Track) limit 5 orderBy [asc (t^.TrackName)] where_ $ isNothing (t^.TrackComposer) pure (t^.TrackName)</blockquote><p>or</p><blockquote>printResults "select t.name from tracks t where t.composer is not null order by t.name limit 5;" $ select $ do t &lt;- from (table @Track) limit 5 orderBy [asc (t^.TrackName)] where_ $ not_ (isNothing (t^.TrackComposer)) pure (t^.TrackName)</blockquote><h1><a href="https://entropicthoughts.com#part-3--joins">Part 3: Joins</a></h1>
+<p>This is the part I was looking forward to learning. Being able to filter data in one table is very powerful, but being able to cross-reference tables is what really sets sql apart as a powerful data storage tool.</p><h2><a href="https://entropicthoughts.com#section-3-1--a-regular-inner-join-between-two-tables">Section 3.1: A regular inner join between two tables</a></h2>
+<p>Let’s say we want to know the track title and album name for the shortest tracks that belong to an album in our database.</p><blockquote>printResults "select t.name, a.title from tracks t inner join albums a on a.albumid = t.albumid order by t.milliseconds limit 5;" $ select $ do (t :&amp; a) &lt;- from $ innerJoin (table @Track) . on (table @Album) $ \(t :&amp; a) -&gt; t^.TrackAlbumId ==. just (a^.AlbumId) limit 5 orderBy [asc (t^.TrackMilliseconds)] pure (t^.TrackName, a^.AlbumTitle)</blockquote><blockquote># select t.name, a.title from tracks t inner join albums a on a.albumid = t.albumid order by t.milliseconds limit 5; 1. (Value "\201 Uma Partida De Futebol", Value "O Samba Pocon\233") 2. (Value "Now Sports", Value "Body Count") 3. (Value "A Statistic", Value "Body Count") 4. (Value "Oprah", Value "Body Count") 5. (Value "Commercial 1", Value "House of Pain")</blockquote><p>
+At this point, we finally see why we have been giving our tables short
+identifiers (<pre>t</pre>, <pre>c</pre>, <pre>i</pre>, <pre>a</pre> etc.) in both sql and Haskell code. When we
+are juggling multiple tables at once in a join, we can access fields from either
+table by choosing the right prefix, and it’s clear where the data is coming from.
+</p><p>The new part in this query is the join. I’ve written it this way:</p><blockquote>(t :&amp; a) &lt;- from $ innerJoin (table @Track) . on (table @Album) $ \(t :&amp; a) -&gt; t^.TrackAlbumId ==. just (a^.AlbumId)</blockquote><p>The way you’ll find it written by other people is using infix backticks.</p><blockquote>(t :&amp; a) &lt;- from $ table @Track `innerJoin` table @Album `on` (\(t :&amp; a) -&gt; t^.TrackAlbumId ==. just (a^.AlbumId))</blockquote><p>However such a from clause is written, its innermost expression is going to be a function that produces a sql conditional expression indicating how to join rows from both tables with each other. In our case, the function is</p><blockquote>let joinRowsOn (t :&amp; a) = t^.TrackAlbumId ==. just (a^.AlbumId) in -- ...</blockquote><p>
+The <pre>:&amp;</pre> data constructor serves practically the same purpuse as a tuple – it
+binds together two table objects that are joined in a query, and by
+deconstructing that pair we can access each table object individually, as we do
+here when asserting equivalence between album ids.11 Note also the <pre>just</pre>
+function, required because <pre>TrackAlbumId</pre> is nullable.
+</p><p>
+This function is paired up with the second table we are joining using the <pre>on</pre>
+function, as in
+</p><blockquote>let joinRowsOn (t :&amp; a) = t^.TrackAlbumId ==. just (a^.AlbumId) hasOnClause = on (table @Album) joinRowsOn in -- ...</blockquote><p>
+Then the <pre>innerJoin</pre> function takes the first table and the result of the
+<pre>on</pre> function and produces an object that can be passed to the Esqueleto <pre>from</pre>
+function.
+</p><blockquote>let joinRowsOn (t :&amp; a) = t^.TrackAlbumId ==. just (a^.AlbumId) hasOnClause = on (table @Album) joinRowsOn completeJoinExpression = innerJoin (table @Track) hasOnClause in select $ do joinedTables &lt;- from completeJoinExpression -- ...</blockquote><p>
+This will get translated to an <pre>inner join</pre> sql query.
+</p><p>
+To get the identifiers of the individual tables out of the <pre>joinedTables</pre>
+variable, we can add a pattern match on it, since it is one of those <pre>:&amp;</pre> pairs
+that we can deconstruct.
+</p><blockquote>let joinRowsOn (t :&amp; a) = t^.TrackAlbumId ==. just (a^.AlbumId) hasOnClause = on (table @Album) joinRowsOn completeJoinExpression = innerJoin (table @Track) hasOnClause in select $ do joinedTables &lt;- from completeJoinExpression case joinedTables of t :&amp; a -&gt; do -- ...</blockquote><p>Going backwards again, we can now inline the pattern match:</p><blockquote>let joinRowsOn (t :&amp; a) = t^.TrackAlbumId ==. just (a^.AlbumId) hasOnClause = on (table @Album) joinRowsOn completeJoinExpression = innerJoin (table @Track) hasOnClause in select $ do (t :&amp; a) &lt;- from completeJoinExpression</blockquote><p>
+and then inline the <pre>completeJoinExpression</pre>.
+</p><blockquote>let joinRowsOn (t :&amp; a) = t^.TrackAlbumId ==. just (a^.AlbumId) hasOnClause = on (table @Album) joinRowsOn in select $ do (t :&amp; a) &lt;- from $ innerJoin (table @Track) hasOnClause</blockquote><p>
+From here, we continue to inline the <pre>hasOnClause</pre> variable.
+</p><blockquote>let joinRowsOn (t :&amp; a) = t^.TrackAlbumId ==. just (a^.AlbumId) in select $ do (t :&amp; a) &lt;- from $ innerJoin (table @Track) . on (table @Album) $ joinRowsOn</blockquote><p>We inline the last variable too.</p><blockquote>select $ do (t :&amp; a) &lt;- from $ innerJoin (table @Track) . on (table @Album) $ \(t :&amp; a) -&gt; t^.TrackAlbumId ==. just (a^.AlbumId)</blockquote><p>Now we’re back at the query we started with. Hopefully that gives a sense of how these joins are constructed.</p><h2><a href="https://entropicthoughts.com#section-3-2--adding-another-table-to-the-join">Section 3.2: Adding another table to the join</a></h2>
+<p>We now want to do something simliar to the above, except replace the album name with the artist name in the listing. This requires yet another join, to go from the artist id of the album to the artist name. We could do this without infix backticks, and it might look something like</p><blockquote>printResults "select t.name, r.name from tracks t inner join albums l on l.albumid = t.albumid inner join artists r on l.artistid = r.artistid order by t.milliseconds limit 5 offset 30;" $ select $ do (t :&amp; _ :&amp; r) &lt;- from $ let trackAlbum = on (table @Album) $ \(t :&amp; l) -&gt; t^.TrackAlbumId ==. just (l^.AlbumId) albumArtist = on (table @Artist) $ \(_ :&amp; l :&amp; r) -&gt; l^.AlbumArtistId ==. r^.ArtistId in innerJoin (innerJoin (table @Track) trackAlbum) albumArtist limit 5 offset 30 orderBy [asc (t^.TrackMilliseconds)] pure (t^.TrackName, r^.ArtistName)</blockquote><p>but at this point I might have to give up my crusade and bow before the backticks. The triple join reads more naturally that way:</p><blockquote>(t :&amp; _ :&amp; r) &lt;- from $ table @Track `innerJoin` table @Album `on` (\(t :&amp; l) -&gt; t^.TrackAlbumId ==. just (l^.AlbumId)) `innerJoin` table @Artist `on` (\(_ :&amp; l :&amp; r) -&gt; l^.AlbumArtistId ==. r^.ArtistId)</blockquote><p>The other joins work much like this one so we’ll ignore them and march right ahead onto the next part.</p><h1><a href="https://entropicthoughts.com#part-4--data-aggregation">Part 4: Data aggregation</a></h1>
+<p>The most basic form of aggregation is counting within groups, so that’s what the tutorial goes to and where we’ll pick up.</p><h2><a href="https://entropicthoughts.com#section-4-1--counting-within-groups">Section 4.1: Counting within groups</a></h2>
+<p>
+We can guess how to group by something based on what we’ve seen so far. As
+for the <pre>count</pre> function, it is generic over all numbers so we specify we
+want an integer with a type application.
+</p><blockquote>printResults "select t.albumid, count(t.trackid) from tracks t group by t.albumid limit 5;" $ select $ do t &lt;- from $ table @Track limit 5 groupBy (t^.TrackAlbumId) pure (t^.TrackAlbumId, count @Int (t^.TrackId))</blockquote><p>We could also order by count to get the most trackful albums.</p><blockquote>printResults "select t.albumid, count(t.trackid) from tracks t group by t.albumid order by count(t.trackid) desc limit 5;" $ select $ do t &lt;- from $ table @Track limit 5 groupBy (t^.TrackAlbumId) orderBy [desc (count @Int (t^.TrackId))] pure (t^.TrackAlbumId, count @Int (t^.TrackId))</blockquote><p>
+We can list the names of the first five albums with more than 15 tracks on them,
+combining grouping, joining, and a <pre>having</pre> filter.
+</p><blockquote>printResults "select a.title from tracks t inner join albums a on t.albumid = a.albumid group by t.albumid having count(t.trackid) &gt; 15 limit 5;" $ select $ do (t :&amp; a) &lt;- from $ table @Track `innerJoin` table @Album `on` (\(t :&amp; a) -&gt; t^.TrackAlbumId ==. just (a^.AlbumId)) limit 5 groupBy (t^.TrackAlbumId) having (count (t^.TrackId) &gt;. val @Int 15) pure (a^.AlbumTitle)</blockquote><h1><a href="https://entropicthoughts.com#more-aggregation--set-operations--ctes--etc-">More aggregation, set operations, CTEs, etc.</a></h1>
+<p>There are many more things we can do12 I’m a big fan of recursive ctes after having used them to speed up application logic by many orders of magnitude at one of my first jobs., both in sql and Esqueleto, but I’m leaving this off here. After having gone through the above examples, we ought to feel much more confident in being able to both read and write an Esqueleto query when we need it.</p><p>Maybe we’ll come back to this in the future and show how more advanced features work. Maybe not.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

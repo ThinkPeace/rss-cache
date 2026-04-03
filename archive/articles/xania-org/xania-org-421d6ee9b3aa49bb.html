@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aliasing | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Aliasing</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-15T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/15-aliasing-in-general?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-421d6ee9b3aa49bb.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Knowing when the compiler can&#x27;t optimise is important too</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p><html:a href="/202512/14-licm-when-it-doesnt">Yesterday</html:a> we ended on a bit of a downer: aliasing stopped optimisations dead in their tracks. I know this is supposed to be the <html:em>Advent of Compiler Optimisations</html:em>, not the <html:em>Advent of Compiler Giving Up</html:em>! Knowing why your compiler can't optimise is just as important as knowing all the clever tricks it can pull off.</html:p>
+
+<html:p>Let's take a simple example of a counter class<html:sup id="fnref:actually"><html:a class="footnote-ref" href="#fn:actually">1</html:a></html:sup>. It accumulates integers into a member variable <html:code>total</html:code>. I've used C++ templates to show two versions of the code: one that accumulates in an <html:code>int</html:code> and one that accumulates in an <html:code>long</html:code>.</html:p>
+
+<html:p>At first glance, the two loop bodies look almost identical, as you might expect. In one case we'll accumulate in <html:code>eax</html:code>, and the other in <html:code>rax</html:code>, right? The truth is more subtle. Let's first look at the <html:code>int</html:code> case:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">DWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="p">]</html:span><html:span class="w">      </html:span><html:span class="c1">; eax = total</html:span>
+<html:span class="nl">.L3:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">DWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rsi</html:span><html:span class="p">]</html:span><html:span class="w">      </html:span><html:span class="c1">; add element to total</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">rsi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">4</html:span><html:span class="w">                    </html:span><html:span class="c1">; move to next element</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">DWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="w">      </html:span><html:span class="c1">; total = eax</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rsi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rdx</html:span><html:span class="w">                  </html:span><html:span class="c1">; are we finished?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.L3</html:span><html:span class="w">                       </html:span><html:span class="c1">; loop if not</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ret</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>Looks pretty reasonable, right? Now let's look at the <html:code>long</html:code> version:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">QWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="p">]</html:span><html:span class="w">      </html:span><html:span class="c1">; rax = total</html:span>
+<html:span class="nl">.L9:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">movsx</html:span><html:span class="w"> </html:span><html:span class="no">rdx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">DWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rsi</html:span><html:span class="p">]</html:span><html:span class="w">    </html:span><html:span class="c1">; read &amp; sign extend next element</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">rsi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">4</html:span><html:span class="w">                    </html:span><html:span class="c1">; move to next element</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rdx</html:span><html:span class="w">                  </html:span><html:span class="c1">; rax += element</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rcx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rsi</html:span><html:span class="w">                  </html:span><html:span class="c1">; are we finished?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.L9</html:span><html:span class="w">                       </html:span><html:span class="c1">; loop if not</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">QWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="w">      </html:span><html:span class="c1">; total = rax</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ret</html:span><html:span class="w">                           </html:span><html:span class="c1">; return</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>The first change from the 32-bit case you'll notice is the <html:code>movsx</html:code> to turn the 32-bit signed integer into a 64-bit signed integer. That's all but free on modern CPUs, and so while it looks like the loop is doing more work than the 32-bit version, it's not as bad as it seems.</html:p>
+
+<html:p>The important difference here is the update of <html:code>total</html:code>: In the first version, each loop iteration updates the member variable <html:code>total</html:code>. In the second version everything remains in registers until the end of the loop, and then <html:code>total</html:code> is only updated at the end. CPU caches are super fast, but it's still best to avoid redundant stores in hot loops!</html:p>
+
+<html:p>So, why this difference? Of course it's aliasing: In the <html:code>int</html:code> version the compiler can't be sure that the <html:code>span</html:code> passed in to <html:code>count</html:code> doesn't cover the <html:code>Counter</html:code>'s member variable <html:code>total</html:code>. They are the same type, and so that would be perfectly OK by the type-based aliasing rules of C++.</html:p>
+
+<html:p>In the <html:code>long</html:code> version, the types differ (<html:code>int</html:code> vs <html:code>long</html:code>), and under C++'s strict aliasing rules, it would be undefined behaviour for them to overlap in memory. Since the compiler can assume the program doesn't invoke undefined behaviour, it knows they don't alias and can safely optimise. That lets it cache the <html:code>total</html:code> in a register and only update the member variable at the end. As we'll see later in the series, being aliasing-free helps other optimisations too, like vectorisation.</html:p>
+
+<html:p>To fix this issue, we have a couple of choices. The easy way would be to rewrite to accumulate in a local variable, and then update the total at the end: Using <html:code>total += std::accumulate(span.begin(), span.end(), 0)</html:code> would fix this <html:em>and</html:em> be more intention-revealing.</html:p>
+
+<html:p>The other, non-standard way to work around this issue is to use <html:code>__restrict</html:code>. This GNU extension (borrowed from C) lets us decorate pointers and essentially promises that this pointer uniquely refers to the object it points at. In our case, the thing we need to prove is unique is the <html:code>Counter</html:code>'s "this pointer" itself. Adding <html:code>__restrict</html:code> after the parameter list (where you would add <html:code>const</html:code> for a const member function) works. But again - this is very non-standard, so use at your peril<html:sup id="fnref:vectorise"><html:a class="footnote-ref" href="#fn:vectorise">2</html:a></html:sup>.</html:p>
+
+<html:p>Aliasing is one of C++'s sneakier gotchas, especially when you're working with base types like <html:code>int</html:code> and <html:code>float</html:code> - you can't avoid using them, and they're prime candidates for aliasing with each other<html:sup id="fnref:rust"><html:a class="footnote-ref" href="#fn:rust">3</html:a></html:sup>. It's perfectly legal to have overlapping same-type pointers, so the compiler assumes the worst and peppers your hot loops with memory accesses. The fix may be as simple as only using local variables within your loop - but first you have to spot it. Fire up <html:a href="https://godbolt.org">Compiler Explorer</html:a>, look for those unexpected writes to memory when you'd expect everything to stay in registers, and you'll know when aliasing is holding you back!</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/PPJtJzT2U04">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 15 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/14-licm-when-it-doesnt">When LICM fails us</html:a> | <html:a href="/202512/16-calling-conventions">Calling all arguments</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:actually">
+<html:p>This example is taken from something similar that actually bit me in my job a few years ago. I was bewildered until I worked out that it was aliasing! <html:a class="footnote-backref" href="#fnref:actually" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:vectorise">
+<html:p>Try making the change in the Compiler Explorer window above. You'll see the <html:code>total</html:code> update move outside of the loop. If you're not scared to jump ahead a bit, make it <html:code>-O3</html:code> and you'll see the vectorised code, but only with <html:code>__restrict</html:code>. <html:a class="footnote-backref" href="#fnref:vectorise" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:rust">
+<html:p>Aliasing is particularly bad in C and C++. In other languages like Rust and Fortran, aliasing can't happen at all, or is severely restricted. This can help their optimisers considerably. <html:a class="footnote-backref" href="#fnref:rust" title="Jump back to footnote 3 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

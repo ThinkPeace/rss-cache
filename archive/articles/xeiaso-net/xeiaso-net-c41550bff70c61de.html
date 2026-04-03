@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Homelab downtime update: The fight for DNS supremacy | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Homelab downtime update: The fight for DNS supremacy</h1>
+        <div class="meta">Xe Iaso&#x27;s blog 2026-03-18T00:00:00Z</div>
+        <div class="links">
+          <a href="https://xeiaso.net/notes/2026/dns-fight/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xeiaso-net/xeiaso-net-c41550bff70c61de.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Turns out everything DID NOT go offline somehow. Yay!</div>
+        <div class="content">
+          <p>Hey all, quick update continuing from yesterday's announcement that my homelab went down. This is stream of consciousness and unedited. Enjoy!</p>
+        <p>Turns out the entire homelab didn't go down and two Kubernetes nodes survived the power outage somehow.</p>
+        <p>Two Kubernetes controlplane nodes.</p>
+        <p>Kubernetes really wants there to be an odd number of controlplane nodes and my workloads are too heavy for any single node to run and Longhorn really wants there to be at least three nodes online. So I had to turn them off.</p>
+        <p>How did I get in? The Mac mini that I used for Anubis CI. It somehow automatically powered on when the grid reset and/or survived the power outage.</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">xe@t-elos:~$ uptime
+        </span><span class="code-line"> 09:45:55 up 66 days,  9:51,  4 users,  load average: 0.37, 0.22, 0.18
+        </span></code></pre>
+        <p>Holy shit, that's good to know!</p>
+        <p>Anyways the usual suspects for trying to debug things didn't work (kubectl get nodes got a timeout, etc.), so I did an nmap across the entire home subnet. Normally this is full of devices and hard to read. This time there's basically nothing. What stood out was this:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">Nmap scan report for kos-mos (192.168.2.236)
+        </span><span class="code-line">Host is up, received arp-response (0.00011s latency).
+        </span><span class="code-line">Scanned at 2026-03-18 09:23:09 EDT for 1s
+        </span><span class="code-line">Not shown: 996 closed tcp ports (reset)
+        </span><span class="code-line">PORT      STATE SERVICE   REASON
+        </span><span class="code-line">3260/tcp  open  iscsi     syn-ack ttl 64
+        </span><span class="code-line">9100/tcp  open  jetdirect syn-ack ttl 64
+        </span><span class="code-line">50000/tcp open  ibm-db2   syn-ack ttl 64
+        </span><span class="code-line">50001/tcp open  unknown   syn-ack ttl 64
+        </span><span class="code-line">MAC Address: FC:34:97:0D:1E:CD (Asustek Computer)
+        </span><span class="code-line">
+        </span><span class="code-line">Nmap scan report for ontos (192.168.2.237)
+        </span><span class="code-line">Host is up, received arp-response (0.00011s latency).
+        </span><span class="code-line">Scanned at 2026-03-18 09:23:09 EDT for 1s
+        </span><span class="code-line">Not shown: 996 closed tcp ports (reset)
+        </span><span class="code-line">PORT      STATE SERVICE   REASON
+        </span><span class="code-line">3260/tcp  open  iscsi     syn-ack ttl 64
+        </span><span class="code-line">9100/tcp  open  jetdirect syn-ack ttl 64
+        </span><span class="code-line">50000/tcp open  ibm-db2   syn-ack ttl 64
+        </span><span class="code-line">50001/tcp open  unknown   syn-ack ttl 64
+        </span><span class="code-line">MAC Address: FC:34:97:0D:1F:AE (Asustek Computer)
+        </span></code></pre>
+        <p>Those two machines are Kubernetes controlplane nodes! I can't SSH into them because they're running Talos Linux, but I can use <code>talosctl</code> (via port 50000) to shut them down:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">$ ./bin/talosctl -n 192.168.2.236 shutdown --force
+        </span><span class="code-line">WARNING: 192.168.2.236: server version 1.9.1 is older than client version 1.12.5
+        </span><span class="code-line">watching nodes: [192.168.2.236]
+        </span><span class="code-line">    * 192.168.2.236: events check condition met
+        </span><span class="code-line">
+        </span><span class="code-line">$ ./bin/talosctl -n 192.168.2.237 shutdown --force
+        </span><span class="code-line">WARNING: 192.168.2.237: server version 1.9.1 is older than client version 1.12.5
+        </span><span class="code-line">watching nodes: [192.168.2.237]
+        </span><span class="code-line">    * 192.168.2.237: events check condition met
+        </span></code></pre>
+        <p>And now it's offline until I get home.</p>
+        <p>This was causing the sponsor panel to be offline because the external-dns pod in the homelab was online and fighting my new cloud deployment for DNS supremacy. The sponsor panel is now back online (I should have put it in the cloud in the first place, that's on me) and peace has been restored to most of the galaxy, at least as much as I can from here.</p>
+        <p>Action items:</p>
+        <ul>
+        <li>Figure out why ontos and kos-mos came back online</li>
+        <li>Make all nodes in the homelab resume power when wall power exists again</li>
+        <li>Review homelab for PSU damage</li>
+        <li>Re-evaluate usage of Talos Linux, switch to Rocky?</li>
+        </ul>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

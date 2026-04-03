@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why Android developers no longer need Windows USB drivers | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why Android developers no longer need Windows USB drivers</h1>
+        <div class="meta">Fabien Sanglard 2023-12-30T00:00:00Z</div>
+        <div class="links">
+          <a href="https://fabiensanglard.net/android_windows_driver/index.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/fabiensanglard-net/fabiensanglard-net-ebd99584e6031945.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body>
+    <p>In the early days of the platform, Android developers working from Linux and Mac OS X connected their device via an USB cable and were good to go. Windows users had to find and then install drivers. That was super-annoying.</p>
+    <p>Nowadays there is no more need for drivers. What happened?</p>
+    <p>When you plug an USB device into a port, the operating system needs to load drivers for its interface(s). This is done by inspecting the USB Descriptors hierarchy.</p>
+    <blockquote>Device Descriptor ├─ Configuration Descriptor │ └─ Interface Descriptor │ └─ Endpoint_Descriptors ├─ String Descriptors └─ Device Qualifier Descriptor</blockquote>
+    <p>Oftentimes, reading the Device Descriptor <a href="https://www.keil.com/pack/doc/mw/USB/html/_u_s_b__device__descriptor.html">Vendor ID (VPI) and Product ID (PID) fields</a><a href="https://fabiensanglard.net#footnote_1">[1]</a> is enough to decide which drivers should be loaded.</p>
+    <p>All three major OSs ship with "default" Device Class drivers so most USB devices work auto-magically<a href="https://fabiensanglard.net#footnote_2">[2]</a>.
+ If I connect my ErgoDox EZ keyboard, Windows attaches <pre>hidusb.sys.</pre> to it<a href="https://fabiensanglard.net#footnote_3">[3]</a> and I don't need a driver.</p>
+    <p>If Windows cannot find a built-in Device Class driver (or if they are better matches), it loads user-installed drivers. e.g. an Apple Magic Trackpad will also get <pre>hidusb.sys</pre> unless Bingxing Wang's <a href="https://github.com/imbushuo/mac-precision-touchpad/tree/master">awesome driver</a> is installed, in which case Windows loads <pre>AmtPtpDeviceUm.dll</pre> (with support for right-click and multi-finger gestures).</p>
+    <p>If no driver can be found, Linux loads <pre>usbfs</pre> which lets user-space programs access the device. Mac OS does the same, with <pre>IOKit</pre>. Windows reports an error. No driver is loaded and the Android device cannot be accessed.</p>
+    <p>To understand what is going on when a driver is installed, let's inspect the "brain" from <a href="https://fabiensanglard.net/usb_driver_r13-windows.zip">Google USB Driver</a>, <pre>android_winusb.inf</pre>.</p>
+    <blockquote>;Google Nexus One %SingleAdbInterface% = USB_Install, USB\VID_18D1&amp;PID_4E11 [USB_Install] Include = winusb.inf Needs = WINUSB.NT</blockquote>
+    <p>In <pre>INF</pre> parlance, it instructs "When VID=0x18D1 and PID=0x4E11 (a.k.a: a Google Nexus One), load <pre>winusb</pre> driver".</p>
+    <p>What is WinUSB? Alike Linux's <pre>usbfs</pre> and Mac OS's <pre>IOKit</pre> it is an USB driver which allows user-space programs to enumerate interfaces and write/read into/from the endpoints<a href="https://fabiensanglard.net#footnote_4">[4]</a>. That is what <pre>adb</pre> (the <a href="https://en.wikipedia.org/wiki/Android_Debug_Bridge">Android Debug Bridge</a>) uses to chat with an Android device.</p>
+    <p>The method previously described has an obvious flaw. If an Android device VID/PID are not listed, <pre>winusb</pre> is not loaded.</p>
+    <p>Windows 8 has a better way than <pre>INF</pre> files to discover which driver an interface needs. It asks directly to the device!</p>
+    <p>When a device is connected, the OS issues a String Descriptors request at index <pre>0xEE</pre>. If the device is Microsoft OS Descriptors (MOD) compatible, it returns the string <pre>M\0S\0F\0T\01\000\0\0</pre>. In this case, Windows requests the <a href="https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/microsoft-defined-usb-descriptors">Extended Compat ID OS Feature Descriptor</a>.</p>
+    <p>We can inspect this descriptor on a Pixel 6 with <pre>libusb</pre>'s <pre>xusb</pre>.</p>
+    <blockquote>$ ./xusb 18d1:4ee2 [...] Reading string descriptors: String (0x01): "Google" String (0x02): "AOSP on Oriole" String (0x03): "0123456789ABCD" Reading OS string descriptor: Reading Extended Compat ID OS Feature Descriptor (wIndex = 0x0004): 00000000 40 00 00 00 00 01 04 00 02 00 00 00 00 00 00 00 @............... 00000010 00 01 4d 54 50 00 00 00 00 00 00 00 00 00 00 00 ..MTP........... 00000020 00 00 00 00 00 00 00 00 01 01 57 49 4e 55 53 42 ..........WINUSB 00000030 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................</blockquote>
+    <p>This device was set up with both Media Transfer Protocol and developer mode enabled. For each of these interfaces, the Feature Descriptor instructs which driver it needs. Respectively <pre>mtp.sys</pre> for the first interface and <pre>winusb.sys</pre> on the second interface.</p>
+    <p>With <pre>winusb.sys</pre> loaded, user-space executables such as <pre>adb</pre> can open the device, claim the interface, and get the developer rolling. No need for drivers anymore!</p>
+    <p>Josh Gao (@jmga, adb developer at the time) pointed out that he introduced MOD support in Android 10 (API 29)<a href="https://fabiensanglard.net#footnote_5">[5]</a>. And he also wrote a CTS test for it so all Android devices shipping after API 29 should have it.</p>
+    <blockquote>Reading Extended Properties OS Feature Descriptor (wIndex = 0x0005): 00000000 8e 00 00 00 00 01 05 00 01 00 84 00 00 00 01 00 ................ 00000010 00 00 28 00 44 00 65 00 76 00 69 00 63 00 65 00 ..(.D.e.v.i.c.e. 00000020 49 00 6e 00 74 00 65 00 72 00 66 00 61 00 63 00 I.n.t.e.r.f.a.c. 00000030 65 00 47 00 55 00 49 00 44 00 00 00 4e 00 00 00 e.G.U.I.D...N... 00000040 7b 00 46 00 37 00 32 00 46 00 45 00 30 00 44 00 {.F.7.2.F.E.0.D. 00000050 34 00 2d 00 43 00 42 00 43 00 42 00 2d 00 34 00 4.-.C.B.C.B.-.4. 00000060 30 00 37 00 44 00 2d 00 38 00 38 00 31 00 34 00 0.7.D.-.8.8.1.4. 00000070 2d 00 39 00 45 00 44 00 36 00 37 00 33 00 44 00 -.9.E.D.6.7.3.D. 00000080 30 00 44 00 44 00 36 00 42 00 7d 00 00 00 0.D.D.6.B.}...</blockquote>
+    <table>
+      <row>
+        <cell>
+          <p/>
+        </cell>
+        <cell>[1]</cell>
+        <cell>At the interface level are also present the <p/></cell>
+      </row>
+    </table>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

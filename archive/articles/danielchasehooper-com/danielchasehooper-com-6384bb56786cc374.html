@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why Swift’s Type Checker Is So Slow | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why Swift’s Type Checker Is So Slow</h1>
+        <div class="meta">Daniel Hooper 2024-06-12T00:00:00Z</div>
+        <div class="links">
+          <a href="https://danielchasehooper.com/posts/why-swift-is-slow/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/danielchasehooper-com/danielchasehooper-com-6384bb56786cc374.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">How a 10 year old design choice for Swift’s type checker still haunts us to this day Read the whole article on danielchasehooper.com →</div>
+        <div class="content">
+          <html>
+  <body>
+    <p>June 12, 2024・5 minute read</p>
+    <p>The Swift compiler can take an absurdly long time to compile expressions due to how types are inferred<a href="https://danielchasehooper.com#fn:1">1</a>. Here’s an explanation by the creator of Swift, Chris Lattner (from from his <a href="https://www.youtube.com/watch?v=9ag0fPMmYPQ&amp;t=373s">Mojo talk</a> and edited for clarity):</p>
+    <blockquote>
+      <p>My experience with Swift is we tried to make a really fancy bi-directional Hindley-Milner type checker and it’s really great because you can have very beautiful minimal syntax but the problem is that A) compile times are really bad (particularly if you have complicated expressions) and B) the error messages are awful because now you have a global constraint system and when something goes wrong you have to infer what happened and the user can’t know that something over there made it so something over here can’t type check. In my experience it sounds great but it doesn’t work super well.</p>
+    </blockquote>
+    <p>Let me explain what he means with an example:</p>
+    <pre>
+      <pre>enum ThreatLevel {
+    case normal
+    case midnight
+}
+
+enum KeyTime {
+    case midnight
+    case midday
+}
+
+func setThreatLevel(_ level: ThreatLevel) {...}
+
+func setThreatLevel(_ level: Int) {...}
+
+setThreatLevel(.midnight)
+</pre>
+    </pre>
+    <p>On the last line, <pre>setThreatLevel</pre> could refer to one of two functions, and <pre>.midnight</pre> could represent <pre>ThreatLevel.midnight</pre> or <pre>KeyTime.midnight</pre>. The Swift compiler uses a constraint solver to find the valid combination is <pre>setThreatLevel(_ level: ThreatLevel)</pre> and <pre>ThreatLevel.midnight</pre>. On longer expressions with many more possible combinations the constraint solver can get bogged down. Often the <a href="https://developer.apple.com/documentation/swift/initialization-with-literals">ExpressibleBy protocols</a> and operator overloading create high combination counts, like in this example:</p>
+    <pre>
+      <pre>let address = "127.0.0.1"
+let username = "steve"
+let password = "1234"
+let channel = 11
+
+let url = "http://" + username 
+            + ":" + password 
+            + "@" + address 
+            + "/api/" + channel 
+            + "/picture"
+
+print(url)
+</pre>
+    </pre>
+    <p>Swift 6 spends 42 seconds on these 12 lines on an M1 Pro, only to spit out the notorious <pre>error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions</pre>. In the same amount of time, Clang can perform a clean build of my 59,000 line C project 38 times. The Swift standard library has 17 overloads of <pre>+</pre> and 9 types adopting the <pre>ExpressibleByStringLiteral</pre> Protocol. This leads to an exponential combination of types and operators for the constraint solver to try. Unfortunately for the solver, I included a type error in the expression. The <pre>+</pre> operator cannot add the <pre>channel</pre> Int to a String literal. No matter how many combinations the solver tries, none of them resolve this error. In this case the compiler gives up before trying them all and fails to point out the type mismatch.</p>
+    <p>You can fix the problem by converting <pre>channel</pre> to String:</p>
+    <pre>
+      <pre>let url = "http://" + username 
+            + ":" + password 
+            + "@" + address 
+            + "/api/" + String(channel) 
+            + "/picture"
+</pre>
+    </pre>
+    <p>This successfully compiles in 0.19 seconds! The constraint solver is designed to try the most likely combinations first — that strategy pays off now that the code doesn’t have an error. It is possible to write expressions that successfully compile, but take a long time:</p>
+    <pre>
+      <pre>let result: Double = -(1 + 1) + -(1 + 1) - 1
+</pre>
+    </pre>
+    <p>Swift 6 takes 6.2 seconds to compile this one line<a href="https://danielchasehooper.com#fn:2">2</a>. Even <a href="https://youtu.be/-eCwBwTbjAI?si=rQ5tHNcBRkmaFV8-&amp;t=1000">toy languages</a> compile equivalent expressions faster.</p>
+    <p>The nature of constraint solvers is that they may find unexpected solutions, or have unpredictable performance. For example, appending “+ 1” to the previous example makes it compile in 0.7 seconds. Very strange. Tweaking the expression in other ways gave me the <pre>unable to type-check this expression in reasonable time</pre> error.</p>
+    <p>You may have expressions in your code slowing down compile times. To find the worst offenders, run:</p>
+    <pre>
+      <pre>xcodebuild clean build -project \
+&lt;YOUR PROJECT FILE NAME&gt;.xcodeproj/ \
+OTHER_SWIFT_FLAGS="-Xfrontend -debug-time-expression-type-checking" \
+| grep -Ei '^\d+\.\d+ms\t/.+$' | sort -r
+</pre>
+    </pre>
+    <p>Use temporary variables to break the slow expressions into multiple statements. In addition, it might be worth adding <pre>-Xfrontend</pre> and <pre>-warn-long-expression-type-checking=100</pre> to your project’s “Other swift flags” build setting to be warned when an expression takes longer than 100 milliseconds to compile.</p>
+    <p>My friends within Apple tell me that they have learned to limit expression length to try to control compile times. I’ve heard similar stories from friends at Delta Air Lines and other companies.</p>
+    <p>The Swift team is aware of the issue, and lists the following item under <a href="https://github.com/apple/swift/blob/main/docs/CompilerPerformance.md#known-problem-areas">known problem areas</a>:</p>
+    <blockquote>
+      <p>Expression type inference solves constraints inefficiently, and can sometimes behave super-linearly or even exponentially.</p>
+    </blockquote>
+    <p>Unfortunately the current approach’s exponential worst case <a href="https://learn.microsoft.com/en-us/archive/blogs/ericlippert/lambda-expressions-vs-anonymous-methods-part-five">is unavoidable</a>. A different approach to type checking is required to fix it. I think it’s worth considering this course of action:</p>
+    <p>To learn more about Swift’s type checker, start by reading <a href="https://github.com/apple/swift/blob/main/docs/TypeChecker.md">Type Checker Design and Implementation</a>. The type checker source code is located in the <a href="https://github.com/apple/swift/tree/main/lib/Sema">swift/lib/Sema folder</a></p>
+    <p>Discuss on <a href="https://x.com/DanielcHooper/status/1800948752754335753">Twitter</a><br/>Discuss on <a href="https://news.ycombinator.com/item?id=40661001">Hacker News</a></p>
+    <p>In larger projects, some compile time slowness is due to the Swift/Xcode/SwiftPM build system, but that’s a different story. <a href="https://danielchasehooper.com#fnref:1">↩︎</a></p>
+    <p>Example from <a href="https://www.cocoawithlove.com/blog/2016/07/12/type-checker-issues.html">Exponential time complexity in the Swift type checker</a> <a href="https://danielchasehooper.com#fnref:2">↩︎</a></p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

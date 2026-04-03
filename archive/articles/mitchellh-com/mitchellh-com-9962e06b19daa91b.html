@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Grapheme Clusters and Terminal Emulators | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Grapheme Clusters and Terminal Emulators</h1>
+        <div class="meta">Mitchell Hashimoto 2023-10-02T00:00:00Z</div>
+        <div class="links">
+          <a href="https://mitchellh.com/writing/grapheme-clusters-in-terminals">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/mitchellh-com/mitchellh-com-9962e06b19daa91b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body><h1><a href="https://mitchellh.com/">Mitchell Hashimoto</a></h1><h1>Grapheme Clusters and Terminal Emulators</h1><p>Copy and paste "🧑‍🌾" in your terminal emulator. How many cells forward
+did your cursor move? Depending on your terminal emulator, it may have moved
+2, 4, 5, or 6 cells<a href="https://mitchellh.com#user-content-fn-1">1</a>. Yikes. This blog post describes why this happens
+and how terminal emulator and program authors can achieve consistent spacing
+for all characters.</p><h1><a href="https://mitchellh.com#character-grids-historically"/>Character Grids, Historically</h1>
+<p>Terminals operate on a grid of fixed size cells. This is fundamental
+to how terminal emulators operate because many
+<a href="https://en.wikipedia.org/wiki/ANSI_escape_code">control sequences</a>
+programs can send to the terminal operate on cells.</p><p>For example, there is a control sequence to move the cursor left
+<pre>CSI n D</pre>, right <pre>CSI n C</pre>, up <pre>CSI n A</pre>, or down <pre>CSI n B</pre>. The
+"n" in each of these is the number of cells to move. There is
+a sequence to request the cursor position <pre>CSI 6 n</pre>. The terminal
+responds to the program in the form <pre>CSI y ; x R</pre> where both "y"
+and "x" are cell coordinates.</p><p>Traditionally, terminals simply read an input byte stream and mapped each individual byte to a cell in the grid. For example, the stream "1234" is 4 bytes, and programmers can very easily read a byte at a time and place it into the next cell, move the cursor right one, repeat.</p><p>Eventually, "wide characters" came along. Common wide characters are
+Asian characters such as 橋 or Emoji such as 😃. A function
+<a href="https://www.man7.org/linux/man-pages/man3/wcwidth.3.html"> wcwidth</a>
+was added to libc to return the width of a wide character in cells.
+Wide characters were given a width of "2" (usually). Therefore, if
+you type 橋 in a terminal emulator, the character will take up two
+grid cells and your cursor should jump forward by two cells.</p><p>And this is how most terminal emulators and terminal programs (shells,
+TUIs, etc.) are implemented today: they process input characters via
+<pre>wcwidth</pre> and move the cursor accordingly. And for a short period of time,
+this worked completely fine. But today, this is no longer adequate and
+results in many errors.</p><h1><a href="https://mitchellh.com#grapheme-clustering"/>Grapheme Clustering</h1>
+<p>It turns out that a single 32-bit value is not adequate to represent every user-perceived character in the world. A "user-perceived character" is how the Unicode Standard defines a grapheme.</p><p>Let's consider the emoji "🧑‍🌾". The emoji should look
+<a href="https://static.mitchellh.com/ghostty/mode-2027/farmer.png">something like this</a> in case your computer doesn't support it.
+I think every human
+would agree this is a single "user-perceived character" or grapheme. The
+Unicode Standard itself defines this as a single grapheme so regardless of
+your personal opinion, international standards say this is one grapheme.</p><p>For computers, its not so obvious. "🧑‍🌾" is three codepoints
+(U+1F9D1 🧑, U+200D, and U+1F33E 🌾), three 32-bit values when UTF-32 encoded, or 11
+bytes<a href="https://mitchellh.com#user-content-fn-2">2</a> when UTF-8 encoded.</p><p>If we only consider the 32-bit values and send each one individually
+to <pre>wcwidth</pre> as we historically have done, we'll get the results of
+"2", then "0", then "2", respectively for each codepoint. Therefore, the
+cursor moves forward by 4 cells. This is why with most terminals (at the
+time of writing this), you'll see your cursor move forward by 4 cells</p><p>What's with the zero-width character? The codepoint <pre>U+200D</pre> is known
+as a <a href="https://en.wikipedia.org/wiki/Zero-width_joiner">Zero-Width Joiner</a>
+(ZWJ) and has a standards-defined width of zero. The ZWJ tells text
+processing systems to treat the codepoints around it as joined into
+a single character. That's why you can type both "🧑‍🌾" and "🧑🌾";
+the only difference between these two quoted values is the farmer on the
+left has a zero-width joiner between the two emoji.</p><p>Enter grapheme clustering. Grapheme clustering is the process of determing
+a single grapheme from a stream of codepoints. Grapheme clustering is
+the process that lets a program see three 32-bit values as a single
+user-perceived character. The algorithm for grapheme clustering is
+defined in <a href="https://www.unicode.org/reports/tr29/#Grapheme_Cluster_Boundaries">UAX #29, "Unicode Text Segmentation"</a>.
+I won't go into detail how the algorithm works, just grab any modern
+Unicode library for your programming language and it should be able to
+perform grapheme clustering.</p><p>A particular challenge with grapheme clustering is that it is stateful. You must have access to the previous codepoint, the current codepoint, and an integer state value to robustly determine the break points for graphemes. Therefore, it isn't super easy (but its not hard) to drop into an existing program.</p><p>With grapheme clustering, a terminal would see "🧑‍🌾" as a single wide-character grapheme and move the cursor forward only two cells instead of four.</p><p>This isn't just for emoji. I'm using emoji as an example but grapheme clustering is also extremely important for correctly handling the languages of the world. For example, Arabic characters are often made up of multiple codepoints.</p><p>Aside: font shaping. Grapheme clustering only solves the problem of
+determining grapheme boundaries in a stream of codepoints. It does not
+solve the problem of rendering a stream of codepoints. For that, you
+need a font shaper such as <a href="https://harfbuzz.github.io/">Harfbuzz</a>.
+Harfbuzz sees a stream of codepoints, detects the graphemes, and is
+able to then map those graphemes to individual glyphs in a font.</p><p>This blog post won't cover font shaping, but if you paste "🧑‍🌾" in a terminal and see two emoji instead of one, its either due to the terminal stripping the zero-width joiner or more likely because the terminal doesn't support font shaping.</p><h1><a href="https://mitchellh.com#grapheme-clustering-in-terminals"/>Grapheme Clustering in Terminals</h1>
+<p>Most terminals today do not support grapheme clustering. A major reason is because advanced terminal applications such as shells and text editors often need to constantly know exactly where the cursor is and remain in sync with the terminal grid state.</p><p>Because historically terminals used <pre>wcwidth</pre>, shells, editors, and other TUI
+apps also use <pre>wcwidth</pre>, and continue to do so today. Even though it produces
+the wrong values for multi-codepoint graphemes, at least the wrong values
+are often consistently wrong across terminal emulators.</p><p>When I first implemented text processing for <a href="https://mitchellh.com/ghostty">my terminal</a>,
+I implemented full grapheme cluster support because I assumed that would be
+a good thing. However, I was immediately disappointed to find that when
+I did proper grapheme clustering, <a href="https://fishshell.com/">fish shell</a>
+would redraw my prompt in the wrong place when I moved my cursor. 😞 My
+shell assumed my terminal used <pre>wcwidth</pre>, and my terminal assumed programs
+didn't care. We both were wrong, so I disabled grapheme clustering...</p><p>Enter mode 2027. Mode 2027 is
+<a href="https://github.com/contour-terminal/terminal-unicode-core">a proposal for grapheme support in terminals</a>.
+This proposal is from the author of the <a href="https://github.com/contour-terminal/contour">Contour terminal</a>.
+The idea is that a program running in a terminal can notify the terminal
+that it wishes to operate with full support for grapheme clustering, and this
+feature can be turned on and off. The running program can also query the
+terminal to see if it supports this feature.</p><p>I recently implemented support for mode 2027 in my terminal and you can see it working below. With mode 2027 off, the cursor moves to column 5 after the farmer emoji (width of 4). With mode 2027 on, the cursor moves to column 3 (width of 2).</p><graphic src="/_next/image?url=https%3A%2F%2Fstatic.mitchellh.com%2Fghostty%2Fmode-2027%2Fmode2027.png&amp;w=3840&amp;q=75"/><h1><a href="https://mitchellh.com#terminal-comparison"/>Terminal Comparison</h1>
+<p>The table below shows the reported width of "🧑‍🌾" by various terminals. For each terminal, I used the latest version I could find as of October 2, 2023. I put my own terminal first in the list but otherwise listed them alphabetically.</p><table><row span="4"><cell role="head">Terminal</cell><cell role="head">Width</cell><cell role="head">Mode 2027</cell><cell role="head">Notes</cell></row><row><cell><p/></cell></row></table><pre>wcwidth</pre> if mode 2027 is disabled<pre>wcwidth</pre> if mode 2027 is disabled<p>Mode 2027 support is still rare and relatively unsupported. Its interesting to see however the variance in reported width across all terminals. "2" and "4" are both understandable values. The terminals reporting "5" and "6" are living a weird reality.</p><p>One special challenge is terminal multiplexers such as tmux or zellij.
+Notice above that tmux uses <pre>wcwidth</pre> and thus moves the cursor forward by
+four. But tmux itself lives in a terminal emulator which also sees the value
+when printed. If tmux and the terminal don't match, the cursors become out
+of sync and the resulting bugs can be comical<a href="https://mitchellh.com#user-content-fn-3">3</a>.</p><h1><a href="https://mitchellh.com#what-can-program-authors-do-today"/>What Can Program Authors Do Today?</h1>
+<p>If you're the author of a program that runs in a terminal (text editor, CLI, TUI, etc.), there are things you can do today to handle grapheme clusters more appropriately.</p><p>One, you can just not care. If your program doesn't need to keep track of where the cursor is, doesn't need to manually line-break, etc. then you can simply not care and let the terminal do whatever it does.</p><p>Two, you can and should query for mode 2027 support and try to use mode 2027
+if it works. You can query for mode 2027 support using the standard sequence
+DECRQM (request mode): <pre>CSI ? 2027 $ p</pre>.</p><p>Three, you can query the cursor position after outputing a series of text
+using <pre>CSI 6 n</pre>. The terminal will then report where the cursor is and you
+can use this to calculate the width of your text.</p><p>What you should not do is assume <pre>wcwidth</pre> behavior or grapheme
+clustering behavior. You can see from the table in the previous section
+that either assumption would be wrong across multiple terminal emulators,
+even if you only consider the popular or mainstream ones.</p><p>Hopefully in the future more terminals and terminal programs will support mode 2027 and proper grapheme clustering. As noted earlier, this doesn't just impact "cute" features such as emoji but also affects various world languages such as Arabic.</p><p>If you're not a terminal or terminal program author, hopefully you found this blog post insightful. Implementing a terminal emulator was certainly eye-opening for me to see the complexities in text processing and the burden of legacy behaviors.</p><p>I also want to give a quick shout out to Christian Parpart for proposing mode 2027. Christian is the first person I saw very publicly talk about the issues with grapheme clusters and terminals and also decided to try to do somthing about it. Thank you!</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

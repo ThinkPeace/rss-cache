@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why WinQuake exists and how it works | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why WinQuake exists and how it works</h1>
+        <div class="meta">Fabien Sanglard 2025-12-03T00:00:00Z</div>
+        <div class="links">
+          <a href="https://fabiensanglard.net/winquake/index.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/fabiensanglard-net/fabiensanglard-net-d06ff35bd803db2f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body>
+    <p>When I took a look at the history of Quake binaries, they all made sense to me. <pre>quake.exe</pre> was the original release, able to run on DOS and Windows 95. Then came <pre>vquake.exe</pre> to support the hardware accelerated chip Vérité 1000. Later, <pre>glquake.exe</pre> generalized hardware acceleration to any vendor providing OpenGL drivers. And to revolutionize Internet deathmatch, id Software released QuakeWorld server and client (<pre>qwsv.exe</pre> and <pre>qwcl.exe</pre>).</p>
+    <p>However, I could not figure out the point of <pre>winquake.exe</pre>. Until now. Here is what I understood and a little bit of a dive into how it works.</p>
+    <p><pre>quake.exe</pre> runs on both DOS and Windows 95 but how well does it perform? A quick benchmark on my Pentium MMX 233MHz, Matrox Mystique PC (320x200 with 101 screen size) and sound on, showed the following numbers.</p>
+    <table>
+      <row span="2">
+        <cell role="head">Configuration</cell>
+        <cell role="head">Framerate</cell>
+      </row>
+      <row span="2"><cell><pre>quake.exe</pre> started from DOS</cell>
+    <cell>48 fps</cell></row>
+      <row><cell><pre>quake.exe</pre> started from Windows 95</cell>
+    <cell>38 fps</cell></row>
+    </table>
+    <p>So "framerate" is the beginning of an answer to justify the existence of WinQuake. <pre>quake.exe</pre> running from Windows 95 is roughly 25% slower than the same binary started from DOS. And that is to be expected. Windows 95 runs DOS applications in a virtual machine ("DOS BOX"), where memory access, interrupts, and signals are virtualized, which incurs overhead.</p>
+    <p>Another element of the answer comes from <a href="https://fabiensanglard.net/quake_chunnel">Quake Chunnel</a>. <pre>quake.exe</pre> can access Windows 95 TCP/IP stack, but only via a convoluted tech from Mpath to bridge a "DOS BOX" to win32 dlls. By having a win32-only application, id Software had guaranteed direct access to <pre>winsock.dll</pre>.</p>
+    <p>Last but not least, id Software really wanted Quake to work on Windows NT. Despite their best efforts, the people at DJGPP could not make their DPMI client in <pre>quake.exe</pre> compatible with the NT Virtual DOS Machine (NTVDM).</p>
+    <blockquote>Near pointers don't work under NT - which was a huge disappointment to iD and generated some conference calls to Microsoft.<br/>- Charles Sandmann<a href="">[1]</a></blockquote>
+    <p>A fun way to start exploring is to first read <a href="https://fabiensanglard.net/WQREADME.TXT">WQREADME.TXT</a> and then take a look at all the modes available in <pre>winquake.exe</pre>. They are configured with the script <a href="https://fabiensanglard.net/WQ.BAT">wq.bat</a>.</p>
+    <blockquote>Options for running WinQuake: wq max: all features on, but doesn't work on all systems wq fast: maximum speed, but doesn't work on all systems wq fastvid: maximum video speed, but safer, probably slower sound wq fastsnd: maximum sound speed, but safer, probably slower video wq safe: very likely to run, but may be slower wq verysafe: almost sure to run, but probably slower, and no sound</blockquote>
+    <p>Here are the numbers I got for each mode, still with the same Pentium MMX 233MHz machine and same configuration.</p>
+    <table>
+      <row span="2">
+        <cell role="head">Configuration</cell>
+        <cell role="head">Framerate</cell>
+      </row>
+      <row span="2"><cell><pre>wq max</pre></cell>
+    <cell>42.4 fps</cell></row>
+      <row span="2"><cell><pre>wq fast</pre></cell>
+    <cell>41.8 fps</cell></row>
+      <row span="2"><cell><pre>wq fastvid</pre></cell>
+    <cell>45.0 fps</cell></row>
+      <row span="2"><cell><pre>wq fastsnd</pre></cell>
+    <cell>41.8 fps</cell></row>
+      <row span="2"><cell><pre>wq safe</pre>
+    </cell>
+    <cell>45.0 fps</cell></row>
+      <row><cell><pre>wq verysafe</pre>
+    </cell>
+    
+    <cell>40.0 fps*</cell></row>
+    </table>
+    <p>Impressive. <pre>winquake.exe</pre> managed to bring up the framerate within 6% of <pre>quake.exe</pre> running on DOS. Mission accomplished. But how does it works?</p>
+    <p>Each "mode" is configured via command-line flags. This part reveals there are three types of backend for input controls, audio, and video.</p>
+    <blockquote>max winquake -dinput fast winquake fastvid winquake -wavonly fastsnd winquake -nodirectdraw -nowindirect safe winquake -wavonly -nodirectdraw -nowindirect verysafe winquake -dibonly -nosound -nojoy</blockquote>
+    <p>Amusingly, the mode that provides the highest framerate, <pre>fastvid</pre> keeps everything default but disables an audio backend!</p>
+    <p>"fastvid" was also the name of a <a href="https://fabiensanglard.net/fastvid.txt">tool</a> to fix the Pentium Pro abysmal video write speed on chipset that shipped with buggy "Write Posting". The option in <pre>qw.bat</pre> has nothing to do with it.</p>
+    <p>WinQuake can send its sound effects (the music comes from CD tracks) using two audio backends (with <pre>-nosound</pre> disables sound effects altogether).</p>
+    <p>The two backends are DirectSound (<pre>dsound.h</pre> from DirectX) and what id calls wave sound which is in fact <pre>winmm.h</pre>, the Windows MultiMedia audio API, dating back to Windows 3.1.</p>
+    <p>If DirectSound is available, WinQuake uses it to provide the lowest latency. However this backend has a higher impact on the CPU and results in 10% lower framerate. With <pre>-wavonly</pre>, users can force usage of <pre>WinMM</pre> which results in higher latency but higher framerate.</p>
+    <p>To read user inputs, WinQuake uses either DirectInput (<pre>dinput.h</pre> from DirectX) or the legacy Windows API <pre>winuser.h</pre>.
+
+</p>
+    <p>By default WinQuake uses <pre>winuser.h</pre> but usage of DirectInput can be requested via <pre>-dinput</pre> for slightly smoother motion and responsiveness to fast spinning motions. I suspect it was not enabled by default for cases where DirectX was not installed or perhaps fear of driver problems.</p>
+    <p>Joystick inputs are handled with <pre>joystickapi.h</pre>. Likewise, it seems drivers may not have been stable since id provided a way to disable it with <pre>-nojoy</pre>.</p>
+    <p>The part that was the most interesting to me was the video backends. WinQuake can operate in five modes using GDI, VGA, VESA, Accelerated VESA, or DirectDraw.</p>
+    <p>The Graphics Device Interface (GDI) (<pre>wingdi.h</pre>) is the foundation to render anything on the desktop in Windows 95. Applications usually did not use it directly but instead called <pre>winuser.h</pre> (which in turns used low-level <pre>wingdi.h</pre>).</p>
+    <p>WinQuake can render to a Device-Independent Bitmaps (DIB) which is a surface to be blitted towards a window though GDI. The surface can be of any dimension so there are no "display mode" to detect here, WinQuake hardcodes its DIB modes to square-pixel resolutions 320x240, 640x480, and 800x600.</p>
+    <p>Because it is using Windows "by the book", DIB mode is the safest mode that should always work. It is also the slowest way to render to the screen because WinQuake first renders to a DIB that is then sent to the GDI and then sent to the video card.</p>
+    <p>While slower, it is not devoid of hardware acceleration. Many graphic cards wanting to perform well under Windows 95 had hardware acceleration implementation of crucial functions such as <pre>bitBlt</pre>.</p>
+    <p>Finally, DIB mode is the only one able to render in "windowed" mode. Every other mode takes over and renders in "fullscreen" mode. Note that DIB can also render in pseudo-full screen if WinQuake is started with <pre>dibonly</pre> but this is "faked" with a borderless window covering the whole screen.</p>
+    <p>For everything not DIB, WinQuake uses SciTech's MegaGraph Graphics Library. It was a rather expensive lib ($499 in 1997, $1,000 in 2025)<a href="https://fabiensanglard.net#footnote_2">[2]</a> but well worth its price because it brought order into the chaos that was the world of video systems in 1997 if a game operated outside GDI.</p>
+    <p>WinQuake could find itself having to deal with the following types of video systems.</p>
+    <blockquote>1. VBEAF : VESA Accelerator Function 2. VBE2 : VESA Linear Frame Buffer for direct to VRAM write/read. 3. DirectDraw : Only available if DirectX is installed. 4. StandardVGA : That good ol' VGA video mode.</blockquote>
+    <p>When it starts, WinQuake registers the drivers it wants MGL to load (see <pre>registerAllDispDrivers</pre>). MGL then lists all supported resolutions and pick the highest performance drivers to access each of them (in the order list above).</p>
+    <blockquote>void registerAllDispDrivers(void) { /* Even though these driver require WinDirect, we register * them so that they will still be available even if DirectDraw * is present and the user has disabled the high performance * WinDirect modes. */ MGL_registerDriver(MGL_VGA8NAME,VGA8_driver); if (useWinDirect){ MGL_registerDriver(MGL_LINEAR8NAME,LINEAR8_driver); if (!COM_CheckParm ("-novbeaf")) MGL_registerDriver(MGL_ACCEL8NAME,ACCEL8_driver); } if (useDirectDraw) { MGL_registerDriver(MGL_DDRAW8NAME,DDRAW8_driver); } }</blockquote>
+    <p>The list of modes and which driver was selected by MGL is available via the command <pre>vid_describemodes</pre> in Quake console. In the screenshot below, we can see almost the full house of drivers <pre>VGA8.DRV</pre>, <pre>DDRAW.DRV</pre>, <pre>LINEAR8.DRV</pre>, and the windowed DIB modes.</p>
+    <p>I had never heard of VBE/AF before reading MGL source code. As far as I understand, it never gained much traction and few vendors wrote drivers to support it.</p>
+    <p>Many games used MGL: WinQuake, Hexen II, Grand Theft Auto, Maui Mallard in Cold Shadow, Total Mayhem, Balls of Steel.</p>
+    <p>Microsoft was very much aware that GDI was fine for applications but not enough for video games. Already in Windows 3.1 they had released a game developer SDK called WinG to give a more direct fullscreen access to the screen. The second version of WinG was renamed DirectX and contained the 2D fullscreen API which they called DirectDraw.</p>
+    <blockquote>Although safer and more reliable, Microsoft Windows imposed many restrictions on applications. One result of this situation was that games, and other high-performance graphics applications, could no longer access the hardware resources directly in order to maximize performance and expand functionalities. For several years game programmers continued to exercise the craft in DOS, and Windows users had to switch to the DOS mode to run games, simulations, and other graphics programs. The resulting situation implied a major contradiction: a graphical operating system in which graphics applications would execute with marginal performance<br/>The first effort in this direction was a product named WinG, in reference to Windows for Games. WinG was first made available in 1994 and it required Win32 in Windows 3.1. Its main feature is that WinG enabled the game programmer to rapidly transfer bitmaps from system memory into video memory. This made possible the creation of Windows games that executed with much better performance.<br/>Microsoft renamed the new version of the Game SDK, calling it DirectX 2. Other versions later released were named DirectX 3, DirectX 5, DirectX 6, and currently, DirectX 7.<br/>- Feng Yuan, "Windows Graphics Programming Win32 GDI and DirectDraw"</blockquote>
+    <p>In terms of performance, DirectDraw was a step up from GDI but it was also not guaranteed to work due to driver bugs or if the user had not installed DirectX. It can be disabled with <pre>nodirectdraw</pre>.</p>
+    <p>Readers may have picked up on something written earlier that was blatantly wrong. Direct access to the hardware is forbidden to Win32 applications. So how is MGL able to bypass GDI/DirectDraw and directly hit VBEAF, VBE, and VGA?</p>
+    <p>That is possible thanks to the secret tech from SciTech called WinDirect. How it works is explained in <a href="https://fabiensanglard.net/SciTech MGL Reference Guide v4.pdf">SciTech MGL Reference Guide v4.pdf</a>.</p>
+    <blockquote>What is WinDirect?<br/><br/>A key component of the SciTech MGL, WinDirect is a runtime package for DOS and Windows 95 that provides direct access to the display hardware for both 16 and 32-bit applications. Traditionally Windows applications have had to perform all graphics output using the standard Graphics Device Interface (GDI). Although the GDI is very extensive and powerful, it is also not particularly fast for the sort of graphics that real time applications like interactive video games require.<br/><br/>WinDirect breaks this barrier by allowing high performance applications to shut down the normal GDI interface, and to take over the entire graphics display hardware just like you would normally do under DOS. Once GDI has been shut down, interactive graphics applications can re-program the display controller and write directly to video memory. A WinDirect application can program any standard VGA graphics mode such as 320x200x256, it can re-program the controller and run standard VGA ModeX style graphics, or it can call the standard VESA BIOS services to run high resolution SuperVGA graphics.<br/><br/>- MGL v4 Programmer Guide<a href="">[3]</a></blockquote>
+    <p>MGL v4 <a href="https://fabiensanglard.net/mgl_v4_programmer_guide.pdf">programmer guide</a>, is a treasure strove of information. If, like me, you wondered what were these <pre>WDIR32.DLL</pre> and <pre>WDIR16.DLL</pre> libraries that came with WinQuake, the doc mentions them (WinDIRect). Likewise, the doc describes <pre>PMPRO16.DLL</pre> and <pre>PMPRO32.DLL</pre> as DOS extender independent API for protected mode services. Michael Abrash's Zen Timer is also mentioned in there :)!</p>
+    <p>WinQuake source code does not include MGL. Only the headers and a pre-compiled 32-bit <pre>MGLLT.LIB</pre> (MGL Lite) are provided to allow compilation. SciTech did eventually publish the source in 2000<a href="https://fabiensanglard.net#footnote_4">[4]</a> but it is <a href="http://www.scitechsoft.com/dp_mgl.html">no longer available</a>. What was uploaded on GitHub<a href="https://fabiensanglard.net#footnote_5">[5]</a> is v5 which by then had dramatically changed (e.g: WinDirect was gone).<br/>
+<br/>
+Luckily a kind soul has mirrored <a href="http://ftp.lanet.lv/ftp/mirror/x2ftp/msdos/programming/scitech/00index.html">MGL v4</a>. If you want to do your own digging, install mglb405.exe and mgls405.exe. Or just download my installation, <a href="https://fabiensanglard.net/src.rar">src.rar</a>.</p>
+    <p>Overall, <pre>winquake.exe</pre> was often able to find a fast rendering path, either through DirectDraw or WinDirect. The fallback to DIB mode was not ideal but still a win compared to <pre>quake.exe</pre>. Add to that the ability to select a sound backend to optimize for framerate or audio latency and the result was a damn good experience that completely justified the effort.</p>
+    <p>More than 30 years later, you can still run <pre>winquake.exe</pre> on Windows 11. Fullscreen does not support widescreen but the windowed mode still works flawlessly. As much as Microsoft has been questionable lately, their commitment to backward compatibility is impressive.</p>
+    <table>
+      <row>
+        <cell>
+          <p/>
+        </cell>
+        <cell>[1]</cell>
+        <cell>
+          <p/>
+        </cell>
+      </row>
+    </table>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

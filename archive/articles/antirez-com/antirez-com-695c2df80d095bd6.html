@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>First Token Cutoff LLM sampling | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>First Token Cutoff LLM sampling</h1>
+        <div class="meta">&lt;antirez&gt; 2024-01-12T16:49:37Z</div>
+        <div class="links">
+          <a href="http://antirez.com/news/142">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/antirez-com/antirez-com-695c2df80d095bd6.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">From a theoretical standpoint, the best reply provided by an LLM is obtained by always picking the token associated with the highest probability. This approach makes the LLM output deterministic, which is not a good property for a number of applications. For this reason, in order to balance LLMs creativity while preserving adherence to the context, differen…</div>
+        <div class="content">
+          From a theoretical standpoint, the best reply provided by an LLM is obtained by always picking the token associated with the highest probability. This approach makes the LLM output deterministic, which is not a good property for a number of applications. For this reason, in order to balance LLMs creativity while preserving adherence to the context, different sampling algorithms have been proposed in recent years.
+<br>
+<br>Today one of the most used ones, more or less the default, is called top-p: it is a form of nucleus sampling where top-scoring tokens are collected up to a total probability sum of “p”, then random weighted sampling is performed.
+<br>
+<br>In this blog post I’ll examine why I believe nucleus sampling may not be the best approach, and will show a simple and understandable alternative in order to avoid the issues of nucleus sampling. The algorithm is yet a work in progress, but by publishing it now I hope to stimulate some discussion / hacking.
+<br>
+<br>## There is some gold in the logits
+<br>
+<br>Despite the fact that LLM logits are one of the few completely understandable parts of the LLM inner working, I generally see very little interest in studying their features, investigating more advanced sampling methods, detecting and signaling users uncertainty and likely hallucination. Visualizing the probabilities distribution for successive tokens is a simple and practical exercise in order to gain some insights:
+<br>
+<br>!~!<img src="http://antirez.com/misc/logits-distribution.png">
+<br>
+<br>In the image we can see the top 32 candidate tokens colored by probability (white = 0, blue = 1), the selected token and the rank of the selected token (highest probability = 0, the previous one = 1, and so forth).
+<br>
+<br>In the above example, the Mistral base model knows the birth and death dates of Umberto Eco, so it confidently signals the most likely token with most of the total probability. Other times the model is more perplexed because either there are multiple ways to express the continuation of the text, or because it is not certain about certain facts. Asking the date of a name which birthday was not learned during training produces a different distribution of token probabilities.
+<br>
+<br>However in general what we want to avoid is to select suboptimal tokens, putting the LLM generation outside the path of minimum perplexity and hallucination. Nucleus sampling fails at doing this because accumulating tokens up to “p”, depending on the distribution may include tokens that are extremely weaker than the first choice. Consider, for instance, the “writer” token in the image above. Umberto Eco was a writer, indeed. The token associated with writer, while it is not scoring with a very high value, it is still a lot more above the second choice. Yet a p of 0.3 may accumulate the second token with a low value like 0.01, and yield it with some single-digit probability, with the risk of putting the generation in the wrong path.
+<br>
+<br>Instead, in the case of the following token, “who”, there are multiple choices with a relatively similar score, that could be used for alternative generations.
+<br>
+<br>## Making use of the avalanche effect
+<br>
+<br>A key observation here is that to select too weak tokens for the sake of variability is not a good deal: even if we only exploit generations moments where there are a few good candidates in order to diversify the output, the avalanche effect will help us: the input context will change, thus the output of the LLM will be perturbed, with the effect of making it more likely to produce some alternative version of the text.
+<br>
+<br>## First Token Cutoff (FTC) algorithm
+<br>
+<br>DISCLAIMER: The algorithm described here hasn’t undergone any scientific scrutiny. I experimented a couple of days with different sampling algorithms having “bound worst token” properties, and this one looks like the best balance between applicability, results and understandability.
+<br>
+<br>The algorithm described here can be informally stated as follows:
+<br>
+<br>- When the LLM is strongly biased towards a given candidate, select it.
+<br>- When there are multiple viable candidates, produce alternatives.
+<br>- The selection of the worst possible token should be bounded to a given amount.
+<br>
+<br>Past work, like Tail Free Sampling, also noted that a selection should be made across a small set of high-quality tokens emitted by the LLM. However in TFS such set is identified by performing the derivative to select a cluster corresponding to the tokens that don’t see a steep curve after which the token quality decreases strongly.
+<br>
+<br>In the algorithm proposed here, instead, we want the selection to follow a more bounded and understandable cut-off relative to the highest scoring token T0, attributing to T0 a special meaning compared to all the other tokens: the level of certainty the LLM has during the emission of such token (a proxy of perplexity, basically). Thus the algorithm refuses every token that is worse than a given percentage if compared to T0.
+<br>
+<br>The cut off percentage, that can have a value from 0 to 1, is called “co”.
+<br>An example and viable “co” could be 0.5.
+<br>
+<br>This is how the algorithm works:
+<br>
+<br>1. Compute softmax() of logits.
+<br>2. Sort tokens by probability.
+<br>3. Given T0, the probability of the best token, compute the ratio of all the other tokens as:
+<br>
+<br>    r = 1 - (T[i] / T0)
+<br>
+<br>4. Select only tokens for which r <= co
+<br>5. Perform weighted random pick among the selected tokens.
+<br>
+<br>Note that in this way, regardless of the fact that tokens may have a smooth monotonically decreasing value, there is a hard limit to the tokens we can include in the set of possibilities. Instead with other methods that try to identify high-score clusters, this is not the case.
+<br>
+<br>## Practical examples
+<br>
+<br>One reason why nucleus top-p sampling does not look to fail catastrophically in the practice, is that often times the first token probability is very high, thus when the perplexity is low, and also all the times casually we don’t collect and then pick low-quality tokens, the generation continues along a sensible path.
+<br>
+<br>Things are more problematic when there are successive tokens with probabilities like:
+<br>
+<br>0.25, 0.14, 0.01
+<br>
+<br>With a p=0.4, we could collect the third low quality token and yield it ~3% probability.
+<br>
+<br>Now consider First Token Cutoff with a co value of 0.5 (token can be up to 50% worse than first one):
+<br>
+<br>The second token r value is:
+<br>
+<br>r[t1] = 1-(0.14/0.25) = 0.44 # 0.44 <= 0.5, this token is accepted
+<br>r[t2] = 1-(0.01/0.25) = 0.96 # 0.96 > 0.5, this token is refused
+<br>
+<br>## Example output
+<br>
+<br>Outputs of Mistral base model (no instruct) with co=0.7 for the prompt “Sorted sets are”.
+<br>The outputs are three successful outputs not cherry picked for quality.
+<br>
+<br>1. Sorted sets are a powerful data structure in Redis. They can be used to store sorted lists, to store unique values, to store scores for ranking, and to store a sorted list of sorted sets.
+<br>
+<br>2. Sorted sets are a very powerful data structure. They allow you to store data in a way that makes it easy to find the highest or lowest values in the set, and they also allow you to sort the data. This can be useful for many different tasks, such as ranking users by their score, or finding the most popular items in a database.
+<br>
+<br>3. Sorted sets are a very powerful data structure that can be used to solve many different problems. The most common use case is to store a list of unique elements, each of which has an associated value. For example, you could use a sorted set to store the names of all the people in your family, with their ages as the associated values.
+<br>
+<br>## Why understandability matters
+<br>
+<br>Sampling parameters are among the few things that the end user of LLMs, or the API user, must tune. Trial and error is often needed, however to have a single tunable parameter for which there is an immediate real-world description and intuition helps a lot. Moreover "co" is a linear parameter, so it's particularly simple to reason about VS parameters like temperature, or even "p" of top_p that while linear strongly depends on the distribution shape of the logits.
+<br>
+<br>## Future work
+<br>
+<br>I’m at the start of my investigations, so I’ll study and evaluate better this algorithm. More than anything else, I would love to see more interest in sampling algorithms and more interest in moving forward from top-p alike approaches.
+<br>
+<br>There are perhaps interesting information to collect from the logits distribution. For example it is likely that a linear probe could be able to learn when the hidden layers of an LLM are dealing with some factual information. This, with the token perplexity, could be used in order to show the user of LLMs that some part of the output is likely wrong. In general visualizing tokens probabilities distribution is very informative and in some way allows to touch with bare hands how LLMs work and what are the candidates at each step.
+<br>
+<br>## Reference implementation
+<br>
+<br>    logits = mx.softmax(logits)
+<br>    np_logits = np.array(logits) # MX -> NumPy
+<br>    np_logits = np_logits.flatten()
+<br>    sorted_indices = np.argsort(np_logits)
+<br>    sorted_indices = sorted_indices[::-1]
+<br>
+<br>    co = 0.7
+<br>    j = 1
+<br>    t0 = np_logits[sorted_indices[0]]
+<br>    while 1 - (np_logits[sorted_indices[j]] / t0) < co and j < len(np_logits):
+<br>        j += 1
+<br>    accepted_logits = []
+<br>    for i in range(0,j):
+<br>        accepted_logits.append(float(np_logits[sorted_indices[j]]))
+<br>    accepted_logits = mx.array(accepted_logits)
+<br>
+<br>    idx = mx.random.categorical(accepted_logits)
+<br>    idx = int(np.array(idx)) # Convert zero-dim array to scalar
+<br>    token_id = sorted_indices[idx]
+<br>
+<br>
+<br>## Credits
+<br>
+<br>These experiments were really simple to perform thanks to the MLX library from Apple, and the cool and smart developers working incessantily at it. MLX is extremely accessible, like it should be: after all LLMs are imprescrutable, but the inference itself is a simple process.
+<a href="http://antirez.com/news/142">Comments</a>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

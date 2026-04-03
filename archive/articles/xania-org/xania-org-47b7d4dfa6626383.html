@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Induction variables and loops | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Induction variables and loops</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-09T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/09-induction-variables?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-47b7d4dfa6626383.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Compilers can rewrite loops to avoid expensive calculations</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p>Loop optimisations often surprise us. What looks expensive might be fast, and what looks clever might be slow.</html:p>
+
+<html:p><html:a href="/202512/08-going-loopy">Yesterday</html:a> we saw how the compiler canonicalises loops so it (usually) doesn't matter how you write them, they'll come out the same. What happens if we do something a little more expensive inside the loop?</html:p>
+
+<html:p>Let's take a look at something that looks like it would need an "expensive" multiply each loop iteration<html:sup id="fnref:dont"><html:a class="footnote-ref" href="#fn:dont">1</html:a></html:sup>:</html:p>
+
+<html:p>Despite our "times table" seemingly requiring a multiply for each step, the compiler realises it can rephrase the loop to keep an accumulator, and add <html:code>table</html:code> each iteration instead:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">.L3:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">rdx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">4</html:span><html:span class="w">                </html:span><html:span class="c1">; advance the output pointer</html:span>
+<html:span class="w">  </html:span><html:span class="nf">mov</html:span><html:span class="w"> </html:span><html:span class="no">DWORD</html:span><html:span class="w"> </html:span><html:span class="no">PTR</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdx-4</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="c1">; write "accumulator"</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">edi</html:span><html:span class="w">              </html:span><html:span class="c1">; add "table" to the accumulator</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">rdx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rcx</html:span><html:span class="w">              </html:span><html:span class="c1">; have we reached the end?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.L3</html:span><html:span class="w">                   </html:span><html:span class="c1">; loop if not</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>That "accumulator" is called an induction variable, and if you know a thing about maths<html:sup id="fnref:math"><html:a class="footnote-ref" href="#fn:math">2</html:a></html:sup>, you know we can rewrite lots of things as a series of sums. For example, if we wanted to output squares (x²) instead, we might expect the compiler to smartly turn this into a series of additions<html:sup id="fnref:expl"><html:a class="footnote-ref" href="#fn:expl">3</html:a></html:sup>, something like<html:sup id="fnref:haswell"><html:a class="footnote-ref" href="#fn:haswell">4</html:a></html:sup>:</html:p>
+
+<html:p>But in fact, if we try it, the compiler goes back to squaring with <html:code>imul</html:code>:</html:p>
+
+<html:p>What's going on here?! Yet again, the compiler is probably smarter than us: multiplies are pretty quick (around 3 cycles), and by keeping each loop iteration independent of the previous iteration, the processor can actually run many multiplications simultaneously.</html:p>
+
+<html:p>In our manual induction variable code, each loop iteration requires the results of the previous loop iteration - a <html:em>loop carried dependency</html:em> - which could prevent this overlapping of calculations.</html:p>
+
+<html:p>To test this theory, we can use <html:code>llvm-mca</html:code> - the <html:a href="https://llvm.org/docs/CommandGuide/llvm-mca.html">LLVM Machine Code Analyser</html:a>. This tool runs a CPU simulation and can show this overlapping<html:sup id="fnref:assume"><html:a class="footnote-ref" href="#fn:assume">5</html:a></html:sup> of computation. I've used it to generate a timeline of what happens on the CPU, cycle by cycle. In this view, instructions run from top to bottom, and time left to right. Each instruction's journey through the pipeline is shown: <html:code>D</html:code> is decode, <html:code>e</html:code> is execution, <html:code>E</html:code> is execution complete, <html:code>R</html:code> is retired (fully complete). <html:code>=</html:code> shows a stall. Each row shows one instruction - for example, <html:code>[0,2]</html:code> means iteration 0, instruction 2.</html:p>
+
+<html:p>Watch how the instructions from different iterations overlap - that's the key to performance here. This trace is for the induction variable version:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code>[0,0]     DeER .    .    .  .   add     rsi, 4
+[0,1]     D=eER.    .    .  .   mov     dword ptr [rsi - 4], eax
+[0,2]     DeE-R.    .    .  .   add     eax, edx
+[0,3]     DeE-R.    .    .  .   add     edx, 2
+[0,4]     .DeER.    .    .  .   cmp     rcx, rsi
+[0,5]     .D=eER    .    .  .   jne     .L3
+[1,0]     .DeE-R    .    .  .   add     rsi, 4
+[1,1]     .D=eER    .    .  .   mov     dword ptr [rsi - 4], eax
+[1,2]     . DeER    .    .  .   add     eax, edx
+[1,3]     . DeER    .    .  .   add     edx, 2
+[1,4]     . DeER    .    .  .   cmp     rcx, rsi
+[1,5]     . D=eER   .    .  .   jne     .L3
+</html:code></html:pre></html:div>
+
+
+<html:p>Nearly the whole first loop iteration is decoded each cycle, and by the third cycle all of the first loop iteration is executing. The first iteration is complete on the 6th cycle, and the second by the seventh cycle, which means once things settle down, an iteration completes every 1½ cycles<html:sup id="fnref:ac"><html:a class="footnote-ref" href="#fn:ac">6</html:a></html:sup>. You can see the full trace <html:a href="https://aoco.compiler-explorer.com/z/ccE3Y5cGd">at this Compiler Explorer link</html:a>.</html:p>
+
+<html:p>If we simulate the square-with-multiply version:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code>[0,0]     DeER .    .    .    .   mov   edx, eax
+[0,1]     D=eeeER   .    .    .   imul  edx, eax
+[0,2]     D====eER  .    .    .   mov   dword ptr [rsi + 4*rax], edx
+[0,3]     DeE----R  .    .    .   inc   rax
+[0,4]     .DeE---R  .    .    .   cmp   rax, rdi
+[0,5]     .D=eE--R  .    .    .   jne   .L3
+[1,0]     .DeE---R  .    .    .   mov   edx, eax
+[1,1]     .D=eeeER  .    .    .   imul  edx, eax
+[1,2]     . D===eER .    .    .   mov   dword ptr [rsi + 4*rax], edx
+[1,3]     . DeE---R .    .    .   inc   rax
+[1,4]     . D=eE--R .    .    .   cmp   rax, rdi
+[1,5]     . D==eE-R .    .    .   jne   .L3
+</html:code></html:pre></html:div>
+
+
+<html:p>On this simulated Haswell processor, the average loop still takes 1.5 cycles! Check the <html:a href="https://aoco.compiler-explorer.com/z/croW7esoj">full link here</html:a>. Despite using a more expensive multiply, and despite a loop iteration now taking 8 cycles, because each loop iteration is independent of the last, we still get the throughput of one iteration every 1½ cycles.</html:p>
+
+<html:p>Compilers <html:em>are</html:em> smart - trust them. But know how to use tools like <html:a href="https://godbolt.org">Compiler Explorer</html:a> and <html:code>llvm-mca</html:code> to verify, and always benchmark.</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/vZk7Br6Vh1U">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 9 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/08-going-loopy">Going loopy</html:a> | <html:a href="/202512/10-loop-unrolling">Unrolling loops</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:dont">
+<html:p>Please don't write code like this: don't write unchecked to an output array, use <html:code>std::span</html:code> or similar, or return a <html:code>std::vector&lt;&gt;</html:code>, or any number of better ways. I'm trying to balance small code output for teaching purposes against "real world" code. <html:a class="footnote-backref" href="#fnref:dont" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:math">
+<html:p>Translation for Americans: "math". <html:a class="footnote-backref" href="#fnref:math" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:expl">
+<html:p>The difference between adjacent squares goes up by 1, 3, 5, 7... <html:a class="footnote-backref" href="#fnref:expl" title="Jump back to footnote 3 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:haswell">
+<html:p>You might spot I'm using <html:code>haswell</html:code> tuning here: this is to keep it in line with later analysis I'm going to do. In this particular case it doesn't make a code generation difference, but it keeps the analysis in sync with the code here, and is close to the default <html:code>-mtune=generic</html:code> the compiler uses. The analysis tool we'll use assumes a much newer CPU, and that erodes the point I'm making in this particular post. <html:a class="footnote-backref" href="#fnref:haswell" title="Jump back to footnote 4 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:assume">
+<html:p>It assumes perfect branch prediction and no cache misses, which is a little hopeful but is a decent starting point. <html:a class="footnote-backref" href="#fnref:assume" title="Jump back to footnote 5 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:ac">
+<html:p>It works out as one and a half due to other constraints you can see if you look at the full trace. Computers are bonkers fast these days. <html:a class="footnote-backref" href="#fnref:ac" title="Jump back to footnote 6 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

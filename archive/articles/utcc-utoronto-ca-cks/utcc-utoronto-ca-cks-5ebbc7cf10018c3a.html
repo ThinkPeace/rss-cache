@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lingering duplicate systems and the expense of weeding them out (an illustration) | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Lingering duplicate systems and the expense of weeding them out (an illustration)</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-03-21T03:05:27Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/LingeringDuplicateSystems">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-5ebbc7cf10018c3a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">We have been operating a fileserver environment for a long time now, back before we used ZFS . When you operate fileservers in a traditional general Unix environment , one of the things you need is disk usage information. So a very long time ago, before I even arrived, people built a very Unix-y system to do this. Every night, raw usage information was gene…</div>
+        <div class="content">
+          <div class="wikitext"><p><a href="https://support.cs.toronto.edu/">We</a> have been operating <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/ZFSFileserverSetupIII">a
+fileserver environment</a> for a long
+time now, <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/SanNamesPersistence">back before we used ZFS</a>. When you
+operate fileservers in <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/OurDifferentSysadminEnvironment">a traditional general Unix environment</a>, one of the things you need is
+disk usage information. So a very long time ago, before I even
+arrived, people built a very Unix-y system to do this. Every night,
+raw usage information was generated for each filesystem (for a while
+with '<code>du</code>'), written to a special system directory in the filesystem,
+and then used to create a text file with a report showing currently
+usage and the daily and weekly change in everyone's usage. A local
+'report disk usage' script would then basically run your pager on
+this file.</p>
+
+<p>After a while, we we able to improve this system by using native
+ZFS commands to get per-user 'quota' usage information, which made
+it much faster than the old way (we couldn't do this originally
+because <a href="https://utcc.utoronto.ca/~cks/space/blog/solaris/ZFSFileserverSetup">we started with ZFS</a> before
+ZFS tracked this information). Later, this made it reasonable to
+generate a 'frequent' disk usage report every fifteen minutes (with
+it keeping a day's worth of data), which could be helpful to identify
+who had suddenly used a lot of disk space; we wrote some scripts
+to use this information, but never made them as public as the
+original script. However, all of this had various limitations,
+including that it stopped updating once the filesystem had filled
+up.</p>
+
+<p>Shortly after we set up <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/PrometheusGrafanaSetup-2019">our Prometheus metrics system</a> and actually had a flexible metrics
+system we could put things into, <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/PrometheusCardinalityUnafraid">we started putting disk space
+usage information into it</a>, giving
+us more fine grained data, more history (especially fine grained
+history, where we'd previously only had the past 24 hours), and the
+ability to put it into Grafana graphs on dashboards. Soon afterward
+it became obvious that <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/SimpleTextViaCommands">sometimes the best way to expose information
+is through a command</a>, so we wrote a command
+to dump out current disk usage information in a relatively primitive
+form.</p>
+
+<p>Originally this 'getdiskusage' command produced quite raw output
+because it wasn't really intended for direct use. But over time,
+people (especially me) kept wanting more features and options and
+I never quite felt like writing some scripts to sit on top of it
+when I could just fiddle the code a bit more. Recently, I added
+some features and tipped myself over a critical edge, where it felt
+like I could easily re-do the old scripts to get their information
+from 'getdiskusage' instead of those frequently written files. One
+thing led to another and so now <a href="https://support.cs.toronto.edu/documents/diskspace.html">we have some new documentation
+and new (and revised) user-visible commands to go with it</a>.</p>
+
+<p>(The raw files were just lines of 'disk-space login', and this was
+pretty close to what getdiskusage produced already in some modes.)</p>
+
+<p>However, despite replacing the commands, we haven't yet turned off
+the infrastructure on our fileservers that creates and updates those
+old disk usage files. Partly this is because I'd want to clean up
+all the existing generated files rather than leave them to become
+increasingly out of date, and that's a bit of a pain, and partly
+it's because of inertia.</p>
+
+<p>Inertia is also a lot of why it took so long to replace the scripts.
+We've had the raw capability to replace them for roughly six years
+(since 'getdiskusage' was written, demonstrating that it was easily
+possible to extract the data from our metrics system in a usable
+form), and we'd said to each other that we wanted to do it for about
+that long, but it was always "someday". One reason for the inertia
+was that the existing old stuff worked fine, more or less, and also
+we didn't think very many people used it very often because it
+wasn't really documented or accessible. Perhaps another reason was
+that we weren't entirely sure we wanted to commit to the new system,
+or at least to exact form we first implemented our disk space metrics
+in.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

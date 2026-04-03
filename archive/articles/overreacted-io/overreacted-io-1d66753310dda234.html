@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>npm audit: Broken by Design | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>npm audit: Broken by Design</h1>
+        <div class="meta">overreacted — A blog by Dan Abramov 2021-07-07T00:00:00Z</div>
+        <div class="links">
+          <a href="https://overreacted.io/npm-audit-broken-by-design/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/overreacted-io/overreacted-io-1d66753310dda234.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Found 99 vulnerabilities (84 moderately irrelevant, 15 highly irrelevant)</div>
+        <div class="content">
+          <html>
+  <body><h1>npm audit: Broken by Design</h1><p>July 7, 2021</p><p>Security is important. Nobody wants to be the person advocating for less security. So nobody wants to say it. But somebody has to say it.</p><p>So I guess I’ll say it.</p><p>The way <pre>npm audit</pre> works is broken. Its rollout as a default after every <pre>npm install</pre> was rushed, inconsiderate, and inadequate for the front-end tooling.</p><p>Have you heard the story about <a href="https://en.wikipedia.org/wiki/The_Boy_Who_Cried_Wolf">the boy who cried wolf?</a> Spoiler alert: the wolf eats the sheep. If we don’t want our sheep to be eaten, we need better tools.</p><p>As of today, <pre>npm audit</pre> is a stain on the entire npm ecosystem. The best time to fix it was before rolling it out as a default. The next best time to fix it is now.</p><p>In this post, I will briefly outline how it works, why it’s broken, and what changes I’m hoping to see.</p><p>Note: this article is written with a critical and somewhat snarky tone. I understand it’s super hard to maintain massive projects like Node.js/npm, and that mistakes may take a while to become apparent. I am frustrated only at the situation, not at the people involved. I kept the snarky tone because the level of my frustration has increased over the years, and I don’t want to pretend that the situation isn’t as dire as it really is. Most of all I am frustrated to see all the people for whom this is the first programming experience, as well as all the people who are blocked from deploying their changes due to irrelevant warnings. I am excited that <a href="https://twitter.com/bitandbang/status/1412803378279759872">this issue is being considered</a> and I will do my best to provide input on the proposed solutions! 💜</p><h2><a href="https://overreacted.io#how-does-npm-audit-work"/> How does npm audit work?</h2>
+<p><a href="https://overreacted.io#why-is-npm-audit-broken">Skip ahead</a> if you already know how it works.</p><p>Your Node.js application has a dependency tree. It might look like this:</p><pre><pre>your-app
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+    - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+      - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a></pre></pre><p>Most likely, it’s a lot deeper.</p><p>Now say there’s a vulnerability discovered in <pre/>:<a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a></p><pre><pre>your-app
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+    - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+      - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a> (Vulnerable!)</pre></pre><p>This gets published in a special registry that <pre>npm</pre> will access next time you run <pre>npm audit</pre>. Since npm v6+, you’ll learn about this after every <pre>npm install</pre>:</p><pre><pre>1 vulnerabilities (0 moderate, 1 high)
+ 
+To address issues that do not require attention, run:
+  npm audit fix
+ 
+To address all issues (including breaking changes), run:
+  npm audit fix --force</pre></pre><p>You run <pre>npm audit fix</pre>, and npm tries to install the latest <pre/> with the fix in it. As long as <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a><pre>database-layer</pre> specifies that it depends not on exactly on <pre/> but some permissible range that includes <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a><pre>1.0.1</pre>, the fix “just works” and you get a working application:</p><pre><pre>your-app
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+    - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+      - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a> (Fixed!)</pre></pre><p>Alternatively, maybe <pre/> depends strictly on <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a><pre/>. In that case, the maintainer of <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a><pre>database-layer</pre> needs to release a new version too, which would allow <pre/> instead:<a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a></p><pre><pre>your-app
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+  - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a>
+    - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a> (Updated to allow the fix.)
+      - <a href="https://overreacted.io/cdn-cgi/l/email-protection">[email protected]</a> (Fixed!)</pre></pre><p>Finally, if there is no way to gracefully upgrade the tree, you could try <pre>npm audit fix --force</pre>. This is supposed to be used if <pre>database-layer</pre> doesn’t accept the new version of <pre>network-utility</pre> and also doesn’t release an update to accept it. So you’re kind of taking matters in your own hands, potentially risking breaking changes. Seems like a reasonable option to have.</p><p>This is how <pre>npm audit</pre> is supposed to work in theory.</p><p>As someone wise said, in theory there is no difference between theory and practice. But in practice there is. And that’s where all the fun starts.</p><h2><a href="https://overreacted.io#why-is-npm-audit-broken"/> Why is npm audit broken?</h2>
+<p>Let’s see how this works in practice. I’ll use Create React App for my testing.</p><p>If you’re not familiar with it, it’s an integration facade that combines multiple other tools, including Babel, webpack, TypeScript, ESLint, PostCSS, Terser, and others. Create React App takes your JavaScript source code and converts it into a static HTML+JS+CSS folder. Notably, it does not produce a Node.js app.</p><p>Let’s create a new project!</p><pre><pre>npx create-react-app myapp</pre></pre><p>Immediately upon creating a project, I see this:</p><pre><pre>found 5 vulnerabilities (3 moderate, 2 high)
+  run `npm audit fix` to fix them, or `npm audit` for details</pre></pre><p>Oh no, that seems bad! My just-created app is already vulnerable!</p><p>Or so npm tells me.</p><p>Let’s run <pre>npm audit</pre> to see what’s up.</p><h3><a href="https://overreacted.io#first-vulnerability"/> First “vulnerability”</h3>
+<p>Here is the first problem reported by <pre>npm audit</pre>:</p><pre><pre>┌───────────────┬──────────────────────────────────────────────────────────────┐
+│ Moderate      │ Regular Expression Denial of Service                         │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Package       │ browserslist                                                 │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Patched in    │ &gt;=4.16.5                                                     │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Dependency of │ react-scripts                                                │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Path          │ react-scripts &gt; react-dev-utils &gt; browserslist               │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ More info     │ https://npmjs.com/advisories/1747                            │
+└───────────────┴──────────────────────────────────────────────────────────────┘</pre></pre><p>Apparently, <pre>browserslist</pre> is vulnerable. What’s that and how is it used? Create React App generates CSS files optimized for the browsers you target. For example, you can say you only target modern browsers in your <pre>package.json</pre>:</p><pre><pre>  "browserslist": {
+    "production": [
+      "&gt;0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }</pre></pre><p>Then it won’t include outdated flexbox hacks in the output. Since multiple tools rely on the same configuration format for the browsers you target, Create React App uses the shared <pre>browserslist</pre> package to parse the configuration file.</p><p>So what’s the vulnerability here? <a href="https://owasp.org/www-community/attacks/Regular_expression_Denial_of_Service_-_ReDoS">“Regular Expression Denial of Service”</a> means that there is a regex in <pre>browserslist</pre> that, with malicious input, could become very slow. So an attacker can craft a special configuration string that, when passed to <pre>browserslist</pre>, could slow it down exponentially. This sounds bad…</p><p>Wait, what?! Let’s remember how your app works. You have a configuration file on your machine. You build your project. You get static HTML+CSS+JS in a folder. You put it on static hosting. There is simply no way for your application user to affect your <pre>package.json</pre> configuration. This doesn’t make any sense. If the attacker already has access to your machine and can change your configuration files, you have a much bigger problem than slow regular expressions!</p><p>Okay, so I guess this “Moderate” “vulnerability” was neither moderate nor a vulnerability in the context of a project. Let’s keep going.</p><p>Verdict: this “vulnerability” is absurd in this context.</p><h3><a href="https://overreacted.io#second-vulnerability"/> Second “vulnerability”</h3>
+<p>Here is the next issue <pre>npm audit</pre> has helpfully reported:</p><pre><pre>┌───────────────┬──────────────────────────────────────────────────────────────┐
+│ Moderate      │ Regular expression denial of service                         │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Package       │ glob-parent                                                  │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Patched in    │ &gt;=5.1.2                                                      │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Dependency of │ react-scripts                                                │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Path          │ react-scripts &gt; webpack-dev-server &gt; chokidar &gt; glob-parent  │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ More info     │ https://npmjs.com/advisories/1751                            │
+└───────────────┴──────────────────────────────────────────────────────────────┘</pre></pre><p>Let’s look at the <pre>webpack-dev-server &gt; chokidar &gt; glob-parent</pre> dependency chain. Here, <pre>webpack-dev-server</pre> is a development-only server that’s used to quickly serve your app locally. It uses <pre>chokidar</pre> to watch your filesystem for changes (such as when you save a file in your editor). And it uses <a href="https://www.npmjs.com/package/glob-parent"> glob-parent</a> in order to extract a part of the filesystem path from a filesystem watch pattern.</p><p>Unfortunately, <pre>glob-parent</pre> is vulnerable! If an attacker supplies a specially crafted filepath, it could make this function exponentially slow, which would…</p><p>Wait, what?! The development server is on your computer. The files are on your computer. The file watcher is using the configuration that you have specified. None of this logic leaves your computer. If your attacker is sophisticated enough to log into your machine during local development, the last thing they’ll want to do is to craft special long filepaths to slow down your development. They’ll want to steal your secrets instead. So this whole threat is absurd.</p><p>Looks like this “Moderate” “vulnerability” was neither moderate nor a vulnerability in the context of a project.</p><p>Verdict: this “vulnerability” is absurd in this context.</p><h3><a href="https://overreacted.io#third-vulnerability"/> Third “vulnerability”</h3>
+<p>Let’s have a look at this one:</p><pre><pre>┌───────────────┬──────────────────────────────────────────────────────────────┐
+│ Moderate      │ Regular expression denial of service                         │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Package       │ glob-parent                                                  │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Patched in    │ &gt;=5.1.2                                                      │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Dependency of │ react-scripts                                                │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Path          │ react-scripts &gt; webpack &gt; watchpack &gt; watchpack-chokidar2 &gt;  │
+│               │ chokidar &gt; glob-parent                                       │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ More info     │ https://npmjs.com/advisories/1751                            │
+└───────────────┴──────────────────────────────────────────────────────────────┘</pre></pre><p>Wait, it’s the same thing as above, but through a different dependency path.</p><p>Verdict: this “vulnerability” is absurd in this context.</p><h3><a href="https://overreacted.io#fourth-vulnerability"/> Fourth “vulnerability”</h3>
+<p>Oof, this one looks really bad! <pre>npm audit</pre> has the nerve to show it in red color:</p><pre><pre>┌───────────────┬──────────────────────────────────────────────────────────────┐
+│ High          │ Denial of Service                                            │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Package       │ css-what                                                     │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Patched in    │ &gt;=5.0.1                                                      │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Dependency of │ react-scripts                                                │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Path          │ react-scripts &gt; @svgr/webpack &gt; @svgr/plugin-svgo &gt; svgo &gt;   │
+│               │ css-select &gt; css-what                                        │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ More info     │ https://npmjs.com/advisories/1754                            │
+└───────────────┴──────────────────────────────────────────────────────────────┘</pre></pre><p>What is this “high” severity issue? “Denial of service.” I don’t want service to be denied! That would be really bad… Unless…</p><p>Let’s look at the <a href="https://www.npmjs.com/advisories/1754">issue</a>. Apparently <a href="https://www.npmjs.com/package/css-what"> css-what</a>, which is a parser for CSS selectors, can be slow with specially crafted input. This parser is used by a plugin that generates React components from SVG files.</p><p>So what this means is that if the attacker takes control of my development machine or my source code, they put a special SVG file that will have a specially crafted CSS selector in it, which will make my build slow. That checks out…</p><p>Wait, what?! If the attacker can modify my app’s source code, they’ll probably just put a bitcoin miner in it. Why would they add SVG files into my app, unless you can mine bitcoins with SVG? Again, this doesn’t make any sense.</p><p>Verdict: this “vulnerability” is absurd in this context.</p><p>So much for the “high” severity.</p><h3><a href="https://overreacted.io#fifth-vulnerability"/> Fifth “vulnerability”</h3>
+<pre><pre>┌───────────────┬──────────────────────────────────────────────────────────────┐
+│ High          │ Denial of Service                                            │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Package       │ css-what                                                     │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Patched in    │ &gt;=5.0.1                                                      │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Dependency of │ react-scripts                                                │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ Path          │ react-scripts &gt; optimize-css-assets-webpack-plugin &gt; cssnano │
+│               │ &gt; cssnano-preset-default &gt; postcss-svgo &gt; svgo &gt; css-select  │
+│               │ &gt; css-what                                                   │
+├───────────────┼──────────────────────────────────────────────────────────────┤
+│ More info     │ https://npmjs.com/advisories/1754                            │
+ 
+└───────────────┴──────────────────────────────────────────────────────────────┘</pre></pre><p>This is just the same exact thing as above.</p><p>Verdict: this “vulnerability” is absurd in this context.</p><h3><a href="https://overreacted.io#shall-we-keep-going"/> Shall we keep going?</h3>
+<p>So far the boy has cried wolf five times. Two of them are duplicates. The rest are absurd non-issues in the context of how these dependencies are used.</p><p>Five false alarms wouldn’t be too bad.</p><p>Unfortunately, there are hundreds.</p><p>Here are a <a href="https://github.com/facebook/create-react-app/issues/11053">few</a> <a href="https://github.com/facebook/create-react-app/issues/11092">typical</a> threads, but there are many more <a href="https://github.com/facebook/create-react-app/issues/11174">linked from here</a>:</p><graphic src="https://imgur.com/ABDK4Ky.png" alt="Screenshot of many GH threads"/><p>I’ve spent several hours looking through every <pre>npm audit</pre> issue reported to us over the last several months, and they all appear to be false positives in the context of a build tool dependency like Create React App.</p><p>Of course, they are possible to fix. We could relax some of the top-level dependencies to not be exact (leading to bugs in patches slipping in more often). We could make more releases just to stay ahead of this security theater.</p><p>But this is inadequate. Imagine if your tests failed 99% of the times for bogus reasons! This wastes person-decades of effort and makes everyone miserable:</p><ul><li>It makes beginners miserable because they run into this as their first programming experience in the Node.js ecosystem. As if installing Node.js/npm was not confusing enough (good luck if you added <pre>sudo</pre>somewhere because a tutorial told you), this is what they’re greeted with when they try examples online or even when they create a project. A beginner doesn’t know what a RegExp is. Of course they don’t have the know-how to be able to tell whether a RegExp DDoS or prototype pollution is something to worry about when they’re using a build tool to produce a static HTML+CSS+JS site.</li><li>It makes experienced app developers miserable because they have to either waste time doing obviously unnecessary work, or fight with their security departments trying to explain how <pre>npm audit</pre>is a broken tool unsuitable for real security audits by design. Yeah, somehow it was made a default in this state.</li><li>It makes maintainers miserable because instead of working on bugfixes and improvements, they have to pull in bogus vulnerability fixes that can’t possibly affect their project because otherwise their users are frustrated, scared, or both.</li><li>Someday, it will make our users miserable because we have trained an entire generation of developers to either not understand the warnings due to being overwhelmed, or to simply ignore them because they always show up but the experienced developers (correctly) tell them there is no real issue in each case.</li></ul><p>It doesn’t help that <pre>npm audit fix</pre> (which the tool suggests using) is buggy. I ran <pre>npm audit fix --force</pre> today and it downgraded the main dependency to a three-year-old version with actual real vulnerabilities. Thanks, npm, great job.</p><h2><a href="https://overreacted.io#what-next"/> What next?</h2>
+<p>I don’t know how to solve this. But I didn’t add this system in the first place, so I’m probably not the best person to solve it. All I know is it’s horribly broken.</p><p>There are a few possible solutions that I have seen.</p><ul><li>Move dependency to <pre>devDependencies</pre>if it doesn’t run in production. This offers a way to specify that some dependency isn’t used in production code paths, so there is no risk associated with it. However, this solution is flawed:<ul><li><pre>npm audit</pre>still warns for development dependencies by default. You have to know to run<pre>npm audit --production</pre>to not see the warnings from development dependencies. People who know to do that probably already don’t trust it anyway. This also doesn’t help beginners or people working at companies whose security departments want to audit everything.</li><li><pre>npm install</pre>still uses information from plain<pre>npm audit</pre>, so you will effectively still see all the false positives every time you install something.</li><li>As any security professional will tell you, development dependencies actually are an attack vector, and perhaps one of the most dangerous ones because it’s so hard to detect and the code runs with high trust assumptions. This is why the situation is so bad in particular: any real issue gets buried below dozens of non-issues that <pre>npm audit</pre>is training people and maintainers to ignore. It’s only a matter of time until this happens.</li></ul></li><li>Inline all dependencies during publish. This is what I’m increasingly seeing packages similar to Create React App do. For example, both <a href="https://unpkg.com/browse/vite@2.4.1/dist/node/">Vite</a>and<a href="https://unpkg.com/browse/next@11.0.1/dist/">Next.js</a>simply bundle their dependencies directly in the package instead of relying on the npm<pre>node_modules</pre>mechanism. From a maintainer’s point of view,<a href="https://github.com/vitejs/vite/blob/main/CONTRIBUTING.md#notes-on-dependencies">the upsides are clear</a>: you get faster boot time, smaller downloads, and — as a nice bonus — no bogus vulnerability reports from your users. It’s a neat way to game the system but I’m worried about the incentives npm is creating for the ecosystem. Inlining dependencies kind of goes against the whole point of npm.</li><li>Offer some way to counter-claim vulnerability reports. The problem is not entirely unknown to Node.js and npm, of course. Different people have worked on different suggestions to fix it. For example, there is a <a href="https://github.com/npm/rfcs/pull/18">proposal</a>for a way to manually resolve audit warnings so that they don’t display again. However, this still places the burden on app users, which don’t necessarily have context on what vulnerabilities deeper in the tree are real or bogus. I also have a<a href="https://twitter.com/dan_abramov/status/1412380714012594178">proposal</a>: I need a way to mark for my users that a certain vulnerability can’t possibly affect them. If you don’t trust my judgement, why are you running my code on your computer? I’d be happy to discuss other options too.</li></ul><p>The root of the issue is that npm added a default behavior that, in many situations, leads to a 99%+ false positive rate, creates an incredibly confusing first programming experience, makes people fight with security departments, makes maintainers never want to deal with Node.js ecosystem ever again, and at some point will lead to actually bad vulnerabilities slipping in unnnoticed.</p><p>Something has to be done.</p><p>In the meantime, I am planning to close all GitHub issues from <pre>npm audit</pre> that I see going forward that don’t correspond to a real vulnerability that can affect the project. I invite other maintainers to adopt the same policy. This will create frustration for our users, but the core of the issue is with npm. I am done with this security theater. Node.js/npm have all the power to fix the problem. I am in contact with them, and I hope to see this problem prioritized.</p><p>Today, <pre>npm audit</pre> is broken by design.</p><p>Beginners, experienced developers, maintainers, security departments, and, most importantly — our users — deserve better.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

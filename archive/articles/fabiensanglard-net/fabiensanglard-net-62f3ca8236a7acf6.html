@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Commander Keen: Adaptive Tile Scrolling | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Commander Keen: Adaptive Tile Scrolling</h1>
+        <div class="meta">Fabien Sanglard 2023-07-27T00:00:00Z</div>
+        <div class="links">
+          <a href="https://fabiensanglard.net/ega/index.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/fabiensanglard-net/fabiensanglard-net-62f3ca8236a7acf6.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body><p>I have been reading <a href="https://amzn.to/43DLW2U">Doom Guy</a> by John Romero. It is an excellent book which I highly recommend. In the ninth chapter, John describes being hit by lightning upon seeing Adaptive Tile Refresh (ATR). That made me realize I never took the time to understand how this crucial piece of tech powers the Commander Keen (CK) series.</p><p>During my research I was surprised to learn that ATR only powered the first CK trilogy. The second trilogy turned out to use something far better.</p><p>Commander Keen ran at its best on a PC equipped with a Enhanced Graphic Adapter (EGA) card. On these machines, graphic programming is done through a set of registers for configuration and a window of 64KiB memory mapped<a href="https://fabiensanglard.net#footnote_1">[1]</a> to the Video RAM (VRAM) to plot pixels. Internally the EGA stores data in four planes named C0, C1, C2, and C3<a href="https://fabiensanglard.net#footnote_2">[2]</a>. From the banks, bytes are picked up by the screen controller and sent to the monitor.
+</p><p>This design involving four banks may seem bizarre but this was the only way to reach the bandwidth necessary to keep with the screen (CRT). No chip was fast enough so IBM designers made the controller (CRTC) read four bytes in parallel.</p><p>The EGA CRTC does not expect RGB values to generate pixels. Instead it is based on a palette system. Several modes offer various resolutions and colors. In its mode <pre>Dh</pre><a href="https://fabiensanglard.net#footnote_3">[3]</a>, which is what CK uses, the resolution is 320x200 16 colors<a href="https://fabiensanglard.net#footnote_4">[4]</a>.</p><table><row span="16"><cell>0x0</cell><cell>0x1</cell><cell>0x2</cell><cell>0x3</cell><cell>0x4</cell><cell>0x5</cell><cell>0x6</cell><cell>0x7</cell><cell>0x8</cell><cell>0x9</cell><cell>0xA</cell><cell>0xB</cell><cell>0xC</cell><cell>0xD</cell><cell>0xE</cell><cell>0xF</cell></row><row><cell>M</cell></row></table><p>In mode <pre>10h</pre>, which CK does NOT use, the palette indices (pens) can be reconfigured to use different colors (inks). Each pen can point to an ink from a set of 64 predefined values.</p><table><row span="17"><cell>0x0</cell><cell>0x1</cell><cell>0x2</cell><cell>0x3</cell><cell>0x4</cell><cell>0x5</cell><cell>0x6</cell><cell>0x7</cell><cell>0x8</cell><cell>0x9</cell><cell>0xA</cell><cell>0xB</cell><cell>0xC</cell><cell>0xD</cell><cell>0xE</cell><cell>0xF</cell></row><row span="17"><cell>0x00</cell><cell>M</cell></row><row span="17"><cell>0x10</cell><cell>M</cell></row><row span="17"><cell>0x20</cell><cell>M</cell></row><row><cell>0x30</cell><cell>M</cell></row></table><p>Trivia: In mode <pre>Dh</pre>, the palette colors can still be reconfigured but only from the default 16 colors. This is how CK implements its crude fade in/out effect.</p><p>Each bank stores a plane of a nibble (4-bit). <pre>C0</pre> stores all LSB of each nibble. <pre>C3</pre> stores all MSB of each nibble. And so on... As an example, the first byte in <pre>C0</pre> stores the LSB of the eight first pixel on the screen.</p><p>A full screen requires 320x200/2= 32,000 bytes of VRAM. Each bank/plane stores 200 lines made of 40 bytes each.</p><p>At its heart the problem ATR solves is bandwidth. Writing 320x200 nibbles (32 KiB) per frame is too much for the ISA bus. There is no way to maintain a 60Hz framerate while refreshing the whole screen. If we were to run the following code, which simply fills all banks, it would run at 5 frames per seconds.</p><blockquote>byte* vram = 0xA0000000L; for (int bank_id = 0 ; bank_id &lt; 4 ; bank_id++) { select_bank(bank_id); for (int i = 0; i &lt; 40 * 200; i++) { vram[i] = 0x0; } }</blockquote><p>Trivia: Connoisseurs will point out there are ways for the EGA to write to all four banks simulaneously. These can help to clear the screen or in the case of Wolfenstein 3D duplicate columns. They don't help for Commander Keen.</p><p>The best way to understand ATR is to build it from scratch, introducing EGA registers as we need them. Let's start by displaying a static image. We set the EGA in mode <pre>Dh</pre>, pick an address in VRAM, fill it with nibbles, and then use the "CRTC Start" register so the CRTC knows where to start reading from.</p><p>Trivia: There is no single CRTC start address register. Instead a developer must use two registers named "Start Address High" (<pre>0CH</pre>), and "Start Address Low" (<pre>0DH</pre>). For simplicity, we treat it as if it was a single one and call it <pre>CRTC_START</pre>.</p><p>Now we are going to add smooth scrolling. The goal is to create a system where the image displayed on the screen can be shifted with an EGA register (cheap) without plotting a single pixel (expensive).</p><p>Let's start with smooth vertical scrolling. If we allocate more memory than is displayed, we create a virtual screen in VRAM. We can add 16 lines above and 16 lines below. Instead of 40x200 = 8,000 bytes per plane, we now used 40 x 232 = 9,280 bytes per plane.</p><p>To move the displayed image up by a line, we can just increase the <pre>CRTC_START</pre> register by 40 bytes.</p><p>To move the displayed image down by a line, we can just decrease the <pre>CRTC_START</pre> register by 40 bytes.</p><p>The renderer now needs to write a few more lines to VRAM but the cost is amortized. The gain is that we can update the <pre>CRTC_START</pre> address up or down in the virtual screen to smoothly move the displayed image up or down.</p><p>The previous trick allows smooth vertical scrolling. However the truly impressive part, the one John Romero raves about in his book, is smooth horizontal scrolling.</p><p>At first sight, it does not look like we can use the same trick since all lines are contiguous in VRAM (there is no space between them). But the EGA has a register to allow padding between lines. With the <pre>OFFSET</pre> register set to 2 we add 16 bytes of padding which results in 16 extra pixels on the left and 16 extra pixels on the right in the virtual screen<a href="https://fabiensanglard.net#footnote_5">[5]</a>. 
+</p><p>However this is not enough for the scrolling to be smooth. If we change the CRTC start address, we have to remember that nibbles are stored in planes. Increasing <pre>CRTC_START</pre> by 1 moves the screen horizontally by 8 pixels (four banks each containing 2 pixels per byte). This is coarse, not smooth.</p><p>The last register involved in ATR is called "Horizontal Pel Panning" (we will call is <pre>PEL</pre>). It accepts 4 bits  to tell the CRTC to skip up to 7 bits from <pre>CRTC_START</pre> before using nibbles. This is exactly what we need for smooth horizontal scrolling.</p><p>Each movement left or right is done with a <pre>CRTC_START</pre> register update (for coordinate / 8). Then the move is fine tuned with the <pre>PEL</pre> register (for coordinate % 8).</p><p>So far, we have built a virtual screen in VRAM allowing 16 smooth one pixel moves in both axes using only EGA registers. But what happens when we reach an edge? That's where the innovation, and what left John Romero speechless for 30 minutes, starts.</p><p>As John Carmack explained<a href="https://fabiensanglard.net#footnote_6">[6]</a>, once it reaches an edge, the virtual screen must be reset. And it cannot be a full screen redraw because it would take 200ms and drop framerate to 5fps. This operation, coined "jolt" by knolo in their excellent explanation<a href="https://fabiensanglard.net#footnote_7">[7]</a>, involves collaboration from the game designers.
+</p><p>CK levels are built with tiles of dimension 16x16. Upon being drawn by artists, the build system give them an unique ID. A level design creates a map by placing tile IDs in a 2D editor. CK engine keeps track of which tile IDs are in the virtual screen. Since the engine only jolts at tiles size granularity, it can determine extremely fast what has changed on the screen by comparing IDs.</p><p>Notice how, before the jolt, the CRTC starts at the botton of the virtual screen. The image displayed on the screen has not changed between before and after. However the virtual screen has been "re-centered".</p><p>To jolt, the engine compares each tile ID in the virtual screen current state and the desired, re-centered, state. For matching tiles there is nothing to do and they are skipped entirely. Only mismatch incur a CPU penalty because these need to be overwritten in VRAM.</p><p>This is the part where CK game designer had to help the engine with. The jolt efficiency is inversely proportional to the number of tiles to redraw. To avoid costy jolts, designers built tile-maps so there would be a lot of reperating tiles.</p><p>In the following screenshot of Commander Keen 1, the player smoothly moved to the right until it ran out of virtual screen. A 16 pixels left jolt occurs. We can see the small number of tiles which were overwritten.</p><p> 
+  
+  
+<graphic src="before.webp"/></p><p>Only 40 tiles have changed (in pink) out of 250. The amount of redraw is just 16% of the whole screen.</p><p>So far we have only discussed how the background (made of tiles) is rendered and smoothly scrolled. CK draws a layer of sprites on top of it. While it renders the sprites layer over the background tile layer, the engine maintains a list of dirty (overwritten) tile coordinates. Each new frame, the dirty list is traversed, the background tiles are restored, and then the sprites are drawn again. Rinse, repeat.</p><p>To avoid visual artifacts, the whole system is duplicated via two framebuffers. While an image is read by the CRTC, another can be written elsewhere in VRAM. Each buffer uses (320 + 32) * (200 + 32) * 4 / 8 = 40,832 bytes. With double buffer, the total is 40,832 * 2 = 81,664 bytes. This is way past the capacity of the standard set by IBM original EGA graphic card. But it was not a problem.</p><blockquote>Only the original IBM EGA board ever shipped with 64KiB, and it was a clunky beast full of discrete components, which required daughter-boards for VRAM expansion.<br/><br/>The EGA clones that started coming along in ~1986-7 were based on integrated chipsets (like the one from Chips &amp; Technologies), and the vast majority of them came with 256K on board. When Commander Keen came out, the headcount of EGA cards with less than 256K 'in the wild' would've been practically negligible.<br/><br/></blockquote><p>Trivia: How to manage 256 KiB of VRAM with only a 64 KiB window? Not a problem since the banks contain 64 KiB each. The CPU can still "see" everything via the plane mask (selection) register.</p><p>Knowing how ATR works, and how it depends on repeating tiles, we should be surprised to see the difference between the first and second trilogy screenshots.</p><table><row><cell>
+<p/><graphic/></cell>
+    </row></table><p>If Commander Keen 1, 2, and 3 show the characteristic repeating patterns required by ATR, the second trilogy, made of Commander Keen 4, 5, and 6, does not. It is most apparent with the starting forest of CK 4 where next to nothing is repeating except for the marginal underground.</p><table><row><cell>
+<p/><graphic/></cell>
+    </row></table><p>How did they pull that off? John Carmack alluded to the answer on his Twitter account in 2020<a href="https://fabiensanglard.net#footnote_11">[11]</a>.
+</p><blockquote>The second Keen trilogy used a better trick -- just keep panning and redrawing the leading edge, letting the screen wrap around at the 64k aperture edge.<br/><br/>- John Carmack</blockquote><p>An explanation further elaborated during an interview with Lex Fridman in 2022<a href="https://fabiensanglard.net#footnote_12">[12]</a>.</p><blockquote>I finally asked what actually happens if you just go off the edge [OF THE VRAM]?<br/>If you take your [CRTC] start and you say OK, I can move over and I get to what should be the bottom of the memory window. [...] What happens if I start at 0xFFFE at the very end of the 64k block? It turns out it just wraps back around to the top of the block.<br/>I'm like oh well this makes everything easy. You can just scroll the screen everywhere and all you have to draw is just one new line of tiles.<br/>It just works. We no longer had the problem of having fields of similar colors. It doesn't matter what you're doing, you could be having a completely unique world and you're just drawing the new strip.<br/><br/>- John Carmack</blockquote><p>So there we have the explanation. ATR was improved upon not by adding a feature but by removing one. Without the jolt, the CRTC start address drift in VRAM space until it wraps around the 64KiB space of the banks. Since it happens with both elements of the double buffer, they drift at the same speed and never overlap. It worked well most of the time.</p><blockquote>This is so simple, it just works and it's faster. It seemed like there was no downside.<br/><br/>Funny thing was it turned out, after we shipped titles with this, there were super vga cards, allowing higher resolutions and different features that the standard ones didn't.<br/><br/>On some of those cards there was a weird compatibility quirk again because nobody thought this was what it was designed to do and some of those cards had more memory. They had more than just 256k and four planes they had 512k or a megabyte and on some of those cards I scroll my window down and then it goes into uninitialized memory that actually exists instead of wrapping back around at the top!<br/><br/>I was in a tough position. Do I have to track every single one of these [SUPER VGA CARDS] and it was a madhouse back then with 20 different video card vendors with all slightly different implementations of their non-standard functionality. Either I needed to natively program all of the cards or I kind of punt. I took the easy solution of when you finally did run to the edge of the screen I accepted a hitch and just copied the whole screen up.- John Carmack</blockquote><p>This technique likely prevented tiles and sprites to be stored in VRAM (to use the fast 32-bit at a time VRAM to VRAM copy method popularized by Michael Abrash). But since very little has to be drawn each frame, it probably did not matter.</p><table><row span="3"><cell><p/></cell><cell>[ 1]</cell><cell>EGA memory map [0xA000:0000, 0xA000:FFFF].</cell></row><row><cell><p/></cell><cell>[ 2]</cell><cell><p/></cell></row></table><pre>Dh</pre> == <pre>0xD</pre> but it feels more oldschool to write with the <pre>H&gt;</pre> prefix.</body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

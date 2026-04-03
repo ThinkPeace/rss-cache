@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to annotate JITed code for perf/samply | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How to annotate JITed code for perf/samply</h1>
+        <div class="meta">Max Bernstein&#x27;s Blog 2025-12-18T00:00:00Z</div>
+        <div class="links">
+          <a href="https://bernsteinbear.com/blog/jit-perf-map/?utm_source=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/bernsteinbear-com/bernsteinbear-com-ed0c1823ae2a7511.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Brief one today. I got asked “does YJIT/ZJIT have support for [Linux] perf?” The answer is yes, and it also works with samply (including on macOS!), because both understand the perf map interface . This is the entirety of the implementation in ZJIT 1 : fn register_with_perf ( iseq_name : String , start_ptr : usize , code_size : usize ) { use std :: io :: Wr…</div>
+        <div class="content">
+          <p>Brief one today. I got asked “does YJIT/ZJIT have support for [Linux] perf?”</p>
+
+<p>The answer is yes, and it also works with <a href="https://github.com/mstange/samply">samply</a> (including on macOS!),
+because both understand the <a href="https://github.com/torvalds/linux/blob/516471569089749163be24b973ea928b56ac20d9/tools/perf/Documentation/jit-interface.txt">perf map interface</a>.</p>
+
+<p>This is the entirety of the implementation in ZJIT<sup id="fnref:hex" role="doc-noteref"><a href="#fn:hex" class="footnote" rel="footnote">1</a></sup>:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">fn</span> <span class="nf">register_with_perf</span><span class="p">(</span><span class="n">iseq_name</span><span class="p">:</span> <span class="nb">String</span><span class="p">,</span> <span class="n">start_ptr</span><span class="p">:</span> <span class="nb">usize</span><span class="p">,</span> <span class="n">code_size</span><span class="p">:</span> <span class="nb">usize</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">use</span> <span class="nn">std</span><span class="p">::</span><span class="nn">io</span><span class="p">::</span><span class="n">Write</span><span class="p">;</span>
+    <span class="k">let</span> <span class="n">perf_map</span> <span class="o">=</span> <span class="nd">format!</span><span class="p">(</span><span class="s">"/tmp/perf-{}.map"</span><span class="p">,</span> <span class="nn">std</span><span class="p">::</span><span class="nn">process</span><span class="p">::</span><span class="nf">id</span><span class="p">());</span>
+    <span class="k">let</span> <span class="nf">Ok</span><span class="p">(</span><span class="n">file</span><span class="p">)</span> <span class="o">=</span> <span class="nn">std</span><span class="p">::</span><span class="nn">fs</span><span class="p">::</span><span class="nn">OpenOptions</span><span class="p">::</span><span class="nf">new</span><span class="p">()</span><span class="nf">.create</span><span class="p">(</span><span class="k">true</span><span class="p">)</span><span class="nf">.append</span><span class="p">(</span><span class="k">true</span><span class="p">)</span><span class="nf">.open</span><span class="p">(</span><span class="o">&amp;</span><span class="n">perf_map</span><span class="p">)</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="nd">debug!</span><span class="p">(</span><span class="s">"Failed to open perf map file: {perf_map}"</span><span class="p">);</span>
+        <span class="k">return</span><span class="p">;</span>
+    <span class="p">};</span>
+    <span class="k">let</span> <span class="k">mut</span> <span class="n">file</span> <span class="o">=</span> <span class="nn">std</span><span class="p">::</span><span class="nn">io</span><span class="p">::</span><span class="nn">BufWriter</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="n">file</span><span class="p">);</span>
+    <span class="k">let</span> <span class="nf">Ok</span><span class="p">(</span><span class="n">_</span><span class="p">)</span> <span class="o">=</span> <span class="nd">writeln!</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="s">"{start_ptr:x} {code_size:x} zjit::{iseq_name}"</span><span class="p">)</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="nd">debug!</span><span class="p">(</span><span class="s">"Failed to write {iseq_name} to perf map file: {perf_map}"</span><span class="p">);</span>
+        <span class="k">return</span><span class="p">;</span>
+    <span class="p">};</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>Whenever you generate a function, append a one-line entry consisting of</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>START SIZE symbolname
+</code></pre></div></div>
+
+<p>to <code class="language-plaintext highlighter-rouge">/tmp/perf-{PID}.map</code>. Per the Linux docs linked above,</p>
+
+<blockquote>
+  <p>START and SIZE are hex numbers without 0x.</p>
+
+  <p>symbolname is the rest of the line, so it could contain special characters.</p>
+</blockquote>
+
+<p>You can now happily run <code class="language-plaintext highlighter-rouge">perf record your_jit [...]</code> or <code class="language-plaintext highlighter-rouge">samply record your_jit
+[...]</code> and have JIT frames be named in the output. We hide this behind
+the <code class="language-plaintext highlighter-rouge">--zjit-perf</code> flag to avoid file I/O overhead when we don’t need it.</p>
+
+<h2 id="there-is-also-the-jit-dump-interface">There is also the JIT dump interface</h2>
+
+<p>Perf map is the older way to interact with perf: a newer, more complicated way
+involves <a href="https://theunixzoo.co.uk/blog/2025-09-14-linux-perf-jit.html">generating a “dump” file</a> and then <code class="language-plaintext highlighter-rouge">perf inject</code>ing it.</p>
+
+<!--
+
+## There is also the JIT gdb interface
+
+This is not strictly related but I want to figure it out
+
+-->
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:hex" role="doc-endnote">
+      <p>We actually use <code class="language-plaintext highlighter-rouge">{:#x}</code>, which I noticed today is wrong. <code class="language-plaintext highlighter-rouge">{:#x}</code> leaves
+in the <code class="language-plaintext highlighter-rouge">0x</code>, and it shouldn’t; instead <strong>use <code class="language-plaintext highlighter-rouge">{:x}</code></strong>. <a href="#fnref:hex" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

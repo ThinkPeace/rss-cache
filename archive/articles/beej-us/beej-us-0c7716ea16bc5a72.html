@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Websockets: Writing the Client | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Websockets: Writing the Client</h1>
+        <div class="meta">Beej&#x27;s Bit Bucket 2015-11-19T00:00:00Z</div>
+        <div class="links">
+          <a href="http://beej.us/blog/data/websockets2/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/beej-us/beej-us-0c7716ea16bc5a72.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Part 2 in the series: writing the client-side JavaScript.</div>
+        <div class="content">
+          <html>
+  <body><p>2015-11-19</p><h1>WebSockets: Writing the Client</h1><p><graphic> The websockets logo. I think.</graphic></p><p>We're going to do a little three-part introduction to
+<a href="https://en.wikipedia.org/wiki/WebSocket">WebSockets</a>, which provide a
+way to communicate back and forth with the web server without all the
+overhead of a standard <a href="https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol">HTTP
+connection</a>.</p><p>And, in the course of it, we'll be writing a simple chat server and client.</p><p>We're going to be piggybacking on the previous blog entry, on writing <a href="http://beej.us/nodejs-httpserver/">A
+NodeJS Webserver</a>. In particular, that webserver
+will be used for generic webserving on this project, and will also be
+what the WebSockets run on.</p><p>So you might as well start there, if you haven't already.</p><ul><li><a href="http://beej.us/nodejs-httpserver/">Part 0: A NodeJS Webserver</a></li><li><a href="http://beej.us/websockets/">Part 1: Intro to WebSockets, conceptually</a></li><li>Part 2: Writing the client side chat code for the browser in JavaScript</li><li><a href="http://beej.us/websockets3/">Part 3: Writing the server-side chat code in NodeJS</a></li></ul><p>If you want to jump right on in, <a href="https://github.com/beejjorgensen/websockets-demo">get the full source on
+GitHub</a>.</p><h2>The Client Side</h2><p>Now that we have an idea of what WebSockets are, it's time to write the client.</p><p>The basic approach is:</p><ul><li>
+<p>Make the UI components.</p></li><li>
+<p>Create a new WebSocket object with the destination URL and desired protocol.</p><graphic src="../../common/images/goat50.png" alt="Hint Goat"/> WebSocket URLs will
+begin with <pre>ws://</pre>or<pre>wss://</pre>for encrypted connections.</li><li>
+<p>Set up listeners for the</p><pre>open</pre>,<pre>close</pre>,<pre>error</pre>, and<pre>message</pre>events on the WebSockets object.</li><li>
+<p>Write the handlers to handle those events.</p></li></ul><p>Let's start with the UI.</p><h2>The User Interface</h2><p>Before we tear into what those handler functions should do, we should probably define the UI they'll be doing it to.</p><p>This is a chat program, so let's define the UI to have a chat output area where all the messages go, a text field where you can enter your name, a text field where you enter your chat message, and a "Send" button.</p><p>And the HTML looks like this:</p><pre><pre>&lt;body&gt;
+    &lt;div id="chat-output"&gt;&lt;/div&gt;
+    &lt;input type="text" id="chat-username"&gt;
+    &lt;input type="text" id="chat-input"&gt;
+    &lt;input type="button" id="chat-send" value="Send"&gt;
+&lt;/body&gt;
+</pre></pre>
+<p>Notice that we've given everything a handy ID for reference later.</p><p>We'll set the CSS of <pre>chat-output</pre> to have a good height and
+<pre>overflow:auto</pre> so that it puts scrollbars on as necessary:</p><pre><pre>#chat-output {
+    height: 20ex;
+    overflow: auto;
+    border: 1px solid gray;
+}
+</pre></pre>
+<p>And that should give you something that looks like this:</p><p><graphic src="images/html-layout.png" alt="Example Chat UI"/></p><h3>Interfacing with the User Interface (from the program's perspective)</h3><p>We're going to do a quick diversion on how to interact with the HTML
+elements in the
+<a href="https://en.wikipedia.org/wiki/Document_Object_Model">DOM</a>. We need to
+be able to get the value of the text inputs so we can send that data to
+the server. We also need to be able to add stuff to the chat output
+window and have it automatically scroll down to the bottom when it fills
+up.</p><p>There's a function you can call to get a reference to any one of the DOM
+elements, identified by the same selector you use in CSS. For example,
+to get a reference to the <pre>chat-input</pre> field, you can use
+<pre>querySelector()</pre> to get it:</p><pre><pre>// Get a reference to the DOM element with ID "chat-input"
+
+let chatInput = document.querySelector('#chat-input');
+</pre></pre>
+<p>In my code, I have a little helper function to make this a more reasonable length call in practical use:</p><pre><pre>// Helper function to get an element by ID
+
+function qs(s) {
+    return document.querySelector(s);
+}
+</pre></pre>
+<p>So now I could just call <pre>qs('#chat-input')</pre> instead of that whole
+<pre>document</pre>-dot thing.</p><blockquote><p/><graphic/><pre>document.querySelector('#foo')</pre>works very much like<pre>$('#foo')</pre>in<a href="">jQuery</a>.</blockquote><p>For the input fields, we use the <pre>value</pre> property to retrieve the
+contents of whatever's in there:</p><pre><pre>let username = qs('#chat-user').value;
+let message = qs('#chat-input').value;
+</pre></pre>
+<p>and you can then pass that data over the WebSocket.</p><p>For the main chat window with all the messages on it, we do things a
+little differently, since it doesn't have a <pre>value</pre>.  (<pre>value</pre> is only
+used on <pre>&lt;input&gt;</pre> elements, and the chat output window is a <pre>&lt;div&gt;</pre>.)</p><p>To get and set the contents of the chat output window, we'll use its
+<pre>innerHTML</pre> property, which gets or sets whatever HTML is within it. As
+a bonus, this means we can decorate the messages that show up in the
+chat window with HTML markup to make them italic or bold or whatever.
+Any valid HTML can be packed inside.</p><p>We'll add a function to write a line of text to the chat output, and
+prepend it with a newline if necessary (which we'll represent with an
+HTML <pre>&lt;br&gt;</pre> tag).</p><p>First, we get a reference to the output window, <pre>chat-output</pre>.  Then we
+get its current contents and store them in <pre>innerHTML</pre>.  We compute the
+new output, append it to the previous value in <pre>innerHTML</pre>, and reassign
+it back into the <pre>chat-output</pre> element.</p><pre><pre>/**
+ * Write something to the output portion of the screen
+ */
+function writeOutput(s) {
+    let chatOutput = qs('#chat-output');
+    let innerHTML = chatOutput.innerHTML;
+
+    // Add a newline before new output
+    let newOutput = innerHTML === ''? s: '&lt;br/&gt;' + s;
+
+    chatOutput.innerHTML = innerHTML + newOutput;
+
+    // Scroll to bottom
+    chatOutput.scrollTop = chatOutput.scrollHeight;
+}
+</pre></pre>
+<p>And, finally, as you see, there's a bit of magic code at the bottom to set the scrolling position of the window so that the bottom-most content is still displayed. This effectively auto-scrolls the window when content falls off the bottom.</p><h2>Very Basic WebSocket Skeleton</h2><pre><pre>/**
+ * Once the page has loaded
+ */
+function onLoad() {
+    // Create WebSocket
+    ws = new WebSocket("ws://localhost:3490, "beej-chat-protocol");
+
+    // Add event listeners
+    ws.addEventListener('open', onSocketOpen);
+    ws.addEventListener('close', onSocketClose);
+    ws.addEventListener('error', onSocketError);
+    ws.addEventListener('message', onSocketMessage);
+}
+
+// Wait for load event before starting
+window.addEventListener('load', onLoad);
+</pre></pre>
+<p>And that's all there is to that. The WebSocket will be created, and the events will occur as appropriate.</p><p>Now, some of those events happen in an expected order. Firstly, we'd
+expect to get an <pre>open</pre> event before anything else arrives.  With the
+possible exception of an <pre>error</pre> event, which means the computer messed
+something up, because it's never our fault, right?</p><blockquote><p/><graphic>Actually, we're going to do something a little more clever with the above code. We're going to create the WebSocket like this:</graphic><pre>let localURL = parseLocation(window.location); ws = new WebSocket("ws://" + localURL.host, "beej-chat-protocol");</pre><p>That is, instead of hardcoding it to look at</p><pre>localhost</pre>(which isn't particularly useful for people over the network), we code it up to say, "Open the WebSocket to the same host-and-port I loaded this web page from."<p>What's this</p><pre>parseLocation()</pre>function, though? We code that up using a<a href="">hackish little trick</a>wherein you set the<pre>href</pre>attribute of an<pre>&lt;a&gt;</pre>tag with the URL, and let it do the hard work. Once you do that, you can get the host and port from the<pre>host</pre>attribute, just like we've done, above.<pre>/** * Break down a URL into its components */ function parseLocation(url) { let a = document.createElement('a'); a.href = url; return a; }</pre><p>Now, if we were really, really smart, we'd set the protocol to</p><pre>wss:</pre>if the<pre>localURL.protocol</pre>were<pre>https:</pre>. But that's an exercise for you, dear reader.</blockquote><h2><pre>onSocketError</pre> and <pre>onSocketClose</pre> implementations</h2>
+<p>Let's start with these two, since they're the most simple. All we're
+going to do is output an appropriate message. So we call <pre>writeOutput()</pre>
+with the appropriate HTML:</p><pre><pre>/**
+ * When the socket errors
+ */
+function onSocketError(ev) {
+    writeOutput("&lt;i&gt;Connection error.&lt;i&gt;");
+}
+</pre></pre>
+<pre><pre>/**
+ * When the socket closes
+ */
+function onSocketClose(ev) {
+    writeOutput("&lt;i&gt;Connection closed.&lt;i&gt;");
+}
+</pre></pre>
+<p>That's it for that. Let's take a small step up in complexity, and try
+sending something to the server in our <pre>onSocketOpen</pre> function.</p><h2><pre>onSocketOpen</pre> Implementation</h2>
+<p>When the user first connects, they shouldn't be rude by not introducing
+themselves. So what we're going to do is send a <pre>chat-join</pre> message to
+our server per our <a href="http://beej.us/websockets/#protocols">previous article on
+protocols</a>.</p><p>Assuming the connection goes well, we'll be getting a call to
+<pre>onSocketOpen()</pre>, our event handler for the WebSocket <pre>open</pre> event.
+We'll send out our response then.</p><pre><pre>/**
+ * When the socket opens
+ */
+function onSocketOpen(ev) {
+    writeOutput("&lt;i&gt;Connection opened.&lt;/i&gt;");
+
+    sendMessage('chat-join', {
+        "username": getChatUsername()
+    });
+}
+</pre></pre>
+<p>As you see, we first write a bit of output just so the user can be tickled pink that the connection has been established. And then we send a message back to the server with our username.</p><blockquote><p/><graphic>We also have the code automatically default the username to "Guest X", where X is a random hex number. In this way, we know the field won't be empty when we send it.</graphic><p>Another option for coding this up would have been to force the user through a login screen ahead of time, but we're trying to keep it as simple as possible for this demo.</p></blockquote><p>What about these other functions, though? Let's get the easy one out of the way:</p><pre><pre>/**
+ * Helper function to get the chat username
+ */
+function getChatUsername() {
+    return qs('#chat-username').value.trim();
+}
+</pre></pre>
+<p>Note the <pre>trim()</pre> call there, to strip leading and trailing whitespace.
+The server can handle it if there is some, but we're being polite on the
+client, as well.</p><p><a href="">And here's </a><pre>sendMessage()</pre>, which takes two
+arguments: the message type (a <pre>string</pre>) and the message payload (an
+<pre>Object</pre>)</p><pre><pre>/**
+ * Send a message to the server
+ */
+function sendMessage(type, payload) {
+	ws.send(makeMessage(type, payload));
+}
+
+/**
+ * Construct a message
+ */
+function makeMessage(type, payload) {
+	return JSON.stringify({
+		'type': type,
+		'payload': payload
+	});
+}
+</pre></pre>
+<p><pre>ws.send()</pre> is what's going to actually send the data to the server. It
+calls a helper function first: <pre>makeMessage()</pre>. All <pre>makeMessage()</pre> does
+is make an object with the type and payload, and convert it into a
+<a href="https://en.wikipedia.org/wiki/JSON">JSON</a> string.</p><p>And away we go! The data's on its way to the server!</p><h2><pre>onSocketMessage</pre> implementation</h2>
+<p>And how do we get data back from the server?</p><p>We're going to be getting a JSON string from the server, so first we'll
+parse that into a JavaScript <pre>Object</pre> with <pre>JSON.parse()</pre>.</p><p>Then we'll look at the message object's <pre>type</pre> property to see what kind
+of message it is.</p><p>Finally, we'll do the Right Thing for the particular message type.</p><pre><pre>/**
+ * When the socket receives a message
+ */
+function onSocketMessage(ev) {
+    let msg = JSON.parse(ev.data);
+    let payload = msg.payload;
+
+    // Sanitize HTML string
+    let username = escapeHTML(payload.username);
+
+    switch (msg.type) {
+        case 'chat-message':
+            writeOutput('&lt;b&gt;' + username + ":&lt;/b&gt; " +
+                escapeHTML(payload.message));
+            break;
+
+        case 'chat-join':
+            writeOutput('&lt;i&gt;&lt;b&gt;' + username +
+                '&lt;/b&gt; has joined the chat.&lt;/i&gt;');
+            break;
+
+        case 'chat-leave':
+            writeOutput('&lt;i&gt;&lt;b&gt;' + username + 
+                '&lt;/b&gt; has left the chat.&lt;/i&gt;');
+            break;
+    }
+}
+</pre></pre>
+<p>All looking good? What's that <pre>escapeHTML()</pre> call?</p><p>This is actually pretty important. See, we're putting HTML we're getting from the server right on the screen, and the server's getting it right from other users. The browser will happily inject whatever HTML it gets, and will execute it.</p><p>The last thing you need is an attacker sending you a chat message that reads, "!!" and having your browser execute it instead of displaying it on the screen.</p><p>The solution to this problem is to translate all the HTML special
+characters into their associated <a href="http://dev.w3.org/html5/html-author/charref">HTML
+entities</a>. At the very
+least, the following should be done (starting with the first one):</p><ul><li><pre>&amp;</pre>becomes<pre>&amp;amp;</pre></li><li><pre>&lt;</pre>becomes<pre>&amp;lt;</pre></li><li><pre>&gt;</pre>becomes<pre>&amp;gt;</pre></li></ul><p>Paranoid people also recommend:</p><ul><li><pre>'</pre>becomes<pre>&amp;apos;</pre></li><li><pre>"</pre>becomes<pre>&amp;quot;</pre></li><li><pre>/</pre>becomes<pre>&amp;sol;</pre></li></ul><p>And we do that with this horribly inefficient function:</p><pre><pre>/**
+ * Escape HTML special characters
+ */
+function escapeHTML(s) {
+    return s.replace(/&amp;/g, '&amp;amp;')
+        .replace(/&lt;/g, '&amp;lt;')
+        .replace(/&gt;/g, '&amp;gt;')
+        .replace(/'/g, '&amp;apos;')
+        .replace(/"/g, '&amp;quot;')
+        .replace(/\//g, '&amp;sol;');
+}
+</pre></pre>
+<p>General rule: Anything that you are going to stick into your page
+as HTML that you get from an untrusted source needs to be sanitized
+through a function like <pre>escapeHTML()</pre>. Every time.</p><h2>Finally, the Keyboard Input</h2><p>Sooner or later, we have to actually be able to type and send things, or else we'll not have any fun.</p><p>Well, we have a "Send" button, so let's get clicks on that by adding an
+event listener in our <pre>onLoad()</pre> handler:</p><pre><pre>qs('#chat-send').addEventListener('click', send);
+</pre></pre>
+<p>And that'll call the handy-dandy <pre>send()</pre> function:</p><pre><pre>/**
+ * Send a chat message
+ */
+function send() {
+    sendMessage('chat-message', {
+        "username": getChatUsername(),
+        "message": getChatMessage()
+    });
+
+    // Clear the input field after sending
+    qs('#chat-input').value = '';
+}
+</pre></pre>
+<p>As you can see, this sends the actual chat username and message out, and clears the input field for the next call.</p><blockquote><p/><graphic>And for fun, we'll go ahead and make it so it also sends the message when you hit RETURN, since</graphic><p>First, we'll add a</p><pre>keyup</pre>event listener to the text input field, so that we get an event every time a key is released. We'll add that in the<pre>onLoad()</pre>handler:<pre>qs('#chat-input').addEventListener('keyup', onChatInputKeyUp);</pre><p>Then</p><pre>onChatInputKeyUp</pre>will look to see if the user hit the return key, and then call<pre>send()</pre>to send off the current contents of the text input (just as if the user had hit the "Send" button).<pre>/** * Make [RETURN] the same as the send button for convenience */ function onChatInputKeyUp(ev) { if (ev.keyCode === 13) { // 13 is RETURN send(); } }</pre><p>To test for keycodes with your keyboard, visit</p><a href="">keycode.info</a>.</blockquote><h2>Shortcomings and Room for Improvement</h2><p>Since this is just a toy program, there are definitely a few things wrong with it.</p><p>First of all, the usernames are sent in a very ungainly way that (as you'll see) makes it difficult for the server to keep track of names. It would be better to have the user log in and pass a username packet to the server. And then if they changed their name, pass a new username packet.</p><p>Secondly, you can trivially impersonate anyone by entering their username.</p><p>Also, even if you stopped that, there's nothing in the packet structure to prevent other people from impersonating you. Eventually, the server would have to keep track of you by unique user ID if you wanted to mitigate that.</p><p>Obviously the UI is horrible.</p><p>The code isn't structured in a way that makes it easy to start new
+instances of chat windows. I could imagine a case where you might want
+multiple chat windows per page, so you could
+<a href="http://beej.us/html-canvas-scratcher-2">refactor</a> to code to support this.</p><p>And there are plenty of other bonus shortcomings I'm too tired to think of right now, I'm sure.</p><h2>Up Next</h2><p>The only remaining piece in the series is the WebSockets server side, so we'll tackle that last. See you then!</p><p><a href="http://beej.us/websockets3/">Continue to Part 3: Writing the Server</a></p><h2>Links</h2><h2>License</h2><p>The code attached to this article is licensed under the <a href="http://www.opensource.org/licenses/mit-license.php">MIT open source
+license</a>.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fedora&#x27;s virt-manager started using external snapshots for me as of Fedora 41 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Fedora&#x27;s virt-manager started using external snapshots for me as of Fedora 41</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-03-24T02:51:03Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/FedoraVirtManagerBadSnapshots">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-71fa4be814af52c6.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Today I made an unpleasant discovery about virt-manager on my (still) Fedora 42 machines that I shared on the Fediverse : This is my face that Fedora virt-manager appears to have been defaulting to external snapshots for some time and SURPRISE, external snapshots can&#x27;t be reverted by virsh. This is my face, especially as it seems to have completely screwed…</div>
+        <div class="content">
+          <div class="wikitext"><p>Today I made an unpleasant discovery about virt-manager on my (still)
+Fedora 42 machines that <a href="https://mastodon.social/@cks/116280551980110519">I shared on the Fediverse</a>:</p>
+
+<blockquote><p>This is my face that Fedora virt-manager appears to have been
+defaulting to external snapshots for some time and SURPRISE, external
+snapshots can't be reverted by virsh. This is my face, especially as
+it seems to have completely screwed up even deleting snapshots on some
+virtual machines.</p>
+</blockquote>
+
+<p>(I only discovered this today because today is the first time I
+tried to touch such a snapshot, either to revert to it or to clean
+it up. It's possible that there is some hidden default for what
+sort of snapshot to make and it's only been flipped for me.)</p>
+
+<p>Neither virt-manager nor virsh will clearly tell you about this.
+In virt-manager you need to click on each snapshot and if it says
+'external disk only', congratulations, you're in trouble. In virsh,
+'virsh snapshot-list --external &lt;vm>' will list external snaphots,
+and then 'virsh snapshot-list --tree &lt;vm>' will tell you if they
+depend on any internal snapshots.</p>
+
+<p>My largest problems came from virtual machines where I had earlier
+internal snapshots and then I took more snapshots, which became
+external snapshots from Fedora 41 onward. You definitely can't
+revert to an external snapshot in this situation, at least not
+with virsh or virt-manager, and the error messages I got were
+generic ones about not being able to revert external snapshots.
+I haven't tested reverting external snapshots for a VM with no
+internal ones.</p>
+
+<p>(<a href="https://utcc.utoronto.ca/~cks/space/blog/linux/LibvirtUEFISnapshots">Not being able to revert to external snapshots is a long standing
+libvirt issue</a>, but it's possible they now
+work if you only have external snapshots. Otherwise, Fedora 41 and
+Fedora 42 defaulting to external snapshots is extremely hard to
+understand (to be polite).)</p>
+
+<p>Update: you can revert an external snapshot in the latest libvirt
+if all of your snapshots are external. You can't revert them if
+libvirt helpfully gave you external snapshots on top of internal
+ones by switching the default type of snapshots (probably in Fedora
+41).</p>
+
+<p>If you have an external snapshot that you need to revert to, all I
+can do is point to <a href="https://wiki.libvirt.org/I_created_an_external_snapshot_but_libvirt_will_not_let_me_delete_or_revert_to_it.html">a libvirt wiki page on the topic</a>
+(although it may be outdated by now) along with <a href="https://libvirt.org/formatsnapshot.html">libvirt's
+documentation on its snapshot XML</a>. I suspect that there is
+going to be suffering involved. I haven't tried to do this; <a href="https://mastodon.social/@cks/116280551980110519">when
+it came up today</a>
+I could afford to throw away the external snapshot.</p>
+
+<p>If you have internal snapshots and you're willing to throw away the
+external snapshot and what's built on it, you can use virsh or
+virt-manager to revert to an internal snapshot and then delete the
+external snapshot. This leaves the external snapshot's additional
+disk file or files dangling around for you to delete by hand.</p>
+
+<p>If you have only an external snapshot, it appears that libvirt will
+let you delete the snapshot through 'virsh snapshot-delete &lt;vm>
+&lt;external-snapshot>', which preserves the current state of the
+machine's disks. This only helps if you don't want the snapshot any
+more, but this is one of my common cases (where I take precautionary
+snapshots before significant operations and then get rid of them
+later when I'm satisfied, or at least committed).</p>
+
+<p>The worst situation appears to be if you have an external snapshot
+made after (and thus on top of) an earlier internal snapshot and
+you to keep the live state of things while getting rid of the
+snapshots. As far as I can tell, it's impossible to do this through
+libvirt, although some of the documentation suggests that you should
+be able to. The process outlined in libvirt's <a href="https://libvirt.org/kbase/merging_disk_image_chains.html">Merging disk image
+chains</a>
+didn't work for me (see also <a href="https://www.libvirt.org/kbase/backing_chains.html">Disk image chains</a>).</p>
+
+<p>(If it worked, this operation would implicitly invalidate the
+snapshots and I don't know how you get rid of them inside libvirt,
+since you can't delete them normally. I suspect that to get rid of
+them, you need to shut down all of the libvirt daemons and then
+delete the XML files that (on Fedora) you'll find in
+/var/lib/libvirt/qemu/snapshot/&lt;domain>.)</p>
+
+<p>One reason to delete external snapshots you don't need is if you
+ever want to be able to easily revert snapshots in the future. I
+wouldn't trust making internal snapshots on top of external ones,
+if libvirt even lets you, so if you want to be able to easily revert,
+it currently appears that you need to have and use only internal
+snapshots. Certainly you can't mix new external snapshots with old
+internal snapshots, as I've seen.</p>
+
+<p>(The <a href="https://github.com/virt-manager/virt-manager/releases/tag/v5.1.0">5.1.0 virt-manager release</a>
+will warn you to not mix snapshot modes and defaults to whatever
+snapshot mode you're already using. I don't know what it defaults
+to if you don't have any snapshots, I haven't tried that yet.)</p>
+
+<h3>Sidebar: Cleaning this up on the most tangled virtual machine</h3>
+
+<p>I've tried <a href="https://copr.fedorainfracloud.org/coprs/g/virtmaint-sig/virt-preview/">the latest preview releases of the libvirt
+stuff</a>,
+but it doesn't make a difference in the most tangled situation I have:</p>
+
+<blockquote><pre>
+$ virsh snapshot-delete hl-fedora-36 fedora41-preupgrade
+error: Failed to delete snapshot fedora41-preupgrade
+error: Operation not supported: deleting external snapshot that has internal snapshot as parent not supported
+</pre>
+</blockquote>
+
+<p>This VM has an internal snapshot as the parent because I didn't
+clean up the first snapshot (taken before a Fedora 41 upgrade)
+before making the second one (taken before a Fedora 42 upgrade).</p>
+
+<p>In theory one can use 'virsh blockcommit' to reduce everything down
+to a single file, per <a href="https://libvirt.org/kbase/merging_disk_image_chains.html#consolidating-an-entire-disk-image-chain-into-a-single-image">the knowledge base section on this</a>.
+In practice it doesn't work in this situation:</p>
+
+<blockquote><pre>
+$ virsh blockcommit hl-fedora-36 vda --verbose --pivot --active
+error: invalid argument: could not find base image in chain for 'vda'
+</pre>
+</blockquote>
+
+<p>(I tried with --base too and that didn't help.)</p>
+
+<p>I was going to attribute this to the internal snapshot but then I
+tried 'virsh blockcommit' on another virtual machine with only an
+external snapshot and it failed too. So I have no idea how this is
+supposed to work.</p>
+
+<p>Since I could take a ZFS snapshot of the entire disk storage, I
+chose violence, which is to say direct usage of qemu-img. First,
+I determined that I couldn't trivially delete the internal snapshot
+before I did anything else:</p>
+
+<blockquote><pre>
+$ qemu-img snapshot -d fedora40-preupgrade fedora35.fedora41-preupgrade
+qemu-img: Could not delete snapshot 'fedora40-preupgrade': snapshot not found
+</pre>
+</blockquote>
+
+<p>The internal snapshot is in the underlying file 'fedora35.qcow2'.
+Maybe I could have deleted it safely even with an external thing
+sitting on top of it, but I decided not to do that yet and proceed
+to the main show:</p>
+
+<blockquote><pre>
+$ qemu-img commit -d fedora35.fedora41-preupgrade
+Image committed.
+$ rm fedora35.fedora41-preupgrade
+</pre>
+</blockquote>
+
+<p>Using 'qemu-img info fedora35.qcow2' showed that the internal snapshot
+was still there, so I removed it with 'qemu-img snapshot -d' (this time
+on fedora35.qcow2).</p>
+
+<p>All of this left libvirt's XML drastically out of step with the
+underlying disk situation. So I removed the XML for the snapshots
+(after saving a copy), made sure all libvirt services weren't
+running, and manually edited the VM's XML, where it turned out that
+all I needed to change was the name of the disk file. This appears
+to have worked fine.</p>
+
+<p>I suspect that I could have skipped manually removing the internal
+snapshot and its XML and libvirt would then have been happy to see
+it and remove it.</p>
+
+<p>(I'm writing all of the commands and results down partly for my
+future reference.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

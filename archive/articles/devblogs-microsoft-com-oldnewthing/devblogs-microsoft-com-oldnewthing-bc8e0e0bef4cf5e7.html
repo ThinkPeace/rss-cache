@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>What if a dialog wants to intercept its own message loop? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>What if a dialog wants to intercept its own message loop?</h1>
+        <div class="meta">The Old New Thing 2026-03-27T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260327-00/?p=112172">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-bc8e0e0bef4cf5e7.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">You can steal them from your owner. The post What if a dialog wants to intercept its own message loop? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>So far, we&#8217;ve been looking at how a dialog box owner can customize the dialog message loop. But what about the dialog itself? Can the dialog customize its own dialog message loop?</p>
+<p>Sure. It just has to steal the messages from its owner.</p>
+<p>The dialog box can subclass its owner and grab the <code>WM_<wbr />ENTER­IDLE</code> message. Now, maybe it should be careful only to grab <code>WM_<wbr />ENTER­IDLE</code> messages that were triggered by that dialog and not accidentally grab messages that were triggered by other dialogs.</p>
+<pre>HANDLE hTimer;
+
+LRESULT CALLBACK EnterIdleSubclassProc(HWND hwnd, UINT message,
+    WPARAM wParam, LPARAM lParam, UINT_PTR id,
+    [[maybe_unused]] DWORD_PTR data)
+{
+    if (message == WM_ENTERIDLE &amp;amp:&amp;
+        wParam == MSGF_DIALOGBOX &amp;&amp;
+        (HWND)lParam == (HWND)id) {
+        return SendMessage(hdlg, message, wParam, lParam);
+    } else {
+        return DefSubclassProc(hwnd, message, wParam, lParam);
+    }
+}
+
+INT_PTR CALLBACK DialogProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    LARGE_INTEGER twoSeconds;
+
+    switch (message) {
+    ⟦ ... ⟧
+
+    case WM_INITDIALOG:
+        hTimer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+        twoSeconds.QuadPart = -2 * wil::filetime_duration::one_second;
+        SetWaitableTimer(h, &amp;twoSeconds, 2000, nullptr, nullptr, FALSE);
+        SetWindowSubclass(GetParent(hdlg), EnterIdleSubclassProc,
+                          (UINT_PTR)hdlg, 0);
+        ⟦ other dialog box setup ⟧
+        return TRUE;
+
+    case WM_ENTERIDLE:
+        OnEnterIdle(hdlg, (UINT)wParam, (HWND)lParam);
+        return 0;
+
+    ⟦ ... ⟧
+    }
+
+    return FALSE;
+}
+</pre>
+<p>When the dialog box initializes, we create the periodic waitable timer (for demonstration purposes) and also subclass our owner window with the <code>Enter­Idle­Subclass­Proc</code>. We use the dialog window handle as the ID for two reasons. First, it lets us pass a parameter to the subclass procedure so it knows which dialog box it is working on behalf of. (We could also have passed it as the <code>data</code> parameter.) More importantly, it allows multiple dialogs to use the <code>Enter­Idle­Subclass­Proc</code> to subclass their owner, and the multiple subclasses won&#8217;t conflict with each other.</p>
+<p>The subclass procedure checks whether it is a <code>WM_<wbr />ENTER­IDLE</code>, marked as coming from a dialog box message loop, and where the dialog box handle is the one we have. If so, then we forward the <code>WM_<wbr />ENTER­IDLE</code> back into the dialog for processing. That processing consists of using the <code>On­Enter­Idle</code> function we created at the start of the series, which processes waitable timer events while waiting for a message to arrive.</p>
+<p>Okay, but should we be careful to grab <code>WM_<wbr />ENTER­IDLE</code> messages only if they correspond to our dialog box? Because if the owner displays some other modal dialog box while our dialog is up (not really a great idea, but hey, weirder things have happened), then we still want to process our waitable timer events. But on the other hand, maybe that other dialog wants to customize the message loop in a different way. Probably best to steal messages only if they originated from our dialog box.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260327-00/?p=112172">What if a dialog wants to intercept its own message loop?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

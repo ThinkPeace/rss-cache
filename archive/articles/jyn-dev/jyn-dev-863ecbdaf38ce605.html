@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>negative build dependencies | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>negative build dependencies</h1>
+        <div class="meta">the website of jyn 2025-12-03T00:00:00Z</div>
+        <div class="links">
+          <a href="https://jyn.dev/negative-build-dependencies/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jyn-dev/jyn-dev-863ecbdaf38ce605.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A build system needs to know not just which files exist, but which shouldn&#x27;t exist.</div>
+        <div class="content">
+          <p>This post is part 2/4 of <a href="/four-posts-about-build-systems/">a series about build systems</a>.
+The next post is <a href="/i-want-a-better-action-graph-serialization/">I want a better action graph serialization</a>.</p>
+<hr />
+<p>This post is about a limitation of the dependencies you can express in a build file.
+It uses Ninja just because it's simple and I'm very familiar with it, but the problem exists in most build systems.</p>
+<p>Say you have a C project with two different include paths: <code>dependency/include</code> and <code>src</code>:</p>
+<pre class="z-code"><code><span class="z-text z-plain">.
+</span><span class="z-text z-plain">├── build.ninja
+</span><span class="z-text z-plain">├── dependency
+</span><span class="z-text z-plain">│   └── include
+</span><span class="z-text z-plain">│       └── interface.h
+</span><span class="z-text z-plain">└── src
+</span><span class="z-text z-plain">    └── main.c
+</span></code></pre>
+<p>and the following build.ninja:<sup class="footnote-reference" id="fr-depfiles-1"><a href="#fn-depfiles">1</a></sup></p>
+<pre data-lang="ninja" class="language-ninja z-code"><code class="language-ninja" data-lang="ninja"><span class="z-text z-plain">rule cc
+</span><span class="z-text z-plain">  command = cc -I dependency/include -I src $in -o $out
+</span><span class="z-text z-plain">
+</span><span class="z-text z-plain">build src/main: cc src/main.c | dependency/include/interface.h
+</span></code></pre>
+<aside role=note class=note-container><div class=note-content>
+<p>In ninja, <code>| file</code> means an “implicit dependency”, i.e. it causes a rebuild but does not get bound to <code>$in</code>.</p>
+</div></aside>
+<p>and some small implementations, just so we can see that it actually works:</p>
+<pre data-lang="c" class="language-c z-code"><code class="language-c" data-lang="c"><span class="z-source z-c"><span class="z-comment z-line z-double-slash z-c"><span class="z-punctuation z-definition z-comment z-c">//</span> src/main.c
+</span></span><span class="z-source z-c"><span class="z-meta z-preprocessor z-include z-c"><span class="z-keyword z-control z-import z-include z-c">#include</span> <span class="z-string z-quoted z-other z-lt-gt z-include z-c"><span class="z-punctuation z-definition z-string z-begin z-c">&lt;</span>stdio.h<span class="z-punctuation z-definition z-string z-end z-c">&gt;</span></span>
+</span></span><span class="z-source z-c"><span class="z-meta z-preprocessor z-include z-c"><span class="z-keyword z-control z-import z-include z-c">#include</span> <span class="z-string z-quoted z-double z-include z-c"><span class="z-punctuation z-definition z-string z-begin z-c">&quot;</span>interface.h<span class="z-punctuation z-definition z-string z-end z-c">&quot;</span></span>
+</span></span><span class="z-source z-c">
+</span><span class="z-source z-c"><span class="z-storage z-type z-c">int</span> <span class="z-meta z-function z-c"><span class="z-entity z-name z-function z-c">main</span></span><span class="z-meta z-function z-parameters z-c"><span class="z-meta z-group z-c"><span class="z-punctuation z-section z-group z-begin z-c">(</span></span></span><span class="z-meta z-function z-parameters z-c"><span class="z-meta z-group z-c"><span class="z-storage z-type z-c">void</span><span class="z-punctuation z-section z-group z-end z-c">)</span></span></span><span class="z-meta z-function z-c"> </span><span class="z-meta z-function z-c"><span class="z-meta z-block z-c"><span class="z-punctuation z-section z-block z-begin z-c">{</span></span></span><span class="z-meta z-function z-c"><span class="z-meta z-block z-c">
+</span></span></span><span class="z-source z-c"><span class="z-meta z-function z-c"><span class="z-meta z-block z-c">        <span class="z-meta z-function-call z-c"><span class="z-support z-function z-C99 z-c">printf</span><span class="z-meta z-group z-c"><span class="z-punctuation z-section z-group z-begin z-c">(</span></span></span><span class="z-meta z-function-call z-c"><span class="z-meta z-group z-c"><span class="z-string z-quoted z-double z-c"><span class="z-punctuation z-definition z-string z-begin z-c">&quot;</span><span class="z-constant z-other z-placeholder z-c">%d</span><span class="z-constant z-character z-escape z-c">\n</span><span class="z-punctuation z-definition z-string z-end z-c">&quot;</span></span><span class="z-punctuation z-separator z-c">,</span> interface_version</span></span><span class="z-meta z-function-call z-c"><span class="z-meta z-group z-c"><span class="z-punctuation z-section z-group z-end z-c">)</span></span></span><span class="z-punctuation z-terminator z-c">;</span>
+</span></span></span><span class="z-source z-c"><span class="z-meta z-function z-c"><span class="z-meta z-block z-c"></span></span><span class="z-meta z-function z-c"><span class="z-meta z-block z-c"><span class="z-punctuation z-section z-block z-end z-c">}</span></span></span>
+</span><span class="z-source z-c">
+</span><span class="z-source z-c"><span class="z-comment z-line z-double-slash z-c"><span class="z-punctuation z-definition z-comment z-c">//</span> dependency/include/interface.h
+</span></span><span class="z-source z-c"><span class="z-storage z-modifier z-c">const</span> <span class="z-storage z-modifier z-c">static</span> <span class="z-storage z-type z-c">short</span> interface_version <span class="z-keyword z-operator z-assignment z-c">=</span> <span class="z-constant z-numeric z-integer z-decimal z-c">1</span><span class="z-punctuation z-terminator z-c">;</span>
+</span></code></pre>
+<p>This works ok on our first build, and when <code>dependency/include/interface.h</code> changes:</p>
+<pre class="z-code"><code><span class="z-text z-plain">$ ninja
+</span><span class="z-text z-plain">[1/1] cc -I dependency/include -I src src/main.c -o src/main
+</span></code></pre>
+<p>But say now that we add our own <code>src/interface.h</code> file:</p>
+<pre data-lang="console" class="language-console z-code"><code class="language-console" data-lang="console"><span class="z-source z-shell z-console"><span class="z-keyword z-operator z-assignment z-redirection z-process z-shell">$</span> <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">cat</span></span><span class="z-meta z-function-call z-arguments z-shell"> src/interface.h</span>
+</span><span class="z-source z-shell z-console">const static char *version = &quot;1.0&quot;;
+</span><span class="z-source z-shell z-console"><span class="z-keyword z-operator z-assignment z-redirection z-process z-shell">$</span> <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">ninja</span></span>
+</span><span class="z-source z-shell z-console">ninja: no work to do.
+</span></code></pre>
+<p>Now we have a problem. If we remove our build artifacts, ninja <em>does</em> rerun, and shows us what that problem is:</p>
+<pre class="z-code"><code><span class="z-text z-plain">[1/1] cc -I dependency/include -I src src/main.c -o src/main
+</span><span class="z-text z-plain">FAILED: [code=1] src/main
+</span><span class="z-text z-plain">cc -I dependency/include -I src src/main.c -o src/main
+</span><span class="z-text z-plain">src/main.c: In function ‘main’:
+</span><span class="z-text z-plain">src/main.c:5:24: error: ‘interface_version’ undeclared (first use in this function)
+</span><span class="z-text z-plain">    5 |         printf(&quot;%d\n&quot;, interface_version);
+</span><span class="z-text z-plain">      |                        ^~~~~~~~~~~~~~~~~
+</span><span class="z-text z-plain">src/main.c:5:24: note: each undeclared identifier is reported only once for each function it appears in
+</span><span class="z-text z-plain">ninja: build stopped: subcommand failed.
+</span></code></pre>
+<p>We switched out what <code>interface.h</code> resolved to, but ninja didn't know about the changed dependency.</p>
+<p>What we want is a way to tell it to rebuild if the file <code>src/interface.h</code> is created. To my knowledge, ninja has no way of expressing this kind of negative dependency edge.</p>
+<aside role=note class=note-container><div class=note-content>
+<p>One possibility is to depend on the <em>whole directory</em> of <code>src</code>. The semantics of this are that <code>src</code> gets marked dirty whenever a file is added, moved, or deleted. This has two problems:</p>
+<ul>
+<li>It rebuilds too often. We only want to rerun when <code>src/interface.h</code> is added, not for any other file creation.</li>
+<li>We don’t actually have a consistent way to find all directories that need to be marked in this way. Here we just hardcoded src, but in larger builds <a href="https://jyn.dev/negative-build-dependencies/#fn-depfiles">we would use depfiles</a>, and depfiles do not contain any information about negative dependencies. This matters a lot when there are a dozen+ directories in the search path!</li>
+</ul>
+</div></aside>
+<aside role=note class=note-container><div class=note-content>
+<p>Another way to avoid needing negative dependencies is to simply have a <a href="https://jyn.dev/build-system-tradeoffs/#hermetic-builds">hermetic build</a>, so that our <code>cc src/main.c | dependency/interface.h</code> rule never even makes the <code>src/interface.h</code> file available to the command. That works, but puts us firmly out of Ninja's design space; hermetic builds come with severe tradeoffs.</p>
+</div></aside>
+<aside role=note class=note-container><div class=note-content>
+<p>Yet another idea is to introduce an early-cutoff point:</p>
+<ol>
+<li>For each <code>.c</code> file, run <code>cc -M</code> to get a list of include files. Save that to disk.</li>
+<li>Whenever a directory is changed, rerun <code>cc -M</code>. If our list has changed, rerun a full build for that file.</li>
+</ol>
+
+<p>This has the problem that it's <var>O(n<sup>3</sup>)</var>: For each file, for each include, for each directory in the search path, the preprocessor will try to <code>stat</code> that file to see whether it exists.</p>
+<p>One possible workaround is to calculate the list of include files <em>in the build system</em>:
+Look at the order of the search paths, list each path recursively, ignore filenames that are overridden by an include earlier in the search path.
+Save that to disk.
+Next time a directory is modified, check if the list of include files has changed. If so, only then rerun <code>cc -M</code> for all files.</p>
+<p>This requires the build system to have some quite deep knowledge of how the language works, but I do think it would work today without changes to Ninja.</p>
+<p>Thanks to <a href="https://jade.fyi">Jade Lovelace</a> for this suggestion.</p>
+</div></aside>
+<p>Thanks to David Chisnall and Ben Boeckel (<strong>@mathstuf</strong>) for making me aware of this issue.</p>
+<section class="footnotes">
+<ol class="footnotes-list">
+<li id="fn-depfiles">
+<p>People familiar with ninja might say this looks odd and it should use a <code>depfile</code> with <code>cc -M</code> so dependencies are tracked automatically. That makes your files shorter and means you need to run the configure step less often, but it doesn't actually solve the problem of negative dependencies. Ninja still doesn't know when it needs to regenerate the depfile. <a href="#fr-depfiles-1">↩</a></p>
+</li>
+</ol>
+</section>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

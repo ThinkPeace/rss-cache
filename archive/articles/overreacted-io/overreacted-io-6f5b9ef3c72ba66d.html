@@ -1,0 +1,1497 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JSX Over The Wire | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>JSX Over The Wire</h1>
+        <div class="meta">overreacted — A blog by Dan Abramov 2025-04-16T00:00:00Z</div>
+        <div class="links">
+          <a href="https://overreacted.io/jsx-over-the-wire/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/overreacted-io/overreacted-io-6f5b9ef3c72ba66d.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Turning your API inside-out.</div>
+        <div class="content">
+          <html>
+  <body><h1>JSX Over The Wire</h1><p>April 16, 2025</p><p>Suppose you have an API route that returns some data as JSON:</p><pre><pre>app.get('/api/likes/:postId', async (req, res) =&gt; {
+  const postId = req.params.postId;
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  const json = {
+    totalLikeCount: post.totalLikeCount,
+    isLikedByUser: post.isLikedByUser,
+    friendLikes: friendLikes,
+  };
+  res.json(json);
+});</pre></pre><p>You also have a React component that needs that data:</p><pre><pre>function LikeButton({
+  totalLikeCount,
+  isLikedByUser,
+  friendLikes
+}) {
+  let buttonText = 'Like';
+  if (totalLikeCount &gt; 0) {
+    // e.g. "Liked by You, Alice, and 13 others"
+    buttonText = formatLikeText(totalLikeCount, isLikedByUser, friendLikes);
+  }
+  return (
+    &lt;button className={isLikedByUser ? 'liked' : ''}&gt;
+      {buttonText}
+    &lt;/button&gt;
+  );
+}</pre></pre><p>How do you get that data into that component?</p><p>You could pass it from a parent component using some data fetching library:</p><pre><pre>function PostLikeButton({ postId }) {
+  const [json, isLoading] = useData(`/api/likes/${postId}`);
+  // ...
+  return (
+    &lt;LikeButton
+      totalLikeCount={json.totalLikeCount}
+      isLikedByUser={json.isLikedByUser}
+      friendLikes={json.friendLikes}
+    /&gt;
+  );
+}</pre></pre><p>That’s one way of thinking about it.</p><p>But have another look at your API:</p><pre><pre>app.get('/api/likes/:postId', async (req, res) =&gt; {
+  const postId = req.params.postId;
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  const json = {
+    totalLikeCount: post.totalLikeCount,
+    isLikedByUser: post.isLikedByUser,
+    friendLikes: friendLikes,
+  };
+  res.json(json);
+});</pre></pre><p>Do these lines remind you of anything?</p><p>Props. You’re passing props. You just didn’t specify where to.</p><p>But you already know their final destination—<pre>LikeButton</pre>.</p><p>Why not just fill that in?</p><pre><pre>app.get('/api/likes/:postId', async (req, res) =&gt; {
+  const postId = req.params.postId;
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  const json = (
+    &lt;LikeButton
+      totalLikeCount={post.totalLikeCount}
+      isLikedByUser={post.isLikedByUser}
+      friendLikes={friendLikes}
+    /&gt;
+  );
+  res.json(json);
+});</pre></pre><p>Now the “parent component” of <pre>LikeButton</pre> is the API itself.</p><p>Wait, what?</p><p>Weird, I know. We’re going to worry about whether it’s a good idea later. But for now, notice how this inverts the relationship between components and the API. This is sometimes known as the Hollywood Principle: “Don’t call me, I’ll call you.”</p><p>Your components don’t call your API.</p><p>Instead, your API returns your components.</p><p>Why would you ever want to do that?</p><h2><a href="https://overreacted.io#part-1-json-as-components"/> Part 1: JSON as Components</h2>
+<h3><a href="https://overreacted.io#model-view-viewmodel"/> Model, View, ViewModel</h3>
+<p>There is a fundamental tension between how we want to store information and how we want to display it. We generally want to store more things than we display.</p><p>For example, consider a Like button on a Post. When we store Likes for a given Post, we might want to represent them as a table of <pre>Like</pre> rows like this:</p><pre><pre>type Like = {
+  createdAt: string, // Timestamp
+  likedById: number, // User ID
+  postId: number     // Post ID
+};</pre></pre><p>Let’s call this kind of data a “Model”. It represents the raw shape of the data.</p><pre><pre>type Model = Like;</pre></pre><p>So our Likes database table might contain data of that shape:</p><pre><pre>[{
+  createdAt: '2025-04-13T02:04:41.668Z',
+  likedById: 123,
+  postId: 1001
+}, {
+  createdAt: '2025-04-13T02:04:42.668Z',
+  likedById: 456,
+  postId: 1001
+}, {
+  createdAt: '2025-04-13T02:04:43.668Z',
+  likedById: 789,
+  postId: 1002
+}, /* ... */]</pre></pre><p>However, what we want to display to the user is different.</p><p>What we want to display is the number of Likes for that Post, whether the user has already liked it, and the names of their friends who also liked it. For example, the Like button could appear pressed in (which means that you already liked this post) and say “You, Alice, and 13 others liked this.” Or “Alice, Bob, and 12 others liked this.”</p><pre><pre>type LikeButtonProps = {
+  totalLikeCount: number,
+  isLikedByUser: boolean,
+  friendLikes: string[]
+}</pre></pre><p>Let’s call this kind of data a “ViewModel”.</p><pre><pre>type ViewModel = LikeButtonProps;</pre></pre><p>A ViewModel represents data in a way that is directly consumable by the UI (i.e the view). It is often significantly different from the raw Model. In our example:</p><ul><li>ViewModel’s <pre>totalLikeCount</pre>is aggregated from individual<pre>Like</pre>models.</li><li>ViewModel’s <pre>isLikedByUser</pre>is personalized and depends on the user.</li><li>ViewModel’s <pre>friendLikes</pre>is both aggregated and personalized. To calculate it, you’d have to takes the Likes for this post, filter them down to likes from friends, and get the first few friends’ names (which are likely stored in a different table).</li></ul><p>Clearly, Models will need to turn into ViewModels at some point. The question is where and when this happens in the code, and how that code evolves over time.</p><h3><a href="https://overreacted.io#rest-and-json-api"/> REST and JSON API</h3>
+<p>The most common way to solve this problem is to expose some kind of a JSON API that the client can hit to assemble the ViewModel. There are different ways to design such an API, but the most common way is what’s usually known as REST.</p><p>The typical way to approach REST (<a href="https://htmx.org/essays/how-did-rest-come-to-mean-the-opposite-of-rest/">let’s say we’ve never read this article</a>) is to pick some “Resources”—such as a Post, or a Like—and provide JSON API endpoints that list, create, update, and delete such Resources. Naturally, REST does not specify anything about how you should shape these Resources so there’s a lot of flexibility.</p><p>Often, you might start by returning the shape of the Model:</p><pre><pre>// GET /api/post/123
+{
+  title: 'My Post',
+  content: 'Hello world...',
+  authorId: 123,
+  createdAt: '2025-04-13T02:04:40.668Z'
+}</pre></pre><p>So far so good. But how would you incorporate Likes into this? Maybe <pre>totalLikeCount</pre> and <pre>isLikedByUser</pre> could be a part of the Post Resource:</p><pre><pre>// GET /api/post/123
+{
+  title: 'My Post',
+  content: 'Hello world...',
+  authorId: 123,
+  createdAt: '2025-04-13T02:04:40.668Z',
+  totalLikeCount: 13,
+  isLikedByUser: true
+}</pre></pre><p>Now, should <pre>friendLikes</pre> also go there? We need this information on the client.</p><pre><pre>// GET /api/post/123
+{
+  title: 'My Post',
+  authorId: 123,
+  content: 'Hello world...',
+  createdAt: '2025-04-13T02:04:40.668Z',
+  totalLikeCount: 13,
+  isLikedByUser: true,
+  friendLikes: ['Alice', 'Bob']
+}</pre></pre><p>Or are we starting to abuse the notion of a Post by adding too much stuff to it? Okay, how about this, maybe we could offer a separate endpoint for a Post’s Likes:</p><pre><pre>// GET /api/post/123/likes
+{
+  totalCount: 13,
+  likes: [{
+    createdAt: '2025-04-13T02:04:41.668Z',
+    likedById: 123,
+  }, {
+    createdAt: '2025-04-13T02:04:42.668Z',
+    likedById: 768,
+  }, /* ... */]
+}</pre></pre><p>So a Post’s Like becomes its own “Resource”.</p><p>That’s nice in theory but we’re going to need to know the likers’ names, and we don’t want to make a request for each Like. So we need to “expand” the users here:</p><pre><pre>// GET /api/post/123/likes
+{
+  totalCount: 13,
+  likes: [{
+    createdAt: '2025-04-13T02:04:41.668Z',
+    likedBy: {
+      id: 123,
+      firstName: 'Alice',
+      lastName: 'Lovelace'
+    }
+  }, {
+    createdAt: '2025-04-13T02:04:42.668Z',
+    likedBy: {
+      id: 768,
+      firstName: 'Bob',
+      lastName: 'Babbage'
+    }
+  }]
+}</pre></pre><p>We also “forgot” which of these Likes are from friends. Should we solve this by having a separate <pre>/api/post/123/friend-likes</pre> endpoint? Or should we order by friends first and include <pre>isFriend</pre> into the <pre>likes</pre> array items so we can disambiguate friends from other likes? Or should we add <pre>?filter=friends</pre>?</p><p>Or should we include the friend likes directly into the Post to avoid two API calls?</p><pre><pre>// GET /api/post/123
+{
+  title: 'My Post',
+  authorId: 123,
+  content: 'Hello world...',
+  createdAt: '2025-04-13T02:04:40.668Z',
+  totalLikeCount: 13,
+  isLikedByUser: true,
+  friendLikes: [{
+    createdAt: '2025-04-13T02:04:41.668Z',
+    likedBy: {
+      id: 123,
+      firstName: 'Alice',
+      lastName: 'Lovelace'
+    }
+  }, {
+    createdAt: '2025-04-13T02:04:42.668Z',
+    likedBy: {
+      id: 768,
+      firstName: 'Bob',
+      lastName: 'Babbage'
+    }
+  }]
+}</pre></pre><p>This seems useful but what if <pre>/api/post/123</pre> gets called from other screens that don’t need this information—and you’d rather not slow them down? Maybe there could be an opt-in like <pre>/api/post/123?expand=friendLikes</pre>?</p><p>Anyway, the point I’m trying to make here is not that it’s impossible to design a good REST API. The vast majority of apps I’ve seen work this way so it’s at the very least doable. But anyone who designed one and then worked on it for more than a few months knows the drill. Evolving REST endpoints is a pain in the ass.</p><p>It usually goes like this:</p><ul><li>Initially, you have to decide how to structure the JSON output. None of the options are clearly better than the rest; mostly you’re just guessing how the app will evolve.</li><li>The initial decisions tend to settle down after a few back-and-forth iterations… until the next UI redesign which causes ViewModels to have slightly different shapes. The already existing REST endpoints don’t quite cover the new needs.</li><li>It’s possible to add new REST API endpoints, but at some point you’re not really “supposed to” add more because you already defined all the possible Resources. For example, if <pre>/posts/123</pre>exists, you likely won’t add another “get post” API.</li><li>Now you’re running into issues with calculating and sending either not enough or too much data. You either aggressively “expand” fields in the existing Resources or come up with an elaborate set of conventions for doing it on-demand.</li><li>Some ViewModels are only needed by a subset of screens but they’re always included in the response because that’s easier than making them configurable.</li><li>Some screens resort to cobbling their ViewModels together from multiple API calls because no single response contains all the necessary information anymore.</li><li>Then the design and the functionality of your product changes again. Repeat.</li></ul><p>There’s clearly some fundamental tension here, but what is causing it?</p><p>First, note how the shape of the ViewModels is determined by the UI. It’s not a reflection of some platonic idea of a Like; rather, it’s dictated by the design. We want to show “You, Ann, and 13 others liked this”, therefore we need these fields:</p><pre><pre>type LikeButtonProps = {
+  totalLikeCount: number,
+  isLikedByUser: boolean,
+  friendLikes: string[]
+}</pre></pre><p>If this screen’s design or functionality changes (for example, if you want to show the avatars of your friends who liked the post), the ViewModel will change as well:</p><pre><pre>type LikeButtonProps = {
+  totalLikeCount: number,
+  isLikedByUser: boolean,
+  friendLikes: {
+    firstName: string
+    avatar: string
+  }[]
+}</pre></pre><p>But here’s the rub.</p><p>REST (or, rather, how REST is broadly used) encourages you to think in terms of Resources rather than Models or ViewModels. At first, your Resources start out as mirroring Models. But a single Model rarely has enough data for a screen, so you develop ad-hoc conventions for nesting Models in a Resource. However, including all the relevant Models (e.g. all Likes of a Post) is often impossible or impractical, so you start adding ViewModel-ish fields like <pre>friendLikes</pre> to your Resources.</p><p>But putting ViewModels in Resources also doesn’t work very well. ViewModels are not abstract concepts like “a post”; each ViewModel describes a specific piece of UI. As a result, the shape of your “Post” Resource grows to encompass the needs of every screen displaying a post. But those needs also change over time, so the “Post” Resource’s shape is at best a compromise between what different screens need now, and at worst a fossilized record of everything they’ve ever needed in the past.</p><p>Let me put this more bluntly:</p><p>REST Resources don’t have a firm grounding in the reality. Their shapes are not sufficiently constrained—we’re making up concepts mostly out of thin air. Unlike Models, they’re not grounded in the reality of how the data is stored. And unlike ViewModels, they’re not grounded in the reality of how the data is presented. Unfortunately, nudging them in either direction only makes things worse.</p><p>If you keep REST Resources close to the Models, you’ll hurt the user experience. Now things that could be fetched in a single request would require a couple or, god forbid, N calls. This is especially noticeable in products from companies where the backend team “hands off” a REST API to the frontend team and takes no feedback. The API may look simple and elegant but it is completely impractical to consume.</p><p>On the other hand, if you nudge REST Resources to stay closer to the ViewModels, you’re hurting maintainability. ViewModels are fickle! Most ViewModels are going to change the next time the corresponding piece of UI is redesigned. But changing the shape of REST Resources is hard—the same Resources are being fetched by many screens. As a result, their shape gradually drifts away from the needs of the current ViewModels, and becomes difficult to evolve. There’s a reason the backend teams often resist adding UI-specific fields to the response: they’ll likely get stale!</p><p>This doesn’t necessarily mean that REST itself, as it’s broadly understood, is broken. It can be very nice to use when the Resources are well-defined and their fields are well-chosen. But this often goes against the client’s needs, which is to get all the data for a particular screen. There’s something missing in the middle.</p><p>We need a translation layer.</p><h3><a href="https://overreacted.io#api-for-viewmodels"/> API for ViewModels</h3>
+<p>There is a way to resolve this tension.</p><p>You have some latitude with how exactly you could approach it but the main idea is that your client should be able to request all data for a specific screen at once.</p><p>It’s such a simple idea!</p><p>Instead of requesting “canonical” REST Resources from the client such as:</p><pre><pre>GET /data/post/123       # Get Post Resource
+GET /data/post/123/likes # Get Post Likes Resource</pre></pre><p>you request a ViewModel for a specific screen (i.e. a route):</p><pre><pre>GET /screens/post-details/123 # Get ViewModel for the PostDetails screen</pre></pre><p>This data would include everything that screen needs.</p><p>The difference is subtle but profound. You’re no longer trying to define a universal canonical shape of a Post. Rather, you send whatever data the PostDetails screen needs in order to display its components today. If the PostDetails screen gets deleted, this endpoint gets deleted too. If a different screen wants to display some related information (for example, a PostLikedBy popup), it will gets its own route:</p><pre><pre>GET /screens/post-details/123 # Get ViewModel for the PostDetails screen
+GET /screens/post-liked-by/123 # Get ViewModel for the PostLikedBy screen</pre></pre><p>Okay, but how does this help?</p><p>This avoids the trap of “ungrounded” abstraction. The ViewModel interface for every screen precisely specifies the shape of the server response. If you need to change it or fine-tune it, you can do that without affecting any other screens.</p><p>For example, a <pre>PostDetails</pre> screen ViewModel might look like this:</p><pre><pre>type PostDetailsViewModel = {
+  postTitle: string,
+  postContent: string,
+  postAuthor: {
+    name: string,
+    avatar: string,
+    id: number
+  },
+  friendLikes: {
+    totalLikeCount: number,
+    isLikedByUser: boolean,
+    friendLikes: string[]
+  }
+};</pre></pre><p>So that’s what the server would return for <pre>/screens/post-details/123</pre>. Later, if you want to display avatars of friend likes, you’d just add it to that ViewModel:</p><pre><pre>type PostDetailsViewModel = {
+  postTitle: string,
+  postContent: string,
+  postAuthor: {
+    name: string,
+    avatar: string,
+    id: number
+  },
+  friendLikes: {
+    totalLikeCount: number,
+    isLikedByUser: boolean,
+    friendLikes: {
+      firstName: string
+      avatar: string
+    }[]
+  }
+}</pre></pre><p>Note that you’d only have to update that screen’s endpoint. You’re no longer forced to balance what one screen needs with what another screen needs. There are no questions like “which Resource does this field belong to?”, or whether it should be “expanded”. If some screen needs more data than others, you can just include more data in that screen’s response—it doesn’t have to be generic or configurable. The shape of the server response is exactly determined by each screen’s needs.</p><p>This does solve the stated problems with REST.</p><p>It also introduces a few novel questions:</p><ul><li>There’s going to be a lot more endpoints than with REST Resources—an endpoint per screen. How will these endpoints be structured and kept maintainable?</li><li>How do you reuse code between the endpoints? Presumably there would be a lot of duplicated data access and other business logic between those endpoints.</li><li>How do you convince the backend team to pivot from their REST APIs to this?</li></ul><p>The last question is probably the first we need to resolve. The backend team will likely have very warranted reservations about this approach. At the very least, if this approach proves terrible, it would be good to have a way to migrate back.</p><p>Luckily, there’s no need to throw anything away.</p><h3><a href="https://overreacted.io#backend-for-frontend"/> Backend For Frontend</h3>
+<p>Instead of replacing your existing REST API, you can add a new layer in front of it:</p><pre><pre>// You're adding new screen-specific endpoints...
+app.get('/screen/post-details/:postId', async (req, res) =&gt; {
+  const [post, friendLikes] = await Promise.all([
+    // ...which call your existing REST API here
+    fetch(`/api/post/${postId}`).then(r =&gt; r.json()),
+    fetch(`/api/post/${postId}/friend-likes`).then(r =&gt; r.json()),
+  ]);
+  const viewModel = {
+    postTitle: post.title,
+    postContent: parseMarkdown(post.content),
+    postAuthor: post.author,
+    postLikes: {
+      totalLikeCount: post.totalLikeCount,
+      isLikedByUser: post.isLikedByUser,
+      friendLikes: friendLikes.likes.map(l =&gt; l.firstName)
+    }
+  };
+  res.json(viewModel);
+});</pre></pre><p>This is not a new idea. Such a layer is often called BFF, or Backend for Frontend. In this case, the job of the BFF is to adapt your REST API to returning ViewModels.</p><p>If some screen needs more data, a BFF lets you serve more data to it without changing your entire data model. It keeps screen-specific changes scoped. Crucially, it lets you deliver all the data any screen needs in a single roundtrip.</p><p>The BFF doesn’t have to be written in the same language as your REST API. For reasons we’ll get into later, it’s advantageous to write BFF in the same language as your frontend code. You can think of it as a piece of the frontend that happens to run on the server. It’s like the frontend’s “ambassador” to the server. It “adapts” the REST responses into the shape that each screen of the frontend UI actually wants.</p><p>Although you can get some of the benefits of BFF with client-only per-route loaders like <a href="https://reactrouter.com/start/framework/data-loading#client-data-loading"> clientLoader in React Router</a>, there’s a lot you unlock by actually deploying this layer on the server close to where the REST endpoints are deployed.</p><p>For example, even if you do have to make several REST API requests serially one after another to load all the necessary data for a screen, the latency between the BFF and your REST API would be much lower than when making multiple serial requests from the client. If your REST API responses are fast on the internal network, you can cut down literal seconds of what used to be client/sever waterfalls without actually parallelizing the (sometimes inevitable) serial calls.</p><p>A BFF also lets you apply data transformations before sending data to the client, which can significantly improve performance on low-end client devices. You can even go as far as to cache or persist some computations on the disk, even between different users, since you have access to the disk—and to server caches like Redis. In that sense, a BFF lets a frontend team have their very own little slice of the server.</p><p>Importantly, a BFF gives you a way to experiment with alternatives to your REST APIs without affecting the client application. For example, if your REST API has no other consumers, you can turn it into an internal microservice and avoid exposing it to the world. Moreover, you could turn it into a data access layer rather than an HTTP service, and simply import that data access layer in-process from your BFF:</p><pre><pre>import { getPost, getFriendLikes } from '@your-company/data-layer';
+ 
+app.get('/screen/post-details/:postId', async (req, res) =&gt; {
+  const postId = req.params.postId;
+  const [post, friendLikes] = await Promise.all([
+    // Reads from an ORM and applies business logic.
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  const viewModel = {
+    postTitle: post.title,
+    postContent: parseMarkdown(post.content),
+    postAuthor: post.author,
+    postLikes: {
+      totalLikeCount: post.totalLikeCount,
+      isLikedByUser: post.isLikedByUser,
+      friendLikes: friendLikes.likes.map(l =&gt; l.firstName)
+    }
+  };
+  res.json(viewModel);
+});</pre></pre><p>(Of course, this part only works if you can write lower-level backend logic in JS.)</p><p>This can help you avoid problems like loading the same information many times from the database (no <pre>fetch</pre> calls means database reads can be batched). It also lets you “drop down” the abstraction level when needed—for example, to run a fine-tuned stored database procedure that isn’t neatly exposed over the REST API.</p><p>There’s a lot to like about the BFF pattern. It solves quite a few problems but it also raises new questions. For example, how do you organize its code? If each screen is essentially its own API method, how do you avoid duplication of code? And how do you keep your BFF synchronized with data requirements of the front-end side?</p><p>Let’s try to make some progress on answering those.</p><h3><a href="https://overreacted.io#composable-bff"/> Composable BFF</h3>
+<p>Suppose you’re adding a new <pre>PostList</pre> screen. It’s going to render an array of <pre>&lt;PostDetails&gt;</pre> components, each of which needs the same data as before:</p><pre><pre>type PostDetailsViewModel = {
+  postTitle: string,
+  postContent: string,
+  postAuthor: {
+    name: string,
+    avatar: string,
+    id: number
+  },
+  friendLikes: {
+    totalLikeCount: number,
+    isLikedByUser: boolean,
+    friendLikes: string[]
+  }
+};</pre></pre><p>So the ViewModel for <pre>PostList</pre> contains an array of <pre>PostDetailsViewModel</pre>:</p><pre><pre>type PostListViewModel = {
+  posts: PostDetailsViewModel[]
+};</pre></pre><p>How would you load the data for <pre>PostList</pre>?</p><p>Your first inclination may be to make a series of requests from the client to the existing <pre>/screen/post-details/:postId</pre> endpoint which already knows how to prepare a ViewModel for a single post. We just need to call it for every post.</p><p>But wait, this defeats the entire purpose of the BFF! Making many requests for a single screen is inefficient and is precisely the kind of compromise that we’ve been trying to avoid. Instead, we’ll add a new BFF endpoint for the new screen.</p><p>The new endpoint might initially look like this:</p><pre><pre>import { getPost, getFriendLikes, getRecentPostIds } from '@your-company/data-layer';
+ 
+app.get('/screen/post-details/:postId', async (req, res) =&gt; {
+  const postId = req.params.postId;
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  const viewModel = {
+    postTitle: post.title,
+    postContent: parseMarkdown(post.content),
+    postAuthor: post.author,
+    postLikes: {
+      totalLikeCount: post.totalLikeCount,
+      isLikedByUser: post.isLikedByUser,
+      friendLikes: friendLikes.likes.map(l =&gt; l.firstName)
+    }
+  };
+  res.json(viewModel);
+});
+ 
+app.get('/screen/post-list', async (req, res) =&gt; {
+  // Grab the recent post IDs
+  const postIds = await getRecentPostIds();
+  const viewModel = {
+    // For each post ID, load the data in parallel
+    posts: await Promise.all(postIds.map(async postId =&gt; {
+      const [post, friendLikes] = await Promise.all([
+        getPost(postId),
+        getFriendLikes(postId, { limit: 2 }),
+      ]);
+      const postDetailsViewModel = {
+        postTitle: post.title,
+        postContent: parseMarkdown(post.content),
+        postAuthor: post.author,
+        postLikes: {
+          totalLikeCount: post.totalLikeCount,
+          isLikedByUser: post.isLikedByUser,
+          friendLikes: friendLikes.likes.map(l =&gt; l.firstName)
+        }
+      };
+      return postDetailsViewModel;
+    }))
+  };
+  res.json(viewModel);
+});</pre></pre><p>However, note that there’s significant code duplication between the endpoints:</p><pre><pre>import { getPost, getFriendLikes, getRecentPostIds } from '@your-company/data-layer';
+ 
+app.get('/screen/post-details/:postId', async (req, res) =&gt; {
+  const postId = req.params.postId;
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  const viewModel = {
+    postTitle: post.title,
+    postContent: parseMarkdown(post.content),
+    postAuthor: post.author,
+    postLikes: {
+      totalLikeCount: post.totalLikeCount,
+      isLikedByUser: post.isLikedByUser,
+      friendLikes: friendLikes.likes.map(l =&gt; l.firstName)
+    }
+  };
+  res.json(viewModel);
+});
+ 
+app.get('/screen/post-list', async (req, res) =&gt; {
+  const postIds = await getRecentPostIds();
+  const viewModel = {
+    posts: await Promise.all(postIds.map(async postId =&gt; {
+      const [post, friendLikes] = await Promise.all([
+        getPost(postId),
+        getFriendLikes(postId, { limit: 2 }),
+      ]);
+      const postDetailsViewModel = {
+        postTitle: post.title,
+        postAuthor: post.author,
+        postContent: parseMarkdown(post.content),
+        postLikes: {
+          totalLikeCount: post.totalLikeCount,
+          isLikedByUser: post.isLikedByUser,
+          friendLikes: friendLikes.likes.map(l =&gt; l.firstName)
+        }
+      };
+      return postDetailsViewModel;
+    }))
+  };
+  res.json(viewModel);
+});</pre></pre><p>It’s almost like there is a notion of “<pre>PostDetails</pre> ViewModel” begging to be extracted. This should not be surprising—both screens render the same <pre>&lt;PostDetails&gt;</pre> component, so they need similar code to load the data for it.</p><h3><a href="https://overreacted.io#extracting-a-viewmodel"/> Extracting a ViewModel</h3>
+<p>Let’s extract a <pre>PostDetailsViewModel</pre> function:</p><pre><pre>import { getPost, getFriendLikes, getRecentPostIds } from '@your-company/data-layer';
+ 
+async function PostDetailsViewModel({ postId }) {
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  return {
+    postTitle: post.title,
+    postContent: parseMarkdown(post.content),
+    postAuthor: post.author,
+    postLikes: {
+      totalLikeCount: post.totalLikeCount,
+      isLikedByUser: post.isLikedByUser,
+      friendLikes: friendLikes.likes.map(l =&gt; l.firstName)
+    }
+  };
+}
+ 
+app.get('/screen/post-details/:postId', async (req, res) =&gt; {
+  const postId = req.params.postId;
+  const viewModel = await PostDetailsViewModel({ postId });
+  res.json(viewModel);
+});
+ 
+app.get('/screen/post-list', async (req, res) =&gt; {
+  const postIds = await getRecentPostIds();
+  const viewModel = {
+    posts: await Promise.all(postIds.map(postId =&gt;
+      PostDetailsViewModel({ postId })
+    ))
+  };
+  res.json(viewModel);
+});</pre></pre><p>This makes our BFF endpoints significantly simpler.</p><p>In fact, we can go a bit further. Look at this part of <pre>PostDetailsViewModel</pre>:</p><pre><pre>async function PostDetailsViewModel({ postId }) {
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  return {
+    postTitle: post.title,
+    postContent: parseMarkdown(post.content),
+    postAuthor: post.author,
+    postLikes: {
+      totalLikeCount: post.totalLikeCount,
+      isLikedByUser: post.isLikedByUser,
+      friendLikes: friendLikes.likes.map(l =&gt; l.firstName)
+    }
+  };
+}</pre></pre><p>We know that the purpose of the <pre>postLikes</pre> field is to eventually become props for the <pre>LikeButton</pre> component—i.e. this field is <pre>LikeButton</pre>’s ViewModel:</p><pre><pre>function LikeButton({
+  totalLikeCount,
+  isLikedByUser,
+  friendLikes
+}) {
+  // ...
+}</pre></pre><p>So let’s extract the logic preparing these props into <pre>LikeButtonViewModel</pre>:</p><pre><pre>import { getPost, getFriendLikes, getRecentPostIds } from '@your-company/data-layer';
+ 
+async function LikeButtonViewModel({ postId }) {
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  return {
+    totalLikeCount: post.totalLikeCount,
+    isLikedByUser: post.isLikedByUser,
+    friendLikes: friendLikes.likes.map(l =&gt; l.firstName)
+  };
+}
+ 
+async function PostDetailsViewModel({ postId }) {
+  const [post, postLikes] = await Promise.all([
+    getPost(postId), // It's fine to getPost() here again. Our data layer deduplicates calls via an in-memory cache.
+    LikeButtonViewModel({ postId }),
+  ]);
+  return {
+    postTitle: post.title,
+    postContent: parseMarkdown(post.content),
+    postAuthor: post.author,
+    postLikes
+  };
+}</pre></pre><p>Now we have a tree of functions that load data as JSON—our ViewModels.</p><p>Depending on your background, this might remind you of a few other things. It might remind you of composing Redux reducers out of smaller reducers. It might also remind you of composing GraphQL fragments out of smaller fragments. Or it might remind you of composing React components from other React components.</p><p>Although the code style is a little verbose now, there is something oddly satisfying in breaking apart a screen’s ViewModel into smaller ViewModels. It feels similar to writing a React component tree, except that we’re decomposing a backend API. It’s like the data has its own shape but it roughly lines up with your React component tree.</p><p>Let’s see what happens when the UI needs to evolve.</p><h3><a href="https://overreacted.io#evolving-a-viewmodel"/> Evolving a ViewModel</h3>
+<p>Suppose the UI design changes, and we want to display friends’ avatars too:</p><pre><pre>type LikeButtonProps = {
+  totalLikeCount: number,
+  isLikedByUser: boolean,
+  friendLikes: {
+    firstName: string
+    avatar: string
+  }[]
+}</pre></pre><p>Assuming we use TypeScript, we’ll immediately get a type error in the ViewModel:</p><pre><pre>async function LikeButtonViewModel(
+  { postId } : { postId: number }
+) : LikeButtonProps {
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  return {
+    totalLikeCount: post.totalLikeCount,
+    isLikedByUser: post.isLikedByUser,
+    // 🔴 Type 'string[]' is not assignable to type '{ firstName: string; avatar: string; }[]'.
+    friendLikes: friendLikes.likes.map(l =&gt; l.firstName)
+  };
+}</pre></pre><p>Let’s fix it:</p><pre><pre>async function LikeButtonViewModel(
+  { postId } : { postId: number }
+) : LikeButtonProps {
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  return {
+    totalLikeCount: post.totalLikeCount,
+    isLikedByUser: post.isLikedByUser,
+    friendLikes: friendLikes.likes.map(l =&gt; ({
+      firstName: l.firstName,
+      avatar: l.avatar,
+    }))
+  };
+}</pre></pre><p>Now the BFF response for every screen that includes a <pre>LikeButton</pre> ViewModel will use the new <pre>friendLikes</pre> format, which is exactly what the <pre>LikeButton</pre> React component wants. There are no further changes to make—it just works. We know that it works because <pre>LikeButtonViewModel</pre> is the only place generating props for a <pre>LikeButton</pre>, no matter which screen we’re requesting from the BFF. (For now assume that this is true; we’re still yet to decide how exactly to tie them.)</p><p>I’d like to call attention to the previous fact because this is quite profound.</p><p>When was the last time you could clearly trace the correspondence between a deeply nested piece of server code generating a fragment of data, and a deeply nested piece of the client code consuming that data? We’re clearly onto something.</p><h3><a href="https://overreacted.io#viewmodel-parameters"/> ViewModel Parameters</h3>
+<p>You might have noticed that ViewModel functions can take parameters. Importantly, these parameters can be specified by the “parent” ViewModel functions and plumbed down—so the client doesn’t need to be aware of them.</p><p>For example, suppose you wanted to make the Post List page only display the first paragraph of every post’s content. Let’s add a parameter to its ViewModel:</p><pre><pre>async function PostDetailsViewModel({
+  postId,
+  truncateContent
+}) {
+  const [post, postLikes] = await Promise.all([
+    getPost(postId),
+    LikeButtonViewModel({ postId }),
+  ]);
+  return {
+    postTitle: post.title,
+    postContent: parseMarkdown(post.content, {
+      maxParagraphs: truncateContent ? 1 : undefined
+    }),
+    postAuthor: post.author,
+    postLikes
+  };
+}
+ 
+app.get('/screen/post-details/:postId', async (req, res) =&gt; {
+  const postId = req.params.postId;
+  const viewModel = await PostDetailsViewModel({
+    postId,
+    truncateContent: false
+  });
+  res.json(viewModel);
+});
+ 
+app.get('/screen/post-list', async (req, res) =&gt; {
+  const postIds = await getRecentPostIds();
+  const viewModel = {
+    posts: await Promise.all(postIds.map(postId =&gt;
+      PostDetailsViewModel({
+        postId,
+        truncateContent: true
+      })
+    ))
+  };
+  res.json(viewModel);
+});</pre></pre><p>The JSON response for the <pre>post-details</pre> endpoint still includes the entire posts, but the <pre>post-list</pre> JSON endpoint will now only serve their abridged summaries. This is a view model concern, and now we have a natural place to express it in code.</p><h3><a href="https://overreacted.io#plumbing-viewmodel-parameters"/> Plumbing ViewModel Parameters</h3>
+<p>Next, suppose you wanted to include avatars only on the Details screen. Let’s edit <pre>LikeButtonViewModel</pre> to take and respect an <pre>includeAvatars</pre> parameter:</p><pre><pre>async function LikeButtonViewModel({
+  postId,
+  includeAvatars
+}) {
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: 2 }),
+  ]);
+  return {
+    totalLikeCount: post.totalLikeCount,
+    isLikedByUser: post.isLikedByUser,
+    friendLikes: friendLikes.likes.map(l =&gt; ({
+      firstName: l.firstName,
+      avatar: includeAvatars ? l.avatar : null,
+    }))
+  };
+}</pre></pre><p>Now you can plumb it down all the way from the BFF endpoints:</p><pre><pre>async function PostDetailsViewModel({
+  postId,
+  truncateContent,
+  includeAvatars
+}) {
+  const [post, postLikes] = await Promise.all([
+    getPost(postId),
+    LikeButtonViewModel({ postId, includeAvatars }),
+  ]);
+  return {
+    postTitle: post.title,
+    postContent: parseMarkdown(post.content, {
+      maxParagraphs: truncateContent ? 1 : undefined
+    }),
+    postAuthor: post.author,
+    postLikes
+  };
+}
+ 
+app.get('/screen/post-details/:postId', async (req, res) =&gt; {
+  const postId = req.params.postId;
+  const viewModel = await PostDetailsViewModel({
+    postId,
+    truncateContent: false,
+    includeAvatars: true
+  });
+  res.json(viewModel);
+});
+ 
+app.get('/screen/post-list', async (req, res) =&gt; {
+  const postIds = await getRecentPostIds();
+  const viewModel = {
+    posts: await Promise.all(postIds.map(postId =&gt;
+      PostDetailsViewModel({
+        postId,
+        truncateContent: true,
+        includeAvatars: false
+      })
+    ))
+  };
+  res.json(viewModel);
+});</pre></pre><p>Again, the client doesn’t pass ad-hoc parameters like <pre>?includeAvatars=true</pre> to the server to ensure that the avatars are included in the JSON response. Instead, the <pre>post-list</pre> BFF endpoint itself knows a Post List shouldn’t include avatars, so it can pass <pre>includeAvatars: false</pre> to <pre>PostDetailsViewModel</pre>, which plumbs it down to <pre>LikeButtonViewModel</pre>. The client code doesn’t need to be aware of the server logic at all—all it cares about is that it gets the props that it wants.</p><p>For the case when we do show avatars of friends, we might want to show five rather than two. We can make that change directly in <pre>LikeButtonViewModel</pre>:</p><pre><pre>async function LikeButtonViewModel({
+  postId,
+  includeAvatars
+}) {
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: includeAvatars ? 5 : 2 }),
+  ]);
+  return {
+    totalLikeCount: post.totalLikeCount,
+    isLikedByUser: post.isLikedByUser,
+    friendLikes: friendLikes.likes.map(l =&gt; ({
+      firstName: l.firstName,
+      avatar: includeAvatars ? l.avatar : null,
+    }))
+  };
+}</pre></pre><p>Since the <pre>LikeButtonViewModel</pre> function exists solely to generate the <pre>LikeButton</pre> props, adding more presentational logic here feels natural. It’s a view model, right? If another view wanted to show a different number of avatars, it could do that. Unlike with REST, there is no canonical notion of a “post”—so any UI can specify exactly the data it needs, from a screen all the way down to a button.</p><p>Our ViewModels evolve in the exact lockstep with the needs of the client.</p><h3><a href="https://overreacted.io#composing-viewmodels"/> Composing ViewModels</h3>
+<p>Something interesting is taking shape. We’ve started to split our BFF endpoints into units of reusable logic, and we’ve found that these units let us encapsulate data loading in a similar way as we’ve been encapsulating the user interface. If you squint at ViewModels, you might even see some parallels to components.</p><p>And yet the end result of the ViewModel tree is not a UI tree—it’s just JSON.</p><pre><pre>// GET /screen/post-list
+{
+  /* Begin screen/post-list ViewModel */
+  posts: [{
+    /* Begin PostDetailsViewModel */
+    postTitle: "JSX Over The Wire",
+    postAuthor: "Dan",
+    postContent: "Suppose you have an API route that returns some data as JSON.",
+    postLikes: {
+      /* Begin LikeButtonViewModel */
+      totalLikeCount: 8,
+      isLikedByUser: false,
+      friendLikes: [{
+        firstName: "Alice"
+      }, {
+        firstName: "Bob"
+      }]
+      /* End LikeButtonViewModel */
+    }
+    /* End PostDetailsViewModel */
+  }, {
+    /* Begin PostDetailsViewModel */
+    postTitle: "React for Two Computers",
+    postAuthor: "Dan",
+    postContent: "I’ve been trying to write this post at least a dozen times.",
+    postLikes: {
+      /* Begin LikeButtonViewModel */
+      totalLikeCount: 13,
+      isLikedByUser: true,
+      friendLikes: [{
+        firstName: "Bob"
+      }]
+      /* End LikeButtonViewModel */
+    }
+    /* End PostDetailsViewModel */
+  }]
+}</pre></pre><p>But what should we do with that JSON?</p><p>In the end, somehow we want the props generated by <pre>LikeButtonViewModel</pre> to end up in the <pre>LikeButton</pre> component. Likewise, somehow we want the props generated by <pre>PostDetailsViewModel</pre> to get to the <pre>PostDetails</pre> component. We don’t want to generate a huge ViewModel tree of JSON just to manually plumb every piece of it down exactly to the component that needs that ViewModel’s data.</p><p>We’re building two parallel hierarchies in the two worlds.</p><p>But these worlds are not connected yet.</p><p>Something is missing.</p><h3><a href="https://overreacted.io#recap-json-as-components"/> Recap: JSON as Components</h3>
+<ul><li>For any UI, the data begins its life as Models and ends its life as ViewModels. The transformation between Models and ViewModels has to happen somewhere.</li><li>The shape of ViewModels is fully dictated by the design of our user interface. This means that they will evolve over time together with our designs. Also, different screens need different ViewModels aggregated from the same underlying Models.</li><li>Modeling data from the server as REST Resources creates a tension. If REST Resources are close to raw Models, it may require multiple roundtrips and complex ad-hoc conventions to obtain the necessary ViewModels for a screen. If REST Resources are close to ViewModels, they get too coupled to the initial screens they were designed to represent, and don’t evolve together with the needs of the client.</li><li>We can resolve this tension by creating another layer—a Backend For Frontend (BFF). The job of the BFF is to translate the needs of the client (“give me data for this screen”) to REST calls on the backend. A BFF can also evolve beyond being a facade for REST, and instead load data directly using an in-process data layer.</li><li>Since the BFF’s job is to return all the data needed for each screen as a piece of JSON, it is natural to split up the data loading logic into reusable units. A screen’s ViewModel can be decomposed into a tree of ViewModels, corresponding to the pieces of server data that different components will want to receive on the client. These individual ViewModels can then be recombined and composed together.</li><li>These ViewModel functions can pass information to each other. This lets us customize the JSON we’re sending depending on the screen. Unlike with REST, we’re no longer trying to design canonical shapes like a “a post object” used throughout all responses. At any point, we can diverge and serve different ViewModels for the same information to different screens—whatever they want. These ViewModels are view models. They can—should?—have presentation logic.</li><li>We’re beginning to realize that ViewModels form a very similar structure to React components. ViewModels are like components, but for generating JSON. However, we still haven’t figured out how to actually pass the JSON they’re generating on the server to the components that need it on the client. It’s also annoying to deal with two parallel hierarchies. We’re onto something, but we’re missing something.</li></ul><p>What are we missing?</p><h2><a href="https://overreacted.io#part-2-components-as-json"/> Part 2: Components as JSON</h2>
+<h3><a href="https://overreacted.io#html-ssi-and-cgi"/> HTML, SSI, and CGI</h3>
+<p>JSON, MVVM, BFF, what the hell was that?!</p><p>What an incredibly overengineered way to make a website. These React complexity peddlers are so out of touch. If only they knew the history.</p><p>Back in my days, we’d just write a bit of HTML and call it a day.</p><p>My <pre>index.html</pre> homepage would look like this:</p><pre><pre>&lt;html&gt;
+  &lt;body&gt;
+    &lt;h1&gt;Welcome to my blog!&lt;/h1&gt;
+    &lt;h2&gt;Latest posts&lt;/h2&gt;
+    &lt;h3&gt;
+      &lt;a href="/jsx-over-the-wire.html"&gt;
+        JSX Over The Wire
+      &lt;/a&gt;
+    &lt;/h3&gt;
+    &lt;p&gt;
+      Suppose you have an API route that returns some data as JSON. [...]
+    &lt;/p&gt;
+    &lt;h3&gt;
+      &lt;a href="/react-for-two-computers.html"&gt;
+        React for Two Computers
+      &lt;/a&gt;
+    &lt;/h3&gt;
+    &lt;p&gt;
+      I’ve been trying to write this post at least a dozen times. [...]
+    &lt;/p&gt;
+    ...
+  &lt;/body&gt;
+&lt;/html&gt;</pre></pre><p>Then my <pre>jsx-over-the-wire.html</pre> post details page would look like this:</p><pre><pre>&lt;html&gt;
+  &lt;body&gt;
+    &lt;h1&gt;JSX Over The Wire&lt;/h1&gt;
+    &lt;p&gt;
+      Suppose you have an API route that returns some data as JSON.
+    &lt;/p&gt;
+    ...
+  &lt;/body&gt;
+&lt;/html&gt;</pre></pre><p>I’d put these files on a box with Apache and that would be it!</p><p>Now suppose I wanted to add a footer to all my pages. That couldn’t be easier. First, let me create a file called <pre>includes/footer.html</pre> with my footer:</p><pre><pre>&lt;marquee&gt;
+  &lt;a href="/"&gt;overreacted&lt;/a&gt;
+&lt;/marquee&gt;</pre></pre><p>Now I can include my footer on any page with <a href="https://en.wikipedia.org/wiki/Server_Side_Includes">Server-Side Includes  (SSI)</a>:</p><pre><pre>&lt;html&gt;
+  &lt;body&gt;
+    &lt;h1&gt;Welcome to my blog!&lt;/h1&gt;
+    &lt;h2&gt;Latest posts&lt;/h2&gt;
+    ...
+    &lt;!--#include virtual="/includes/footer.html" --&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</pre></pre><p>In fact, I don’t want to copy and paste the first paragraph of each blog post into my <pre>index.html</pre> file so I might use SSI together with <a href="https://en.wikipedia.org/wiki/Common_Gateway_Interface">CGI</a> to generate my index page:</p><pre><pre>&lt;html&gt;
+  &lt;body&gt;
+    &lt;h1&gt;Welcome to my blog!&lt;/h1&gt;
+    &lt;h2&gt;Latest posts&lt;/h2&gt;
+    &lt;!--#include virtual="/cgi-bin/post-details.cgi?jsx-over-the-wire&amp;truncateContent=true" --&gt;
+    &lt;!--#include virtual="/cgi-bin/post-details.cgi?react-for-two-computers&amp;truncateContent=true" --&gt;
+    &lt;!--#include virtual="/includes/footer.html" --&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</pre></pre><p>Likewise, the details page will delegate to the same <pre>post-details.cgi</pre> script:</p><pre><pre>&lt;html&gt;
+  &lt;body&gt;
+    &lt;!--#include virtual="/cgi-bin/post-details.cgi?jsx-over-the-wire&amp;truncateContent=false" --&gt;
+    &lt;!--#include virtual="/includes/footer.html" --&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</pre></pre><p>Finally, the <pre>post-details.cgi</pre> script might talk to the database:</p><pre><pre>#!/bin/sh
+echo "Content-type: text/html"
+echo ""
+ 
+POST_ID="$(echo "$QUERY_STRING" | cut -d'&amp;' -f1 | tr -cd '[:alnum:]._-')"
+TRUNCATE="$(echo "$QUERY_STRING" | grep -c "truncateContent=true")"
+ 
+TITLE=$(mysql -u admin -p'password' -D blog --skip-column-names -e \
+  "SELECT title FROM posts WHERE url='$POST_ID'")
+CONTENT=$(mysql -u admin -p'password' -D blog --skip-column-names -e \
+  "SELECT content FROM posts WHERE url='$POST_ID'")
+ 
+if [ "$TRUNCATE" = "1" ]; then
+  FIRST_PARAGRAPH="$(printf "%s" "$CONTENT" | sed '/^$/q')"
+  echo "&lt;h3&gt;&lt;a href=\"/$POST_ID.html\"&gt;$TITLE&lt;/a&gt;&lt;/h3&gt;"
+  echo "&lt;p&gt;$FIRST_PARAGRAPH [...]&lt;/p&gt;"
+else
+  echo "&lt;h1&gt;$TITLE&lt;/h1&gt;"
+  echo "&lt;p&gt;"
+  echo "$CONTENT"
+  echo "&lt;/p&gt;"
+fi</pre></pre><p>We’re in the nineties, okay?</p><p>So far everything is very simple, even if a bit tedious to write. What we have here is a server that returns all the data necessary for any given screen in one roundtrip.</p><p>(Hmm…)</p><p>Of course, different screens may need the same data, and we don’t want to duplicate the logic. Luckily, we can reuse dynamic includes such as <pre>post-details.cgi</pre>. We can even pass parameters to them like <pre>truncateContent</pre>.</p><p>The most annoying thing about this code is that working in Bash is really not for the faint-hearted (i.e. not for me). Let’s see if we can improve on that part.</p><h3><a href="https://overreacted.io#php-and-xhp"/> PHP and XHP</h3>
+<p>We could translate this entire example to old school PHP, which gives us better control flow, function calls, variables, and so on. However, I want to skip ahead.</p><p>No, not to the modern PHP MVC frameworks.</p><p>I want to skip ahead to <a href="https://codebeforethehorse.tumblr.com/post/3096387855/an-introduction-to-xhp">XHP</a>.</p><p>You see, the problem with the early PHP programs was that they relied on string manipulation of HTML. In that sense the PHP version doesn’t improve by much:</p><pre><pre>if ($truncate) {
+  $splitContent = explode("\n\n", $content);
+  $firstParagraph = $splitContent[0];
+  echo "&lt;h3&gt;&lt;a href=\"/$postId.php\"&gt;$title&lt;/a&gt;&lt;/h3&gt;";
+  echo "&lt;p&gt;$firstParagraph [...]&lt;/p&gt;";
+} else {
+  echo "&lt;h1&gt;$title&lt;/h1&gt;";
+  echo "&lt;p&gt;$content&lt;/p&gt;";
+}</pre></pre><p>Manipulating HTML as strings leads to code that’s tangled, insecure, and difficult to maintain. Most people in the web development community took that as a signal to embrace <a href="https://guides.rubyonrails.org/layouts_and_rendering.html">Rails-style MVC</a> where all the HTML was safely moved out of the code into separate files called templates (and all the data fetching moved to controllers).</p><p>However, that’s not what happened at Facebook.</p><p>At Facebook, they had a different idea.</p><p>The problem with PHP, said Facebook engineers, was not the manipulation of markup per se. What was bad is unprincipled manipulation of markup, i.e. treating markup as a plain string. Markup has a certain shape to it—stuff contained in other stuff. What we need is a way to build and manipulate that markup without accidentally destroying its contents or interpolating unsafe content into it:</p><pre><pre>if ($truncate) {
+  $splitContent = explode("\n\n", $content);
+  $firstParagraph = $splitContent[0];
+  echo
+    &lt;x:frag&gt;
+      &lt;h3&gt;&lt;a href={"/{$postId}.php"}&gt;{$title}&lt;/a&gt;&lt;/h3&gt;
+      &lt;p&gt;{$firstParagraph} [...]&lt;/p&gt;
+    &lt;/x:frag&gt;;
+} else {
+  echo
+    &lt;x:frag&gt;
+      &lt;h1&gt;{$title}&lt;/h1&gt;
+      &lt;p&gt;{$content}&lt;/p&gt;
+    &lt;/x:frag&gt;;
+}</pre></pre><p>These tags are not strings of HTML! They’re objects than can be turned into HTML.</p><p>Now that we’ve moved markup into our code in a maintainable way, we can create our own abstractions. For example, we can define our own <pre>&lt;ui:post-details&gt;</pre>:</p><pre><pre>class :ui:post-details extends :x:element {
+  protected function render(): XHPRoot {
+    if ($this-&gt;:truncateContent) {
+      $splitContent = explode("\n\n", $this-&gt;:content);
+      $firstParagraph = $splitContent[0];
+      return
+        &lt;x:frag&gt;
+          &lt;h3&gt;&lt;a href={"/{$postId}.php"}&gt;{$this-&gt;:title}&lt;/a&gt;&lt;/h3&gt;
+          &lt;p&gt;{$firstParagraph} [...]&lt;/p&gt;
+        &lt;/x:frag&gt;;
+    } else {
+      return
+        &lt;x:frag&gt;
+          &lt;h1&gt;{$this-&gt;:title}&lt;/h1&gt;
+          &lt;p&gt;{$this-&gt;:content}&lt;/p&gt;
+        &lt;/x:frag&gt;;
+    }
+  }
+}</pre></pre><p>And then we can render it to the page:</p><pre><pre>echo
+  &lt;ui:post-details
+    postId="jsx-over-the-wire"
+    truncateContent={true}
+    title="JSX Over The Wire"
+    content="Suppose you have an API route that returns some data..."
+  /&gt;;</pre></pre><p>In fact, we can build an entire web application this way. Tags render other tags, which render other tags, and so on. By eschewing the Rails-style MVC model, we’ve accidentally discovered a much older principle: function composition.</p><p>One downside of XHP is that it isn’t very well-suited to client interactivity. Since XHP executes on a server that emits HTML, the most that you can do relatively seamlessly is to replace parts of an existing markup with the newly generated HTML markup from the server by updating <pre>innerHTML</pre> of some DOM node.</p><p>Replacing <pre>innerHTML</pre> wasn’t working out particularly well—especially for the highly interative Ads product—which made an engineer (who was not me, by the way) wonder whether it’s possible to run an XHP-style “tags render other tags” paradigm directly on the client computer without losing state between the re-renders. As you might gave guessed, this led to the <a href="https://legacy.reactjs.org/blog/2016/09/28/our-first-50000-stars.html#archeology">invention of JSX and React.</a></p><p>Who cares about React though?</p><p>We’re here to shill XHP.</p><h3><a href="https://overreacted.io#async-xhp"/> Async XHP</h3>
+<p>Earlier, <pre>&lt;ui:post-details&gt;</pre> got <pre>title</pre> and <pre>content</pre> from the calling code:</p><pre><pre>echo
+  &lt;ui:post-details
+    postId="jsx-over-the-wire"
+    truncateContent={true}
+    title="JSX Over The Wire"
+    content="Suppose you have an API route that returns some data..."
+  /&gt;;</pre></pre><p>It was not reading <pre>title</pre> or <pre>content</pre> on its own—after all, reading them from a database is (ideally) an asynchronous operation, while XHP tags are synchronous.</p><p>Were.</p><p>At some point, engineers at Facebook realized that XHP tags would be a lot more powerful if they could load their own data. <a href="https://hhvm.github.io/xhp-lib/2015/06/01/new-features-in-depth.html#asynchronous-xhp-rendering">Async XHP tags</a> were born:</p><pre><pre>class :ui:post-details extends :x:element {
+  use XHPAsync;
+ 
+  protected async function asyncRender(): Awaitable&lt;XHPRoot&gt; {
+    $post = await loadPost($this-&gt;:postId);
+    $title = $post-&gt;title;
+    $content = $post-&gt;content;
+    // ...
+  }
+}</pre></pre><p>Now the <pre>&lt;ui:post-details&gt;</pre> can load its own data based on <pre>postId</pre> alone:</p><pre><pre>class :ui:post-list extends :x:element {
+  protected function render(): XHPRoot {
+    return
+      &lt;x:frag&gt;
+        &lt;ui:post-details
+          postId="jsx-over-the-wire"
+          truncateContent={true}
+        /&gt;
+        &lt;ui:post-details
+          postId="react-for-two-computers"
+          truncateContent={true}
+        /&gt;
+        ...
+      &lt;/x:frag&gt;;
+  }
+}</pre></pre><p>This approach lets you write the entire UI as asynchronous tags rendering other asynchronous tags—until the final HTML is generated. It’s a powerful way to think about UI and data. It lets you write self-contained components that load their own data, and then plug those components anywhere in the tree with a one-liner. And since XHP tags run on the server, the entire screen is resolved in a single roundtrip.</p><pre><pre>&lt;ui:post-list /&gt; // An entire page of HTML</pre></pre><p>I need to emphasize this again. Async XHP allowed self-contained components that load their own data — but! — displaying a screen took a single client/server roundtrip. There aren’t many UI frameworks that satisfy both of these points.</p><p>If you’re making a similar framework, there’s a few details you should think about:</p><ul><li>You want the siblings to be resolved in parallel. For example, the two <pre>&lt;ui:post-details&gt;</pre>above should<pre>loadPost</pre>around the same time. Async XHP did this.</li><li>You also need some way to unblock the rest of the page if a particular branch of the tree is taking too long. Facebook had a <a href="https://engineering.fb.com/2010/06/04/web/bigpipe-pipelining-web-pages-for-high-performance/">BigPipe “pagelet”</a>system that flushes the tree “in parts” with explicitly designed loading states acting as the seams.</li><li>Ideally, you want a data access layer that’s able to batch reads and share an in-memory cache across different parts of the request. This ensures that even if tags deeper in the tree start “fetching” later than their parents, you’re utilizing both CPU and IO well—there are always some tags to render while waiting for the DB.</li></ul><p>Overall, async XHP was an incredibly productive mental model to work with—as long as your app was not very interactive. Unfortunately, for highly interactive apps, emitting HTML is not enough. You need to be able to navigate, handle mutations, and refresh content without losing the client-side state. Since XHP targeted HTML, it was a poor fit for rich interfaces, and React gradually took over.</p><p>Still, as interfaces were being converted to React, there was a noticeable loss in conceptual simplicity. The UI and the data that it needs—two things that are so naturally described together—were being pulled apart into separate codebases.</p><p>GraphQL with <a href="https://relay.dev/">Relay</a> were somewhat bridging that gap and contributed some very important innovations, but using them never felt as direct as writing async XHP.</p><h3><a href="https://overreacted.io#native-templates"/> Native Templates</h3>
+<p>XHP had an unlikely comeback at Facebook.</p><p>The mental model it offered was so productive that people didn’t just want to write web interfaces with it. They also wanted to make native apps with it.</p><p>Think about it.</p><p>This piece of XHP is an object:</p><pre><pre>&lt;x:frag&gt;
+  &lt;h1&gt;{$this-&gt;:title}&lt;/h1&gt;
+  &lt;p&gt;{$this-&gt;:content}&lt;/p&gt;
+&lt;/x:frag&gt;</pre></pre><p>Yes, it can be turned into a piece of HTML:</p><pre><pre>&lt;h1&gt;JSX Over The Wire&lt;/h1&gt;
+&lt;p&gt;Suppose you have an API route that returns some data as JSON&lt;/p&gt;</pre></pre><p>But it could also be turned into another representation, such as JSON:</p><pre><pre>{
+  type: 'x:frag',
+  props: {
+    children: [{
+      type: 'h1',
+      props: {
+        children: 'JSX Over The Wire'
+      }
+    },
+    {
+      type: 'p',
+      props: {
+        children: 'Suppose you have an API route that returns some data as JSON'
+      }
+    }]
+  }
+}</pre></pre><p>There’s nothing that actually constrains you to the primitives available in HTML. For example, <pre>&lt;ui:post-details&gt;</pre> could have been emitting <a href="https://developer.apple.com/documentation/uikit/uitextview">iOS views</a> instead:</p><pre><pre>&lt;x:frag&gt;
+  &lt;ios:UITextView&gt;{$this-&gt;:title}&lt;/ios:UITextView&gt;
+  &lt;ios:UITextView&gt;{$this-&gt;:content}&lt;/ios:UITextView&gt;
+&lt;/x:frag&gt;</pre></pre><p>These tags could be transported as JSON over the network to a native iOS app that would read that JSON and construct a native iOS view hierarchy from these tags.</p><pre><pre>{
+  type: 'x:frag',
+  props: {
+    children: [{
+      type: 'ios:UITextView',
+      props: {
+        children: 'JSX Over The Wire'
+      }
+    },
+    {
+      type: 'ios:UITextView',
+      props: {
+        children: 'Suppose you have an API route that returns some data as JSON'
+      }
+    }]
+  }
+}</pre></pre><p>Meanwhile, on the server, you can define your own tags that render those tags:</p><pre><pre>class :ui:post-list extends :x:element {
+  protected function render(): XHPRoot {
+    return
+      &lt;x:frag&gt;
+        &lt;ui:post-details
+          postId="jsx-over-the-wire"
+          truncateContent={true}
+        /&gt;
+        &lt;ui:post-details
+          postId="react-for-two-computers"
+          truncateContent={true}
+        /&gt;
+        ...
+      &lt;/x:frag&gt;
+  }
+}</pre></pre><p>In other words, you’d have a server endpoint that returns the entire data that any particular screen needs in a single roundtrip. Where the “data” is the native UI.</p><pre><pre>&lt;ui:post-list /&gt; // A screen of iOS components</pre></pre><p>You might think this wouldn’t work because a native app can’t rely on a backend in the critical path. However, that’s a misunderstanding of the approach. All you need to ensure is that you request more UI in the same situations as when you would make an API call, and not more often. You’ll also want to have a fallback UI (like a spinner) available instantly just like when making an API call. In fact, you can even bundle the JSON for some of the initial screens directly within your app’s binary.</p><p>In practice, system components like <pre>ios:UITextView</pre> are a bit too low-level to be good primitives for this kind of format. You really want to have a good “palette” of highly interactive primitives since you want some interactions to “skip the server” and be entirely local. For example, you might implement an <pre>ios:ColorPicker</pre> primitive in the native code so that it follows your finger’s movement, but persist the chosen color using a call to the API that will serve you the next screen as JSON.</p><p>Also, if you made the primitives platform-agnostic (which Facebook did), you could use the same server codebase to assemble screens for both iOS and Android:</p><pre><pre>&lt;nt:flexbox flex-direction="column"&gt;
+  &lt;nt:text font-size={24} font-weight={FontWeight::BOLD}&gt;
+    {$this-&gt;:title}
+  &lt;/nt:text&gt;
+  &lt;nt:text font-size={18}&gt;
+    {$this-&gt;:content}
+  &lt;/nt:text&gt;
+&lt;/nt:flexbox&gt;</pre></pre><p>Okay, returning an entire screen as JSON, has anyone done this before?</p><h3><a href="https://overreacted.io#sdui"/> SDUI</h3>
+<p>This is not a novel idea.</p><p>This is not even a controversial idea.</p><p>You’ve heard of HTML, right? This is like HTML, but with your design system. Imagine an API endpoint that returns some UI as JSON. Let’s use the JSX syntax:</p><pre><pre>app.get('/app/profile/:personId', async (req, res) =&gt; {
+  const [person, featureFlags] = await Promise.all([
+    findPerson(req.params.personId),
+    getFeatureFlags(req.user.id)
+  ]);
+ 
+  const json = (
+    &lt;Page title={`${person.firstName}'s Profile`}&gt;
+      &lt;Header&gt;
+        &lt;Avatar src={person.avatarUrl} /&gt;
+        {person.isPremium &amp;&amp; &lt;PremiumBadge /&gt;}
+      &lt;/Header&gt;
+ 
+      &lt;Layout columns={featureFlags.includes('TWO_COL_LAYOUT') ? 2 : 1}&gt;
+        &lt;Panel title="User Info"&gt;
+          &lt;UserDetails user={person} /&gt;
+          {req.user.id === person.id &amp;&amp; &lt;EditButton /&gt;}
+        &lt;/Panel&gt;
+ 
+        &lt;Panel title="Activity"&gt;
+          &lt;ActivityFeed userId={person.id} limit={3} /&gt;
+        &lt;/Panel&gt;
+      &lt;/Layout&gt;
+    &lt;/Page&gt;
+  );
+ 
+  res.json(json);
+}</pre></pre><p>But since you’re essentially coding an API endpoint, you can do anything your API can do—check the feature flags, run server-only logic, read from the data layer.</p><p>Again, this is not a new idea.</p><p>In fact, it’s how many of the top native apps are built. <a href="https://github.com/novitae/igbloks/tree/main/KNOWLEDGES">Instagram does this</a>, <a href="https://medium.com/airbnb-engineering/a-deep-dive-into-airbnbs-server-driven-ui-system-842244c5f5">Airbnb does this</a>, <a href="https://www.reddit.com/r/androiddev/comments/1046xel/comment/j35yr8c/">Uber does this</a>, <a href="https://www.infoq.com/news/2023/09/reddit-feed-server-driven-ui/">Reddit does this</a>, etc. These companies use in-house frameworks that implement this pattern. Many web developers are completely unaware of this pattern which is ironic because the pattern is incredibly “webby”.</p><p>In the native sphere, the pattern is known as “SDUI”—“server driven UI”. This sounds fancy but essentially it’s just JSON endpoints that return UI trees:</p><pre><pre>// /app/profile/123
+{
+  type: "Page",
+  props: {
+    title: "Jae's Profile",
+    children: [{
+      type: "Header",
+      props: {
+        children: [{
+          type: "Avatar",
+          props: {
+            src: "https://example.com/avatar.jpg"
+          }
+        }, {
+          type: "PremiumBadge",
+          props: {},
+        }]
+      }
+    }, {
+      type: "Layout",
+      props: {
+        columns: 2,
+        children: [
+          // ...
+        ]
+      }
+    }]
+  }
+}</pre></pre><p>Then, on the native side, you have some concrete implementations of those primitives—<pre>Page</pre>, <pre>Header</pre>, <pre>Avatar</pre>, <pre>PremiumBadge</pre>, <pre>Layout</pre>, and so on.</p><p>Ultimately, this feels like passing props from the server to the client.</p><p>So if we ever find ourselves in a situation where we have a bunch of data prepared on the server, and we need to find a good way to pass pieces of that data to a bunch of functions declared on the client, a format like this might turn out to be handy.</p><p>Let’s keep that in mind.</p><h3><a href="https://overreacted.io#recap-components-as-json"/> Recap: Components as JSON</h3>
+<ul><li>From the beginning of time, making web apps involved responding to request for a specific screen with all the data needed for that screen. (HTML is data, too.)</li><li>From the beginning of time, people looked for ways to make the generation of that “data” dynamic, to split it into reusable logic, and to pass parameters to that logic.</li><li>In the early days of the web, it was common to compose HTML by string manipulation. Unfortunately, it was easy to mess up and led to many issues.</li><li>This led many in the web community to banish markup to templates. But at Facebook, XHP proposed another approach: markup that produces objects.</li><li>It turns out that making markup a first-class coding primitive naturally leads to tags “returning” other tags—instead of MVC, we got functional composition.</li><li>XHP evolved into Async XHP, which allowed to keep the logic for rendering some UI close to the logic for loading the data it needs. This was extremely powerful.</li><li>Unfortunately, producing HTML as the primary output format is a dead end for interactive applications. You can’t “refresh” HTML in-place without blowing away the state, and state is important.</li><li>However, nothing actually constraints us to HTML. If tags are objects, they can be sent as JSON. Many of the most successful native apps are built this paradigm. (And if you need HTML, you can always turn JSON into HTML later on.)</li><li>Returning a tag of client primitives as a JSON tree is a nice way to represent “passing props” to the client.</li></ul><h2><a href="https://overreacted.io#part-3-jsx-over-the-wire"/> Part 3: JSX Over The Wire</h2>
+<h3><a href="https://overreacted.io#what-were-building"/> What We’re Building</h3>
+<p>So far, we’ve explored two separate lines of thought:</p><ul><li>Directly calling REST APIs from the client layer <a href="https://overreacted.io#rest-and-json-api">ignores the realities</a>of how user interfaces evolve. We can solve this by<a href="https://overreacted.io#api-for-viewmodels">adding a new backend layer</a>that assembles the data on the server according to what each screen needs. This layer<a href="https://overreacted.io#extracting-a-viewmodel">can be split into functions</a>that each specify how to load data for a particular part of the screen. Then these functions can be<a href="https://overreacted.io#composing-viewmodels">composed together</a>. However, we’re not sure how to actually tie those functions to the components whose props they are preparing.</li><li>We can also <a href="https://overreacted.io#html-ssi-and-cgi">start from plain HTML</a>and “server includes”. If we avoid early MVC-ification and instead explore treating markup as objects, we’ll<a href="https://overreacted.io#php-and-xhp">eventually invent</a>the concept of<a href="https://overreacted.io#async-xhp">asynchronous tags</a>that load their own data and return more tags. This approach is very powerful because it lets us build self-contained components without causing multiple client/server roundtrips for fetching a single screen. Emitting HTML as the only target format is a dead end, but as proven by many top native applications using this approach,<a href="https://overreacted.io#native-templates">emitting JSON</a>retains all the benefits. All you need is a<a href="https://overreacted.io#sdui">set of client-side primitives</a>that can be composed from the server.</li></ul><p>It turns out that these are two different ways to talk about the same thing. Ultimately, all we want is a system with these five properties:</p><h4><a href="https://overreacted.io#dans-async-ui-framework-checklist"/> Dan’s Async UI Framework Checklist</h4>
+<ul><li>Our system lets us split a user interface into rich, interactive components.</li><li>Components should have a direct connection with the logic that specifies how their server data is computed. If a component receives some information from the server, you should be a single Ctrl+Click or “Find All References” away from every place on the server where that particular component’s props are being calculated. It should be straightforward to change which data is received by which component.</li><li>There should be a way to make pieces of UI truly self-contained—including their server data dependencies and corresponding server logic. You should be able to nest a piece of UI inside another piece of UI without worrying what data it needs.</li><li>A navigation to a new screen should be possible to complete in one client/server roundtrip. Even if you have hundreds of components that each want to load some data, from the client’s perspective, a screen should arrive as a single response. In fact, we’d like our system to stand in the way of creating client/server waterfalls.</li><li>We’d like our system to fully support rich interactivity. This means that, even if some parts of it run on the server, it is unacceptable to require full-page refreshes on navigation or after a mutation. In fact, the system should support in-place refreshing of server data directly within an interactive tree. A component should be able to “receive new props” from the server without losing any client state.</li></ul><p>Do you know any such systems? (Try scoring the frameworks you know.)</p><p>If not, let’s invent one right now.</p><h3><a href="https://overreacted.io#viewmodels-revisited"/> ViewModels, Revisited</h3>
+<p>Let’s get back to <a href="https://overreacted.io#plumbing-viewmodel-parameters">the last version</a> of <pre>LikeButtonViewModel</pre> from earlier:</p><pre><pre>async function LikeButtonViewModel({
+  postId,
+  includeAvatars
+}) {
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: includeAvatars ? 5 : 2 }),
+  ]);
+  return {
+    totalLikeCount: post.totalLikeCount,
+    isLikedByUser: post.isLikedByUser,
+    friendLikes: friendLikes.likes.map(l =&gt; ({
+      firstName: l.firstName,
+      avatar: includeAvatars ? l.avatar : null,
+    }))
+  };
+}</pre></pre><p>This function is a slice of the backend that prepares the props for the <pre>LikeButton</pre>:</p><pre><pre>{
+  totalLikeCount: 8,
+  isLikedByUser: false,
+  friendLikes: [{
+    firstName: 'Alice',
+    avatar: 'https://example.com/alice.jpg'
+  }, {
+    firstName: 'Bob',
+    avatar: 'https://example.com/bob.jpg'
+  }]
+}</pre></pre><p>Eventually we were hoping that the <pre>LikeButton</pre> will receive these props:</p><pre><pre>function LikeButton({
+  totalLikeCount,
+  isLikedByUser,
+  friendLikes
+}) {
+  // ...
+}</pre></pre><p>However, we haven’t come up with any mechanism to connect the two sides yet. Who’s gonna pass the JSON returned by the <pre>LikeButtonViewModel</pre> to the <pre>LikeButton</pre> component? How do we tie the ViewModels to their components?</p><p>What if we took a page out of <a href="https://overreacted.io#sdui">SDUI</a> and expressed that by returning a tag:</p><pre><pre>async function LikeButtonViewModel({
+  postId,
+  includeAvatars
+}) {
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: includeAvatars ? 5 : 2 }),
+  ]);
+  return (
+    &lt;LikeButton
+      totalLikeCount={post.totalLikeCount}
+      isLikedByUser={post.isLikedByUser}
+      friendLikes={friendLikes.likes.map(l =&gt; ({
+        firstName: l.firstName,
+        avatar: includeAvatars ? l.avatar : null,
+      }))}
+    /&gt;
+  );
+}</pre></pre><p>As <a href="https://overreacted.io#sdui">we know</a> from earlier, we can represent this JSX as a tree of JSON. In fact, it’s almost like the original JSON, but now it specifies the receiving component:</p><pre><pre>{
+  type: "LikeButton",
+  props: {
+    totalLikeCount: 8,
+    isLikedByUser: false,
+    friendLikes: [{
+      firstName: 'Alice',
+      avatar: 'https://example.com/alice.jpg'
+    }, {
+      firstName: 'Bob',
+      avatar: 'https://example.com/bob.jpg'
+    }]
+  }
+}</pre></pre><p>Then React on the client would know to pass these props to the <pre>LikeButton</pre>:</p><pre><pre>function LikeButton({
+  totalLikeCount,
+  isLikedByUser,
+  friendLikes
+}) {
+  // ...
+}</pre></pre><p>And so we’ve finally stitched the ViewModel and its component together!</p><p>We’ve tied the code generating the props with the code consuming those props. Now our ViewModel and our component are a Ctrl+Click away from each other. Since JSX expressions are typechecked, we also get full typechecking for free.</p><p>Have a look at the complete picture:</p><pre><pre>async function LikeButtonViewModel({
+  postId,
+  includeAvatars
+}) {
+  const [post, friendLikes] = await Promise.all([
+    getPost(postId),
+    getFriendLikes(postId, { limit: includeAvatars ? 5 : 2 }),
+  ]);
+  return (
+    &lt;LikeButton
+      totalLikeCount={post.totalLikeCount}
+      isLikedByUser={post.isLikedByUser}
+      friendLikes={friendLikes.likes.map(l =&gt; ({
+        firstName: l.firstName,
+        avatar: includeAvatars ? l.avatar : null,
+      }))}
+    /&gt;
+  );
+}</pre></pre><pre><pre>function LikeButton({
+  totalLikeCount,
+  isLikedByUser,
+  friendLikes
+}) {
+  let buttonText = 'Like';
+  if (totalLikeCount &gt; 0) {
+    // e.g. "Liked by You, Alice, and 13 others"
+    buttonText = formatLikeText(totalLikeCount, isLikedByUser, friendLikes);
+  }
+  return (
+    &lt;button className={isLikedByUser ? 'liked' : ''}&gt;
+      {buttonText}
+    &lt;/button&gt;
+  );
+}</pre></pre><p>Our ViewModel is just like an <a href="https://overreacted.io#async-xhp">Async XHP</a> tag, passing some information to our own <pre>&lt;LikeButton&gt;</pre> primitive that lives on client (just like in <a href="https://overreacted.io#sdui">SDUI</a>). Together, they represent a self-contained piece of UI that knows how to load its own data.</p><p>Let’s do this again with another ViewModel.</p><h3><a href="https://overreacted.io#lets-do-this-again"/> Let’s Do This Again</h3>
+<p>Now let’s revisit the <pre>PostDetailsViewModel</pre> from <a href="https://overreacted.io#composing-viewmodels">this section</a>:</p><pre><pre>async function PostDetailsViewModel({
+  postId,
+  truncateContent,
+  includeAvatars
+}) {
+  const [post, postLikes] = await Promise.all([
+    getPost(postId),
+    LikeButtonViewModel({ postId, includeAvatars }),
+  ]);
+  return {
+    postTitle: post.title,
+    postContent: parseMarkdown(post.content, {
+      maxParagraphs: truncateContent ? 1 : undefined
+    }),
+    postAuthor: post.author,
+    postLikes
+  };
+}</pre></pre><p>We’ve never explicitly written it down, but suppose that there was a matching <pre>PostDetails</pre> component that can take that JSON and actually render the post:</p><pre><pre>function PostDetails({
+  postTitle,
+  postContent,
+  postAuthor,
+  postLikes,
+}) {
+  // ...
+}</pre></pre><p>Let’s connect them together.</p><p>First, let’s change <pre>PostDetailsViewModel</pre> to return a <pre>PostDetails</pre> tag:</p><pre><pre>async function PostDetailsViewModel({
+  postId,
+  truncateContent,
+  includeAvatars
+}) {
+  const [post, postLikes] = await Promise.all([
+    getPost(postId),
+    LikeButtonViewModel({ postId, includeAvatars }),
+  ]);
+  return (
+    &lt;PostDetails
+      postTitle={post.title}
+      postContent={parseMarkdown(post.content, {
+        maxParagraphs: truncateContent ? 1 : undefined
+      })}
+      postAuthor={post.author}
+      postLikes={postLikes}
+    /&gt;
+  );
+}</pre></pre><p>Now the JSON it returns will be wrapped into a <pre>PostDetails</pre> JSX element:</p><pre><pre>{
+  type: "PostDetails",
+  props: {
+    postTitle: "JSX Over The Wire",
+    postAuthor: "Dan",
+    postContent: "Suppose you have an API route that returns some data as JSON.",
+    postLikes: {
+      type: "LikeButton",
+      props: {
+        totalLikeCount: 8,
+        isLikedByUser: false,
+        friendLikes: [{
+          firstName: "Alice"
+        }, {
+          firstName: "Bob"
+        }]
+      }
+    }
+  }
+}</pre></pre><p>On the client, React will take these props and pass them to <pre>PostDetails</pre>:</p><pre><pre>function PostDetails({
+  postTitle,
+  postContent,
+  postAuthor,
+  postLikes,
+}) {
+  return (
+    &lt;article&gt;
+      &lt;h1&gt;{postTitle}&lt;/h1&gt;
+      &lt;div dangerouslySetInnerHTML={{ __html: postContent }} /&gt;
+      &lt;p&gt;by {postAuthor.name}&lt;/p&gt;
+      &lt;section&gt;
+        {postLikes}
+      &lt;/section&gt;
+    &lt;/article&gt;
+  );
+}</pre></pre><p>And that connects the ViewModel with its component!</p><h3><a href="https://overreacted.io#composing-viewmodels-revisited"/> Composing ViewModels, Revisited</h3>
+<p>Notice how <pre>postLikes</pre> in the last example is rendered directly into UI:</p><pre><pre>&lt;section&gt;
+  {postLikes}
+&lt;/section&gt;</pre></pre><p>We can do this because it’s the <pre>&lt;LikeButton&gt;</pre> with its props already preconfigured by <pre>LikeButtonViewModel</pre>. It was right here in the JSON:</p><pre><pre>{
+  type: "PostDetails",
+  props: {
+    // ...
+    postLikes: {
+      type: "LikeButton",
+      props: {
+        totalLikeCount: 8,
+        // ...
+      }
+    }
+  }
+}</pre></pre><p>You might recall that we obtained it by calling <pre>LikeButtonViewModel</pre>:</p><pre><pre>async function PostDetailsViewModel({
+  postId,
+  truncateContent,
+  includeAvatars
+}) {
+  const [post, postLikes] = await Promise.all([
+    getPost(postId),
+    LikeButtonViewModel({ postId, includeAvatars }),
+  ]);
+  // ...</pre></pre><p>However, having ViewModels manually call other ViewModels inside <pre>Promise.all</pre> quickly gets very tedious. So we’ll adopt a new convention. Let’s assume that a ViewModel can embed another ViewModel by returning a JSX tag.</p><p>This will let us clean up the code quite a bit:</p><pre><pre>async function PostDetailsViewModel({
+  postId,
+  truncateContent,
+  includeAvatars
+}) {
+  const post = await getPost(postId);
+  return (
+    &lt;PostDetails
+      postTitle={post.title}
+      postContent={parseMarkdown(post.content, {
+        maxParagraphs: truncateContent ? 1 : undefined
+      })}
+      postAuthor={post.author}
+      postLikes={
+        &lt;LikeButtonViewModel
+          postId={postId}
+          includeAvatars={includeAvatars}
+        /&gt;
+      }}
+    /&gt;
+  );
+}</pre></pre><p>After this change, calling <pre>PostDetailsViewModel</pre> will return “unfinished” JSON:</p><pre><pre>{
+  type: "PostDetails", // ✅ This is a component on the client
+  props: {
+    postTitle: "JSX Over The Wire",
+    // ...
+    postLikes: {
+      type: LikeButtonViewModel, // 🟡 We haven't run this ViewModel yet
+      props: {
+        postId: "jsx-over-the-wire",
+        includeAvatars: false,
+      }
+    }
+  }
+}</pre></pre><p>The code responsible for sending JSON to the client will see that it’s a ViewModel (so it still needs to run!), and will call <pre>LikeButtonViewModel</pre> to get more JSON:</p><pre><pre>{
+  type: "PostDetails", // ✅ This is a component on the client
+  props: {
+    postTitle: "JSX Over The Wire",
+    // ...
+    postLikes: {
+      type: "LikeButton", // ✅ This is a component on the client
+      props: {
+        totalLikeCount: 8,
+        // ...
+      }
+    }
+  }
+}</pre></pre><p>ViewModels will get recursively unfolded as they each contribute their part of the JSON. This might remind you of how <a href="https://overreacted.io#php-and-xhp">XHP tags can recursively render other XHP tags</a>. The final JSON will be turned on the client into a React component tree.</p><pre><pre>&lt;PostDetails
+  postTitle="JSX Over The Wire"
+  // ...
+  postLikes={
+    &lt;LikeButton
+      totalLikeCount={8}
+      // ...
+    /&gt;
+  }
+/&gt;</pre></pre><h3><a href="https://overreacted.io#the-data-always-flows-down"/> The Data Always Flows Down</h3>
+<p>To make the JSX look slightly nicer, we can also rename <pre>postLikes</pre> to <pre>children</pre>. This will let us nest <pre>LikeButtonViewModel</pre> as a JSX child of <pre>PostDetails</pre>.</p><p>Here’s the entire code so far. Notice how the data flows down:</p><pre><pre>async function PostDetailsViewModel({
+  postId,
+  truncateContent,
+  includeAvatars
+}) {
+  const post = await getPost(postId);
+  return (
+    &lt;PostDetails
+      postTitle={post.title}
+      postContent={parseMarkdown(post.content, {
+        maxParagraphs: truncateContent ? 1 : undefined
+      })}
+      postAuthor={post.author}
+    &gt;
+      &lt;LikeButtonViewModel
+        postId={postId}
+        includeAvatars={includeAvatars}
+      /&gt;
+    &lt;/PostDetails&gt;
+  );
+}
+ 
+async function LikeButtonViewModel({
+  postId,
+  includeAvatars
+}) {
+const [post, friendLikes] = await Promise.all([
+  getPost(postId),
+  getFriendLikes(postId, { limit: includeAvatars ? 5 : 2 }),
+]);
+return (
+  &lt;LikeButton
+    totalLikeCount={post.totalLikeCount}
+    isLikedByUser={post.isLikedByUser}
+    friendLikes={friendLikes.likes.map(l =&gt; ({
+      firstName: l.firstName,
+      avatar: includeAvatars ? l.avatar : null,
+    }))}
+  /&gt;
+);</pre></pre><p>All of the server logic above will execute while generating the JSON. This includes both <pre>getPost</pre>, <pre>parseMarkdown</pre>, and <pre>getFriendLikes</pre>. The response will contain the data for the entire screen, satisfying one of our <a href="https://overreacted.io#dans-async-ui-framework-checklist">key requirements</a>:</p><pre><pre>{
+  type: "PostDetails", // ✅ This is a component on the client
+  props: {
+    postTitle: "JSX Over The Wire",
+    // ...
+    children: {
+      type: "LikeButton", // ✅ This is a component on the client
+      props: {
+        totalLikeCount: 8,
+        // ...
+      }
+    }
+  }
+}</pre></pre><p>From the client’s perspective, everything will appear precomputed:</p><pre><pre>function PostDetails({
+  postTitle,
+  postContent,
+  postAuthor,
+  children,
+}) {
+  return (
+    &lt;article&gt;
+      &lt;h1&gt;{postTitle}&lt;/h1&gt;
+      &lt;div dangerouslySetInnerHTML={{ __html: postContent }} /&gt;
+      &lt;p&gt;by {postAuthor.name}&lt;/p&gt;
+      &lt;section&gt;
+        {children}
+      &lt;/section&gt;
+    &lt;/article&gt;
+  );
+}
+ 
+function LikeButton({ totalLikeCount, isLikedByUser, friendLikes }) {
+  // ...
+}</pre></pre><p>In particular, by the time <pre>PostDetails</pre> runs, the <pre>children</pre> it receives will be the <pre>&lt;LikeButton&gt;</pre> tag itself with predefined props. The ViewModels configure the props for the client. This is why on the client, all the props are “already there”.</p><p>Spend some time with the code above and make sure it sinks in.</p><p>Yes, this is weird.</p><p>It is also glorious.</p><p>What we found is a way to compose tags across client-server boundaries where the server parts can be freely wrapped in the client parts, the client parts can be freely wrapped in the server parts, and not only do they just work—we’re also performing the data loading for all of the server parts in a single roundtrip.</p><p>In fact, this approach satisfies every point on <a href="https://overreacted.io#dans-async-ui-framework-checklist">my checklist.</a></p><p>Now let’s tidy it up and clean up some loose ends.</p><h3><a href="https://overreacted.io#a-router-viewmodel"/> A Router ViewModel</h3>
+<p>As we refactor our ViewModels to use JSX (for the JSX-sceptical readers—the point here isn’t just the syntax, although the syntax is nice—but <a href="https://overreacted.io/react-as-a-ui-runtime/#lazy-evaluation">lazy evaluation</a>), we might realize that we don’t actually need separate Express routes for every screen.</p><p>Instead, we might want to do something like this:</p><pre><pre>app.get('/*', async (req, res) =&gt; {
+  const url = req.url;
+  const json = await toJSON(&lt;RouterViewModel url={url} /&gt;); // Evaluate JSX
+  res.json(json);
+});</pre></pre><p>Then we’d have a Router ViewModel that matches screens to routes:</p><pre><pre>function RouterViewModel({ url }) {
+  let route;
+  if (matchRoute(url, '/screen/post-details/:postId')) {
+    const { postId } = parseRoute(url, '/screen/post-details/:postId');
+    route = &lt;PostDetailsRouteViewModel postId={postId} /&gt;;
+  } else if (matchRoute(url, '/screen/post-list')) {
+    route = &lt;PostListRouteViewModel /&gt;;
+  }
+  return route;
+}</pre></pre><p>And then each route would also be a ViewModel:</p><pre><pre>function PostDetailsRouteViewModel({ postId }) {
+  return &lt;PostDetailsViewModel postId={postId} /&gt;
+}
+ 
+async function PostListRouteViewModel() {
+  const postIds = await getRecentPostIds();
+  return (
+    &lt;&gt;
+      {postIds.map(postId =&gt;
+        &lt;PostDetailsViewModel key={postId} postId={postId} /&gt;
+      )}
+    &lt;/&gt;
+  );
+}</pre></pre><p>On the server, it’s ViewModels all the way down.</p><p>This might seem superfluous at this point. But moving the routing logic into the ViewModel world would let <pre>RouterViewModel</pre> wrap its output into a client-side <pre>&lt;Router&gt;</pre> that could re-request the JSON when you navigate to another screen.</p><pre><pre>function RouterViewModel({ url }) {
+  let route;
+  if (matchRoute(url, '/screen/post-details/:postId')) {
+    const { postId } = parseRoute(url, '/screen/post-details/:postId');
+    route = &lt;PostDetailsRouteViewModel postId={postId} /&gt;;
+  } else if (matchRoute(url, '/screen/post-list')) {
+    route = &lt;PostListRouteViewModel /&gt;;
+  }
+  return (
+    &lt;Router&gt;
+      {route}
+    &lt;/Router&gt;
+  );
+}</pre></pre><pre><pre>function Router({ children }) {
+  const [tree, setTree] = useState(children);
+  // ... maybe add some logic here later ...
+  return tree;
+}</pre></pre><p>This could also let us—if we wanted to—implement a more granular router that can split the path into segments, prepare the ViewModels for each segment in parallel when it receives a request, and even re-request individual segments on navigation. This way, we would no longer have to re-request the entire page whenever we need to go to another screen. Of course, we wouldn’t want to implement this kind of logic within the app. Ideally, a framework would do this.</p><h3><a href="https://overreacted.io#server-and-client-components"/> Server and Client Components</h3>
+<p>We can drop the pretense now—we’re describing React Server Components:</p><ul><li>Our “ViewModels” are Server Components.</li><li>Our “Components” are Client Components.</li></ul><p>There are good reasons to call both of them Components. Although in the first part of this post, Server Components <a href="https://overreacted.io#composable-bff">began their journey as ViewModels</a>, their lineage can be equally convincingly traced back to <a href="https://overreacted.io#async-xhp">Async XHP tags</a>. Since they no longer have to return JSON objects, and because in practice you’ll often import the same components from both “sides”, it makes sense to say Components. (In fact, in my incomplete example, all Client Components could be moved to the Server.)</p><p>In this post, we haven’t discussed the actual mechanism “connecting” the module systems of Server and Client worlds. This will be a topic for another post, but in short, when you <pre>import</pre> something from a module with <pre>'use client'</pre>, you don’t get the real thing—you just get a reference which describes how to load it.</p><pre><pre>import { LikeButton } from './LikeButton';
+ 
+console.log(LikeButton);
+// "src/LikeButton.js#LikeButton"
+ 
+async function LikeButtonViewModel({
+  postId,
+  includeAvatars
+}) {
+const [post, friendLikes] = await Promise.all([
+  getPost(postId),
+  getFriendLikes(postId, { limit: includeAvatars ? 5 : 2 }),
+]);
+return (
+  &lt;LikeButton
+    totalLikeCount={post.totalLikeCount}
+    isLikedByUser={post.isLikedByUser}
+    friendLikes={friendLikes.likes.map(l =&gt; ({
+      firstName: l.firstName,
+      avatar: includeAvatars ? l.avatar : null,
+    }))}
+  /&gt;
+);</pre></pre><pre><pre>'use client';
+ 
+export function LikeButton({
+  totalLikeCount,
+  isLikedByUser,
+  friendLikes
+}) {
+  let buttonText = 'Like';
+  if (totalLikeCount &gt; 0) {
+    // e.g. "Liked by You, Alice, and 13 others"
+    buttonText = formatLikeText(totalLikeCount, isLikedByUser, friendLikes);
+  }
+  return (
+    &lt;button className={isLikedByUser ? 'liked' : ''}&gt;
+      {buttonText}
+    &lt;/button&gt;
+  );
+}</pre></pre><p>So the generated JSON will contain an instruction for loading the <pre>LikeButton</pre>:</p><pre><pre>{
+  type: "src/LikeButton.js#LikeButton", // ✅ This is a Client Component
+  props: {
+    totalLikeCount: 8,
+    // ...
+  }
+}</pre></pre><p>React will read that instruction and load it as a <pre>&lt;script&gt;</pre> tag (or read it from the bundler cache). The format is bundler-specific, which explains why React Server Components requires a bundler integration. (<a href="https://parceljs.org/recipes/rsc/">Parcel just released theirs</a> which isn’t tied to a framework, so it’s perfect if you want to play with how RSC works.)</p><p>It’s important that React Server Components emit JSON rather than HTML:</p><ul><li>Server tree can be refetched in-place without losing state. (React will just do its “virtual DOM” thing, i.e. apply the new props to the already existing components.)</li><li>You can target other platforms than web. (Here’s a <a href="https://www.youtube.com/watch?v=djhEgxQf3Kw">cool demo</a>.)</li><li>You can still turn that JSON into HTML by executing all the Client Components within it! That’s not required by RSC, but it is definitely doable. That’s why “Client” components may run on the “server”—to output HTML, you’d run both “sides”.</li></ul><p>To conclude this post, I’ll say the following. I know that React Server Components have not been everyone’s cup of tea. It twists your brain but I think it twists it in a good way. I’ll be posting more about why I’m excited about RSC and will try to distill some of these explanations into shorter posts. But in the meantime, I hope that this post provided some historical background on the motivation behind RSC, <a href="https://overreacted.io#dans-async-ui-framework-checklist">what it can do</a>, as well as how you could arrive at RSC through your own thinking.</p><p>(By the way, if you enjoy more philosophical and whimsical longreads, check out my <a href="https://overreacted.io/react-for-two-computers/">last post</a> which arrives at RSC from the first principles without any history.)</p><h3><a href="https://overreacted.io#recap-jsx-over-the-wire"/> Recap: JSX Over The Wire</h3>
+<ul><li>React Server Components solve the <a href="https://overreacted.io#recap-json-as-components">problems outlined in the first part</a>by using<a href="https://overreacted.io#recap-components-as-json">techniques outlined in the second part</a>. In particular, they let you “componentize” the UI-specific parts of your API and ensure they evolve together with your UI.</li><li>This means that there is a direct connection between your components and the server code that prepares their props. You can always “Find All References” to find from where on the server the data is flowing into each of your components.</li><li>Because React Server Components emit JSON, they don’t “blow away” the state of the page on refetches. Your components can receive fresh props from the server.</li><li>React Server Components emit JSON, but that JSON can also be (optionally) turned to HTML for first render. It’s easy to make HTML out of JSON, but not the inverse.</li><li>React Server Components let you create self-contained pieces of UI that take care of preparing their own server data. However, all this preparation occurs within a single roundtrip. Although your code is modular, their execution is coalesced.</li><li>RSC is mindbending, I won’t lie. Sometimes you have to think inside-out. But personally, I think RSC is awesome. The tooling is still evolving but I’m excited for its future. I hope to see more technologies thoughtfully blending the boundaries.</li></ul><h3><a href="https://overreacted.io#final-code-slightly-edited"/> Final Code, Slightly Edited</h3>
+<p>While this isn’t a runnable application (I bet you could get there with <a href="https://nextjs.org/">Next</a> or <a href="https://parceljs.org/recipes/rsc/">Parcel</a>) and might contain mistakes, here’s the complete code example. I’ve done a few renames to drop the “ViewModel” terminology so it looks more idiomatic.</p><pre><pre>import { PostDetails, LikeButton } from './client';
+ 
+export function PostDetailsRoute({ postId }) {
+  return &lt;Post postId={postId} /&gt;
+}
+ 
+export async function PostListRoute() {
+  const postIds = await getRecentPostIds();
+  return (
+    &lt;&gt;
+      {postIds.map(postId =&gt;
+        &lt;Post key={postId} postId={postId} /&gt;
+      )}
+    &lt;/&gt;
+  );
+}
+ 
+async function Post({
+  postId,
+  truncateContent,
+  includeAvatars
+}) {
+  const post = await getPost(postId);
+  return (
+    &lt;PostLayout
+      postTitle={post.title}
+      postContent={parseMarkdown(post.content, {
+        maxParagraphs: truncateContent ? 1 : undefined
+      })}
+      postAuthor={post.author}
+    &gt;
+      &lt;PostLikeButton
+        postId={postId}
+        includeAvatars={includeAvatars}
+      /&gt;
+    &lt;/PostLayout&gt;
+  );
+}
+ 
+async function PostLikeButton({
+  postId,
+  includeAvatars
+}) {
+const [post, friendLikes] = await Promise.all([
+  getPost(postId),
+  getFriendLikes(postId, { limit: includeAvatars ? 5 : 2 }),
+]);
+return (
+  &lt;LikeButton
+    totalLikeCount={post.totalLikeCount}
+    isLikedByUser={post.isLikedByUser}
+    friendLikes={friendLikes.likes.map(l =&gt; ({
+      firstName: l.firstName,
+      avatar: includeAvatars ? l.avatar : null,
+    }))}
+  /&gt;
+);</pre></pre><pre><pre>'use client';
+ 
+export function PostLayout({
+  postTitle,
+  postContent,
+  postAuthor,
+  children,
+}) {
+  return (
+    &lt;article&gt;
+      &lt;h1&gt;{postTitle}&lt;/h1&gt;
+      &lt;div dangerouslySetInnerHTML={{ __html: postContent }} /&gt;
+      &lt;p&gt;by {postAuthor.name}&lt;/p&gt;
+      &lt;section&gt;
+        {children}
+      &lt;/section&gt;
+    &lt;/article&gt;
+  );
+}
+ 
+export function LikeButton({
+  totalLikeCount,
+  isLikedByUser,
+  friendLikes
+}) {
+  let buttonText = 'Like';
+  if (totalLikeCount &gt; 0) {
+    buttonText = formatLikeText(totalLikeCount, isLikedByUser, friendLikes);
+  }
+  return (
+    &lt;button className={isLikedByUser ? 'liked' : ''}&gt;
+      {buttonText}
+    &lt;/button&gt;
+  );
+}</pre></pre><p>Happy stitching!</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

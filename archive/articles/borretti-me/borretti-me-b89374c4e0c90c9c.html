@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>My Backup Infrastructure, 2025 Edition | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>My Backup Infrastructure, 2025 Edition</h1>
+        <div class="meta">Fernando Borretti 2025-04-13T00:00:00Z</div>
+        <div class="links">
+          <a href="https://borretti.me/article/my-backup-infrastructure-2025-edition">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/borretti-me/borretti-me-b89374c4e0c90c9c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">How I back up my personal data.</div>
+        <div class="content">
+          <p>tl;dr two portable SSDs, synced with <a href="https://en.wikipedia.org/wiki/Rsync">rsync</a>; and a <a href="https://www.backblaze.com/">Backblaze</a> bucket synced with <a href="https://restic.net/">restic</a>:</p>
+
+<p><img src="/assets/content/my-backup-infrastructure-2025-edition/infra.svg" alt="A diagram of my backup infrastructure. In a box labeled 'local', my laptop, 'metauro', and the two SSDs, 'chiron' and 'nessus', backed up with rsync. In a box labeled 'remote', the Backblaze bucket named 'pholus', backed up with restic." /></p>
+
+<p>I’m finally satisfied with my infrastructure for backups, so I’m writing it up so others can benefit from it.</p>
+
+<h1 id="criteria">Criteria</h1>
+
+<p>My requirements for backup infrastructure are:</p>
+
+<ol>
+  <li>Open source, to minimize the risk of backdoors.</li>
+  <li>Fast, but only incrementally: an initial snapshot can be slow.</li>
+  <li>Simple configuration, with little surface area to mess things up.</li>
+  <li>Encryption with keys that I control and which never leave my device. Ideally, encryption should be mandatory, to prevent accidentally putting cleartext on backup media.</li>
+  <li>Has to satisfy the <a href="https://www.hanselman.com/blog/the-computer-backup-rule-of-three">3-2-1 rule</a>: at least three disjoint copies, in two different media, at least one off-site.</li>
+  <li>There has to be a known (documented, memorable) path to recovery. It would be embarrassing if you went to restore your backups and suddenly realized there’s a missing link that prevents you from e.g. recovering the encryption key.</li>
+</ol>
+
+<p>The one non-criterion is portability. Because I only use macOS, I don’t need a solution where I can restore the backups from different operating systems.</p>
+
+<h1 id="local-backups">Local Backups</h1>
+
+<p>I have two portable SSDs, Chiron and Nessus, with encrypted <a href="https://en.wikipedia.org/wiki/Apple_File_System">APFS</a>. The filesystem itself being encrypted is extremely convenient: I just plug them in, and the <a href="https://en.wikipedia.org/wiki/Keychain_(software)">macOS keychain</a> has the keys. There’s no possibility of accidentally leaking cleartext into the disk because the encryption is transparent.</p>
+
+<p>I use rsync to synchronize the laptop to the disks. The specific incantation is:</p>
+
+<div class="language-bash highlighter-rouge">
+  <div class="highlight">
+    <pre class="highlight"><code>rsync <span class="nt">--progress</span> <span class="nt">--archive</span> <span class="nt">--human-readable</span> <span class="nt">--delete</span> <span class="se">\</span>
+      ~/Root/ /Volumes/Chiron/Root
+</code></pre>
+  </div>
+</div>
+
+<p>Which recursively copies the contents of <code class="language-plaintext highlighter-rouge">~/Root</code> into <code class="language-plaintext highlighter-rouge">/Volumes/Chiron/Root</code>, preserving permissions/times/the executable flag, using checksums rather than heuristics to see which files have changed, and deleting files that exist in the target but not the source.</p>
+
+<p>Note that in rsync, trailing slashes matter! <code class="language-plaintext highlighter-rouge">rsync -a source target</code> creates a <code class="language-plaintext highlighter-rouge">source</code> directory inside <code class="language-plaintext highlighter-rouge">target</code>, while <code class="language-plaintext highlighter-rouge">rsync -a source/ target</code> syncs the contents of <code class="language-plaintext highlighter-rouge">source</code> inside <code class="language-plaintext highlighter-rouge">target</code>.</p>
+
+<p>Why two disks? No reason. <a href="https://www.youtube.com/watch?v=Et4sMJP9FmM">Why have one when you can have two for twice the price?</a></p>
+
+<h1 id="remote-backups">Remote Backups</h1>
+
+<p>Continuing with the centaur naming convention, I have a Backblaze bucket named Pholus, and I use restic to take snapshots of the laptop and upload them to the bucket.</p>
+
+<p>Why Backblaze? Because it’s cheaper than <a href="https://aws.amazon.com/s3/">S3</a>, and less involved than S3 (no IAM/roles/policies/etc.), and it does one thing and does it well. I would use S3 if I already had other personal infrastructure on AWS, and latency was a problem (I’m in Australia, and Backblaze is not; with AWS I could have an S3 bucket with ~6ms latency to my home).</p>
+
+<p>Why restic? Because everything else is worse. <a href="https://en.wikipedia.org/wiki/Duplicity_(software)">Duplicity</a> requires using <a href="https://en.wikipedia.org/wiki/GNU_Privacy_Guard">GnuPG</a> for key management, which is like if to start a car you had to stab yourself with your keys. <a href="https://www.borgbackup.org/">Borg</a> is written in Python, which is usually a bad sign for performance and user experience. <a href="https://rclone.org/">Rclone</a>, by default, is just cloud rsync, it doesn’t encrypt anything, you have to use a two-level configuration, where a <a href="https://rclone.org/crypt/"><code class="language-plaintext highlighter-rouge">crypt</code></a> backend acts as a proxy to the real storage backend. So if you misconfigure things, you could end up writing cleartext to the cloud.</p>
+
+<p>restic is easy to learn. The ontology is: you have a thing called a <a href="https://restic.readthedocs.io/en/stable/045_working_with_repos.html">repository</a>, which could be a local directory or a remote object store, identified by a path and locked with a password. A repository has a list of snapshots, which are like Git commits: a snapshot of a directory at a point in time. You can <a href="https://restic.readthedocs.io/en/stable/045_working_with_repos.html#listing-files-in-a-snapshot"><code class="language-plaintext highlighter-rouge">ls</code> the contents of snapshots</a> and even <a href="https://restic.readthedocs.io/en/stable/050_restore.html#printing-files-to-stdout">restore specific files</a>, which is useful for checking that a snapshot has the data you want without restoring the whole thing.</p>
+
+<p>I recommend trying out the commands using <a href="https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html#local">local</a> repositories, where the data is stored in a directory. That lets you get a hang of the ontology and the commands. Then you can create a repository backed by cloud storage.</p>
+
+<p>restic supports Backblaze directly, but the documentation <a href="https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html#backblaze-b2">recommends</a> using Backblaze’s S3-compatible API. To do this, when creating a bucket key you have to tick “Allow List All Bucket Names”, you will also have to know how to map the Backblaze key properties to the AWS environment variables. This is the only difficulty.</p>
+
+<p>Taking a snapshot is just:</p>
+
+<div class="language-bash highlighter-rouge">
+  <div class="highlight">
+    <pre class="highlight"><code><span class="nb">export </span><span class="nv">AWS_ACCESS_KEY_ID</span><span class="o">=[</span>Backblaze keyID]
+<span class="nb">export </span><span class="nv">AWS_SECRET_ACCESS_KEY</span><span class="o">=[</span>Backblaze applicationKey]
+<span class="nb">export </span><span class="nv">RESTIC_REPOSITORY</span><span class="o">=</span><span class="s2">"s3:[bucket endpoint hostname]/[bucket name]"</span>
+restic backup ~/Root
+</code></pre>
+  </div>
+</div>
+
+<p>You will then be asked to enter the repository password. For added peace of mind, you can <code class="language-plaintext highlighter-rouge">ls</code> the snapshot and dump the contents of a few representative files.</p>
+
+<h1 id="frequency">Frequency</h1>
+
+<p>I have a recurring task on my <a href="https://www.todoist.com/">todo list</a> whereby, once a week, I plug in the external drives, run the backup script, and also take a restic snapshot.</p>
+
+<p>I could leave the drives plugged in all the time, and run <code class="language-plaintext highlighter-rouge">rsync</code> automatically every day, but my MacBook Air doesn’t have enough ports for that and, also, this risks propagating data loss to the backups, which defeats the purpose. My doing manual backups, if I lose data unintentionally, I have up to a week to notice and restore it from the SSD.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

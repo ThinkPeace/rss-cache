@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Branch Encryption | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Branch Encryption</h1>
+        <div class="meta">Cats with power tools 2024-03-12T22:49:00Z</div>
+        <div class="links">
+          <a href="https://blog.pixelmelt.dev/branch-encryption/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/blog-pixelmelt-dev/blog-pixelmelt-dev-bdce25005d0f2cf9.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Usage of branch encryption in various obfuscation contexts.</div>
+        <div class="content">
+          <h3 id="usage-with-virtualization-based-obfuscation">Usage with virtualization based obfuscation</h3><img src="https://images.unsplash.com/photo-1699412845266-781ded00c4a7?crop=entropy&amp;cs=tinysrgb&amp;fit=max&amp;fm=jpg&amp;ixid=M3wxMTc3M3wwfDF8c2VhcmNofDUwfHxjYXQlMjB0cmVlfGVufDB8fHx8MTc1MzIwOTcwNHww&amp;ixlib=rb-4.1.0&amp;q=80&amp;w=2000" alt="Branch Encryption"><p>Sources:</p><ul><li><a href="https://rdist.root.org/2007/04/09/mesh-design-pattern-hash-and-decrypt/?ref=blog.pixelmelt.dev">Mesh design pattern: hash-and-decrypt</a> - <a href="https://web.archive.org/web/20240117042122/https://rdist.root.org/2007/04/09/mesh-design-pattern-hash-and-decrypt/">Archive</a></li><li>loski2619 on the <a href="https://discord.gg/sneakerdev?ref=blog.pixelmelt.dev">Sneaker Development</a> Discord</li></ul><blockquote>This technique prevents future states of a program from being known before they are reached.<br><br>In a proper implementation, an attacker wouldn&apos;t be able to infer previous states of a program it hasn&apos;t tracked, at the same time, the attacker wouldn&apos;t be able to jump into states which require non-constant values to be executed (unless it can alter the control flow to visit those nodes and has the proper key to them) - loski2619</blockquote><p>Say you want to protect the following code that will reveal a secret only to those who know the password.</p><pre><code class="language-javascript">let usrinpt = input(&quot;what is the password?&quot;)
+if(usrinpt == &quot;42&quot;){
+	console.log(&quot;the cake is a lie&quot;)
+} else {
+	console.log(&quot;denied&quot;)
+}
+</code></pre><p>You put it through your virtual machine obfuscator and it outputs a VM and the following instructions in bytecode.</p><pre><code class="language-yaml">STRING &quot;what is the password?&quot;
+LOAD 0
+STRING &quot;42&quot;
+EQUIVALENT
+# If statement flow
+JUMP_IF_FALSE IF_ELSEBLOCK
+STRING &quot;the cake is a lie&quot;
+PRINT # Logic to call console.log would be here but its not relevent
+JUMP IF_END
+LABEL IF_ELSEBLOCK
+STRING &quot;denied&quot;
+PRINT
+LABEL IF_END
+STOP_VM
+</code></pre><p>Now do you see the issue here? Our secret is in plain text! Sure you might have a complex string decoding algorithm or something but the issue still exists, the attacker will always be able to recover our secret without knowing the password. (this applies to any constant data defined in your code, not just strings)</p><p>What if I told you that there is a solution to our problem that would lock everything inside the if statements true condition behind an impenetrable wall? We can use hashing and encryption to do this.</p><p>Currently, we are doing something like</p><pre><code class="language-javascript">if(input == &quot;42&quot;) {
+	run_code()
+} else {
+	run_code()
+}
+</code></pre><p>Which allows the attacker to see what the valid password is by looking at what we compare the user input to, by including &quot;42&quot; in the comparison there is no way to hide the password since the attacker must execute the comparison to run the program.</p><p>But we can change the code to <em>not</em> directly include the comparison</p><pre><code class="language-javascript">if(hash(input) == hashedPassword) {
+	run_code()
+} else {
+	run_code()
+}
+</code></pre><p>Since &quot;42&quot; is a constant that is never rewritten and immediately gets discarded after usage, that means our compiler definitively knows what its value during runtime will be. The compiler can replace the constant &quot;42&quot; with the output of a hash function with the value as input. Then instead of comparing the user input to the valid key, we can compare the <em>hash</em> of the valid key to the <em>hash</em> of the user input.</p><p>This is all well and good but we have one more issue, the valid key may be hidden now, but the secret is still recoverable by the attacker if they read the source code.</p><p>We can fix that by encrypting the code inside the if statement with the correct password as a key, and then during runtime we can try to decrypt the code with the users input. (note that this is <em>not</em> the hash of the input)</p><pre><code class="language-javascript">if(hash(input) == hashedPassword) {
+	decrypt_and_run_code(input)
+} else {
+	run_code()
+}
+</code></pre><p>Our bytecode now looks something like this</p><pre><code class="language-yaml">STRING &quot;what is the password?&quot;
+LOAD 0
+CALL_HASH_FUNCTION # Logic to call the hash function would be here but is not relevent
+STRING &quot;imtheoutputofahashfunction&quot; # This used to be &quot;42&quot;
+EQUIVALENT
+LOAD 0
+# If statement flow
+JUMP_IF_FALSE IF_ELSEBLOCK
+DECRYPT_BLOCK startIndex endIndex # Will decrypt the code between the JIF and label
+ENCRYPTED_INSTRUCTION
+ENCRYPTED_INSTRUCTION
+ENCRYPTED_INSTRUCTION
+LABEL IF_ELSEBLOCK
+STRING &quot;denied&quot;
+PRINT
+LABEL IF_END
+STOP_VM
+</code></pre><p>Look at that, now the only way for our secret to be known is for the user to know the exact password used to decrypt the code.</p><h3 id="usage-with-plain-javascript">Usage with plain Javascript</h3><p>Here is an example of how this would look implemented with normal JS, given this implementation is weak because the code is stored as a string then eval&apos;ed and it does not use a strong hash or encryption function.</p><pre><code class="language-javascript">function hash(input) {
+	return input.split(&quot;&quot;).reduce((a, b) =&gt; a + b.charCodeAt(0), 0);
+}
+
+function xorcrypt(text, key) {
+	let result = &quot;&quot;;
+	for (let i = 0; i &lt; text.length; i++) {
+		result += String.fromCharCode(text.charCodeAt(i) ^ key);
+	}
+	return result;
+}
+
+function checkPassword(userInput) {
+	if (hash(userInput) === 1235) {
+		// decrypted value: console.log(&apos;the cake is a lie&apos;)
+		eval(xorcrypt(&quot;&#x4B0;&#x4BC;&#x4BD;&#x4A0;&#x4BC;&#x4BF;&#x4B6;&#x4FD;&#x4BF;&#x4BC;&#x4B4;&#x4FB;&#x4F4;&#x4A7;&#x4BB;&#x4B6;&#x4F3;&#x4B0;&#x4B2;&#x4B8;&#x4B6;&#x4F3;&#x4BA;&#x4A0;&#x4F3;&#x4B2;&#x4F3;&#x4BF;&#x4BA;&#x4B6;&#x4F4;&#x4FA;&quot;, hash(userInput)));
+	} else {
+	    console.log(&quot;Access denied&quot;);
+	}
+}
+
+checkPassword(&quot;wrongpass&quot;); // Access denied
+
+checkPassword(&quot;secretpass123&quot;); // the cake is a lie
+</code></pre><h3 id="where-to-use">Where to use</h3><p>This technique is most applicable when you need to protect both:</p><ol><li>The comparison value itself (like the password &quot;42&quot;)</li><li>The code/data that should only be accessible when the comparison succeeds</li></ol>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

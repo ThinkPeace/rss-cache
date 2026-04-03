@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Liskov Substitution Principle does more than you think | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The Liskov Substitution Principle does more than you think</h1>
+        <div class="meta">Computer Things 2026-01-06T16:51:26Z</div>
+        <div class="links">
+          <a href="https://buttondown.com/hillelwayne/archive/the-liskov-substitution-principle-does-more-than/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/buttondown-com-hillelwayne/buttondown-com-hillelwayne-04e12c63e57ebe29.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Happy New Year! I&#x27;m done with the newsletter hiatus and am going to try updating weekly again. To ease into things a bit, I&#x27;ll try to keep posts a little more off the cuff and casual for a while, at least until Logic for Programmers is done. Speaking of which, v0.13 should be out by the end of this month. So for this newsletter I want to talk about the Lisk…</div>
+        <div class="content">
+          <p class="empty-line"></p>
+<p>Happy New Year! I'm done with the newsletter hiatus and am going to try updating weekly again. To ease into things a bit, I'll try to keep posts a little more off the cuff and casual for a while, at least until <a href="https://leanpub.com/logic/" target="_blank"><em>Logic for Programmers</em></a> is done. Speaking of which, v0.13 should be out by the end of this month.</p>
+<p>So for this newsletter I want to talk about the <a href="https://en.wikipedia.org/wiki/Liskov_substitution_principle" target="_blank">Liskov Substitution Principle</a> (LSP). Last week I read <a href="https://loup-vaillant.fr/articles/solid-bull" target="_blank">A SOLID Load of Bull</a> by cryptographer Loupe Vaillant, where he argues the <a href="https://en.wikipedia.org/wiki/SOLID" target="_blank">SOLID</a> principles of OOP are not worth following. He makes an exception for LSP, but also claims that it's "just subtyping" and further:</p>
+<blockquote>
+<p>If I were trying really hard to be negative about the Liskov substitution principle, I would stress that <strong>it only applies when inheritance is involved</strong>, and inheritance is strongly discouraged anyway.</p>
+</blockquote>
+<p>LSP is more interesting than that! In the original paper, <a href="https://www.cs.cmu.edu/~wing/publications/LiskovWing94.pdf" target="_blank">A Behavioral Notion of Subtyping</a>, Barbara Liskov and Jeannette Wing start by defining a "correct" subtyping as follows:</p>
+<blockquote>
+<p>Subtype Requirement: Let ϕ(x) be a property provable about objects x of type T. Then ϕ(y) should be true for objects y of type S where S is a subtype of T.</p>
+</blockquote>
+<p>From then on, the paper determine what <em>guarantees</em> that a subtype is correct.<sup id="fnref:safety"><a class="footnote-ref" href="#fn:safety">1</a></sup>  They identify three conditions: </p>
+<ol>
+<li>Each of the subtype's methods has the same or weaker preconditions and the same or stronger postconditions as the corresponding supertype method.<sup id="fnref:cocontra"><a class="footnote-ref" href="#fn:cocontra">2</a></sup> </li>
+<li>The subtype satisfies all state invariants of the supertype. </li>
+<li>The subtype satisfies all "history properties" of the supertype. <sup id="fnref:refinement"><a class="footnote-ref" href="#fn:refinement">3</a></sup> e.g. if a supertype has an immutable field, the subtype cannot make it mutable. </li>
+</ol>
+<p>(Later, Elisa Baniassad and Alexander Summers <a href="https://www.cs.ubc.ca/~alexsumm/papers/BaniassadSummers21.pdf" target="_blank">would realize</a> these are equivalent to "the subtype passes all black-box tests designed for the supertype", which I wrote a little bit more about <a href="https://www.hillelwayne.com/post/lsp/" target="_blank">here</a>.)</p>
+<p>I want to focus on the first rule about preconditions and postconditions. This refers to the method's <strong>contract</strong>.  For a function <code>f</code>, <code>f.Pre</code> is what must be true going into the function, and <code>f.Post</code> is what the function guarantees on execution. A canonical example is square root: </p>
+<div class="codehilite"><pre><span></span><code>sqrt.Pre(x) = x &gt;= 0
+sqrt.Post(x, out) = out &gt;= 0 &amp;&amp; out*out == x
+</code></pre></div>
+<div class="subscribe-form"></div>
+<p>Mathematically we would write this as <code>all x: f.Pre(x) =&gt; f.Post(x)</code> (where <code>=&gt;</code> is the <a href="https://en.wikipedia.org/wiki/Material_conditional" target="_blank">implication operator</a>). If that relation holds for all <code>x</code>, we say the function is "correct". With this definition we can actually formally deduce the first  subtyping requirement. Let <code>caller</code> be some code that uses a method, which we will call <code>super</code>, and let both <code>caller</code> and <code>super</code> be correct. Then we know the following statements are true:</p>
+<div class="codehilite"><pre><span></span><code>  1. caller.Pre &amp;&amp; stuff =&gt; super.Pre
+  2. super.Pre =&gt; super.Post
+  3. super.Post &amp;&amp; more_stuff =&gt; caller.Post
+</code></pre></div>
+<p>Now let's say we substitute <code>super</code> with <code>sub</code>, which is also correct. Here is what we now know is true: </p>
+<div class="codehilite"><pre><span></span><code><span class="w"> </span> 1. caller.Pre =&gt; super.Pre
+<span class="gd">- 2. super.Pre =&gt; super.Post</span>
+<span class="gi">+ 2. sub.Pre =&gt; sub.Post</span>
+<span class="w"> </span> 3. super.Post =&gt; caller.Post
+</code></pre></div>
+<p>When is <code>caller</code> still correct? When we can fill in the "gaps" in the chain, aka if <code>super.Pre =&gt; sub.Pre</code> and <code>sub.Post =&gt; super.Post</code>. In other words, if <code>sub</code>'s preconditions are weaker than (or equivalent to) <code>super</code>'s preconditions and if <code>sub</code>'s postconditions are stronger than (or equivalent to) <code>super</code>'s postconditions.</p>
+<p>Notice that I never actually said <code>sub</code> was from a subtype of <code>super</code>! The LSP conditions (at least, the contract rule of LSP) doesn't just apply to <em>subtypes</em> but can be applied in any situation where we substitute a function or block of code for another. Subtyping is a common place where this happens, but by no means the only! We can also substitute across time.Any time we modify some code's behavior, we are effectively substituting the new version in for the old version, and so the new version's contract must be compatible with the old version's to guarantee no existing code is broken.</p>
+<p>For example, say we maintain an API or function with two required inputs, <code>X</code> and <code>Y</code>, and one optional input, <code>Z</code>. Making <code>Z</code> required strengthens the precondition ("input must have Z" is stronger than "input may have Z"), so potentially breaks existing users of our API. Making <code>Y</code> optional weakens the precondition ("input may have Y" is weaker than "input must have Y"), so is guaranteed to be compatible.</p>
+<p>(This also underpins <a href="https://en.wikipedia.org/wiki/Robustness_principle" target="_blank">The robustness principle</a>: "be conservative in what you send, be liberal in what you accept".)</p>
+<p>Now the dark side of all this is <a href="https://www.hyrumslaw.com/" target="_blank">Hyrum's Law</a>. In the below code, are <code>new</code>'s postconditions stronger than <code>old</code>'s postconditions? </p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">old</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">"a"</span><span class="p">:</span> <span class="s2">"foo"</span><span class="p">,</span> <span class="s2">"b"</span><span class="p">:</span> <span class="s2">"bar"</span><span class="p">}</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">new</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">"a"</span><span class="p">:</span> <span class="s2">"foo"</span><span class="p">,</span> <span class="s2">"b"</span><span class="p">:</span> <span class="s2">"bar"</span><span class="p">,</span> <span class="s2">"c"</span><span class="p">:</span> <span class="s2">"baz"</span><span class="p">}</span>
+</code></pre></div>
+<p>On a first appearance, this is a strengthened postcondition: <code>out.contains_keys([a, b, c]) =&gt; out.contains_keys([a, b])</code>. But now someone does this:</p>
+<div class="codehilite"><pre><span></span><code><span class="n">my_dict</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"c"</span><span class="p">:</span> <span class="s2">"blat"</span><span class="p">}</span> 
+<span class="n">my_dict</span> <span class="o">|=</span> <span class="n">new</span><span class="p">()</span>
+<span class="k">assert</span> <span class="n">my_dict</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"blat"</span>
+</code></pre></div>
+<p>Oh no, their code now breaks! They saw <code>old</code> had the postcondition "<code>out</code> does NOT contain "c" as a key", and then wrote their code expecting that postcondition. In a sense, <em>any</em> change the postcondition can potentially break <em>someone</em>. "All observable behaviors of your system
+will be depended on by somebody", as <a href="https://www.hyrumslaw.com/" target="_blank">Hyrum's Law</a> puts it.</p>
+<p>So we need to be explicit in what our postconditions actually are, and properties of the output that are not part of our explicit postconditions are subject to be violated on the next version. You'll break people's workflows but you also have grounds to say "I warned you".</p>
+<p>Overall, Liskov and Wing did their work in the context of subtyping, but the principles are more widely applicable, certainly to more than just the use of inheritance.</p>
+<div class="footnote">
+<hr/>
+<ol>
+<li id="fn:safety">
+<p>Though they restrict it to just <a href="https://www.hillelwayne.com/post/safety-and-liveness/" target="_blank">safety properties</a>. <a class="footnote-backref" href="#fnref:safety" title="Jump back to footnote 1 in the text">↩</a></p>
+</li>
+<li id="fn:cocontra">
+<p>The paper lists a couple of other authors as introduce the idea of "contra/covariance rules", but part of being "off-the-cuff and casual" means not diving into every referenced paper. So they might have gotten the pre/postconditions thing from an earlier author, dunno for sure! <a class="footnote-backref" href="#fnref:cocontra" title="Jump back to footnote 2 in the text">↩</a></p>
+</li>
+<li id="fn:refinement">
+<p>I <em>believe</em> that this is equivalent to the formal methods notion of a <a href="https://www.hillelwayne.com/post/refinement/" target="_blank">refinement</a>. <a class="footnote-backref" href="#fnref:refinement" title="Jump back to footnote 3 in the text">↩</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

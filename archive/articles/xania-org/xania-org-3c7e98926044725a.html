@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Loop-Invariant Code Motion | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Loop-Invariant Code Motion</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-13T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/13-licking-licm?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-3c7e98926044725a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The compiler can move code outside of loops to speed things up</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p>Look back at <html:a href="/202512/08-going-loopy">our simple loop example</html:a> - there's an optimisation I completely glossed over. Let me show you what I mean:</html:p>
+
+<html:p>On every loop iteration we are calling <html:code>vec.size()</html:code> to compare the index value, and to check if the index has reached the end of the vector. However, looking in the assembly, the compiler has pulled the size calculation<html:sup id="fnref:recall"><html:a class="footnote-ref" href="#fn:recall">1</html:a></html:sup> out of the loop entirely - the <html:code>sar</html:code> that divides the "end - start" value by the size of an int is only performed <html:em>before</html:em> the loop! The compiler quietly rewrote our code to be:</html:p>
+
+<html:p>Such a transformation is called Loop-Invariant Code Motion, or LICM. It's not just expressions in the <html:code>for</html:code> clauses themselves, any code inside the loop that the compiler can prove doesn't depend on which iteration it's in is fair game.</html:p>
+
+<html:p>Let's give our loop something more to do: We'll take a <html:code>std::string_view</html:code><html:sup id="fnref:sv"><html:a class="footnote-ref" href="#fn:sv">2</html:a></html:sup> and count how many characters fall within a given range (being "capital letters" or "numerics")<html:sup id="fnref:const"><html:a class="footnote-ref" href="#fn:const">3</html:a></html:sup>. We'll write it naively, using a <html:code>get_range()</html:code> function that returns the min and max character "in range" as a pair:</html:p>
+
+<html:p>You can see that clang<html:sup id="fnref:gcc"><html:a class="footnote-ref" href="#fn:gcc">4</html:a></html:sup> here has realised the range from <html:code>get_range</html:code> cannot change during the loop and so has moved it outside:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">count_in_range:</html:span>
+<html:span class="c1">; ...preamble removed for brevity...</html:span>
+<html:span class="w">  </html:span><html:span class="nf">call</html:span><html:span class="w"> </html:span><html:span class="no">get_range</html:span><html:span class="p">(</html:span><html:span class="no">RangeType</html:span><html:span class="p">)</html:span><html:span class="err">@</html:span><html:span class="no">PLT</html:span><html:span class="w">     </html:span><html:span class="c1">; call get_range (OUTSIDE OF LOOP)</html:span>
+<html:span class="w">  </html:span><html:span class="nf">movsx</html:span><html:span class="w"> </html:span><html:span class="no">ecx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">al</html:span><html:span class="w">                     </html:span><html:span class="c1">; ecx = range.first</html:span>
+<html:span class="w">  </html:span><html:span class="nf">shr</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">8</html:span>
+<html:span class="w">  </html:span><html:span class="nf">movsx</html:span><html:span class="w"> </html:span><html:span class="no">edx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">al</html:span><html:span class="w">                     </html:span><html:span class="c1">; edx = range.second</html:span>
+<html:span class="w">  </html:span><html:span class="nf">xor</html:span><html:span class="w"> </html:span><html:span class="no">esi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">esi</html:span><html:span class="w">                      </html:span><html:span class="c1">; esi = loop counter = 0</html:span>
+<html:span class="w">  </html:span><html:span class="nf">xor</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="w">                      </html:span><html:span class="c1">; eax = num = 0</html:span>
+<html:span class="nl">.LBB0_4:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">movsx</html:span><html:span class="w"> </html:span><html:span class="no">edi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">byte</html:span><html:span class="w"> </html:span><html:span class="no">ptr</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rbx</html:span><html:span class="w"> </html:span><html:span class="err">+</html:span><html:span class="w"> </html:span><html:span class="no">rsi</html:span><html:span class="p">]</html:span><html:span class="w">   </html:span><html:span class="c1">; read next c</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">ecx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">edi</html:span><html:span class="w">                      </html:span><html:span class="c1">; compare with first</html:span>
+<html:span class="w">  </html:span><html:span class="nf">setle</html:span><html:span class="w"> </html:span><html:span class="no">r8b</html:span><html:span class="w">                         </html:span><html:span class="c1">; r8b = c &gt;= first</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">edx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">edi</html:span><html:span class="w">                      </html:span><html:span class="c1">; compare with second</html:span>
+<html:span class="w">  </html:span><html:span class="nf">setge</html:span><html:span class="w"> </html:span><html:span class="no">dil</html:span><html:span class="w">                         </html:span><html:span class="c1">; dil = c &lt;= second</html:span>
+<html:span class="w">  </html:span><html:span class="nf">and</html:span><html:span class="w"> </html:span><html:span class="no">dil</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">r8b</html:span><html:span class="w">                      </html:span><html:span class="c1">; dil = dil &amp; r8b</html:span>
+<html:span class="w">                                    </html:span><html:span class="c1">; ie 1 if c in range, else 0</html:span>
+<html:span class="w">  </html:span><html:span class="nf">movzx</html:span><html:span class="w"> </html:span><html:span class="no">edi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">dil</html:span><html:span class="w">                    </html:span><html:span class="c1">; edi = (zero extended) dil</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rdi</html:span><html:span class="w">                      </html:span><html:span class="c1">; num += (1 if in range, else 0)</html:span>
+<html:span class="w">  </html:span><html:span class="nf">inc</html:span><html:span class="w"> </html:span><html:span class="no">rsi</html:span><html:span class="w">                           </html:span><html:span class="c1">; increment loop counter</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">r14</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rsi</html:span><html:span class="w">                      </html:span><html:span class="c1">; are we done?</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.LBB0_4</html:span><html:span class="w">                       </html:span><html:span class="c1">; loop if not</html:span>
+<html:span class="c1">; ...postamble/return removed for brevity...</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>Clang has also played some other neat tricks<html:sup id="fnref:ahem"><html:a class="footnote-ref" href="#fn:ahem">5</html:a></html:sup> here to avoid a branch inside the loop using <html:code>setle</html:code> and <html:code>setge</html:code> to get a 0 or 1 based on a condition code.</html:p>
+
+<html:p>Usually I end with a "trust the compiler" type sentiment. However, in this case I was surprised that gcc wasn't able to perform code motion here<html:sup id="fnref:bug"><html:a class="footnote-ref" href="#fn:bug">6</html:a></html:sup>. I guess that's what <html:a href="https://godbolt.org">Compiler Explorer</html:a> is for: Trust the compiler, but know how to verify its output too.</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/dIwaqJG0WDo">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 13 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/12-loop-unswitching">Unswitching loops for fun and profit</html:a> | <html:a href="/202512/14-licm-when-it-doesnt">When LICM fails us</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:recall">
+<html:p>Recall that the vector holds various pointers, and to determine the count of elements, we need to subtract the <html:code>end</html:code> from the <html:code>start</html:code> and divide by the element size. <html:a class="footnote-backref" href="#fnref:recall" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:sv">
+<html:p>A <html:code>std::string_view</html:code> is, in this case, equivalent to <html:code>std::span&lt;char&gt;</html:code>. <html:a class="footnote-backref" href="#fnref:sv" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:const">
+<html:p>I haven't actually supplied the body of the <html:code>get_range</html:code> function here - it would add more code <html:em>and</html:em> would show the compiler doing inlining, which I'll cover properly later in this series. However, I do need to use a magic attribute <html:code>[[gnu::pure]]</html:code> here to let the compiler know that the implementation of this function is "pure" and depends only on its inputs. The compiler usually figures this out for itself from the implementation if it can see it. <html:a class="footnote-backref" href="#fnref:const" title="Jump back to footnote 3 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:gcc">
+<html:p>Surprisingly, gcc seems unable to take advantage of this optimisation and in fact calls <html:code>get_range</html:code> <html:em>twice</html:em> each iteration, even if I use the even-stricter <html:code>[[gnu::const]]</html:code> attribute. <html:a class="footnote-backref" href="#fnref:gcc" title="Jump back to footnote 4 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:ahem">
+<html:p>I've deliberately used <html:code>-O1</html:code> only here to minimise some of the <html:em>even more clever</html:em> tricks clang will do here. I will cover some of those later in this series. <html:a class="footnote-backref" href="#fnref:ahem" title="Jump back to footnote 5 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:bug">
+<html:p>After speaking with some other C++ experts, I filed a <html:a href="https://gcc.gnu.org/bugzilla/show_bug.cgi?id=122226">gcc bug</html:a> on a similar but largely equivalent example. A gcc maintainer suggests it's due to the structure type returned (a <html:code>std::pair</html:code> here) doesn't go through common subexpression elimination (CSE<html:sup id="fnref:CSE"><html:a class="footnote-ref" href="#fn:CSE">7</html:a></html:sup>), which prevents the analysis needed to do LICM. <html:a class="footnote-backref" href="#fnref:bug" title="Jump back to footnote 6 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:CSE">
+<html:p>We won't cover CSE in this series, but the compiler tries to detect redundant calculation of the same subexpressions, and only does the work once where possible. <html:a class="footnote-backref" href="#fnref:CSE" title="Jump back to footnote 7 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

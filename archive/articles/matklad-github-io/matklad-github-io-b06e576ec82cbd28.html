@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Programming Aphorisms | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Programming Aphorisms</h1>
+        <div class="meta">matklad 2026-02-11T00:00:00Z</div>
+        <div class="links">
+          <a href="https://matklad.github.io/2026/02/11/programming-aphorisms.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/matklad-github-io/matklad-github-io-b06e576ec82cbd28.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A meta programming post --- looking at my thought process when coding and trying to pin down what is programming knowledge. Turns out, a significant fraction of that is just reducing new problems to a vocabulary of known tricks. This is a personal, descriptive post, not a prescriptive post for you.</div>
+        <div class="content">
+          <header>
+  <h1>Programming Aphorisms</h1>
+  <time class="meta" datetime="2026-02-11">Feb 11, 2026</time>
+</header>
+<p>A meta programming post — looking at my thought process when coding and trying to pin down what is
+programming “knowledge”. Turns out, a significant fraction of that is just reducing new problems to
+a vocabulary of known tricks. This is a personal, descriptive post, not a prescriptive post for you.</p>
+<p>It starts with a question posted on Ziggit. The background here is that Zig is in the process of
+removing ambient IO capabilities. Currently, you can access program environment from anywhere via
+<span class="display"><code>std.process.getEnvVarOwned</code>.</span>
+In the next Zig version, you’ll have to thread
+<span class="display"><code>std.process.Environ.Map</code></span>
+from main down to every routine that needs access to the environment. In this user’s case, they have
+a <code>readHistory</code> function which used to look up the path to the history file in the environment, and
+they are wondering how to best model that in the new Zig. The options on the table are:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span><span class="hl-function"> readHistory</span>(</span>
+<span class="line">    io: std.Io,</span>
+<span class="line">    alloc: Allocator,</span>
+<span class="line">    file: std.Io.File,</span>
+<span class="line">) ReadHistoryError<span class="hl-operator">!</span><span class="hl-type">void</span>;</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span><span class="hl-function"> readHistory</span>(</span>
+<span class="line">    io: std.Io,</span>
+<span class="line">    alloc: Allocator,</span>
+<span class="line">    maybe_environ_map: ?<span class="hl-operator">*</span>std.process.Environ.Map,</span>
+<span class="line">) ReadHistoryError<span class="hl-operator">!</span><span class="hl-type">void</span>;</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span><span class="hl-function"> readHistory</span>(</span>
+<span class="line">    io: std.Io,</span>
+<span class="line">    alloc: Allocator,</span>
+<span class="line">    maybe_absolute_path: ?[]<span class="hl-keyword">const</span> <span class="hl-type">u8</span>,</span>
+<span class="line">    maybe_environ_map: ?<span class="hl-operator">*</span>std.process.Environ.Map,</span>
+<span class="line">) ReadHistoryError<span class="hl-operator">!</span><span class="hl-type">void</span>;</span></code></pre>
+
+</figure>
+<p>My starting point would instead be this:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">pub</span> <span class="hl-keyword">const</span> HistoryOptions = <span class="hl-keyword">struct</span> {</span>
+<span class="line">    file: []<span class="hl-keyword">const</span> <span class="hl-type">u8</span>,</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span><span class="hl-function"> from_environment</span>(</span>
+<span class="line">        environment: <span class="hl-operator">*</span><span class="hl-keyword">const</span> std.process.Environ.Map,</span>
+<span class="line">    ) HistoryOptions;</span>
+<span class="line">};</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span><span class="hl-function"> readHistory</span>(</span>
+<span class="line">    io: std.Io,</span>
+<span class="line">    gpa: Allocator,</span>
+<span class="line">    options: HistoryOptions,</span>
+<span class="line">) ReadHistoryError<span class="hl-operator">!</span><span class="hl-type">void</span>;</span></code></pre>
+
+</figure>
+<p>In terms of meta programming, what I find fascinating is that this, for me, is both immediate (I
+don’t have to think about it), but also is clearly decomposable into multiple factoids I’ve
+accumulated before. Here’s a deconstruction of what I did here, the verbal “labels” I use to think
+about what I did, and where I had learned to do that:</p>
+<p><em>First</em>, I “raised the abstraction level” by giving <em>it</em> a name and a type (<code>HistoryOptions</code>). This
+is a rare transformation which I learned and named myself. Naming is important for my thinking and
+communicating process. “Let’s raise abstraction level” is a staple code review comment of mine.</p>
+<p><em>Second</em>, I avoided “midlayer mistake” by making sure that every aspect of options is
+user-configurable. Easy to do in Zig, where all fields are public. I learned about
+<a href="https://lwn.net/Articles/336262/">midlayer mistake</a> from a GitHub comment by
+<a href="https://joshtriplett.org">Josh Triplett</a>.</p>
+<p><em>Third</em>, I provided a “shortcut”, the
+<span class="display"><code>from_environment</code></span>
+convenience function that cuts across abstraction layers. I learned the “shortcut” aphorism from
+<a href="https://spookylukey.github.io/django-views-the-right-way/detail-view.html#discussion-layering-violations-shortcuts-vs-mixins"><em>Django Views — The Right Way</em>.</a>
+Germane to the present article, I read that post a decade after I had touched Django the last time.
+It was useless to me on the object level. On the meta level, reading the article solidified and
+<em>named</em> several programming tricks for me. See reverberations in
+<a href="https://rust-analyzer.github.io/blog/2020/09/28/how-to-make-a-light-bulb.html"><em>How to Make a 💡?</em>.</a></p>
+<p><em>Fourth</em>, I instinctively renamed <code>alloc</code> to “gpa” (in opposition to “arena”), the naming I spotted
+in the Zig compiler.</p>
+<p><em>Fifth</em>, I named the configuration parameter “options”, not <code>config</code>, <code>props</code> or <code>params</code>, a naming
+scheme I learned at TigerBeetle.</p>
+<p><em>Sixth</em>, I made sure that the signature follows “positional DI” scheme. Arguments that are
+dependencies, resources with unique types are injected positionally (and have canonical names like
+<code>io</code> or <code>gpa</code>). Arguments that <em>directly</em> vary the behavior of function (as opposed to affecting
+transitive callees) are passed by name, in the <code>Options</code> struct.</p>
+<p>To be specific, I don’t claim that my snippet is the right way to do this! I have no idea, as I
+don’t have access to the full context. Rather, if I were <em>actually</em> solving the problem, the snippet
+above would be my initial starting point for further iteration.</p>
+<p>Note that I also don’t explain <em>why</em> I am doing the above six things, I only name them and point at
+the origin. Actually explaining the <em>why</em> would take a blog post of its own for every one of them.</p>
+<p>And this is I think the key property of my thought process — I have a bag of tricks, where the
+tricks are named. Inside my mind, this label points both to the actual trick (code to type),
+as well as a justification for it (in what context that would be a good trick to use).</p>
+<p>And I use these tricks all the time, literally! Just answering in passing to a forum comment makes
+me grab a handful! A lot of my knowledge is structured like a book of coding aphorisms.</p>
+<hr>
+<p>Meta meta — how come I have acquired all those tricks? I read voraciously, random commits, issues,
+jumping enthusiastically into rabbit holes and going on wiki trips. The key skill here is
+recognizing an aphorism once you see it. Reading Ziggit is part of trick-acquisition routine for
+me. Having learned the trick, I remember it, where “remembering” is an act of active recall at the
+opportune moment. This recall powers “horizontal gene transfer” across domains, stealing shortcuts
+from Django and midlayer mistake from the kernel. Did you notice that applying “horizontal gene
+transfer” to the domain of software engineering tacit knowledge is horizontal gene transfer? When
+entering a new domain, I actively seek out the missing tricks. I am relatively recent in Zig, but
+all the above tricks are either Zig native, or at least Zig adapted. Every once in a while, I
+“invent” a trick of my own. For example, “positional DI” is something I only verbalized last year.
+This doesn’t mean I hadn’t been doing that before, just that the activity wasn’t mentally labeled as
+a separate thing you can deliberately do. I had the idea, now I also have an aphorism.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

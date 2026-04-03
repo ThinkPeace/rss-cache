@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Porting PuTTY to Windows on Arm | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Porting PuTTY to Windows on Arm</h1>
+        <div class="meta">Simon Tatham&#x27;s quasi-blog 2019-03-05T00:00:00Z</div>
+        <div class="links">
+          <a href="https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/putty-woa/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/chiark-greenend-org-uk-sgtatham/chiark-greenend-org-uk-sgtatham-5d21c78df0f1f2d5.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">What I had to do to make PuTTY compile for Windows on Arm as well as on x86, plus a deep dive into the NEON-accelerated cryptography.</div>
+        <div class="content">
+          <html>
+  <body>
+    <p>
+      
+        Also an <a href="https://community.arm.com/tools/b/blog/posts/porting-putty-to-windows-on-arm">Arm Community blog post</a>.
+      
+    </p>
+    <p>
+      In my day job, I work in the Arm Development Solutions Group,
+      developing Arm Compiler and its supporting tools. In my spare
+      time, I’m also the lead developer of the free SSH
+      client <a href="https://www.chiark.greenend.org.uk/~sgtatham/putty/">PuTTY</a>.
+    </p>
+    <p>Recently, Windows on Arm has been making a splash, so last year [2018] I did a little porting work to get WoA builds of PuTTY. This year [2019], I’ve gone a little further, and optimised the cryptography code using the Arm v8 Cryptographic Extension. So the next release of PuTTY (expected this month) should contain all of that work.</p>
+    <p>That was all done in my spare time, but since I also work for Arm, they asked if I could write something up about how all that was done.</p>
+    <p>
+      Of course, the first job was to compile PuTTY for WoA at all. As
+      of Visual Studio 2017 (and also 2015, which I was still using at
+      the start of this project), if you try to compile an ordinary
+      Win32 desktop application with the Arm-targeted VS compiler, you
+      find that its header files don’t define most of the API
+      functions by default, so you get a lot of compile-time errors.
+      The solution (found on the Internet) is to compile with a
+      magic <pre>#define</pre>,
+      namely <pre>_ARM_WINAPI_PARTITION_DESKTOP_SDK_AVAILABLE</pre>,
+      which turns on all those parts of the headers.
+    </p>
+    <p>The next job was to fix any PuTTY-specific compile failures or runtime bugs. I guessed that the cross-platform parts of the code would have no trouble here, because Linux distributions have been compiling those on Arm for years. But the Windows front end had never before been built for any architecture except x86, and even the move to x86-64 needed a lot of bug fixes, so I was definitely expecting that there would be some work needed here.</p>
+    <p>In fact, there wasn’t! Once I added that macro definition to the makefile, the whole tool suite built first time for Windows, and nobody has yet reported any bug specific to the WoA build.</p>
+    <p>
+      So that was a very encouraging start. But I wasn’t quite
+      finished, because Visual Studio isn’t actually the compiler I
+      use for the production builds of PuTTY: instead, for various
+      reasons, I use <pre>clang-cl</pre> in VS emulation mode (a
+      choice also made by the Chromium project). So the next question
+      was, would it be just as easy to build for WoA using clang?
+    </p>
+    <p>
+      Answer: nearly as easy. There was one small wrinkle,
+      which was stack protection. On x86, clang’s stack protection is
+      compatible with Visual Studio’s C library, but when targeting
+      Arm, I found that clang emitted references
+      to <pre>__stack_chk_guard</pre>
+      and <pre>__stack_chk_fail</pre>, which are part of a stack
+      protection system that’s not the same as the one VS uses. The
+      VS-compatible stack protection involves functions
+      called <pre>__security_push_cookie</pre>
+      and <pre>__security_pop_cookie</pre>, and clang doesn’t know
+      how to generate calls to those. So I had to turn off stack
+      protection (<pre>/GS-</pre>) on the command line.
+    </p>
+    <p>But after that, everything worked fine, and clang-built Windows PuTTY was running on Arm!</p>
+    <p>After building the PuTTY executable files, there’s one more thing done by the master build script: wrapping them into an MSI installer.</p>
+    <p>There are two problems with doing that. One is that many MSIs, including PuTTY’s, do some of their install-time activities by embedding a DLL, and having the MSI database tables include an instruction that says ‘now call a function in this DLL’. PuTTY’s installer uses this to validate the install directory when the user selects it interactively, and to display the README file after installation. To run an MSI on Arm, I had no idea what architecture those DLLs should be built for.</p>
+    <p>Rather than spend a lot of effort finding out, I thought an easier approach was just to get rid of the DLLs completely. Both the things we use them for are minor quality-of-implementation issues, and don’t make the installer unusable if you just leave them out. So for the Arm MSI, I just conditioned them out.</p>
+    <p>
+      The other problem is that an MSI has a master table including a
+      ‘platform’ field, and initially, I couldn’t work out what to put
+      in there. If I set it to ‘Arm’ or ‘Arm64’,
+      then <pre>msiexec.exe</pre> reported that the installer was
+      for an unsupported platform! ‘x86-64’ was also refused, leaving
+      only ‘x86’ – and if I set it to ‘x86’, then
+      when <pre>msiexec</pre> ran the installer, it insisted on
+      installing the Arm PuTTY executable files in <pre>C:\Program
+      Files (x86)</pre>.
+    </p>
+    <p>
+      That one took some actual help from Microsoft to solve. (Thanks,
+      Microsoft, if you're reading this!) It turned out that the
+      answer is that you also have to adjust
+      the <pre>InstallerVersion</pre> property on
+      the <pre>Package</pre> element in the WiX input file:
+      following previous example code, I had it set to 100 (for x86)
+      or 200 (for x86-64), but if you set it to 500, then that
+      tells <pre>msiexec</pre> to switch to a schema in which the
+      platform ‘Arm64’ is legal. Phew.
+    </p>
+    <p>Last year, a contributor sent us code to implement some of PuTTY’s usual cryptographic algorithms – the AES cipher, and the SHA-256 and SHA-1 hash functions – using the dedicated x86 instructions designed to accelerate those algorithms.</p>
+    <p>
+      Arm also has hardware acceleration for those same algorithms, in
+      the Arm v8 crypto extension to NEON. Now that PuTTY is running
+      on WoA, it seemed a shame not to have a parallel set of
+      accelerated implementations for NEON. I was able to do this
+      without having to write any actual assembly – it was enough to
+      write the code using the <a href="https://developer.arm.com/technologies/neon">NEON</a> data
+      types and intrinsic functions defined by ACLE, which means the
+      same C source code can compile for either AArch32 or AArch64
+      (because the intrinsics are named consistently across both).
+    </p>
+    <p>
+      To set this up, you start by adding <pre>#include
+      &lt;arm_neon.h&gt;</pre> to your source file, which defines a
+      set of vector types with names like <pre>uint32x4_t</pre> (a
+      vector of 4 32-bit integers) and <pre>uint8x16_t</pre>
+      (sixteen 8-bit bytes), and a set of intrinsics – i.e. functions
+      that operate on those types, and more or less map one-to-one
+      with the NEON vector instructions. For
+      example, <pre>vaddq_u32(a,b)</pre> takes
+      two <pre>uint32x4_t</pre> vectors, and returns
+      a <pre>uint32x4_t</pre> vector in which each 32-bit lane
+      contains the sum of the corresponding input lanes.
+    </p>
+    <p>
+      ACLE is a standard that should apply to all Arm-targeted
+      compilers – gcc, clang and Visual Studio alike. In fact, I found
+      it wasn’t quite that simple (on Visual Studio targeting
+      AArch64, I had to include <pre>&lt;arm64_neon.h&gt;</pre>
+      instead of <pre>&lt;arm_neon.h&gt;</pre>, and a couple of
+      other compiler/platform combinations aren’t quite working for me
+      at the moment), but in principle, this should work
+      everywhere.
+    </p>
+    <p>The AES block cipher is well suited to NEON, because it operates on a block of 128 bits at a time – exactly the size of a NEON vector register – and consists of a series of transformations that change those 128 bits into a new 128 bits.</p>
+    <p>The nice thing about implementing AES using hardware acceleration is that it’s not necessary to worry about every single detail of the cipher (as you have to if you’re implementing it in pure software). So I don’t have to explain it in full detail here, either: I only have to mention the basic components of the algorithm and how they match up to the NEON instructions.</p>
+    <p>The AES encryption process consists of a sequence of rounds, which jumble up the cipher state. The round function itself is fixed (it doesn’t depend on the cipher key); but in between every pair of rounds, before the first round, and after the final round, the cipher state is XORed with 128 bits of data derived from the key. (This is often referred to as ‘addition’ in the AES spec, even though it’s XOR to most programmers, because it corresponds to the addition operation of the finite field that AES is based on.)</p>
+    <p>The round function is broken up into three conceptual pieces: SubBytes, which transforms each individual byte of the state according to a fixed substitution; ShiftRows, which reorders the 16 bytes of the state but leaves their values alone; and MixColumns, which combines the bytes with each other in groups of four. Each round consists of those three operations in order, except for the last round, which omits the MixColumns step.</p>
+    <p>Here’s a diagram that shows what AES would look like if it had only three rounds. In fact it has at least 10 (depending on key size), but the diagram would just look like more of the same if I put them all in:</p>
+    <p>
+      <graphic>
+    </graphic></p>
+    <p>
+      NEON provides two instructions to accelerate AES
+      encryption: <pre>AESE</pre> and <pre>AESMC</pre>, which are
+      wrapped by the C intrinsic functions <pre>vaeseq_u8</pre>
+      and <pre>vaesmcq_u8</pre>.
+    </p>
+    <p>
+      <pre>vaeseq_u8</pre> bundles together the addition of the
+      round key, SubBytes and ShiftRows. So it takes two inputs (the
+      cipher state and the round key), and <pre>vaeseq_u8(s,k)</pre>
+      returns <pre>ShiftRows(SubBytes(s XOR k))</pre>. The other
+      intrinsic, <pre>vaesmcq_u8</pre>, takes a single input vector
+      and performs MixColumns on it.
+    </p>
+    <p>
+      So most AES rounds consist of one call to each of these
+      intrinsics, with <pre>vaesmcq_u8</pre> coming second. The
+      final round omits MixColumns, so it’s
+      just <pre>vaeseq_u8</pre> on its own – but then you have to
+      add the last round key, which is done by the ordinary non-crypto
+      NEON intrinsic <pre>veorq_u8</pre>.
+    </p>
+    <p>So here’s the same diagram again, showing what the NEON instructions are that do all the same jobs:</p>
+    <p>
+      <graphic>
+    </graphic></p>
+    <p>And here’s a simple implementation in working C:</p>
+    <blockquote>/* roundkeys[] is an array containing n_rounds + 1 elements */ uint8x16_t aes_encrypt(uint8x16_t plaintext, const uint8x16_t roundkeys[], unsigned n_rounds) { uint8x16_t state = plaintext; /* All but the last round */ for (unsigned i = 0; i &lt; n_rounds-1; i++) { state = vaeseq_u8(state, roundkeys[i]); state = vaesmcq_u8(state); } /* The last round, without MixColumns */ state = vaeseq_u8(state, roundkeys[n_rounds-1]); /* XOR in the final round key */ state = veorq_u8(state, roundkeys[n_rounds]); }</blockquote>
+    <p>Simple as that! Who said cryptography was hard?</p>
+    <p>
+      The basic decryption routine looks exactly the same, except that
+      you use <pre>vaesdq_u8</pre> in place
+      of <pre>vaeseq_u8</pre> (which uses the inverted version of
+      the SubBytes transformation), and <pre>vaesimcq_u8</pre> in
+      place of <pre>vaesmcq_u8</pre> (again, the inverse
+      transformation).
+    </p>
+    <p>
+      If you refer back to the diagram above, you’ll notice that that
+      doesn’t exactly perform the same operations in reverse
+      order. SubBytes and ShiftRows are the other way round, for a
+      start, but that doesn’t make any difference because they’re
+      independent of each other anyway and can be done in either
+      order. But also, each of the inner round key additions (that is,
+      all but the first and last) has moved to the other side of a
+      MixColumns operation. That does make a difference, but
+      it’s a difference you can compensate for when you set up
+      the <pre>roundkeys[]</pre> array in the first place ... which
+      is what I’m going to talk about next.
+    </p>
+    <p>When the user sets up AES, they provide 128, 192 or 256 bits of data as the official key. But the encryption process needs 128 bits per round, and there are 10, 12 or 14 rounds depending on the key length. So the key has to be expanded into a ‘key schedule’ containing all the individual round keys, and the key schedule is a vital part of the cipher design and implementation.</p>
+    <p>In AES, the key schedule is specified as a sequence of 32-bit words. The first few words of the schedule are simply the input key itself (either 4, 6 or 8 words depending on the key size). After that, each schedule word is derived from two of the previous words, with various transformations applied; you keep doing that until you have enough key material for all the round keys (that is, 4 × (rounds + 1) words), and then you group the words together in batches of 4.</p>
+    <p>For my purposes, I wasn’t interested in seriously optimising the key schedule setup. In SSH, you only set up an AES key when you’ve just done a public-key operation, and any public-key operation takes many times as long as even a slow AES key expansion, so it wouldn’t be worth bothering. So I didn’t worry about whether it might be possible to vectorise the key expansion and generate the schedule words in batches of 2 or 4; I just plod along generating each individual word one at a time, and combine them into vectors once I’ve finished. That’s more than fast enough for this application.</p>
+    <p>
+      One of the transformations you need during key setup is exactly
+      the same SubBytes operation that is one of the phases of
+      encryption – but you have to apply it on its own to just one
+      32-bit word at a time. We’d like to use
+      the <pre>vaeseq_u8</pre> intrinsic to do that for you; but
+      that bundles up SubBytes with two other operations, which now we
+      have to compensate for.
+    </p>
+    <p>
+      One of the other operations is adding a round key. That’s easily
+      solved: just pass a zero vector as the other operand
+      to <pre>vaeseq_u8</pre>, and that becomes a no-op.
+    </p>
+    <p>
+      The other operation done by <pre>vaeseq_u8</pre> is ShiftRows,
+      which (as I said above) reorders the 16 bytes of the cipher
+      state. More specifically, suppose the bytes start off looking
+      like this:
+    </p>
+    <p>
+      <graphic>
+    </graphic></p>
+    <p>The effect of ShiftRows is to leave all the A bytes fixed; cycle the B bytes round by one place to the left, the C bytes round by two, and the D by three. So you end up with this:</p>
+    <p>
+      <graphic>
+    </graphic></p>
+    <p>The nice thing about this is that every A slot is still occupied by an A byte, and similarly for B,C,D. And we only need to apply SubBytes to one 32-bit word. So if we make all the A bytes the same as each other, and likewise B,C,D, then you end up with a vector containing four copies of the input 32-bit value:</p>
+    <p>
+      <graphic>
+    </graphic></p>
+    <p>and if you apply ShiftRows to a vector of that form, it leaves it completely unchanged.</p>
+    <p>
+      So you can perform a stand-alone SubBytes operation on a 32-bit
+      word by making a vector of four copies of it (using
+      the <pre>vdupq_n_u32()</pre> intrinsic), and then using that
+      as one of the inputs to <pre>vaeseq_u8()</pre>, with the other
+      one being an all-zeroes vector. Then the round key
+      addition and the ShiftRows become no-ops, and the output
+      vector has four copies of exactly the word you wanted.
+    </p>
+    <p>
+      In fact there are a few more administrative details, like the
+      fact that <pre>vdupq_n_u32()</pre> returns a value whose C
+      type is <pre>uint32x4_t</pre>,
+      whereas <pre>vaeseq_u8()</pre> wants a <pre>uint8x16_t</pre>
+      as input. The approved way to convert between them is to
+      use <pre>vreinterpretq_u8_u32()</pre>, which generates no
+      actual code (the vector register is unchanged) and just tells C
+      to start treating it as a different type. With that and the code
+      to extract a single <pre>uint32_t</pre> word from the output
+      vector, I ended up having to do this to get my SubBytes:
+    </p>
+    <blockquote>uint32_t standalone_SubBytes(uint32_t input_word) { uint32x4_t v32 = vdupq_n_u32(input_word); uint8x16_t v8 = vreinterpretq_u8_u32(v32); v8 = vaeseq_u8(v8, vdupq_n_u8(0)); v32 = vreinterpretq_u32_u8(v8); return vget_lane_u32(vget_low_u32(v32), 0); }</blockquote>
+    <p>
+      (Different compilers vary in whether they actually need
+      you to use <pre>vreinterpretq</pre>. I initially compiled my
+      prototype code with clang, which doesn’t mind at all if you pass
+      an intrinsic a different vector type – it didn’t even give me a
+      warning. But when I tried to build it with gcc, which does mind,
+      I got lots of type errors, and had to go back and reinsert all
+      the <pre>vreinterpretq</pre>s. So if you’re writing NEON code,
+      make sure your code compiles with gcc before anyone else tries
+      it!)
+    </p>
+    <p>The other operations you need in key setup are to rotate a word left by 8 bits, and to XOR together two words of the key schedule and sometimes XOR in a constant as well. Of course, doing those things to a 32-bit word at a time doesn’t need any NEON at all.</p>
+    <p>
+      Once you’ve got your complete list of 32-bit words, you can
+      combine them into the <pre>uint8x16_t</pre> vectors needed by
+      the encryption routine by using <pre>vld1q_u32</pre> to load a
+      batch of four words, and then
+      another <pre>vreinterpretq_u8_u32</pre> to turn the result
+      into the right type.
+    </p>
+    <p>
+      Finally, I mentioned above that decryption needs all but the
+      first and last round keys to be modified to account for them
+      being moved to the other side of a MixColumns operation.
+      Specifically, you just have to apply <pre>vaesimcq_u8</pre> to
+      each one; then you rearrange them into the opposite order, and
+      that’s a version of the key schedule you can use for decryption.
+    </p>
+    <p>So that’s how you do AES in NEON!</p>
+    <p>Right, on to hash functions!</p>
+    <p>Of the two hashes accelerated by the v8 crypto extension, SHA-256 is the more modern one and also the easier one to work with, because its internal state is 256 bits long and fits nicely into two NEON vector registers.</p>
+    <p>The main component of SHA-256, and the one that NEON can accelerate, is an update function which takes a 256-bit hash state and a 64-byte block of the message, and returns an updated version of the hash state. Outside that, there’s a layer of padding and marshalling that tells you how to translate an arbitrary-length message into a series of 64-byte blocks, and what the initial value of the hash state should be, but that can all be done in conventional code without needing special-purpose acceleration.</p>
+    <p>The update function consists of two main parts. Firstly, the input message block is expanded into a ‘message schedule’ consisting of 64 32-bit words, starting with the 16 words of the message itself, followed by another 48 that are derived from it. Secondly, each word of the message schedule is used as input to a ‘round’ of the main hash operation, which updates the 256-bit hash state based on that schedule word.</p>
+    <p>(Structurally, this is very like a block cipher, with the input message corresponding to the key, the message schedule being the list of round keys, the input hash value being the plaintext, and the updated hash value the ciphertext. But the tradeoffs change about how much complexity you put in each component, because in a block cipher you make a key schedule once and then use it for many cipher blocks, whereas in a hash function each schedule you make is a one-off.)</p>
+    <p>So the simplest way to write SHA-256 in ordinary unaccelerated code is to separate the two stages completely, and write two separate loops. In pseudocode (leaving out the details of how the updates are actually done):</p>
+    <blockquote>uint32_t schedule[64]; // Make schedule for (i = 0; i &lt; 16; i++) schedule[i] = load_bigendian_32bit(message + 4*i); for (i = 16; i &lt; 64; i++) schedule[i] = make_new_schedule_word(previous words); // Consume schedule for (i = 0; i &lt; 64; i++) hash_state = hash_update(hash_state, schedule[i]);</blockquote>
+    <p>So, how does NEON help us with this?</p>
+    <p>
+      Each new schedule word is made from a combination of some
+      previous schedule words, and they’re always the same distances
+      back in the stream: <pre>schedule[i]</pre> is constructed
+      from <pre>schedule[i-2]</pre>, <pre>schedule[i-16]</pre> and
+      a couple in between. So the schedule construction loop never
+      needs to look further back than 16 words.
+    </p>
+    <p>The NEON acceleration for SHA-256 provides a pair of instructions which deliver a full vector of 4 new words of the message schedule, given four vector registers full of the previous 16 words. (There have to be two instructions involved, so that they can have enough input registers between them.)</p>
+    <p>
+      So in NEON, you can build the message schedule as a sequence
+      of <pre>uint32x4_t</pre> vectors, like this:
+    </p>
+    <blockquote>uint32x4_t sched[16]; for (i = 0; i &lt; 4; i++) sched[i] = vreinterpretq_u32_u8(vrev32q_u8( vld1q_u8(message + 16*i))); for (i = 4; i &lt; 16; i++) sched[i] = vsha256su1q_u32(vsha256su0q_u32( sched[i-4], sched[i-3]), sched[i-2], sched[i-1]);</blockquote>
+    <p>
+      SHA-256 specifies that the input message is regarded as a
+      sequence of big-endian 32-bit words, so – assuming
+      little-endian Arm, which is what we expect to see on both Linux
+      and Windows – we have to use <pre>vrev32q_u8</pre> to
+      byte-reverse each word, and then a <pre>vreinterpretq</pre> to
+      turn the output of that into the right vector type.
+    </p>
+    <p>
+      The part that does the heavy lifting is the second
+      loop. <pre>vsha256su0q_u32</pre> takes two vectors of schedule
+      data from further back in the stream, extracts as much
+      information from them as the next instruction will need, and
+      packs that into a single output vector.
+      Then <pre>vsha256su1q_u32</pre> takes that intermediate value
+      plus the other two vectors of recent schedule data, and
+      delivers the full and complete output schedule.
+    </p>
+    <p>For the second loop that updates the hash state, NEON again provides two instructions which between them perform four rounds of the hash. But they don’t quite do the whole job by themselves, because SHA-256 also specifies a different 32-bit constant for each round, which is added to the message schedule word before the main operation. (That ensures that some mixing still happens even if the input message block was something really boring like all zeroes.)</p>
+    <p>So in order to perform four rounds of SHA-256, you need a vector of message schedule, plus a vector of the round constants for those four rounds, and you start by adding them together (this time using real addition, unlike AES):</p>
+    <blockquote>uint32x4_t round_input = vaddq_u32( schedule[i], round_constant_vectors[i]);</blockquote>
+    <p>Having done that, you can now use the dedicated SHA-256 instructions to update the actual hash state:</p>
+    <blockquote>new.abcd = vsha256hq_u32 (old.abcd, old.efgh, round_input); new.efgh = vsha256h2q_u32(old.efgh, old.abcd, round_input);</blockquote>
+    <p>
+      I’ve given the two hash-state vectors the
+      names <pre>abcd</pre> and <pre>efgh</pre>, because the
+      SHA-256 specification describes the state as consisting of eight
+      32-bit words called <pre>a,b,c,d,e,f,g,h</pre>, so this keeps
+      the correspondence clear between the spec and the
+      implementation.
+    </p>
+    <p>Note in particular that both the update instructions must receive the old values of the state vectors – it won’t work if you overwrite one vector with its updated value and then pass that as input to the other instruction. Also note that the two intrinsics take the old state vectors opposite ways round in their argument lists!</p>
+    <p>So you could write a NEON SHA-256 implementation by combining those snippets of code in the same way as before: first loop round making an array of 16 vectors of message schedule, then loop over that array adding in the round constants and updating the hash state.</p>
+    <p>But we can do better. Because the schedule update function only needs four previous vectors of state, there’s no real need to store the whole message schedule in an array. We can save time by interleaving the two loops, so that we generate each word of message schedule and then immediately consume it.</p>
+    <p>So you could do this kind of thing instead:</p>
+    <blockquote>uint32_t sched[4]; struct { uint32_t abcd, efgh; } hash_state; for (int i = 0; i &lt; 4; i++) { sched[i] = vreinterpretq_u32_u8(vrev32q_u8( vld1q_u8(message + 16*i))); hash_state = hash_update( hash_state, schedule[i], round_constants[i]); } for (int i = 4; i &lt; 16; i++) { sched[i] = vsha256su1q_u32(vsha256su0q_u32( sched[ i ], sched[(i+1)%4]), sched[(i+2)%4], sched[(i+3)%4]); hash_state = hash_update( hash_state, schedule[i], round_constants[i]); }</blockquote>
+    <p>
+      in which <pre>hash_update()</pre> is an inline subfunction
+      wrapping the addition of the round constants and the hash update
+      instructions. Now <pre>sched[]</pre> is only four vectors long
+      instead of 16, and it stores the previous four vectors in a
+      cyclically rotating fashion, so that every time round the second
+      loop, the new schedule vector is stored over the top of the
+      least recently written one.
+    </p>
+    <p>
+      In my actual code, I’ve unrolled both of those loops completely,
+      expanded out the array indices in <pre>sched[]</pre>, and
+      turned it into four independent <pre>uint32x4_t</pre>
+      variables, just to make sure the compiler realises that it’s
+      better to keep all four in registers throughout the function.
+    </p>
+    <p>The older hash function SHA-1 is essentially similar in structure to SHA-256. In particular, it has the same separation into generating the message schedule and consuming it, and again, you could write those loops separately but we prefer to interleave them.</p>
+    <p>The two main differences are that SHA-1 has a hash state consisting of only five 32-bit words instead of eight, and also that its rounds come in three slightly different types, each of which has a separate NEON instruction.</p>
+    <p>
+      (The three types are called ‘choice’, ‘majority’ and ‘parity’,
+      named after the ternary Boolean function that each one uses
+      during its operation, so the NEON intrinsics are
+      called <pre>vsha1cq_u32</pre>, <pre>vsha1mq_u32</pre>
+      and <pre>vsha1pq_u32</pre>. There are 80 rounds in total,
+      consisting of 20 × c, 20 × p, 20 × m and finally 20 × p again.
+      Also, a smaller difference from SHA-256 is that each batch of 20
+      rounds uses a single constant throughout, instead of varying it
+      in every round as SHA-256 does.)
+    </p>
+    <p>Because of the five-word structure, the hash state is represented in C as a mismatched pair of variables, again named to reflect the correspondence with the variable names in the SHA-1 spec:</p>
+    <blockquote>uint32x4_t abcd; uint32_t e;</blockquote>
+    <p>
+      Although <pre>e</pre> has an ordinary integer type, the
+      underlying NEON instructions will need it to be stored in a
+      floating-point register. So to get this hash to perform well,
+      it’s extra important to not pass <pre>e</pre> across
+      any real function-call boundaries, where the procedure call
+      standard would force it to be moved into an integer register and
+      back. We want to make sure it’s all done in a single function,
+      and any subroutines you use for code clarity will have to be
+      labelled ‘<pre>inline</pre>’.
+    </p>
+    <p>
+      The schedule update for SHA-1 looks almost exactly like SHA-256:
+      it still takes four previous vectors of schedule as input and
+      delivers the next whole vector as output. But it so happens that
+      this time it’s the first-stage update intrinsic
+      (<pre>vsha1su0q_u32</pre>) that takes three arguments, and the
+      second one (<pre>vsha1su1q_u32</pre>) takes two:
+    </p>
+    <blockquote>uint32x4_t sched[16]; for (i = 0; i &lt; 4; i++) sched[i] = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8( message + 16*i))); for (i = 4; i &lt; 16; i++) sched[i] = vsha1su1q_u32(vsha1su0q_u32( sched[i-4], sched[i-3], sched[i-2]), sched[i-1]);</blockquote>
+    <p>
+      (You almost can’t see the difference, written like this! The
+      only effect is that the closing parenthesis in the last line
+      comes after
+      <pre>schedule[i-2]</pre>, whereas it came after <pre>schedule[i-3]</pre> in SHA-256.)
+    </p>
+    <p>
+      The round update still adds a constant to the schedule vector,
+      and then performs two instructions to deliver the updated
+      version of the state. But one of those instructions (delivering
+      the output <pre>abcd</pre> vector) has to vary depending on
+      the type of the round; the other one (delivering <pre>e</pre>)
+      is the same instruction in all round types, but the complication
+      is that it expects just one lane of the <pre>abcd</pre> vector
+      as input. So you have to combine it with a couple of extra NEON
+      intrinsics to extract that lane from
+      the <pre>uint32x4_t</pre>.
+    </p>
+    <p>So an example of a full SHA-1 round looks like this:</p>
+    <blockquote>uint32x4_t round_input = vaddq_u32(schedule[i], round_constant); new.abcd = vsha1cq_u32(old.abcd, old.e, round_input); new.e = vsha1h_u32(vget_lane_u32(vget_low_u32(old.abcd), 0));</blockquote>
+    <p>
+      and then you also need modified versions which switch
+      the <pre>abcd</pre> update to use <pre>vsha1mq_u32</pre>
+      or <pre>vsha1pq_u32</pre>.
+    </p>
+    <p>
+      (The <pre>vget_lane</pre> business should optimise away when
+      the code is compiled, because the compiler will just select the
+      32-bit FP register overlapping the appropriate lane of the input
+      vector.)
+    </p>
+    <p>As with SHA-256, it makes more sense to interleave the schedule generation and consumption, to avoid the need to load and store everything into an intermediate array on the stack, and to space apart the loads from the message.</p>
+    <p>All of this has got us to the point of having working implementations of AES, SHA-256 and SHA-1 using NEON acceleration.</p>
+    <p>Those implementations will already be faster than pure software implementations of the same primitives. So after I’d got this much working in PuTTY, I decided it was a reasonable stopping point, and moved on to some other unrelated fixes.</p>
+    <p>But if you want to optimise further, there are still things that can be done.</p>
+    <p>Many cipher modes, such as SDCTR, are parallelisable, in the sense that you can feed multiple blocks of data through the main cipher without a dependency between them. The NEON AES instructions are not intrinsically parallel – they can only process one block at a time – but if you’re using a parallelisable cipher mode, then it’s probably still a win to have a function that decrypts 4 or 8 cipher blocks at a time, loading each round key vector just once and applying it to lots of vector registers containing the intermediate states of many separate blocks.</p>
+    <p>
+      Other cipher modes don’t parallelise. For example, CBC
+      encryption needs to know each output cipher block in order to
+      XOR it into the next plaintext block, so you can’t avoid having
+      to encrypt your blocks one at a time. (However,
+      CBC decryption is parallelisable.) But even there, you
+      can find a trick or two to squeeze out more performance, using
+      the fact that CBC is based on the same operation (XOR) as the
+      round key additions in AES: if, instead of XORing each plaintext
+      block with the previous ciphertext block, you XOR it with the
+      value from just before the final <pre>veorq_u8</pre>
+      adds in the last round key, and compensate for the error by
+      using a modified initial round key which is the XOR of
+      the first and last normal ones, then you can get
+      the <pre>veorq_u8</pre> off the critical path that blocks the
+      next cipher iteration from starting.
+    </p>
+    <p>
+      (Of course, you can’t get rid of the <pre>veorq</pre>
+      completely. It’s still needed to produce the output version of
+      each ciphertext block, of course. It’s just that, on a
+      multiple-issue CPU, now the next encryption operation can be
+      getting started while the <pre>veorq</pre> is still working.)
+    </p>
+    <p>I don’t know of any analogous optimisations you can do with SHA-256 and SHA-1, but I wouldn’t be surprised if there were some to be found there as well. Maybe one day I’ll come back and try to tune all of this for even higher performance!</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Going from an IPv4 address to an ASN in Python 2 with Unix brute force | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Going from an IPv4 address to an ASN in Python 2 with Unix brute force</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-03-25T02:45:53Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/python/IPToASNWithUnixBruteForce">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-e98ebdcd1b64712b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">For reasons , I&#x27;ve reached the point where I would like to be able to map IPv4 addresses into the organizations responsible for them, which is to say their Autonomous System Number (ASN) , for use in DWiki , the blog engine of Wandering Thoughts . So today on the Fediverse I mused : Current status: wondering if I can design an on-disk (read only) data struc…</div>
+        <div class="content">
+          <div class="wikitext"><p><a href="https://utcc.utoronto.ca/~cks/space/blog/web/WeShouldBlockForSocialReasons">For reasons</a>, I've reached
+the point where I would like to be able to map IPv4 addresses into
+the organizations responsible for them, which is to say their
+<a href="https://en.wikipedia.org/wiki/Autonomous_system_%28Internet%29">Autonomous System Number (ASN)</a>,
+for use in <a href="https://utcc.utoronto.ca/~cks/space/dwiki/DWiki">DWiki</a>, the blog engine of <a href="https://utcc.utoronto.ca/~cks/space/blog/">Wandering Thoughts</a>.
+So today on the Fediverse <a href="https://mastodon.social/@cks/116286432747227689">I mused</a>:</p>
+
+<blockquote><p>Current status: wondering if I can design an on-disk (read only)
+data structure of some sort that would allow a Python 2 program to
+efficiently map an IP address to an ASN. There are good in-memory data
+structures for this but you have to load the whole thing into memory
+and my Python 2 program runs as a CGI so no, not even with pickle.</p>
+
+<p>(Since this is Python 2, about all I have access to is gdbm or rolling
+my own direct structure.)</p>
+</blockquote>
+
+<p>Mapping IP addresses to ASNs comes up a lot in routing Internet
+traffic, so there are good in-memory data structures that are
+designed to let you efficiently answer these questions once you
+have everything loaded. But I don't think anyone really worries
+about on-disk versions of this information, while it's the case
+that I care about, although I only care about some ASNs (a detail
+I forgot to put in the Fediverse post).</p>
+
+<p>Then <a href="https://mastodon.social/@cks/116286447217217668">I had a realization</a>:</p>
+
+<blockquote><p>If I'm willing to do this by <a href="https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing">/24</a> (and
+I am) and represent the ASNs by 16-bit ints, I guess you can do this
+with a 32 Mbyte sparse file of two-byte blocks. Seek to a 16-byte
+address determined by the first three octets of the IP, read two
+bytes, if they're zero there's no ASN mapping we care about, otherwise
+they're the ASN in some byte order I'd determine.</p>
+
+<p>If I don't care about the specific ASN, just a class of ASNs of
+interest of which there are at most 255, it's only 16 Mbytes.</p>
+</blockquote>
+
+<p>(And if all I care about is a yes or know answer, I can represent
+each /24 by a bit, so the storage required drops even more, to only
+2 Mbytes.)</p>
+
+<p>This Fediverse post has a mistake. I thought ASNs were 16-bit
+numbers, but we've gone well beyond that by now. So I would want
+to use the one-byte 'class of ASN' approach, with ASNs I don't care
+about mapping to a class of zero. Alternately I could expand to
+storing three bytes for every /24, or four bytes to stay aligned
+with filesystem blocks.</p>
+
+<p>That storage requirement is 'at most' because this will be a Unix
+sparse file, where filesystem blocks that aren't written to aren't
+stored on disk; when read, the data in them is all zero. The lookup
+is efficient, at least in terms of system calls; I'd open the file,
+lseek() to the position, and read two bytes (causing the system to
+read a filesystem block, however big that is). Python 2 doesn't
+have access to <code>pread()</code> or we could do it in one system call.</p>
+
+<p>Within the OS this should be reasonably efficient, because if things
+are active much of the important bits of the mapping file will be
+cached into memory and won't have to be read from disk. 32 Mbytes
+is nothing these days, at least in terms of active file cache, and
+much of the file will be sparse anyway. The OS obviously has
+reasonably efficient random access to the filesystem blocks of the
+file, whether in memory or on disk.</p>
+
+<p>This is a fairly brute force approach that's only viable if you're
+typically making a single query in your process before you finish.
+It also feels like something that is a good fit for Unix because of
+sparse files, although 16 Mbytes isn't that big these days even for
+a non-sparse file.</p>
+
+<p>Realizing the brute force approach feels quite liberating. I've
+been turning this problem over in my mind for a while but each time
+I thought of complicated data structures and complicated approaches
+and it was clear to me that I'd never implement them. This way is
+simple enough that I could actually do it and it's not too impractical.</p>
+
+<p>PS: I don't know if I'll actually build this, but every time a horde
+of crawlers descends on <a href="https://utcc.utoronto.ca/~cks/space/blog/">Wandering Thoughts</a> from a cloud provider
+that has a cloud of separate /24s and /23s all over the place, my
+motivation is going to increase. If I could easily block all netblocks
+of certain hosting providers all at once, I definitely would.</p>
+
+<p>(To get the ASN data there's <a href="https://pypi.org/project/pyasn/">pyasn</a>
+(<a href="https://github.com/hadiasghari/pyasn">also</a>). Conveniently it
+has a simple on-disk format that can be post-processed to go from
+a set of CIDRs that map to ASNs to a data file that maps from /24s
+to ASN classes for ASNs (and classes) that I care about.)</p>
+
+<p>Update: After writing most of this entry I got enthused and wrote
+a stand-alone preliminary implementation (initially storing full
+ASNs in four-byte records), which can both create the data file and
+query it. It was surprisingly straightforward and not very much
+code, which is probably what I should have expected since the core
+approach is so simple. With four-byte records, a full data file of
+all recent routes from <a href="https://pypi.org/project/pyasn/">pyasn</a> is about 53 Mbytes and the data
+file can be created in less than two minutes, which is pretty good
+given that the code writes records for about 16.5 million /24s.</p>
+
+<p>(The whole thing even appears to work, although I haven't strongly
+tested it.)</p>
+</div>
+<div> (<a href="https://utcc.utoronto.ca/~cks/space/blog/python/IPToASNWithUnixBruteForce?showcomments#comments">2 comments</a>.) </div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

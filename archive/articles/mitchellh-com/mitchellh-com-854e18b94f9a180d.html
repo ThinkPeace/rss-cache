@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Finding and Fixing Ghostty&#x27;s Largest Memory Leak | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Finding and Fixing Ghostty&#x27;s Largest Memory Leak</h1>
+        <div class="meta">Mitchell Hashimoto 2026-01-10T00:00:00Z</div>
+        <div class="links">
+          <a href="https://mitchellh.com/writing/ghostty-memory-leak-fix">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/mitchellh-com/mitchellh-com-854e18b94f9a180d.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body><h1><a href="https://mitchellh.com/">Mitchell Hashimoto</a></h1><h1>Finding and Fixing Ghostty's Largest Memory Leak</h1><p>A few months ago, users started reporting that Ghostty was consuming absurd
+amounts of memory, with one user reporting 37 GB after 10 days of uptime.
+Today, I'm happy to say <a href="https://github.com/ghostty-org/ghostty/pull/10251">the fix has been found and merged</a>.
+This post is an overview of what caused the leak, a look at some of
+Ghostty's internals, and some brief descriptions of how we tracked it down.<a href="https://mitchellh.com#user-content-fn-2">1</a></p><p>The leak was present since at least Ghostty 1.0, but it is only recently that popular CLI applications (particularly Claude Code) started producing the correct conditions to trigger it at scale. The limited conditions that triggered the leak are what made it particularly tricky to diagnose.</p><p>The fix is merged and is available in <a href="https://ghostty.org/docs/install/pre">tip/nightly releases</a>,
+and will be part of the tagged 1.3 release in March.</p><h2><a href="https://mitchellh.com#the-pagelist"/>The PageList</h2>
+<p>To understand the bug, we first need to understand how Ghostty manages
+terminal memory. Ghostty uses a data structure called the
+<a href="https://github.com/ghostty-org/ghostty/blob/main/src/terminal/PageList.zig"> PageList</a>
+to store terminal content. PageList is a doubly-linked list of
+memory pages that store the terminal content (characters, styles, hyperlinks,
+etc.).</p><p>The underlying "pages" are not single <a href="https://en.wikipedia.org/wiki/Page_(computer_memory)">virtual memory pages</a>
+but they are a contiguous block of memory aligned to page boundaries
+and composed of an even multiple of system pages.<a href="https://mitchellh.com#user-content-fn-1">2</a></p><p>These pages are allocated using <pre>mmap</pre>. <pre>mmap</pre> isn't particularly fast,
+so to avoid constant syscalls, we use a memory pool. When we need
+a new page, we pull from the pool. When we're done with a page, we return
+it to the pool for reuse.</p><p>The pool uses a standard size for pages. Think of it like buying standard-sized shipping boxes: most things people ship fit in a standard box, and having a standard box comes with various efficiencies.</p><p>But sometimes terminals need more memory than a standard page provides.
+If a set of lines has many emoji, styles, or hyperlinks, we need
+a larger page. In these cases, we allocate a non-standard page
+directly with <pre>mmap</pre>, bypassing the pool entirely. This is typically a
+rare scenario.</p><p>When we "free" a page, we apply some simple logic:</p><ul><li>If the page is <pre>&lt;= standard size</pre>: return it to the pool</li><li>If the page is <pre>&gt; standard size</pre>: call<pre>munmap</pre>to free it</li></ul><p>This is the core background for terminal memory management in Ghostty, and the idea itself is sound. A logic bug around an optimization is what produced the leak, as we'll see next.</p><h2><a href="https://mitchellh.com#the-scrollback-optimization"/>The Scrollback Optimization</h2>
+<p>There's one more background detail we need to cover to understand the bug: scrollback pruning.</p><p>Ghostty has a <pre>scrollback-limit</pre> configuration that caps how much history
+is retained. When you hit this limit, we delete the oldest pages in
+the scrollback buffer to free up memory.</p><p>But this often happens in a super hot path (e.g. when outputting large amounts of data quickly), and allocating and freeing memory pages is expensive, even with the pool. Therefore, we have an optimization: reuse the oldest page as the newest page when we reach the limit.</p><p>This optimization works great. It requires zero allocations and uses only some quick pointer manipulations to move the page from the front to the back of the list. We do some metadata cleanup to "clear" the page but otherwise leave the previous memory intact.</p><p>It's fast and empirically speeds up scrollback-heavy workloads significantly.</p><h2><a href="https://mitchellh.com#the-bug"/>The Bug</h2>
+<p>During the scrollback pruning optimization, we always
+resized our page back to standard size. But we didn't resize the
+underlying memory allocation itself, we only noted the resize in the
+metadata. The underlying memory was still the large
+non-standard <pre>mmap</pre> allocation, but now the PageList thought it was standard
+sized.</p><p>Eventually, we'd free the page under various circumstances (e.g. when
+the user closes the terminal, but also other times). At that point,
+we'd see the page memory was within the standard size, assume it
+was part of the pool, and we would never call <pre>munmap</pre> on it.
+A classic leak.</p><p>This all seems pretty obvious, but the issue is that non-standard pages are rare by design. The goal of our design and optimizations is that standard pages are the common case and provide a fast-path. Only very specific scenarios produce non-standard pages and they're usually not produced in large quantities.</p><p>But the rise of <a href="https://claude.com/product/claude-code">Claude Code</a>
+changed this. For some reason, Claude Code's CLI produces a lot of
+multi-codepoint grapheme outputs which force Ghostty to regularly
+use non-standard pages. Additionally, Claude Code uses the primary screen
+and produces a significant amount of scrollback output. These things
+combined together created the perfect storm to trigger the leak
+in huge quantities.</p><p>I want to be explicit that this bug is not Claude Code's fault. Claude Code is simply exercising Ghostty in a way that exposes this long-standing bug.</p><h2><a href="https://mitchellh.com#the-fix"/>The Fix</h2>
+<p>The fix is conceptually simple: never reuse non-standard pages.
+If we encounter a non-standard page during scrollback pruning, we
+destroy it properly (calling <pre>munmap</pre>) and allocate a fresh
+standard-sized page from the pool.</p><p>The core of the fix is in the snippet below, but some extra work was needed to fix up some other bits of accounting we have:</p><pre><pre>if (first.data.memory.len &gt; std_size) {
+    self.destroyNode(first);
+    break :prune;
+}</pre></pre><p>We could've also reused the non-standard page and just retained the large memory size, but until we have data that shows otherwise, we're still operating under the assumption that standard pages are the common case and it makes sense to reset back to a standard pooled page.</p><p>Other users have recommended more complex strategies (e.g. maintaining some metrics on how often non-standard pages are used and adjusting our assumptions accordingly), but more research is needed before making those changes. This change is simple, fixes the bug, and aligns with our current assumptions.</p><h2><a href="https://mitchellh.com#finding-the-leak-with-vm-tags"/>Finding the Leak with VM Tags</h2>
+<p>As part of the fix, I added support for virtual memory tags on macOS provided by the Mach kernel. This lets us tag our PageList memory allocations with a specific identifier that shows up in various tooling.</p><pre><pre>inline fn pageAllocator() Allocator {
+    // In tests we use our testing allocator so we can detect leaks.
+    if (builtin.is_test) return std.testing.allocator;
+
+    // On non-macOS we use our standard Zig page allocator.
+    if (!builtin.target.os.tag.isDarwin()) return std.heap.page_allocator;
+
+    // On macOS we want to tag our memory so we can assign it to our
+    // core terminal usage.
+    const mach = @import("../os/mach.zig");
+    return mach.taggedPageAllocator(.application_specific_1);
+}</pre></pre><p>Now when debugging memory on macOS, Ghostty's PageList memory shows up with a specific tag instead of being lumped in with everything else. This made it trivial to identify the leak, associate it with the PageList, and also verify that the fix worked by observing the tagged memory being properly freed.</p><h2><a href="https://mitchellh.com#preventing-leaks-in-ghostty"/>Preventing Leaks in Ghostty</h2>
+<p>We do a lot of work in the Ghostty project to find and prevent memory leaks:</p><ul><li>In debug builds and unit tests, we use leak-detecting Zig allocators.</li><li>The CI runs <pre>valgrind</pre>on our full unit test suite on every commit to find more than just leaks, such as undefined memory usage.</li><li>We regularly run the macOS GUI via macOS Instruments to look for leaks particularly in the Swift codebase.</li><li>We run every GTK-related PR using Valgrind (the full GUI) to look for leaks in the GTK codepath that isn't unit tested.</li></ul><p>This has worked really well to date, but unfortunately it didn't catch this particular leak because it only triggers under very specific conditions that our tests didn't reproduce. The merged PR includes a test that does reproduce the leak to prevent regressions in the future.</p><h2><a href="https://mitchellh.com#conclusion"/>Conclusion</h2>
+<p>This was the largest known memory leak in Ghostty to date, and the only reported leak that has been confirmed by more than a single user. We'll continue to monitor and address memory reports as they come in, but remember that reproduction is the key to diagnosing and fixing memory leaks!</p><p>Big thanks to <a href="https://github.com/grishy">@grishy</a> who finally
+got me a reliable reproduction so I could analyze the issue myself. Their
+own analysis reached the same conclusion as mine, and the reproduction
+let me verify both our understandings independently.</p><p>Thanks also to everyone who reported this issue with detailed diagnostics.
+The community's analysis, especially around the <pre>footprint</pre> output and
+VM region counting, gave me important clues that pointed toward the PageList
+as the culprit.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to Use Hexadecimal Ed25519 Public Keys in Node.js | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How to Use Hexadecimal Ed25519 Public Keys in Node.js</h1>
+        <div class="meta">Keygen Blog 2022-01-28T06:00:00Z</div>
+        <div class="links">
+          <a href="https://keygen.sh/blog/how-to-use-hexadecimal-ed25519-keys-in-node/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/keygen-sh/keygen-sh-084a14c85aff50af.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Learn how to use hexadecimal Ed25519 keys with Node&#x27;s crypto module.</div>
+        <div class="content">
+          <html>
+  <body><h1>How to Use Hexadecimal Ed25519 Public Keys in Node.js</h1><p>Friday, Jan 28th 2022</p><p>When dealing with Ed25519 in most cryptographic packages, signing keys and verify keys are encoded in hexadecimal. But unlike most, Node uses DER-encoding, and does not support hexadecimal encoded keys. Node not supporting hex-encoded public keys is a big point of confusion for Keygen users licensing apps built on Node.</p><p>Today, we're going to learn how to use a hex Ed25519 key in Node.</p><h2>Using your DER-encoded Ed25519 key</h2><p>To save our users the headache, we've gone ahead and included a DER-encoded
+Ed25519 public key, available <a href="https://app.keygen.sh/settings">in your account settings</a>. You can utilize
+this in Node, avoiding the pitfalls that the rest of this article attempts to
+work around.</p><p>But if you're curious, or you're using an Ed25519 key that isn't from Keygen, read on to learn how to convert a hexadecimal key to DER format.</p><h2>Converting a hex key to DER format</h2><p>The DER format is made up of a few parts. First, is the IOD, which is more or less a sequence of bytes identifying the cryptographic algorithm.</p><p>Ed25519 has the following OID:</p><pre><pre>06 03 2B 65 70</pre></pre><p>We can use this OID to manually convert our hex-encoded public key into a DER-encoded key. In addition, we'll need to do a bit more magic by creating a sequence of bytes that define the key's length, which is always 32 bytes for Ed25519 public keys.</p><pre><pre>function toDER(hex) {  const key = Buffer.from(hex, 'hex')   // Ed25519's OID  const oid = Buffer.from([0x06, 0x03, 0x2B, 0x65, 0x70])   // Create a byte sequence containing the OID and key  const elements = Buffer.concat([    Buffer.concat([      Buffer.from([0x30]), // Sequence tag      Buffer.from([oid.length]),      oid,    ]),    Buffer.concat([      Buffer.from([0x03]), // Bit tag      Buffer.from([key.length + 1]),      Buffer.from([0x00]), // Zero bit      key,    ]),  ])   // Wrap up by creating a sequence of elements  const der = Buffer.concat([    Buffer.from([0x30]), // Sequence tag    Buffer.from([elements.length]),    elements,  ])   return der}</pre></pre>
+<p>Now if we try out our <pre>toDER</pre> function, we should be able to convert our
+hex-encoded verify key to DER-encoding, and use it in Node's <pre>crypto.createPublicKey</pre>
+function. This allows us to use <pre>crypto.verify(...)</pre>, for example.</p><pre><pre>const key = toDER('6d28cf8e17e4682fbe6285e72b21aa26f094d8dbd18f7828358f822b428d069f')const verifyKey = crypto.createPublicKey({  format: 'der',  type: 'spki',  key,})</pre></pre>
+<p>But if we pass in a couple different public keys, we may notice a pattern.</p><pre><pre>toDER('6d28cf8e17e4682fbe6285e72b21aa26f094d8dbd18f7828358f822b428d069f')// =&gt; &lt;Buffer 30 2a 30 05 06 03 2b 65 70 03 21 00//            6d 28 cf 8e 17 e4 68 2f be 62 85 e7//            2b 21 aa 26 f0 94 d8 db d1 8f 78 28//            35 8f 82 2b 42 8d 06 9f&gt;toDER('51e46ec0a8dac6b00b921e80d53dd90cd922a7a7bda8bef32edef4b112da1716')// =&gt; &lt;Buffer 30 2a 30 05 06 03 2b 65 70 03 21 00//            51 e4 6e c0 a8 da c6 b0 0b 92 1e 80//            d5 3d d9 0c d9 22 a7 a7 bd a8 be f3//            2e de f4 b1 12 da 17 16&gt;toDER('08058583b5a58f5c847090d36cea298907ccf0de37b65ba63e10ed862e2cdc3b')// =&gt; &lt;Buffer 30 2a 30 05 06 03 2b 65 70 03 21 00//            08 05 85 83 b5 a5 8f 5c 84 70 90 d3//            6c ea 29 89 07 cc f0 de 37 b6 5b a6//            3e 10 ed 86 2e 2c dc 3b&gt;</pre></pre>
+<p>The pattern? They all start with the following byte sequence!</p><pre><pre>30 2a 30 05 06 03 2b 65 70 03 21 00</pre></pre><p>This is the Ed25519 OID, and our sequence of bytes indicating that the key is
+32 bytes in length. Since this will always be the case for Ed25519 verify keys,
+that means we can simplify things, avoiding our <pre>toDER</pre> function
+altogether!</p><pre><pre>const key = Buffer.concat([  Buffer.from('302a300506032b6570032100', 'hex'), // Static value  Buffer.from('6d28cf8e17e4682fbe6285e72b21aa26f094d8dbd18f7828358f822b428d069f', 'hex'),]) const verifyKey = crypto.createPublicKey({  format: 'der',  type: 'spki',  key,})</pre></pre>
+<p>To use the public key to verify a signature, you'd use it like so.</p><pre><pre>const ok = crypto.verify(null, dataBytes, verifyKey, signatureBytes)</pre></pre>
+<h2>Converting a DER key to hex format</h2><p>Now what about the reverse? Thankfully, converting a DER-encoded key to hexadecimal
+is much, much more straight forward. Since our DER key is simply a <pre>Buffer</pre>, we can
+easily convert to <pre>hex</pre>, or even <pre>base64</pre>.</p><pre><pre>key.toString('hex').substring(24)// =&gt; 6d28cf8e17e4682fbe6285e72b21aa26f094d8dbd18f7828358f822b428d069f</pre></pre>
+<p>We removed the first 24 characters of the string, the DER prefix.</p><h2>Conclusion</h2><p>Today, we covered how your Keygen account comes with a hexadecimal Ed25519 key, as well as a DER-encoded Ed25519 verify key for use within Node. And we learned how to convert Ed25519 verify keys between hexadecimal and DER encoding.</p><p>We also learned that Node, unlike so many other programming languages, does not support hexadecimal Ed25519 public keys.</p><p>Until next time.</p><p>
+  If you find any errors in my code, or if you can think of ways to improve things, <a href="https://x.com/_m27e">ping me via Twitter</a>.
+</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The stack circuitry of the Intel 8087 floating point chip, reverse-engineered | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The stack circuitry of the Intel 8087 floating point chip, reverse-engineered</h1>
+        <div class="meta">Ken Shirriff&#x27;s blog 2025-12-09T17:54:00Z</div>
+        <div class="links">
+          <a href="http://www.righto.com/2025/12/8087-stack-circuitry.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/righto-com/righto-com-1c8090922bb99620.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Early microprocessors were very slow when operating with floating-point numbers. But in 1980, Intel introduced the 8087 floating-point coprocessor, performing floating-point operations up to 100 times faster. This was a huge benefit for IBM PC applications such as AutoCAD, spreadsheets, and flight simulators. The 8087 was so effective that today&#x27;s computers…</div>
+        <div class="content">
+          <p>Early microprocessors were very slow when operating with floating-point numbers.
+But in 1980, Intel introduced the 8087 floating-point coprocessor, performing
+floating-point operations up
+to 100 times faster.
+This was a huge benefit for IBM PC
+applications such as AutoCAD, spreadsheets, and flight simulators.
+The 8087 was so effective that today's computers still use a floating-point system based on the 8087.<span id="fnref:ieee-754"><a class="ref" href="#fn:ieee-754">1</a></span></p>
+<!--
+It's hard to compute floating-point operations both quickly and accurately.
+Problems can arise from overflow, rounding, transcendental operations, and numerous edge cases.
+Prior to the 8087, each manufacturer had their own incompatible ad hoc implementation of floating point.
+Intel, however, enlisted numerical analysis expert [William Kahan](https://en.wikipedia.org/wiki/William_Kahan) to design accurate floating point
+based on rigorous principles.
+    The 8087 has its problems, but it was a large improvement on earlier floating-point systems.
+    The designers of the 8087 commented on the guidance offered by Professor Kahan: "We did not do as well as he wanted, but we did better than he expected."
+-- The 8087 Primer, page viii
+-->
+
+<p>The 8087 was an extremely complex chip for its time, containing somewhere between
+40,000 and 75,000 transistors, depending on the source.<span id="fnref:count"><a class="ref" href="#fn:count">2</a></span>
+To explore how the 8087 works, I opened up a chip and took numerous photos of the silicon die with a microscope.
+Around the edges of the die, you can see the hair-thin bond wires that connect the chip to its 40 external pins.
+The complex patterns on the die are formed by its metal wiring, as well as the polysilicon and silicon underneath.
+The bottom half of the chip is the "datapath", the circuitry that performs calculations on 80-bit floating point values. 
+At the left of the datapath, a <a href="https://www.righto.com/2020/05/extracting-rom-constants-from-8087-math.html">constant ROM</a> holds important constants such as &pi;.
+At the right are the eight registers that form the stack, along with the stack control circuitry.</p>
+<p><a href="https://static.righto.com/images/8087-stack/8087-die-labeled.jpg"><img alt="Die of the Intel 8087 floating point unit chip, with main functional blocks labeled. The die is 5mm&times;6mm.  Click for a larger image." class="hilite" height="587" src="https://static.righto.com/images/8087-stack/8087-die-labeled-w450.jpg" title="Die of the Intel 8087 floating point unit chip, with main functional blocks labeled. The die is 5mm&times;6mm.  Click for a larger image." width="450" /></a><div class="cite">Die of the Intel 8087 floating point unit chip, with main functional blocks labeled. The die is 5mm&times;6mm.  Click for a larger image.</div></p>
+<p>The chip's instructions are defined by the large <a href="https://www.righto.com/2018/09/two-bits-per-transistor-high-density.html">microcode ROM</a> in the middle.
+This ROM is very unusual; it is semi-analog, storing two bits per transistor by using four transistor sizes.
+To execute a floating-point instruction, the 8087 decodes the instruction and the microcode engine starts executing
+the appropriate micro-instructions from the microcode ROM.
+The decode circuitry to the right of the ROM generates the appropriate control signals from each micro-instruction.
+The bus registers and control circuitry handle interactions with the main 8086 processor and the rest of the system.
+Finally, the <a href="https://www.righto.com/2018/08/inside-die-of-intels-8087-coprocessor.html">bias generator</a>
+uses a charge pump to create a negative voltage to bias the chip's substrate, the underlying silicon.</p>
+<p>The stack registers and control circuitry (in red above) are the subject of this blog post. 
+Unlike most processors, the 8087 organizes its registers in a stack, with instructions operating on the top of the stack.
+For instance, the square root instruction replaces the value on the top of the stack with its square root.
+You can also access a register relative to the top of the stack, for instance, adding the top value to the value two positions down from the top.
+The stack-based architecture was intended to improve the instruction set, simplify compiler design, and make function
+calls more efficient, although it didn't work as well as hoped.</p>
+<p><a href="https://static.righto.com/images/8087-stack/stack-diagram.jpg"><img alt="The stack on the 8087. From The 8087 Primer, page 60." class="hilite" height="204" src="https://static.righto.com/images/8087-stack/stack-diagram-w350.jpg" title="The stack on the 8087. From The 8087 Primer, page 60." width="350" /></a><div class="cite">The stack on the 8087. From <i>The 8087 Primer</i>, page 60.</div></p>
+<p>The diagram above shows how the stack operates. The stack consists of eight registers, with the Stack Top
+(ST) indicating the current top of the stack.
+To push a floating-point value onto the stack, the Stack Top is decremented and then the value is stored in the new top register.
+A pop is performed by copying the value from the stack top and then incrementing the Stack Top.
+In comparison, most processors specify registers directly, so register 2 is always the same register.</p>
+<h2>The registers</h2>
+<p>The stack registers occupy a substantial area on the die of the 8087 because floating-point numbers take many bits.
+A floating-point number consists of a fractional part (sometimes called the mantissa or significand), along with
+the exponent part; the exponent allows floating-point numbers to cover a range from extremely small to extremely
+large.
+In the 8087, floating-point numbers are 80 bits: 64 bits of significand, 15 bits of exponent, and a sign bit.
+An 80-bit register was very large in the era of 8-bit or 16-bit computers; the eight registers in the 8087
+would be equivalent to 40 registers in the 8086 processor.</p>
+<p><a href="https://static.righto.com/images/8087-stack/registers.jpg"><img alt="The registers in the 8087 form an 8&times;80 grid of cells. The close-up shows an 8&times;8 block. I removed the metal layer with acid to reveal the underlying silicon circuitry." class="hilite" height="684" src="https://static.righto.com/images/8087-stack/registers-w500.jpg" title="The registers in the 8087 form an 8&times;80 grid of cells. The close-up shows an 8&times;8 block. I removed the metal layer with acid to reveal the underlying silicon circuitry." width="500" /></a><div class="cite">The registers in the 8087 form an 8&times;80 grid of cells. The close-up shows an 8&times;8 block. I removed the metal layer with acid to reveal the underlying silicon circuitry.</div></p>
+<p>The registers store each bit in a static RAM cell. Each cell has two inverters connected in a loop.
+This circuit forms a stable feedback loop, with one inverter on and one inverter off.
+Depending on which inverter is on, the circuit stores a 0 or a 1.
+To write a new value into the circuit, one of the lines is pulled low, flipping the loop into the desired state.
+The trick is that each inverter uses a very weak transistor to pull the output high, so its output is easily overpowered
+to change the state.</p>
+<p><a href="https://static.righto.com/images/8087-stack/inverter-loop.png"><img alt="Two inverters in a loop can store a 0 or a 1." class="hilite" height="121" src="https://static.righto.com/images/8087-stack/inverter-loop-w250.png" title="Two inverters in a loop can store a 0 or a 1." width="250" /></a><div class="cite">Two inverters in a loop can store a 0 or a 1.</div></p>
+<p>These inverter pairs are arranged in an 8 &times; 80 grid that implements eight words of 80 bits. Each of the 80 rows has two <em>bitlines</em> that provide access to a bit.
+The bitlines provide both read and write access to a bit; the pair of bitlines allows either inverter to be pulled low to store the desired bit value.
+Eight vertical <em>wordlines</em> enable access to one word, one column of 80 bits.
+Each wordline turns on 160 pass transistors, connecting the bitlines to the inverters in the selected column.
+Thus, when a wordline is enabled, the bitlines can be used to read or write that word.</p>
+<p>Although the chip looks two-dimensional, it actually consists of multiple layers.
+The bottom layer is silicon.
+The pinkish regions below are where the silicon has been "doped" to change its electrical properties, making it an active
+part of the circuit.
+The doped silicon forms a grid of horizontal and vertical wiring, with larger doped regions in the middle.
+On top of the silicon, polysilicon wiring provides two functions. First, it provides a layer of wiring to connect the circuit.
+But more importantly, when polysilicon crosses doped silicon, it forms a transistor. The polysilicon provides the gate, turning the transistor on and off.
+In this photo, the polysilicon is barely visible, so I've highlighted part of it in red.
+Finally, horizontal metal wires provide a third layer of interconnecting wiring.
+Normally, the metal hides the underlying circuitry, so I removed the metal with acid for this photo.
+I've drawn blue lines to represent the metal layer.
+Contacts provide connections between the various layers.</p>
+<p><a href="https://static.righto.com/images/8087-stack/memory-cell-layers.jpg"><img alt="A close-up of a storage cell in the registers. The metal layer and most of the polysilicon have been removed to show the underlying silicon." class="hilite" height="336" src="https://static.righto.com/images/8087-stack/memory-cell-layers-w500.jpg" title="A close-up of a storage cell in the registers. The metal layer and most of the polysilicon have been removed to show the underlying silicon." width="500" /></a><div class="cite">A close-up of a storage cell in the registers. The metal layer and most of the polysilicon have been removed to show the underlying silicon.</div></p>
+<p>The layers combine to form the inverters and selection transistors of a memory cell, indicated with the dotted line below.
+There are six transistors (yellow), where polysilicon crosses doped silicon. Each inverter has a transistor that
+pulls the output low and a weak transistor to pull the output high.
+When the word line (vertical polysilicon) is active, it connects the selected inverters to the bit lines (horizontal metal) through the two selection
+transistors.
+This allows the bit to be read or written.</p>
+<p><a href="https://static.righto.com/images/8087-stack/memory-cell-labeled.jpg"><img alt="The function of the circuitry in a storage cell." class="hilite" height="303" src="https://static.righto.com/images/8087-stack/memory-cell-labeled-w500.jpg" title="The function of the circuitry in a storage cell." width="500" /></a><div class="cite">The function of the circuitry in a storage cell.</div></p>
+<p>Each register has two tag bits associated with it, an unusual form of metadata to indicate
+if the register is empty, contains zero, contains a valid value, or
+contains a special value such as infinity.
+The tag bits are used to optimize performance internally and are mostly irrelevant to the programmer.
+As well as being accessed with a register, the tag bits can be accessed in parallel as a 16-bit "Tag Word".
+This allows the tags to be saved or loaded as part of the 8087's state, for instance,
+during interrupt handling.</p>
+<h2>The decoder</h2>
+<p>The decoder circuit, wedged into the middle of the register file, selects one of the registers.
+A register is specified internally with a 3-bit value. The decoder circuit energizes one of the eight register select
+lines based on this value.</p>
+<p>The decoder circuitry is straightforward: it has eight 3-input NOR gates to match one of the eight bit patterns.
+The select line is then powered through a high-current driver that uses large transistors.
+(In the photo below, you can compare the large serpentine driver transistors to the small transistors in a bit cell.)</p>
+<p><a href="https://static.righto.com/images/8087-stack/decoder.jpg"><img alt="The decoder circuitry has eight similar blocks to drive the eight select lines." class="hilite" height="273" src="https://static.righto.com/images/8087-stack/decoder-w600.jpg" title="The decoder circuitry has eight similar blocks to drive the eight select lines." width="600" /></a><div class="cite">The decoder circuitry has eight similar blocks to drive the eight select lines.</div></p>
+<p>The decoder has an interesting electrical optimization.
+As shown earlier, the register select lines are eight polysilicon lines running vertically, the length of the
+register file. 
+Unfortunately, polysilicon has fairly high resistance, better than silicon but much worse than metal.
+The problem is that the resistance of a long polysilicon line will slow down the system.
+That is, the capacitance of transistor gates in combination with high resistance causes an RC (resistive-capacitive) delay in the signal.</p>
+<p>The solution is that the register select lines also run in the metal layer, a second set of lines immediately to the
+right of the register file.
+These lines branch off from the register file about 1/3 of the way down, run to the bottom, and then connect back
+to the polysilicon select lines at the bottom.
+This reduces the maximum resistance through a select line, increasing the speed.</p>
+<p><a href="https://static.righto.com/images/8087-stack/select.jpg"><img alt="A diagram showing how 8 metal lines run parallel to the main select lines. The register file is much taller than shown; the middle has been removed to make the diagram fit." class="hilite" height="419" src="https://static.righto.com/images/8087-stack/select-w300.jpg" title="A diagram showing how 8 metal lines run parallel to the main select lines. The register file is much taller than shown; the middle has been removed to make the diagram fit." width="300" /></a><div class="cite">A diagram showing how 8 metal lines run parallel to the main select lines. The register file is much taller than shown; the middle has been removed to make the diagram fit.</div></p>
+<h2>The stack control circuitry</h2>
+<p>A stack needs more control circuitry than a regular register file, since the circuitry must keep track of the
+position of the top of the stack.<span id="fnref:status-word"><a class="ref" href="#fn:status-word">3</a></span>
+The control circuitry increments and decrements the top of stack (TOS) pointer as values are pushed or popped
+(purple).<span id="fnref:patents"><a class="ref" href="#fn:patents">4</a></span>
+Moreover, an 8087 instruction can access a register based on its offset, for instance the third register
+from the top.
+To support this, the control circuitry can temporarily add an offset to the top of stack position (green).
+A multiplexer (red) selects either the top of stack or the adder output, and feeds it to the decoder (blue),
+which selects one of the eight stack registers in the register file (yellow), as described earlier.</p>
+<p><a href="https://static.righto.com/images/8087-stack/patent-diagram.jpg"><img alt="The register stack in the 8087. Adapted from Patent USRE33629E. I don't know what the GRX field is. I also don't know why this shows a subtractor and not an adder." class="hilite" height="378" src="https://static.righto.com/images/8087-stack/patent-diagram-w700.jpg" title="The register stack in the 8087. Adapted from Patent USRE33629E. I don't know what the GRX field is. I also don't know why this shows a subtractor and not an adder." width="700" /></a><div class="cite">The register stack in the 8087. Adapted from <a href="https://patents.google.com/patent/USRE33629E">Patent USRE33629E</a>. I don't know what the GRX field is. I also don't know why this shows a subtractor and not an adder.</div></p>
+<!--
+    The stack has a key role in most 8087 instructions.
+    The `FLD` (Load Real) and `FSTP` (Store Real and Pop) instructions and their variants push or pop a stack value respectively.
+    The `FST` (Store Real) instruction reads a stack value without popping it.
+    Many instructions affect the top stack register and a specified position in the stack, such as
+    `FXCH` (Exchange Registers).
+    The standard arithmetic operations (add, subtract, multiply, divide) can use the stack in multiple ways.
+    The "classical" form is to perform the operation on the top two stack locations and replace the top stack value
+    with the result.
+    Alternatively, the second argument can come from an arbitrary stack location, with the result going into either
+    the top of stack or the second location.
+    The top value can also be popped, shrinking the stack.
+    Finally, one argument can come from memory.
+    The less common arithmetic operations (e.g. square root, partial remainder) operate on the top of stack or the
+    two top elements as appropriate.
+    The point of this is that the 8087 uses the stack in a wide variety of ways, so the circuitry reflects this
+    complexity.
+
+    The stack pointer can be directly manipulated with the
+    `FINCSTP` and `FDECSTP` instructions (increment or decrement stack pointer).
+    The stack pointer is part of the Status Word, and can be stored to memory with the `FSTSW` (Store Status Word)
+    instruction. It can also be stored to memory or loaded from memory as part of the `FLDENV` and `FSTENV`
+    (Load Environment or Store Environment) instructions or the `FSAVE` and `FRSTOR` (Save State and Restore State)
+    instructions.
+-->
+
+<p>The physical implementation of the stack circuitry is shown below.
+The logic at the top selects the stack operation based on the 16-bit micro-instruction.<span id="fnref:microcode"><a class="ref" href="#fn:microcode">5</a></span>
+Below that are the three latches that hold the top of stack value.
+(The large white squares look important, but they are simply "jumpers" from the ground line to the circuitry, passing
+under metal wires.)</p>
+<p><a href="https://static.righto.com/images/8087-stack/stack-circuitry.jpg"><img alt="The stack control circuitry. The blue regions on the right are oxide residue that remained when I dissolved the metal rail for the 5V power.
+" class="hilite" height="653" src="https://static.righto.com/images/8087-stack/stack-circuitry-w350.jpg" title="The stack control circuitry. The blue regions on the right are oxide residue that remained when I dissolved the metal rail for the 5V power.
+" width="350" /></a><div class="cite">The stack control circuitry. The blue regions on the right are oxide residue that remained when I dissolved the metal rail for the 5V power.
+</div></p>
+<p>The three-bit adder is at the bottom, along with the multiplexer.
+You might expect the adder to use a simple "full adder" circuit. Instead, it is
+a faster <a href="https://en.wikipedia.org/wiki/Carry-lookahead_adder">carry-lookahead</a> adder.
+I won't go into details here, but the summary is that at each bit position, an AND gate produces a Carry Generate
+signal while an XOR gate produces a Carry Propagate signal.
+Logic gates combine these signals to produce the output bits in parallel, avoiding the slowdown of the carry rippling
+through the bits.</p>
+<p>The incrementer/decrementer uses a completely different approach.
+Each of the three bits uses a toggle flip-flop.
+A few logic gates determine if each bit should be toggled or should keep its previous value.
+For instance, when incrementing, the top bit is toggled if the lower bits are 11 (e.g. incrementing from 011 to 100).
+For decrementing, the top bit is toggled if the lower bits are 00 (e.g. 100 to 011).
+Simpler logic determines if the middle bit should be toggled.
+The bottom bit is easier, toggling every time whether incrementing or decrementing.</p>
+<p>The schematic below shows the circuitry for one bit of the stack.
+Each bit is implemented with a moderately complicated flip-flop that can be cleared, loaded with
+a value, or toggled, based on control signals from the microcode.
+The flip-flop is constructed from two set-reset (SR) latches. Note that the flip-flop outputs are crossed when fed back
+to the input, providing the inversion for the toggle action.
+At the right, the multiplexer selects either the register value or the sum from the adder (not shown), generating the signals
+to the decoder.</p>
+<p><a href="https://static.righto.com/images/8087-stack/stack-schematic.jpg"><img alt="Schematic of one bit of the stack." class="hilite" height="294" src="https://static.righto.com/images/8087-stack/stack-schematic-w700.jpg" title="Schematic of one bit of the stack." width="700" /></a><div class="cite">Schematic of one bit of the stack.</div></p>
+<h2>Drawbacks of the stack approach</h2>
+<p>According to the designers of the 8087,<span id="fnref:references"><a class="ref" href="#fn:references">7</a></span>
+the main motivation for using a stack rather than a flat register set was that instructions didn't have enough bits to address multiple register operands.
+In addition, a stack has "advantages over general registers for expression parsing and nested function calls."
+That is, a stack works well for a mathematical expression since sub-expressions can be evaluated on the top
+of the stack.
+And for function calls, you avoid the cost of saving registers to memory, since the subroutine can use the stack without disturbing the values underneath.
+At least that was the idea.</p>
+<!--
+The designers considered a "classical" stack architecture, which has only two or three cells in hardware and accesses
+the rest of the stack from memory. However, this approach was rejected because the excessive traffic between the memory and stack would have been a bottleneck.
+-->
+
+<p>The main problem is "stack overflow".
+The 8087's stack has eight entries, so if you push a ninth value onto the stack, the stack will overflow.
+Specifically, the top-of-stack pointer will wrap around, obliterating the bottom value on the stack.
+The 8087 is designed to detect a stack overflow using the register tags:
+pushing a value to a non-empty register triggers an invalid operation exception.<span id="fnref:underflow"><a class="ref" href="#fn:underflow">6</a></span></p>
+<p>The designers expected that stack overflow would be rare and could be handled by the operating system (or library code).
+After detecting a stack overflow, the software should dump the existing stack to memory to
+provide the illusion of an infinite stack.
+Unfortunately, bad design decisions made it difficult "both technically and commercially" to handle stack overflow.</p>
+<p>One of the 8087's designers (Kahan) attributes the 8087's stack problems to the time difference between California,
+where the designers lived, and Israel, where the 8087 was implemented.
+Due to a lack of communication, each team thought the other was implementing the overflow software.
+It wasn't until the
+8087 was in production that they realized that "it might not be possible to handle 8087 stack underflow/overflow in a reasonable way. It's not impossible, just impossible to do it in a reasonable way."</p>
+<p>As a result, the stack was largely a problem rather than a solution.
+Most 8087 software saved the full stack to memory before performing
+a function call, creating more memory traffic.
+Moreover, compilers turned out to work better with regular registers than a stack,
+so compiler writers awkwardly used the stack to emulate regular registers.
+The <code>GCC</code> compiler <a href="https://langdev.stackexchange.com/a/2408">reportedly</a> needs 3000 lines of extra code to support the x87 stack.</p>
+<p>In the 1990s, Intel introduced a new floating-point system called <a href="https://www.cs.uaf.edu/2012/fall/cs301/lecture/11_02_other_float.html">SSE</a>, followed by AVX in 2011.
+These systems use regular (non-stack) registers and provide parallel operations for higher performance,
+making the 8087's stack instructions largely obsolete.</p>
+<h2>The success of the 8087</h2>
+<p>At the start, Intel was unenthusiastic about producing the 8087, viewing it as unlikely to be a success.
+John Palmar, a principal architect of the chip, had little success convincing
+skeptical Intel management that the market for the 8087 was enormous.
+Eventually,
+he said, "I'll tell you what. I'll relinquish my salary, provided you'll write down your number of how many you expect to sell, then give me a dollar for every one you sell beyond that."<span id="fnref2:references"><a class="ref" href="#fn:references">7</a></span>
+Intel didn't agree to the deal&mdash;which would have made a fortune for Palmer&mdash;but they reluctantly agreed to produce the chip.</p>
+<p>Intel's Santa Clara engineers shunned the 8087, considering it unlikely to work:
+the 8087 would be two to three times more complex than the 8086,
+with a die so large that a wafer might not have a single working die.
+Instead, Rafi Nave, at Intel's Israel site, took on the risky project: “Listen, everybody knows it's not going to work, so if it won't work, I would just fulfill their expectations or their assessment.
+If, by chance, it works, okay, then we'll gain tremendous respect and tremendous breakthrough on our abilities.”</p>
+<p>A small team of seven engineers developed the 8087 in Israel.
+They designed the chip on Mylar sheets: a millimeter on Mylar represented a micron on the physical chip.
+The drawings were then digitized on a Calma system by clicking on each polygon to create the layout.
+When the chip was moved into production,
+the yield was very low but better than feared: two working dies per four-inch wafer.</p>
+<p>The 8087 ended up being a large success, said to have been Intel's most profitable product line at times.
+The success of the 8087 (along with the 8088) cemented the reputation of Intel Israel, which eventually became Israel's largest tech employer.
+The benefits of floating-point hardware proved to be so great that Intel integrated the floating-point unit into later processors
+starting with the 80486 (1989).
+Nowadays, most modern computers, from cellphones to mainframes, provide floating point based on the
+8087,
+so I consider the 8087 one of the most influential chips ever created.</p>
+<p>For more, follow me on
+ Bluesky (<a href="https://bsky.app/profile/righto.com">@righto.com</a>),
+Mastodon (<a href="https://oldbytes.space/@kenshirriff">@kenshirriff@oldbytes.space</a>),
+or <a href="http://www.righto.com/feeds/posts/default">RSS</a>.
+I wrote some articles about the 8087 a few years ago, including <a href="https://www.righto.com/2018/08/inside-die-of-intels-8087-coprocessor.html">the die</a>,
+<a href="https://www.righto.com/2018/09/two-bits-per-transistor-high-density.html">the ROM</a>,
+the <a href="https://www.righto.com/2020/05/die-analysis-of-8087-math-coprocessors.html">bit shifter</a>,
+and <a href="https://www.righto.com/2020/05/extracting-rom-constants-from-8087-math.html">the constants</a>, so you may have seen some of this material before.</p>
+<h2>Notes and references</h2>
+<div class="footnote">
+<ol>
+<li id="fn:ieee-754">
+<p>Most computers now use the <a href="https://en.wikipedia.org/wiki/IEEE_754">IEEE 754</a> floating-point standard,
+which is based on the 8087.
+This standard has been awarded a
+<a href="https://ethw.org/Milestones:IEEE_Standard_754_for_Binary_Floating-Point_Arithmetic,_1985">milestone</a> in computation.&#160;<a class="footnote-backref" href="#fnref:ieee-754" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+</li>
+<li id="fn:count">
+<p>Curiously, reliable sources differ on the number of transistors in the 8087 by almost a factor of 2.
+  Intel says <a href="https://www.intel.com/content/dam/www/public/us/en/documents/case-studies/floating-point-case-study.pdf?page=5">40,000</a>, as does designer William Kahan (<a href="https://web.archive.org/web/20190301193516/http://www.drdobbs.com/architecture-and-design/a-conversation-with-william-kahan/184410314">link</a>).
+  But in <a href="https://doi.org/10.1109/ISSCC.1980.1156144">A Numeric Data Processor</a>, designers Rafi Nave and John Palmer wrote that the chip contains "the equivalent of over 65,000 devices" (whatever "equivalent" means).
+  This number is echoed by a contemporary <a href="https://www.worldradiohistory.com/Archive-Electronics/80s/80/Electronics-1980-02-14.pdf">article</a> in <em>Electronics</em> (1980) that says "over 65,000 H-MOS transistors on a 78,000-mil<sup>2</sup> die."
+  Many other sources, such as <a href="https://vtda.org/books/Computing/Hardware/Upgrading%20and%20Repairing%20PCs/URP_4th_edition.pdf?page=238">Upgrading &amp; Repairing PCs</a>, specify 45,000 transistors.
+  Designer Rafi Nave <a href="https://www.computerhistory.org/collections/catalog/300000148/">stated</a> that the 8087 has
+  63,000 or 64,000 transistors if you count the ROM transistors directly, but if you count ROM transistors as
+  equivalent to two transistors, then you get about 75,000 transistors.&#160;<a class="footnote-backref" href="#fnref:count" title="Jump back to footnote 2 in the text">&#8617;</a></p>
+</li>
+<li id="fn:status-word">
+<p>The 8087 has a 16-bit Status Word that
+contains the stack top pointer, exception flags, the four-bit
+condition code, and other values.
+Although the Status Word appears to be a 16-bit register, it is not implemented as a register.
+Instead, parts of the Status Word are stored in various places around the chip: the stack top pointer is
+in the stack circuitry, the exception flags are part of the interrupt circuitry, the condition code bits are
+next to the datapath, and so on.
+When the Status Word is read or written, these various circuits are connected to the 8087's internal data
+bus, making the Status Word appear to be a monolithic entity.
+Thus, the stack circuitry includes support for reading and writing it.&#160;<a class="footnote-backref" href="#fnref:status-word" title="Jump back to footnote 3 in the text">&#8617;</a></p>
+</li>
+<li id="fn:patents">
+<p>Intel filed several patents on the 8087, including <a href="https://patents.google.com/patent/USRE33629E">Numeric data processor</a>,
+another <a href="https://patents.google.com/patent/US4338675A">Numeric data processor</a>,
+<a href="https://patents.google.com/patent/US4509144A">Programmable bidirectional shifter</a>,
+<a href="https://patents.google.com/patent/US4484259A">Fraction bus for use in a numeric data processor</a>, and
+<a href="https://patents.google.com/patent/US4257095A">System bus arbitration, circuitry and methodology</a>.&#160;<a class="footnote-backref" href="#fnref:patents" title="Jump back to footnote 4 in the text">&#8617;</a></p>
+</li>
+<li id="fn:microcode">
+<p>I started looking at the stack in detail to reverse engineer the micro-instruction format and determine how the
+8087's microcode works.
+I'm working with the "Opcode Collective" on Discord on this project, but progress is slow due to the complexity of
+the micro-instructions.&#160;<a class="footnote-backref" href="#fnref:microcode" title="Jump back to footnote 5 in the text">&#8617;</a></p>
+</li>
+<li id="fn:underflow">
+<p>The 8087 detects stack underflow in a similar manner. If you pop more values from the stack than are present,
+the tag will indicate that the register is empty and shouldn't be accessed. This triggers an invalid operation
+exception.&#160;<a class="footnote-backref" href="#fnref:underflow" title="Jump back to footnote 6 in the text">&#8617;</a></p>
+</li>
+<li id="fn:references">
+<p>The 8087 is described in detail in <a href="https://ethw.org/w/images/2/2f/Intel_8086_family_users_numeric_supp.pdf">The 8086 Family User's Manual, Numerics Supplement</a>.
+  An overview of the stack is on page 60 of <em>The 8087 Primer</em> by Palmer and Morse.
+  More details are in Kahan's <a href="https://web.archive.org/web/20170118054747/https://cims.nyu.edu/~dbindel/class/cs279/87stack.pdf">On the Advantages of the 8087's Stack</a>, 
+  an unpublished course note (maybe for <a href="https://www.researchgate.net/profile/David-Bindel/publication/2585992_CS_279_Annotated_Course_Bibliography/links/545794630cf26d5090ab49a6/CS-279-Annotated-Course-Bibliography.pdf">CS 279</a>?) with a date of Nov 2, 1990 or perhaps <a href="https://www.netlib.org/bibnet/authors/k/kahan-william-m.pdf#page=21">August 23, 1994</a>.
+  Kahan discusses why the 8087's design makes it hard to handle stack overflow in <a href="https://web.archive.org/web/20190301193516/http://www.drdobbs.com/architecture-and-design/a-conversation-with-william-kahan/184410314">How important is numerical accuracy</a>, Dr. Dobbs, Nov. 1997.
+  Another information source is the <a href="https://www.youtube.com/watch?v=JRSUmuWiTOs">Oral History of Rafi Nave</a>&#160;<a class="footnote-backref" href="#fnref:references" title="Jump back to footnote 7 in the text">&#8617;</a><a class="footnote-backref" href="#fnref2:references" title="Jump back to footnote 7 in the text">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flake Checks in Shell | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Flake Checks in Shell</h1>
+        <div class="meta">Entropic Thoughts 2026-02-23T23:00:00Z</div>
+        <div class="links">
+          <a href="https://entropicthoughts.com/flake-checks-in-shell">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/entropicthoughts-com/entropicthoughts-com-49db90cef6f75594.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body><h1>Flake Checks in Shell</h1><p><graphic src="../image/banner/flake-checks-in-shell.jpg" alt="flake-checks-in-shell.jpg"/></p><p>
+tl;dr: To use a shell script as a Nix flake check, turn it into a derivation
+with <pre>runCommand</pre>. It must
+</p><ul><li>Create a file named as suggested in the environment variable <pre>$out</pre>.</li><li>Print the desired “how to fix” information to <pre>stdout</pre>.</li><li>Exit with status code 1 if the check failed, otherwise 0.</li></ul><p>These three steps are not strictly documented anywhere, but are all needed for a shell script to work as a good flake check.</p><h1><a href="https://entropicthoughts.com#an-english-linter">An English linter</a></h1>
+<p>
+We might work on a project where the build server runs linters, unit tests, etc.
+through the <pre>nix flake check</pre> command. Let’s say we want to add a linting step
+that ensures we have chosen the us English spelling of some common words. On
+this web site, the build failure would look like:
+</p><blockquote>error: builder for '/nix/store/4k4...mal-reject-uk-spelling.drv' failed with exit code 1; last 5 log lines: &gt; Found suspected words with UK spelling. &gt; the-most-mario-colour-revisited: colour &gt; update-on-antarctic-sea-ice: grey &gt; using-withptr-from-inline-c-in-haskell: realise &gt; war-what-is-it-good-for: centre,neighbour &gt; when-is-counter-strike-player-good: colour,favourite For full logs, run 'nix log /nix/store/4k4..mal-reject-uk-spelling.drv'.</blockquote><p>We have a shell script that performs this linting. We can start out with</p><blockquote>words='analyse|apologise|catalogue|centre|cheque|colour|defence|favourite|flavour|grey|honour|licence|mum|neighbour|organise|pyjamas|realise|theatre|travelling|tyre' grep -roP '(?&lt;=\W)('"$words"')(?=\W)' . \ | sort \ | uniq \ | perl -F: -lanE ' if ($F[0] ne $fn) { say ("$fn: " . join(",", @words)) if defined($fn); $fn = $F[0] =~ s/\..*//r; @words = (); } push @words, $F[1];'</blockquote><p>
+and this is what we want to get into the <pre>nix flake check</pre>.
+</p><h1><a href="https://entropicthoughts.com#converting-to-a-derivation">Converting to a derivation</a></h1>
+<p>
+There are some things we need to think about when we try to jam this into our
+<pre>flake.nix</pre>. First off, we need to convert it into a Nix derivation, since flake
+checks are supposed to be derivations. As a reminder, a derivation is a recipe
+for building something. We aren’t really interested in building anything, so we
+are looking to create a derivation that has meaningless output, but whose build
+process runs the linting script.
+</p><p>
+We could do it manually with <pre>mkDerivation</pre> as always, but easier in this case
+is the <pre>runCommand</pre> helper function. When given a script, that will evaluate to
+a derivation that runs the script during the build stage. The <pre>runCommand</pre>
+helper also takes a <pre>buildInputs</pre> argument, which lets us specify the
+dependencies we need for the script. In our case, that’s just Perl, but it could
+be anything.
+</p><p>
+When made into a derivation, the script can no longer rely on the literal
+relative path <pre>.</pre> as input to <pre>grep</pre>, so we’ll interpolate the Nix path for the
+source tree.
+</p><blockquote>{ inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05"; outputs = { self, nixpkgs }: let pkgs = nixpkgs.legacyPackages.x86_64-linux; in { checks.x86_64-linux = { avoidUkSpellings = pkgs.runCommand "avoid-uk-spellings" { buildInputs = [ pkgs.perl ]; } '' words='analyse|apologise|catalogue|centre|cheque|colour|defence|favourite|flavour|grey|honour|licence|mum|neighbour|organise|pyjamas|realise|theatre|travelling|tyre' grep -roP '(?&lt;=\W)('"$words"')(?=\W)' ${srcPath} \ | sort \ | uniq \ | perl -F: -lanE ' if ($F[0] ne $fn) { say ("$fn: " . join(",", @words)) if defined($fn); $fn = $F[0] =~ s/\..*//r; @words = (); } push @words, $F[1];' ''; }; }; }</blockquote><p>With this, however, the check will always fail, saying the “builder failed to produce path for output”.</p><h1><a href="https://entropicthoughts.com#producing-output-from-the-derivation">Producing output from the derivation</a></h1>
+<p>
+If we recall that <pre>runCommand</pre> is masquerading as a build step, we get a better
+understanding of the problem. It needs to produce some sort of output. The
+easiest thing we can do is redirect the output of the pipeline to the
+Nix-provided variable <pre>$out</pre>.
+</p><blockquote>pkgs.runCommand "avoid-uk-spellings" { buildInputs = [ pkgs.perl ]; } '' # ---------------&gt;8----- | perl -F: -lanE ' if ($F[0] ne $fn) { say ("$fn: " . join(",", @words)) if defined($fn); $fn = $F[0] =~ s/\..*//r; @words = (); } push @words, $F[1];' &gt; $out '';</blockquote><p>But now we have a new problem: the check passes even when it should not.</p><h1><a href="https://entropicthoughts.com#returning-the-proper-error-code">Returning the proper error code</a></h1>
+<p>
+The way build steps signal failure to Nix is by exiting with a non-zero status
+code. Since the <pre>$out</pre> file only contains something if there were words with a
+uk spelling, we can use the state of that file to determine whether to fail
+the build or not.
+</p><p>To the end of the script, we add a line</p><pre>[ -z "$(cat $out)" ] || exit 1
+</pre>
+<p>
+which ensures that either the file <pre>$out</pre> is empty, or we fail the build. And
+now, finally, this works.
+</p><h1><a href="https://entropicthoughts.com#getting-better-build-errors">Getting better build errors</a></h1>
+<p>However, it could be more helpful. When the build fails, all we get from Nix is</p><blockquote>error: builder for '/nix/store/dql...k4g-avoid-uk-spellings.drv' failed with exit code 1</blockquote><p>
+rather than what we hoped to get: neat suggestions for what we need to fix. This
+is because now that we redirect the output of the script to <pre>$out</pre> we are no
+longer logging it to <pre>stdout</pre>. We can fix that by replacing the output
+redirection with a pipe to <pre>tee</pre>.
+</p><blockquote>pkgs.runCommand "avoid-uk-spellings" { buildInputs = [ pkgs.perl ]; } '' # ---------------&gt;8----- | perl -F: -lanE ' if ($F[0] ne $fn) { say ("$fn: " . join(",", @words)) if defined($fn); $fn = $F[0] =~ s/\..*//r; @words = (); } push @words, $F[1];' \ | tee $out [ -z "$(cat $out)" ] || exit 1 '';</blockquote><p>
+The <pre>tee</pre> command takes input and both prints it out and writes it to a file.
+</p><p>After this, the check both works and produces helpful output. We took care of the things that were needed:</p><ul><li>Turn the script into a derivation that creates an unused output.</li><li>Exit the script with an error code on linting failure.</li><li>Make sure to print diagnostic messages to standard out.</li></ul><p>
+We used the <pre>runCommand</pre> helper because it was convenient, but we could turn
+literally anything into a check with the low-level <pre>mkDerivation</pre>.
+</p><h1><a href="https://entropicthoughts.com#bonus--fixing-up-the-grep-output">Bonus: fixing up the grep output</a></h1>
+<p>
+At this point, we might be annoyed by a <pre>grep</pre> peculiarity: if its given an
+absolute path, it will print the absolute path for the matches too. Our check
+errors might look like
+</p><blockquote>error: builder for '/nix/store/4k4...mal-reject-uk-spelling.drv' failed with exit code 1; last 5 log lines: &gt; Found suspected words with UK spelling. &gt; /nix/store/p81biq2dvbmhg3har759y18di9ybgpmj-ivc2w2wwrrrksd69nqccm7fz1b5xv171-source/the-most-mario-colour-revisited: colour &gt; /nix/store/p81biq2dvbmhg3har759y18di9ybgpmj-ivc2w2wwrrrksd69nqccm7fz1b5xv171-source/update-on-antarctic-sea-ice: grey &gt; /nix/store/p81biq2dvbmhg3har759y18di9ybgpmj-ivc2w2wwrrrksd69nqccm7fz1b5xv171-source/using-withptr-from-inline-c-in-haskell: realise &gt; /nix/store/p81biq2dvbmhg3har759y18di9ybgpmj-ivc2w2wwrrrksd69nqccm7fz1b5xv171-source/war-what-is-it-good-for: centre,neighbour &gt; /nix/store/p81biq2dvbmhg3har759y18di9ybgpmj-ivc2w2wwrrrksd69nqccm7fz1b5xv171-source/when-is-counter-strike-player-good: colour,favourite For full logs, run 'nix log /nix/store/4k4...mal-reject-uk-spelling.drv'.</blockquote><p>
+and that’s rather difficult to get an overview of. This has nothing to do with
+creating checks for Nix, but it might be fun to know how to deal with it anyway.
+We’ll use <pre>sed</pre> to strip out the first bits of the path, but we cannot use the
+typical <pre>/</pre> separators to the substitution command, because the path contains
+those characters. Fortunately, <pre>sed</pre> lets us use any separator characters, so
+we’ll pick one we’re fairly sure won’t be in the Nix store path for the source.
+</p><blockquote>pkgs.runCommand "avoid-uk-spellings" { buildInputs = [ pkgs.perl ]; } '' # ---------------&gt;8----- | perl -F: -lanE ' if ($F[0] ne $fn) { say ("$fn: " . join(",", @words)) if defined($fn); $fn = $F[0] =~ s/\..*//r; @words = (); } push @words, $F[1];' \ | sed 's!${./.}!!' \ | tee $out [ -z "$(cat $out)" ] || exit 1 '';</blockquote></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

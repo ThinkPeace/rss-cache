@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Git Diff Drivers | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Git Diff Drivers</h1>
+        <div class="meta">Andrew Nesbitt 2026-03-30T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/03/30/git-diff-drivers.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-8edc8e501e437f8a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">What git&#x27;s diff drivers can do, from built-in language support to custom textconv filters.</div>
+        <div class="content">
+          <p>When I added a diff driver to <a href="https://github.com/git-pkgs/git-pkgs">git-pkgs</a>, most of the work was already done. git-pkgs could parse 29 lockfile formats and extract dependency lists, so wiring that into git’s textconv mechanism was a small addition that turned <code class="language-plaintext highlighter-rouge">git diff</code> on a lockfile from 200 lines of resolver noise into a handful of dependency changes. That got me looking at what else people had built on top of git’s diff driver system, and at the 28 built-in drivers that git ships, none of which has made it into any forge or GUI client.</p>
+
+<h3 id="built-in-drivers">Built-in drivers</h3>
+
+<p>The <a href="https://github.com/git/git/blob/master/userdiff.c">built-in drivers</a> are defined in <code class="language-plaintext highlighter-rouge">userdiff.c</code> and activated by setting <code class="language-plaintext highlighter-rouge">diff=&lt;name&gt;</code> in <code class="language-plaintext highlighter-rouge">.gitattributes</code>. Each one provides two things: a <code class="language-plaintext highlighter-rouge">xfuncname</code> regex that git uses to find function or section headers for hunk context, and a <code class="language-plaintext highlighter-rouge">wordRegex</code> that controls how <code class="language-plaintext highlighter-rouge">--word-diff</code> tokenizes lines.</p>
+
+<p>The full list as of git 2.53: ada, bash, bibtex, cpp (which covers both C and C++), csharp, css, default, dts, elixir, fortran, fountain, golang, html, ini, java, kotlin, markdown, matlab, objc, pascal, perl, php, python, r, ruby, rust, scheme, and tex. The two most recent additions are ini (2.50) and r (2.51). GitHub’s <a href="https://github.com/github-linguist/linguist">linguist</a> uses these same names for language detection, so if you set <code class="language-plaintext highlighter-rouge">*.rs diff=rust</code> in your <code class="language-plaintext highlighter-rouge">.gitattributes</code>, both git locally and GitHub’s code view will understand the intent, though GitHub doesn’t actually use the driver for its web diffs.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>*.rs diff=rust
+*.go diff=golang
+*.kt diff=kotlin
+</code></pre></div></div>
+
+<p>Kotlin was <a href="https://patchwork.kernel.org/project/git/patch/20220303181517.70682-1-jaydeepjd.8914@gmail.com/">proposed as a patch</a> in 2022 and merged. A <a href="https://github.com/git/git/pull/1746">TypeScript driver PR</a> was submitted and then retracted, though the cpp driver covers enough of TypeScript’s syntax that most people don’t notice. Languages without a built-in driver still get the default driver, which tries a few generic heuristics for function headers but often latches onto something unhelpful. The difference shows up in hunk headers. Without a driver, a change inside a Ruby method might show <code class="language-plaintext highlighter-rouge">@@ -10,3 +10,4 @@ end</code> or latch onto a blank line. With <code class="language-plaintext highlighter-rouge">diff=ruby</code>, the same hunk header becomes <code class="language-plaintext highlighter-rouge">@@ -10,3 +10,4 @@ def process_payment</code>, which tells you where you are without scrolling up.</p>
+
+<h3 id="custom-diff-drivers">Custom diff drivers</h3>
+
+<p>Git supports three kinds of custom diff driver configuration, all set under <code class="language-plaintext highlighter-rouge">[diff "&lt;name&gt;"]</code> in your git config.</p>
+
+<p><strong>textconv</strong> is the most useful: a command that takes a filename as its argument and writes human-readable text to stdout. Git runs this on both sides of a diff and then diffs the text output instead of the raw file. If you have <code class="language-plaintext highlighter-rouge">exiftool</code> installed, you can diff image metadata:</p>
+
+<div class="language-ini highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nn">[diff "exif"]</span><span class="w">
+    </span><span class="py">textconv</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">exiftool</span>
+<span class="w">    </span><span class="py">cachetextconv</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">true</span>
+</code></pre></div></div>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code># .gitattributes
+*.png diff=exif
+*.jpg diff=exif
+</code></pre></div></div>
+
+<p>Now <code class="language-plaintext highlighter-rouge">git diff</code> on a JPEG shows you which EXIF fields changed rather than a wall of binary gibberish. The <code class="language-plaintext highlighter-rouge">cachetextconv</code> option stores conversion results in git notes (<code class="language-plaintext highlighter-rouge">refs/notes/textconv/exif</code>) so repeated diffs don’t re-run the conversion every time. Without it, something like <code class="language-plaintext highlighter-rouge">git log -p</code> on a repository with PDF files will re-run <code class="language-plaintext highlighter-rouge">pdftotext</code> for every commit that touched one, which gets painful fast.</p>
+
+<p>The textconv mechanism is one-way: git can display the diff but you can’t apply it as a patch, because the original binary content can’t be reconstructed from the converted text.</p>
+
+<p><strong>command</strong> replaces git’s entire diff pipeline for matched files. It receives seven arguments (the same interface as <code class="language-plaintext highlighter-rouge">GIT_EXTERNAL_DIFF</code>) and takes full responsibility for producing output. Most people don’t need this unless they want visual side-by-side diffs or output in a non-unified format.</p>
+
+<p><strong>wordRegex</strong> redefines what constitutes a “word” for <code class="language-plaintext highlighter-rouge">--word-diff</code>. The built-in drivers already set language-appropriate word regexes, but for custom file formats you might want to change how tokens are split. A JSON driver might treat entire quoted strings as single tokens so that <code class="language-plaintext highlighter-rouge">--word-diff</code> highlights changed values rather than individual characters within strings.</p>
+
+<p>A driver with <code class="language-plaintext highlighter-rouge">binary = true</code> and a <code class="language-plaintext highlighter-rouge">textconv</code> command will suppress the “Binary files differ” message and show the textconv output instead, and adding <code class="language-plaintext highlighter-rouge">xfuncname</code> gives you meaningful hunk headers even for custom formats.</p>
+
+<h3 id="notable-custom-drivers">Notable custom drivers</h3>
+
+<p><strong>Documents</strong></p>
+
+<ul>
+  <li><a href="https://idogawa.dev/p/2024/01/git-diff-epub.html">idogawa.dev</a> – writeup on diffing epub, docx, pptx, and sqlite via textconv</li>
+</ul>
+
+<p><strong>Images</strong></p>
+
+<ul>
+  <li><a href="https://github.com/ewanmellor/git-diff-image">ewanmellor/git-diff-image</a> – uses ImageMagick to generate visual diffs and open them in a viewer</li>
+  <li><a href="https://gist.github.com/pascaliske/53648334378d592c0c2cc62b989a027e">pascaliske’s gist</a> – uses <code class="language-plaintext highlighter-rouge">exiftool</code> for metadata-level image diffs</li>
+</ul>
+
+<p><strong>Apple / Xcode</strong></p>
+
+<ul>
+  <li>Binary plist files have a well-established one-liner: <code class="language-plaintext highlighter-rouge">git config diff.plist.textconv "plutil -convert xml1 -o -"</code> converts them to readable XML</li>
+  <li><a href="https://github.com/jmah/xibition">jmah/xibition</a> – textconv driver for XIB/NIB files, converts them to a lossy human-readable format showing names, labels, actions, and outlets</li>
+</ul>
+
+<p><strong>Game engines</strong></p>
+
+<ul>
+  <li><a href="https://github.com/madsbangh/unity2text">madsbangh/unity2text</a> – textconv driver for Unity YAML scene files (.unity, .prefab), inserts readable GameObject names and hierarchies into the diff output</li>
+  <li>Unity also ships UnityYAMLMerge as an official merge driver for three-way merging scene files</li>
+</ul>
+
+<p><strong>Databases</strong></p>
+
+<ul>
+  <li><a href="https://github.com/cannadayr/git-sqlite">cannadayr/git-sqlite</a> – diffs SQLite databases by dumping schema and data as SQL, following the approach in <a href="https://ongardie.net/blog/sqlite-in-git/">Diego Ongaro’s post</a></li>
+  <li><a href="https://github.com/CpanelInc/diff-tools">CpanelInc/diff-tools</a> – cPanel’s textconv and merge tools for SQLite, tarballs, and patchfiles</li>
+</ul>
+
+<p><strong>Spreadsheets</strong></p>
+
+<ul>
+  <li><a href="https://github.com/DiefBell/XLSX-Diff">DiefBell/XLSX-Diff</a> – xlsx textconv driver</li>
+  <li><a href="https://github.com/pismute/node-textconv">pismute/node-textconv</a> – node-based textconv for xlsx</li>
+</ul>
+
+<p><strong>Notebooks</strong></p>
+
+<ul>
+  <li><a href="https://github.com/jupyter/nbdime">nbdime</a> – diff and merge drivers for Jupyter notebooks that strip output cells and render structural changes to the cell list</li>
+</ul>
+
+<p><strong>Data files</strong></p>
+
+<ul>
+  <li><a href="https://github.com/ryan-williams/parquet-helpers">ryan-williams/parquet-helpers</a> – textconv for Parquet files showing metadata, schema, and sample rows</li>
+</ul>
+
+<p><strong>Lockfiles</strong></p>
+
+<ul>
+  <li><a href="https://github.com/npm/npm-merge-driver">npm/npm-merge-driver</a> – merge driver that regenerates the lockfile rather than three-way merging the text</li>
+  <li><a href="https://github.com/git-pkgs/git-pkgs">git-pkgs</a> – textconv driver I built that parses 29 lockfile formats and outputs only dependency-level changes</li>
+</ul>
+
+<p>A single dependency update in <code class="language-plaintext highlighter-rouge">Gemfile.lock</code> or <code class="language-plaintext highlighter-rouge">package-lock.json</code> can produce hundreds of changed lines of internal resolver state, but with a textconv driver you only see what actually changed:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nv">$ </span>git pkgs diff-driver <span class="nt">--install</span>
+
+<span class="nv">$ </span>git diff HEAD~1 <span class="nt">--</span> Gemfile.lock
++ kamal 2.0.0
+- puma 5.6.8
++ puma 6.4.2
++ thruster 0.1.0
+</code></pre></div></div>
+
+<p>The install command registers the textconv for each supported lockfile format in your git config and appends the corresponding patterns to <code class="language-plaintext highlighter-rouge">.gitattributes</code>. Once installed it applies everywhere git shows diffs, including <code class="language-plaintext highlighter-rouge">git log -p</code> and <code class="language-plaintext highlighter-rouge">git show</code>, and you can bypass it with <code class="language-plaintext highlighter-rouge">--no-textconv</code> when you need the raw lockfile.</p>
+
+<h3 id="gaps">Gaps</h3>
+
+<ul>
+  <li><strong>Xcode .pbxproj</strong> – UUIDs everywhere, sections reorder on every save, adding one file touches dozens of lines. Merge drivers exist (<a href="https://github.com/Lightricks/Kintsugi">Kintsugi</a>, <a href="https://github.com/simonwagner/mergepbx">mergepbx</a>) and <a href="https://github.com/bloomberg/xcdiff">xcdiff</a> can compare project files standalone, but nobody has wired up a textconv driver.</li>
+  <li><strong>Xcode storyboards</strong> – XML with machine-generated attributes that reorder on save. XIBs have <a href="https://github.com/jmah/xibition">xibition</a> but storyboards have nothing equivalent.</li>
+  <li><strong>Godot .tscn/.tres</strong> – already text, so they diff natively, but <a href="https://github.com/godotengine/godot/issues/5889">non-deterministic subresource ordering</a> and embedded scripts make the diffs noisy. A normalizing textconv could help but nobody has built one.</li>
+  <li><strong>Generated OpenAPI / Swagger specs</strong> – one endpoint change cascades through the whole document. Standalone semantic diff tools like <a href="https://github.com/oasdiff/oasdiff">oasdiff</a> exist but none are wired into git as a textconv.</li>
+  <li><strong>Protobuf descriptors (.pb / .desc)</strong> – compiled binary that <code class="language-plaintext highlighter-rouge">protoc --decode_raw</code> can decode, but nobody has published the textconv config for it.</li>
+  <li><strong>Font files (.ttf/.otf)</strong> – <a href="https://github.com/fonttools/fonttools">fonttools</a>’ <code class="language-plaintext highlighter-rouge">ttx</code> command can convert to XML and <a href="https://github.com/source-foundry/fdiff">fdiff</a> can diff fonts standalone, but neither is packaged as a git driver.</li>
+</ul>
+
+<h3 id="configuration-gotcha">Configuration gotcha</h3>
+
+<p>The split between <code class="language-plaintext highlighter-rouge">.gitattributes</code> (which can be committed) and <code class="language-plaintext highlighter-rouge">[diff]</code> config (which lives in <code class="language-plaintext highlighter-rouge">.git/config</code> or <code class="language-plaintext highlighter-rouge">~/.gitconfig</code>) means that diff drivers are inherently local. You can commit a <code class="language-plaintext highlighter-rouge">.gitattributes</code> that says <code class="language-plaintext highlighter-rouge">*.db diff=sqlite</code>, but every developer on the team still needs to configure the <code class="language-plaintext highlighter-rouge">[diff "sqlite"]</code> section themselves and have the converter tool installed. Some projects include a setup script or document the required config in their README, but there’s no mechanism for a repository to declaratively ship its own diff driver configuration that git will auto-apply on clone, which is also why forge integration has been so slow.</p>
+
+<h3 id="forge-support">Forge support</h3>
+
+<p>GitHub has built bespoke rich diff renderers for <a href="https://docs.github.com/en/repositories/working-with-files/using-files/working-with-non-code-files">several non-code file types</a>: side-by-side image comparison with swipe and onion-skin modes, CSV rendered as searchable tables, prose files with both source and rendered diff views, GeoJSON on Leaflet maps, <a href="https://github.blog/news-insights/product-news/3d-file-diffs/">STL files in a WebGL viewer</a>, Jupyter notebooks, and PDF rendering. These are all hardcoded server-side renderers with no user configuration. If your file type isn’t on the list, you get “Binary files differ” in the web UI regardless of what your <code class="language-plaintext highlighter-rouge">.gitattributes</code> says.</p>
+
+<p>GitLab has a similar set of built-in renderers (images, notebooks, CSV) with no extension mechanism. <a href="https://github.com/go-gitea/gitea/issues/12288">Gitea has an open issue from 2020</a> requesting custom diff rendering support, still unresolved. Forgejo inherits Gitea’s limitation. None of these forges read or respect <code class="language-plaintext highlighter-rouge">[diff]</code> config from the repository, and none of them support textconv.</p>
+
+<p><a href="https://github.com/sublimehq/sublime_merge/issues/428">Sublime Merge</a>, <a href="https://github.com/desktop/desktop/issues/11524">GitHub Desktop</a>, and <a href="https://github.com/fork-dev/TrackerWin/issues/1566">Fork</a> all have open requests for textconv support too, some dating back years.</p>
+
+<p>A textconv command is arbitrary code execution, and on a forge it would be triggered implicitly when someone opens a PR, with no confirmation step. CI gets away with running arbitrary user code because workflow execution is an explicit opt-in with a visible trust boundary, but diff rendering happens the moment you click on a file, so a malicious repo with a crafted <code class="language-plaintext highlighter-rouge">[diff]</code> config could execute code on the forge server without anyone choosing to run anything.</p>
+
+<p>One way around this is installing textconv tools in the server’s global gitconfig rather than reading config from repositories, which is what <a href="https://github.com/go-gitea/gitea/issues/12288">Gitea issue #12288</a> proposes. That shifts the burden to the forge operator, who has to choose which formats to support, install the tools, and maintain them, all for a feature most users don’t know exists. GitHub’s bespoke renderers sidestep the problem entirely by being richer than anything textconv can produce (interactive image sliders, searchable CSV tables, 3D model viewers) without executing any user-supplied commands.</p>
+
+<p>GitHub and GitLab also use <a href="https://github.com/libgit2/libgit2/blob/52294c413100ed4930764addc69beadd82382a4c/src/userdiff.h">libgit2</a> rather than the git CLI, and executing external commands from a library embedded in a web application server is architecturally different from shelling out. libgit2 does have the built-in driver definitions though, so the hunk-header improvements from the 28 language drivers could be surfaced in web diffs without running any external commands at all.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

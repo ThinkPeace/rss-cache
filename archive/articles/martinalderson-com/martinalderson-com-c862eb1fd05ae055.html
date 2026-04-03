@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Using OpenCode in CI/CD for AI pull request reviews | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Using OpenCode in CI/CD for AI pull request reviews</h1>
+        <div class="meta">Martin Alderson 2026-02-26T00:00:00Z</div>
+        <div class="links">
+          <a href="https://martinalderson.com/posts/using-opencode-in-cicd-for-ai-pull-request-reviews/?utm_source=rss&amp;utm_medium=rss&amp;utm_campaign=feed">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/martinalderson-com/martinalderson-com-c862eb1fd05ae055.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Why I replaced SaaS code review tools with OpenCode running in CI/CD pipelines - cheaper, more secure, and works with any Git provider</div>
+        <div class="content">
+          <p>Most existing AI code review tools require you to grant them access to your GitHub or GitLab repositories. While some of these tools are interesting, the security implications of handing over repo access to a third party are significant - and they're typically GitHub or GitLab-first. If you're working on projects that don't use either of those platforms, you're out of luck.</p>
+<p>I run a few projects where we don't use GitHub or GitLab, so these tools simply aren't an option. That led me to explore an alternative: using <a href="https://opencode.ai/">OpenCode</a> - an open source agentic coding CLI, similar to Claude Code - with Codex 5.3, powered by a ChatGPT Plus or Team subscription.</p>
+<h2>Why not just use the existing tools?</h2>
+<p>The honest answer is I don't want to give another SaaS product access to my repositories. Yes, these companies probably handle your code responsibly - but also, famously, might not<sup class="footnote-ref"><a href="#fn1" id="fnref1">[1]</a></sup>. But it's another attack surface, another vendor to evaluate, another set of permissions to manage. I've written before about <a href="https://martinalderson.com/posts/ai-agents-are-starting-to-eat-saas/">agents eating SaaS</a> - and this is a perfect example. Why pay for a code review wrapper when you can just run the agent yourself?</p>
+<p>And for anything that isn't on GitHub or GitLab - Bitbucket, self-hosted Gitea, whatever - you're on your own anyway. These tools (generally) don't support you.</p>
+<h2>Setting up the pipeline</h2>
+<p>The setup is surprisingly straightforward if you're working with any YAML-based CI/CD system - GitHub Actions, GitLab CI, Bitbucket Pipelines, whatever you prefer.</p>
+<p>Your pipeline needs to:</p>
+<ol>
+<li>Clone the repo (most CI providers do this by default)</li>
+<li>Install OpenCode - I run it in Docker with limited sandboxing</li>
+<li>Copy in your OpenCode <code>auth.json</code> config file (I inject this via an environment variable - one annoyance is the OpenAI key expires after 14 days, so there may be a better way to handle this<sup class="footnote-ref"><a href="#fn2" id="fnref2">[2]</a></sup>)</li>
+<li>Pass a prompt to OpenCode asking it to review the PR for code quality, potential bugs, and suggestions, based on a Git diff, outputting a <code>report.md</code> file</li>
+<li>Post the output back to your Git provider as a PR comment via what ever API makes sense. You can also send to Slack or any other system here.</li>
+</ol>
+<p>That's it. The whole thing took me an afternoon to get working, and the review quality has been <em>genuinely</em> useful - not just &quot;add more comments&quot; noise.</p>
+<p>It's actually a really short prompt I settled on and has been giving me pretty outstanding results that really just flags critical things:</p>
+<pre><code>opencode run -m openai/gpt-5.3-codex &quot;
+
+Code review for {{TYPE OF APP, e.g. TypeScript app doing...}}
+
+1. Read CLAUDE.md first - architecture, lessons learned
+2. Run: git diff $BASE_BRANCH...HEAD
+3. Read full changed files + related files (interfaces, callers, services)
+
+CONSERVATIVE REVIEW - False positives waste developer time:
+
+- VERIFY every concern by reading the actual code before flagging
+- Performance issue? Confirm caching/batching doesn't already exist
+- Missing validation? Confirm it's not handled upstream
+- Security concern? Trace the full request flow
+- If you're not 90%+ sure after verification, don't flag it
+
+Skip: style, formatting, naming, docs, hypotheticals.
+                  
+Also check what current tests may hit this, and if they are sufficient for these changes? DO NOT run the tests, just quick reasoning.
+                  
+This should be a separate section of your output report, titled Test Coverage
+
+Write concise review to report.md with file:line refs. LGTM if good.
+&quot;
+</code></pre>
+<p>You can tweak this to your requirements. I'd like to extend this further with ticket information, for example.</p>
+<h2>The economics are hard to argue with</h2>
+<p>This is the part that really got my attention. OpenAI lets you use your existing ChatGPT Plus, Pro, or Business subscription with OpenCode. There are no additional per-license, per-user, per-developer, or per-CI fees. OpenAI have <a href="https://x.com/thsottiaux/status/2009742187484065881">confirmed</a> they're actively working with OpenCode to support this. This is where I think Anthropic are making a major mistake - I'd love to use Claude Code in headless mode for this, but I'm not even sure if it's allowed under their ToS.</p>
+<p>Compare that to the existing code review SaaS products charging per seat, per repo, or per PR. For a team of any size, the maths gets ugly fast. And if you're already paying for ChatGPT, the marginal cost of adding PR reviews is effectively zero.</p>
+<p>I think this does show just how thin the layer AI wrappers have is. As agents get better and better, it's easier and easier to replace 'specialised' tools with this.</p>
+<h2>You keep control of your code</h2>
+<p>This matters more than people think. Your code passes through your CI/CD runners - that's expected and doesn't introduce a new threat surface. You're not granting OAuth access to a third party. You're not trusting that some startup's S3 bucket is properly locked down.</p>
+<p>To be clear - your code is still being sent to OpenAI's API for inference, so it's not truly air-gapped in the default setup. But if you're already using any agentic coding tools (Claude Code, Codex, Cursor, etc.), your code is already going to these providers. The difference here is you're cutting out the <em>middleman</em> - there's no additional third party with persistent access to your repositories.</p>
+<p>For organisations with genuinely high-sensitivity requirements, you can point OpenCode at a local model and run the whole thing air-gapped with absolutely nothing leaving your CI/CD environment. This obviously requires a decent amount of VRAM, but it's a genuinely promising way to bring agentic code review to environments where SaaS tools are a non-starter.</p>
+<h2>Beyond PR reviews</h2>
+<p>I've also built a Slack bot that works in exactly the same way. Instead of being triggered by a Git provider, you ask a question directly in Slack. The bot grabs a read-only copy of the repo, fires up OpenCode, and posts the output back as a reply on the thread.</p>
+<p>Want to ask &quot;where is the retry logic for payment processing?&quot; without opening your IDE? Done. Need a quick summary of what changed in the last sprint? Done. It's basically giving your entire team a senior engineer they can ask questions to at any time.</p>
+<h2>A note on Codex CLI</h2>
+<p>I did try to get this working with Codex CLI itself, but ran into issues with sandboxing. It kept complaining about Landlock not being enabled on the kernel, so I switched to OpenCode.</p>
+<p>OpenCode is also provider agnostic, so if OpenAI decides to change their ToS for this kind of activity you can just replace the <code>opencode run -m openai/gpt-5.3-codex</code> with <code>minimax/minimax-m2</code> in your pipeline file and run on another provider.</p>
+<h2>What's next</h2>
+<p>PR reviews are the obvious starting point, but some obvious next steps is getting the agent to actually resolve comments and propose a new PR. This would not be difficult to do with this pattern, but I'd like to spend some time building 'specialised' agents for other tasks past software engineering - for example, auditing the quality of the UX and giving suggestions if that is regressing in a PR.</p>
+<p>If you're a smaller team already paying for ChatGPT subscriptions and also paying for a separate AI code review tool, it might be worth spending an afternoon seeing if you can replace the latter with the former.</p>
+<hr class="footnotes-sep">
+<section class="footnotes">
+<ol class="footnotes-list">
+<li id="fn1" class="footnote-item"><p>CodeRabbit <a href="https://kudelskisecurity.com/research/how-we-exploited-coderabbit-from-a-simple-pr-to-rce-and-write-access-on-1m-repositories">famously</a> had a RCE which was executable within a .yml file which gave a potential attacker access to 1m GitHub repos <a href="#fnref1" class="footnote-backref">↩︎</a></p>
+</li>
+<li id="fn2" class="footnote-item"><p>OpenCode uses OAuth tokens from ChatGPT which expire after 14 days. This is still very new so I expect this to improve, but for now you'll need to rotate these in your CI secrets periodically. A better approach would be to have a secrets manager grab and rotate this key automatically. <a href="#fnref2" class="footnote-backref">↩︎</a></p>
+</li>
+</ol>
+</section>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

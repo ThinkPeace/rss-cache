@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Exploring Rust Traits | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Exploring Rust Traits</h1>
+        <div class="meta">Beej&#x27;s Bit Bucket 2025-10-17T00:00:00Z</div>
+        <div class="links">
+          <a href="http://beej.us/blog/data/rust-trait-impl/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/beej-us/beej-us-604dd01178bbf59a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Just randomly rabbit-holing down into how traits work in Rust.</div>
+        <div class="content">
+          <html>
+  <body><p>2025-10-17, 2025-10-20</p><h1>Exploring Rust Traits</h1><p><graphic src="images/ferris.png" alt="Ferris the Crab"/></p><p>Welcome to my first blog in my Rust Rabbit Holes series! In these I'll just try implementing something relatively simple and then pull on the various threads to see where they lead.</p><p>I'm a Rust noob. I've dabbled for a few years and written a
+<a href="https://github.com/beejjorgensen/Wizards-Castle-Rust">small-but-non-trivial
+project</a>, but I'm
+far, far from expert.</p><p>So I'm going to just mess around with the language a bit and see what it
+takes to do what. And see what I learn along the way. And if anything is
+wrong in this blog, it's because <a href="https://www.pcgamer.com/software/ai/ai-content-now-outnumbers-human-written-articles-on-the-internet-but-the-good-news-is-that-the-slop-seems-to-have-plateaued-for-now/">I'm
+human</a>.
+😊 Corrections and additional comments welcome, of course.</p><p>For this exploration, I had in mind to just compare buffered and
+unbuffered file I/O. But then it got into
+<a href="https://doc.rust-lang.org/book/ch10-02-traits.html">traits</a> a bit. And
+I ran with that.</p><p>Reader skill level: beginner, like me.</p><h2>Traits</h2><p>If you aren't familiar with the concept of Rust traits, you can very loosely think of them as "interfaces" or "abstract classes" in other languages. They're a description of methods you must have in order to implement a particular trait.</p><p>For example, to implement the <a href="https://doc.rust-lang.org/std/io/trait.Read.html"> Read
+trait</a> in Rust, your
+</p><pre>struct</pre> must implement a <pre>read()</pre> function with the proper signature.<p>There are plenty more details in <a href="https://doc.rust-lang.org/book/ch10-02-traits.html">the Rust
+Book</a>.</p><h2>Buffered and Unbuffered Reads</h2><p>At a low level, the OS typically exposes an interface that just lets you
+synchronously read a chunk of bytes into memory. On Unix-likes, this is
+the <a href="https://man7.org/linux/man-pages/man2/read.2.html"> read()
+syscall</a>.</p><p>This is inconvenient for a number of reasons, two of which are:</p><ul><li>
+<p>Each syscall is expensive, and if you do a lot of tiny reads, that's overhead. It's better to do one big actual OS read, and then all your smaller reads can take place in</p><a href="https://en.wikipedia.org/wiki/User_space_and_kernel_space">user space</a>without that overhead.</li><li>
+<p>The OS doesn't allow you to do fun things like "read a single line of data" because its interface is so simplistic. You'd have to micromanage that yourself. A buffered I/O system, since it already grabbed a big chunk of input, can scan ahead for newlines and return single lines.</p></li></ul><p>In C, the <pre>stdio.h</pre> I/O functions are all typically buffered. If you
+want unbuffered, you either tell the C I/O subsystem to go unbuffered,
+or you can call the OS directly.</p><p>In Rust, both modes are present in the standard library. In the modern style, you first open a file in unbuffered mode, and then you wrap that up in some buffering functionality if you want that.</p><h2>Unbuffered Reads in Rust</h2><p>Rust does unbuffered I/O with its <a href="https://doc.rust-lang.org/std/fs/struct.File.html"> struct File</a> type. It
+implements the
+</p><p><a href="https://doc.rust-lang.org/std/io/trait.Read.html">trait which gives us this method, among others:</a></p><pre>Read</pre><pre><pre>fn read(&amp;mut self, buf: &amp;mut [u8]) -&gt; Result&lt;usize&gt;;
+</pre></pre>
+<p>That's a hard parse if you're new to Rust, but the gist is that you're
+going to pass in a mutable reference to an array of bytes in <pre>buf</pre>
+(mutable so that <pre>read()</pre> can put bytes in it!) and it returns a
+<pre>Result</pre> object telling you the number of bytes that have been read.
+(Incidentally, this is exactly how Unix <pre>read()</pre> syscall works.)</p><p>So after you call <pre>read()</pre> on your file object, hopefully that <pre>buf</pre>
+parameter gets filled up with some bytes and the returned <pre>Result</pre> holds
+the number of bytes that we read.</p><p>Here's a bit of a demo that does this:</p><pre><pre>use std::fs::File;
+use std::error::Error;
+use std::io::Read;
+
+fn unbuffered_demo() -&gt; Result&lt;(), Box&lt;dyn Error&gt;&gt; {
+    const BUFSIZE: usize = 128;
+
+    // Open the file
+    let mut file = File::open("input.txt")?;
+
+    // Buffer to read bytes into
+    let mut buf = [0u8; BUFSIZE];
+
+    // Call file.read repeatedly, trying to get BUFSIZE bytes
+    loop {
+        let bytes_read = file.read(&amp;mut buf)?;
+
+        // Check for end-of-file
+        if bytes_read == 0 {
+            break;
+        }
+
+        // Otherwise, convert bytes to a string
+        let str_val = std::str::from_utf8(&amp;buf[..bytes_read])?;
+        print!("{}", str_val);
+    }
+
+    Ok(())
+}
+</pre></pre>
+<p>Interesting that we had to bring in the <pre>std::io::Read</pre> trait even
+though it doesn't appear in our code. It's because <pre>File</pre> implements it
+that we have to do that, apparently.</p><p>Also check out that <pre>std::str::from_utf8()</pre> call. I'm assuming the bytes
+in that files are <a href="https://en.wikipedia.org/wiki/UTF-8">UTF-8 encoded</a>
+(they are in my <pre>input.txt</pre>). I pass in <pre>&amp;buf[..bytes_read]</pre> which is a
+slice of the buffer just composed of how ever many bytes I read.
+Hopefully the number of bytes is <pre>BUFSIZE</pre>, but the file is unlikely to
+be an exact multiple of that so the last read is short.</p><p>When there is a short read, values in the <pre>[u8]</pre> array past the end of
+the read just have whatever was in there from the previous read. So we
+slice those off.</p><p>Finally, the function return type is interesting:</p><pre><pre>fn unbuffered_demo() -&gt; Result&lt;(), Box&lt;dyn Error&gt;&gt; {
+</pre></pre>
+<p>That's the classic <pre>Result</pre>, but what's the rest of it? My function
+returns <pre>Ok(())</pre> in the good case. But we have all those <pre>?</pre> operators
+all over the place. Those basically say, "Unwrap the return value from
+this function. If it's good, assign it to the variable on the left. If
+it's bad, return with the error."</p><p>But all those functions with <pre>?</pre> after technically return different
+types, so how do we handle them all?</p><p>Well, all of those error types implement the <pre>std::error::Error</pre> trait.
+So we can treat them all like <pre>Error</pre>. Except that they aren't the same
+types, and we won't know which exact type was returned until runtime, so
+we have to use <a href="https://en.wikipedia.org/wiki/Dynamic_dispatch">dynamic
+dispatch</a> when returning
+it—that's the <pre>dyn</pre> keyword you see.</p><p>Not only that, but we don't know how big the particular runtime error
+object will be, so it has to be <pre>Box</pre>ed. Rust needs to know the size of
+everything at compile time, and a <pre>Box</pre> is basically just a pointer to
+something on the
+<a href="https://en.wikipedia.org/wiki/Memory_management#HEAP">heap</a>, and
+pointers are fixed size.</p><p>I was also wondering how the called functions know to <pre>Box</pre> their errors
+for our function because it seems like normally they wouldn't.
+Apparently this happens through the magic of the
+<a href="https://doc.rust-lang.org/std/convert/trait.From.html"> From</a> trait,
+but I didn't pursue that rabbit hole this time.</p><p>Boxing errors like this is not the only way to handle multiple error
+types, and arguably isn't the best way (whatever that means). <a href="https://doc.rust-lang.org/rust-by-example/error/multiple_error_types.html">Rust by
+Example</a>
+has more information.</p><p>OK, so that's unbuffered. How do we get buffered I/O?</p><h2>Buffered Reads in Rust</h2><p>In order to get buffered reads, we need to wrap our <pre>File</pre> up in a
+<a href="https://doc.rust-lang.org/std/io/struct.BufReader.html"> BufReader</a>.</p><p>The short of it looks like this:</p><pre><pre>// Open the file
+let file = File::open("input.txt")?;
+
+// Make a new buffered reader on the file
+let mut reader = BufReader::new(file);
+</pre></pre>
+<p>And now we have a <pre>reader</pre> object that has all kinds of higher-level
+<a href="https://doc.rust-lang.org/std/io/struct.BufReader.html#implementations"> BufReader
+methods</a>
+on it. We can now use these to read the data instead of that
+lower-level </p><pre>read()</pre> method. In particular, it implements the <p><a href="https://doc.rust-lang.org/std/io/trait.BufRead.html">that gives you more (and easier) control over what you read.</a></p><pre>BufRead</pre>
+trait<p>Notably, it has this method:</p><pre><pre>fn read_line(&amp;mut self, buf: &amp;mut String) -&gt; Result&lt;usize&gt; { ... }
+</pre></pre>
+<p>That will read a line at a time! That's fun! Let's write some code that
+does it. I'll just copy the unbuffered code and modify it to use the
+<pre>BufReader</pre> for reading, instead:</p><pre><pre>use std::fs::File;
+use std::error::Error;
+use std::io::{BufRead, BufReader, Read};
+
+fn buffered_demo() -&gt; Result&lt;(), Box&lt;dyn Error&gt;&gt; {
+    // Open the file
+    let file = File::open("input.txt")?;
+
+    // Make a new buffered reader on the file
+    let mut reader = BufReader::new(file);
+
+    // Storage for the line we'll read
+    let mut line = String::new();
+
+    loop {
+        // Read a line!
+        let bytes_read = reader.read_line(&amp;mut line)?;
+
+        // Check for end-of-file
+        if bytes_read == 0 {
+            break;
+        }
+
+        print!("{}", line);
+        line.clear();
+    }
+
+    Ok(())
+}
+</pre></pre>
+<p>Looks awfully similar to what we had before. There are a couple interesting things in this buffered version, though.</p><p>We're not reading into a byte array, but instead into a
+<a href="https://doc.rust-lang.org/std/string/struct.String.html"> String</a>.
+This is nice because </p><pre>String</pre>s are basically
+<p><a href="https://doc.rust-lang.org/std/vec/struct.Vec.html">under the hood so they grow and shrink as needed. No more fixed-size buffer to manage!</a></p><pre>Vec</pre>s<p>In the unbuffered version, the <pre>File</pre> variable had to be <pre>mut</pre>, and here
+it doesn't. That's because in the unbuffered version we were calling
+<pre>file.read()</pre>, which does a mutable borrow <pre>&amp;mut self</pre> as we see in <a href="https://doc.rust-lang.org/std/io/trait.Read.html#tymethod.read">its
+signature</a>.
+In this version, we simply pass ownership of the file to the
+<pre>BufReader</pre>, and it presumably tucks it away in its <pre>struct</pre> somewhere.
+And then when we call <pre>reader.read_line()</pre> is does its own <pre>&amp;mut self</pre>
+borrow and then then calls its <pre>file.read()</pre> internally. I think.</p><p>We do have that <pre>line.clear()</pre> bit at the end. Turns out <pre>read_line()</pre>
+appends data on the end of the <pre>line</pre> variable. So if we want to print
+them one at a time, we actually have to clear the string so it's empty
+for the next line.</p><p>I found myself wondering if that end-of-file check could be rolled into
+a <pre>while let</pre> similar to the idiomatic C while loop:</p><pre><pre>// C code
+while ((bytes_read = read_line(line)) &gt; 0) {
+    puts(line);
+}
+</pre></pre>
+<p>So in Rust that would be something like:</p><pre><pre>// INVALID Rust code
+while (let bytes_read = reader.read_line(&amp;mut line)?) &gt; 0 {
+    print!("{}", line);
+    line.clear();
+}
+</pre></pre>
+<p>But that won't build due to the way <pre>let</pre> in this instance is actually
+doing pattern matching to look for an <pre>Ok()</pre>. I speculate.</p><p>So are we stuck in terms of making our buffered reader prettier? Not quite!</p><blockquote><p/><graphic>There are a few ways to do this beyond what I thought of. You can</graphic><pre>while</pre>loop on a block (which I didn't realize was possible):<pre>while { let bytes_read = reader.read_line(&amp;mut line)?; bytes_read &gt; 0 } { print!("{line}"); line.clear(); }</pre><p>[HT Joe at</p><a href="">OSU-Cascades</a>]</blockquote><p>Digging around the <pre>BufRead</pre> trait, we find a method called
+<a href="https://doc.rust-lang.org/std/io/trait.BufRead.html#method.lines"> lines()</a>.
+This method returns an iterator that we can use to loop over the lines
+of the file, and it'll quit when done!</p><pre><pre>fn buffered_demo_iter() -&gt; Result&lt;(), Box&lt;dyn Error&gt;&gt; {
+    // Open the file
+    let file = File::open("input.txt")?;
+
+    // Make a new buffered reader on the file
+    let reader = BufReader::new(file);
+
+    for line_result in reader.lines() {
+        println!("{}", line_result?);
+    }
+
+    Ok(())
+}
+</pre></pre>
+<p>Much cleaner!</p><p>One difference is that we're getting a <pre>Result</pre> type back in
+<pre>line_result</pre> from the <pre>for</pre> loop. So we have to unwrap that, which I do
+in the <pre>println!()</pre>.</p><p>And it's <pre>println!()</pre> this time, instead of <pre>print!()</pre>. Apparently the
+trailing newline is stripped off when using the <pre>lines()</pre> iterator.</p><blockquote><p/><graphic>Here's another option, since</graphic><pre>reader.lines()</pre>is an iterator. We can just repeatedly call<pre>.next()</pre>to extract lines:<pre>let mut lines = reader.lines(); while let Some(line) = lines.next() { println!("{}", line?); }</pre><p>[HT Joe at</p><a href="">OSU-Cascades</a>]</blockquote><p>Now—wait a moment—nothing is <pre>mut</pre> in our <pre>for</pre>-loop variant! But
+clearly at some deep level the <pre>file</pre> has to be <pre>mut</pre> to <pre>read()</pre> out of
+it. Let's dig. What's <pre>reader.lines()</pre> do?</p><pre><pre>fn lines(self) -&gt; Lines&lt;Self&gt;
+</pre></pre>
+<p>Since it's just <pre>self</pre>, it's actually taking ownership of the
+<pre>reader</pre> <pre>BufReader</pre>. Which means we can't use the <pre>reader</pre> after the
+loop. In this case that's fine.</p><p>But if we wanted to use <pre>reader</pre> after the loop, we'd have to change the
+call to <pre>.lines()</pre> to be against a mutable borrow of <pre>reader</pre> (and it
+would have to be <pre>mut</pre>.</p><pre><pre>    let mut reader = BufReader::new(file);
+
+    for line_result in (&amp;mut reader).lines() {
+</pre></pre>
+<p>That works and we can then use <pre>reader</pre> after the loop is complete if we
+want.</p><p><pre>lines()</pre> is still taking ownership, but it's taking ownership of a
+mutable reference to the <pre>reader</pre>. So we could still use <pre>reader</pre> later.
+(Am I saying this correctly?)</p><p>However, this does not work:</p><pre><pre>    let reader = BufReader::new(file);
+
+    for line_result in (&amp;reader).lines() {
+</pre></pre>
+<p>Why not?</p><p>I made the following toy program to mess with it where I implemented traits for various borrows:</p><pre><pre>struct Bar {
+    x: usize,
+}
+
+impl Foo for Bar {   // Ownership
+    fn foo(self) {
+        println!("{}", self.x)
+    }
+}
+
+impl Foo for &amp;Bar {  // Borrow
+    fn foo(self) {
+        println!("{}", self.x)
+    }
+}
+
+impl Foo for &amp;mut Bar { // Mutable borrow
+    fn foo(self) {
+        println!("{}", self.x)
+    }
+}
+
+trait Foo {
+    fn foo(self);  // Ownership of self
+}
+
+fn main() {
+    let mut b = Bar { x: 12 };
+    (&amp;mut b).foo(); // works
+    (&amp;b).foo();     // works
+    b.foo();        // works
+    //b.foo();      // error (b is moved by the previous call)
+}
+</pre></pre>
+<p>And that works as long as I have <pre>impl Foo</pre> for the various forms of
+<pre>Bar</pre>. So that means we need to have an <pre>impl BufRead</pre> for all the
+supported types, and apparently <pre>&amp;BufReader</pre> isn't one of them...?</p><blockquote><p/><graphic>Looking in the</graphic><a href="">section of the docs, we see the following (among others that aren't pertinent):</a><pre>BufRead</pre>implementors<pre>impl&lt;R: ?Sized + Read&gt; BufRead for BufReader&lt;R&gt; // 1 impl&lt;B: BufRead + ?Sized&gt; BufRead for &amp;mut B // 2</pre><p>So it's defined for:</p><ul/><li>Any</li><pre>BufReader</pre>that implements<pre>Read</pre>. That's my<pre>reader.lines()</pre>.<li>Any</li><pre>&amp;mut</pre>to a thing that implements<pre>BufRead</pre>. That's my<pre>(&amp;mut reader).lines()</pre>.<p>But that's it. Nothing in there that implements it for a</p><pre>&amp;BufReader</pre>. So<pre>(&amp;reader).lines()</pre>doesn't work.<p>[HT</p><a href="">Brian May</a>]</blockquote><p>There might be more to it than this, but that's my new mental model so far.</p><h2>Implementing the <pre>Read</pre> Trait</h2>
+<p>If we look at what <pre>BufReader::new()</pre> takes, we see this:</p><pre><pre>impl&lt;R: Read&gt; BufReader&lt;R&gt;
+
+pub fn new(inner: R) -&gt; BufReader&lt;R&gt;
+</pre></pre>
+<p>So that first line is saying "In the implementation of <pre>BufReader</pre> for
+any type <pre>R</pre> as long as <pre>R</pre> implements the <pre>Read</pre> trait..."</p><p>And the second is saying "We'll have a function <pre>new</pre> that takes an
+argument of type <pre>R</pre> (again <pre>R</pre> must implement the <pre>Read</pre> trait) and
+returns a new <pre>BufReader</pre> of that type."</p><p>It's generic! We can use any type to create our <pre>BufReader</pre> as long as
+it implements the <pre>Read</pre> trait.</p><p>And I have one! For this, we'll have a <pre>DataProvider</pre> object that has an
+array of bytes and implements the <pre>Read</pre> trait. If it implements that,
+it will be good to use with <pre>BufReader</pre>.</p><pre><pre>struct DataProvider {
+    data: &amp;'static [u8],
+    offset: usize,
+}
+
+impl DataProvider {
+    fn new(data: &amp;'static [u8]) -&gt; DataProvider {
+        DataProvider {
+            data,
+            offset: 0,
+        }
+    }
+}
+</pre></pre>
+<p>All it's going to do it keep track of the current offset and copy bytes
+out when its <pre>read()</pre> method is called. We just have to make sure we
+match the function signature in the <a href="https://doc.rust-lang.org/std/io/trait.Read.html"> Read
+trait</a>.</p><pre><pre>impl Read for DataProvider {
+    fn read(&amp;mut self, buf: &amp;mut [u8]) -&gt; std::io::Result&lt;usize&gt; {
+        let start = self.offset;
+        let mut end = self.offset + buf.len();
+        let maximum = self.data.len();
+
+        if end &gt; maximum {
+            end = maximum;
+        }
+
+        let bytes_copied = end - start;
+        self.offset += bytes_copied;
+
+        let src_bytes = &amp;self.data[start..start + bytes_copied];
+        buf[..bytes_copied].copy_from_slice(src_bytes);
+
+        Ok(bytes_copied)
+    }
+}
+</pre></pre>
+<p>A couple fun things there. We let <pre>src_bytes</pre> be a slice of our array
+from the starting point (which was the old <pre>offset</pre> to the ending (which
+might be the end of the data, or might be the end of the destination
+buffer).</p><p>And then we use the <pre>copy_from_slice()</pre> method to copy those bytes from
+the source into the destination buffer. And notably, we might only want
+to copy over some of <pre>buf</pre> (in case we have fewer bytes remaining than
+<pre>buf</pre> is big). And that's why the receiver is the slice
+<pre>buf[..bytes_copied]</pre>.</p><p>And then we return <pre>Ok(bytes_copied)</pre>, and <pre>bytes_copied</pre> will be <pre>0</pre>
+once we reach the end of our data, indicating the equivalent of
+"end-of-file".</p><p>We can use it just like this:</p><pre><pre>fn provider_demo() -&gt; std::io::Result&lt;()&gt; {
+    let dp = DataProvider::new(b"line 0\nline 1\nline 2\nline 3\n");
+
+    let reader = BufReader::new(dp);
+
+    for line_result in reader.lines() {
+        println!("{}", line_result?);
+    }
+
+    Ok(())
+}
+</pre></pre>
+<p>Works!</p><blockquote><p/><graphic>Adding my two</graphic><pre>usize</pre>s for<pre>end</pre>can overflow. This will either panic in a debug build or wrap around in a release build. Clamping it breaks the logic, so the best thing to do would be a<pre>checked_add()</pre>that returns an<pre>Option</pre>and return an<pre>Error</pre>if overflow happened.<p>Further, to avoid the overflow entirely, we should reverse the logic from an addition to a subtraction. I think somewhere in the depths of my brain I knew this, but had forgotten. This also simplifies the code a bit, especially if we use</p><pre>min</pre>for the clamping.<pre>impl Read for DataProvider { fn read(&amp;mut self, buf: &amp;mut [u8]) -&gt; std::io::Result&lt;usize&gt; { let start = self.offset; let remaining = self.data.len() - self.offset; let bytes_copied = std::cmp::min(remaining, buf.len()); let src_bytes = &amp;self.data[start..start + bytes_copied]; buf[..bytes_copied].copy_from_slice(src_bytes); self.offset += bytes_copied; Ok(bytes_copied) } }</pre><p>[HT Jonathan from</p><a href="">Deschutes Tech Guild</a>for both]</blockquote><p>Technically <pre>line_result</pre> is <pre>std::io::Result&lt;String&gt;</pre>. But I didn't
+want to return some <pre>Ok(String::from(""))</pre> nastiness. So I changed it to
+<pre>Result&lt;()&gt;</pre> which is fine.</p><blockquote><p>However I was still confused over why I'm allowed to do this when that's not the</p><pre>Result</pre>that we get from<pre>line_result</pre>. Apparently it's due to the fact that the<pre>?</pre>really only has anything to do with the error portion of the result, and those are all compatible.<p>[HT Jonathan from</p><a href="">Deschutes Tech Guild</a>]</blockquote><h2>To-Do List</h2><ul><li>How the <pre>From</pre>trait works.</li><li>How to implement iterators.</li><li>Everything else.</li></ul><h2>Comments</h2><p><a href="https://mastodon.sdf.org/@beejjorgensen/115391410243105919">View Comments</a></p><p><a href="https://mastodon.sdf.org/@beejjorgensen/115391410243105919">Reply</a></p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

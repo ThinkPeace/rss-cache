@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The story of one of my worst programming failures | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The story of one of my worst programming failures</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-03-11T01:58:42Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/programming/DevelopedTooSmallFailure">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-ed002f013e955357.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Somewhat recently, GeePaw Hill shared the story of what he called his most humiliating experience as a skilled and successful computer programmer . It&#x27;s an excellent, entertaining story with a lesson for all of us, so I urge you to read it. Today I&#x27;m going to tell the story of one of my great failures, where I may have quietly killed part of a professor&#x27;s r…</div>
+        <div class="content">
+          <div class="wikitext"><p>Somewhat recently, <a href="https://mastodon.social/@GeePawHill/116129976624712032">GeePaw Hill shared the story of what he called
+his most humiliating experience as a skilled and successful computer
+programmer</a>.
+It's an excellent, entertaining story with a lesson for all of us,
+so I urge you to read it. Today I'm going to tell the story of one
+of my great failures, where I may have quietly killed part of a
+professor's research project by developing on a too-small machine.</p>
+
+<p>Once upon a time, back when I was an (advanced) undergraduate, I
+was hired as a part time research programmer for a Systems professor
+to work on one of their projects, at first with a new graduate
+student and then later alone (partly because the graduate student
+switched from Systems to <a href="https://en.wikipedia.org/wiki/Human%E2%80%93computer_interaction">HCI</a>). One
+of this professor's research areas was understanding and analyzing
+disk IO patterns (a significant research area at the time), and my
+work was to add <a href="https://utcc.utoronto.ca/~cks/space/blog/tech/DiskCacheHitMissWantDetails">detailed IO tracing</a>
+to the <a href="https://en.wikipedia.org/wiki/Ultrix">Ultrix</a> kernel. Some
+of this was porting work the professor had done with the 4.x BSD
+kernel (while a graduate student and postdoc) into the closely
+related, BSD-derived Ultrix kernel, but we extended the original
+filesystem level tracing down all the way to capturing block IO
+traces (still <a href="https://utcc.utoronto.ca/~cks/space/blog/tech/DiskCacheHitMissWantDetails">specifically attributed to filesystem events</a>).</p>
+
+<p>We were working on Ultrix because my professor had a research and
+equipment grant from DEC. DEC was interested in this sort of
+information for improving the IO performance of the Ultrix kernel,
+and part of the benefit of working with DEC was that DEC could
+arrange for us to get IO traces from real customers with real
+workloads, instead of university research system workloads. Eventually
+the modified kernel worked, gathered all the data that we wanted
+(and gave us <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/KernelNameCachesWhy">some insights even on our systems</a>), and was ready for the customer site.
+We talked to DEC and it was decided that the best approach was that
+I would go down to Boston with the source code, meet with the DEC
+people involved, we'd build a kernel for the customer's setup, and
+then I'd go with the DEC people to the customer site to actually
+boot into it and turn the tracing on.</p>
+
+<p>Very shortly after we booted the new kernel on the customer's machine
+and turned tracing on, the kernel paniced. It was a nice, clear
+panic message from my own code, basically an assertion failure, and
+what it said was more or less 'disk block number too large to fit
+into data field'. I looked at that and had a terrible sinking
+feeling.</p>
+
+<p>This was long enough ago (with small enough disks) that having very
+compact trace data was extremely important, especially at the block
+IO layer (where we were generating a lot of trace records). As a
+result, I'd carefully designed the on-disk trace records to be as
+small as possible. As part of that I'd tried to cut down the size
+of fields to be only as big as necessary, and one of the fields I'd
+minimized was the disk block address of the IO. My minimized field
+was big enough for the block addresses on our Ultrix machines
+(donated by DEC), with not very big disks, but it was now obviously
+too small for the bigger disks that the company had bought from DEC
+for their servers. In a way I was lucky that I'd taken the precaution
+of putting in the size check that paniced, because otherwise we
+could have happily wasted time collecting corrupted traces with
+truncated block addresses.</p>
+
+<p>(All of this was long enough ago that I can't remember how small
+the field was, although my mind wants to say 24 bits. If it was 24
+bits, I had to be using 4 Kbyte filesystem block addresses, not
+512-byte sector addresses.)</p>
+
+<p>Once I saw the panic message, both the mistake and the fix were
+obvious, and the code and so on were well structured enough that
+it was simple to make the change; I could almost have done it on
+the spot (or at least while in Boston). But, well, you only get one
+kernel panic from your new "we assure you this is going to work"
+kernel on a customer's machine, especially if you only have one
+evening to gather your trace data and you can't rebuild a kernel
+from source while at the customer's site, so the DEC people and I
+had to pack up and go back empty handed. Afterward, I flew back to
+Toronto from Boston, made the simple change, and tested everything.
+But I never went back to Boston for another visit with DEC, and I
+don't think that part of my professor's research projects went
+anywhere much after that.</p>
+
+<p>(My visit to Boston and its areas did feature getting driven around
+at somewhat unnervingly fast speeds on the <a href="https://en.wikipedia.org/wiki/Massachusetts_Turnpike">Massachusetts Turnpike</a> in the sports
+car of one of the DEC people involved.)</p>
+
+<p>So that's the story of <a href="https://mastodon.social/@cks/116132912535266993">how I may have quietly killed one of
+my professor's research projects by developing on a too-small
+machine</a>.</p>
+
+<p>(That's obviously not the only problem. When I was picking the field
+size, I could have reached out somehow to ask how big DEC's disks
+got, or maybe ran the field size past my professor to see if it
+made sense. But I was working alone and being trusted with all of
+this, and I was an undergraduate, although I had significant
+professional programming experience by then.)</p>
+
+<h3>Sidebar: Fixing an earlier spectacular failure</h3>
+
+<p>(All of the following is based on my fallible memory.)</p>
+
+<p>The tracing code worked by adding trace records to a buffer in
+memory and then writing out the buffer to the trace file when it
+was necessary. The BSD version of the code that I started with
+(which traced only filesystem level IO) did this synchronously,
+created trace records even for writing out the trace buffer, and
+didn't protect itself against being called again. A recursive call
+would deadlock but usually it all worked because you didn't add too
+many new trace records while writing out the buffer.</p>
+
+<p>(Basically, everything that added a trace record to the buffer
+checked to see if the buffer was too full and if it was, immediately
+called the 'flush the trace buffer' code.)</p>
+
+<p>This approach blew up spectacularly when I added block IO tracing;
+the much higher volume of records being added made deadlocks
+relatively common. The whole approach to writing out the trace
+buffer had to change completely, into a much more complex one with
+multiple processes involved and genuinely asynchronous writeout.
+I still have a vivid memory of making this relatively significant
+restructuring and then doing a RCS ci with a commit message that
+included a long, then current computing quote about replacing one
+set of code with known bugs with a new set of code with new unknown
+ones.</p>
+
+<p>(At this remove I have no idea what the exact quote was and I can't
+find it in a quick online search. And unfortunately the code and its
+RCS history is long since gone.)</p>
+</div>
+<div> (<a href="https://utcc.utoronto.ca/~cks/space/blog/programming/DevelopedTooSmallFailure?showcomments#comments">One comment</a>.) </div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

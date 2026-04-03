@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Writing an LLM from scratch, part 32f -- Interventions: weight decay | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Writing an LLM from scratch, part 32f -- Interventions: weight decay</h1>
+        <div class="meta">Giles&#x27; blog 2026-03-23T23:55:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/03/llm-from-scratch-32f-interventions-weight-decay">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-946e007c7a6a7178.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I&#x27;m still working on improving the test loss for a from-scratch GPT-2 small base model, trained on code based on Sebastian Raschka &#x27;s book &quot; Build a Large Language Model (from Scratch) &quot;. In my training code, I have this code to create the optimiser: optimizer = torch . optim . AdamW ( model . parameters (), lr = 0.0004 , weight_decay = 0.1 ) In my last pos…</div>
+        <div class="content">
+          <p>I'm still working on improving the test loss for a from-scratch GPT-2 small base model, trained on code based on
+<a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>".</p>
+
+<p>In my training code, I have this code to create the optimiser:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">AdamW</span><span class="p">(</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span>
+        <span class="n">lr</span><span class="o">=</span><span class="mf">0.0004</span><span class="p">,</span> <span class="n">weight_decay</span><span class="o">=</span><span class="mf">0.1</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>In my <a href="/2026/03/llm-from-scratch-32e-interventions-learning-rate">last post</a> I looked
+into the learning rate, the <code>lr</code> parameter in that code, and found a value for that,
+plus some extra code to schedule it -- that is, to vary it over time -- which gave better training results.</p>
+
+<p>This time I want to go into the weight decay.  What is it, what is it for, and is
+0.1 really the best value?</p>
+<p>I was a little concerned going into this that in order to understand this hyperparameter,
+I'd need to have a good understanding of how the optimiser works; I've been building
+what I think is a solid mental model of optimisers, but I don't think I understand
+them well enough to explain them yet, and I've been hoping to delay posting about them
+to a separate blog post series after this one.</p>
+
+<p>The good news is that while weight decay is an important aspect of how optimisers work
+-- the "W" in AdamW, the thing that makes it different to the older Adam optimiser,
+is a nod to its different treatment of weight decay -- you don't need to know how
+the optimiser itself works to understand what weight decay is.</p>
+
+<p>Instead, you just need to consider an older and more fundamental aspect of building
+ML systems -- regularisation.  In order to dig into that, let's start with overfitting.</p>
+
+<h3 id="overfitting">Overfitting</h3>
+
+<p>Let's imagine a simple classification task: we want to build a model that can -- for
+any point on this chart -- predict whether a cross or a circle should go there, training it using
+the sample data points that we already have:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/overfit_plot1.png" alt="Overfitting example: the training data" title="Overfitting example: the training data" /></p>
+
+<p>Let's say that we train a powerful model on this dataset, and it comes up with this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/overfit_plot2.png" alt="Overfitting example: the powerful model's solution" title="Overfitting example: the powerful model's solution" /></p>
+
+<p>Now, <em>ab initio</em> we don't know whether that's a good result or not; we need to use our
+validation set to evaluate it.  Let's say that the validation points are these
+blue ones:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/overfit_plot3.png" alt="Overfitting example: validation samples show that it's overfit" title="Overfitting example: validation samples show that it's overfit" /></p>
+
+<p>We can see that it looks like our powerful model has overfit.  The training set is
+all nicely split by the boundary, but the validation points are not.</p>
+
+<p>A common solution to how to handle that kind of issue that you might see in
+introductory ML courses is to try using a less powerful model.  A less powerful model
+in this case might come up with a less "wiggly" line to separate the two categories,
+perhaps because it didn't have enough parameters to make it wiggle so much, so you
+might find that it came up with a classifier that looked more like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/overfit_plot4.png" alt="Overfitting example: a simpler model fits perfectly" title="Overfitting example: a simpler model fits perfectly" /></p>
+
+<p>So: we use our validation set to detect overfitting, and we can adjust the complexity
+of our model to try to avoid it.</p>
+
+<p>Now, this is all very well, but it does require manual intervention.  We had to do
+a training run, identify that we were overfitting, and then decide on parameters for
+the new simpler model (how many parameters should it have?).  We could, perhaps have
+gone too far and wound up with something like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/overfit_plot5.png" alt="Overfitting example: a too-simple model underfits" title="Overfitting example: a too-simple model underfits" /></p>
+
+<p>...and underfit.</p>
+
+<p>There's no way when we start out knowing what the right number of parameters is,
+so we need to try various values and then try to work out the optimum balance.</p>
+
+<p>Regularisation techniques are designed to try to automate this -- to prevent overfitting
+without all that tedious mucking about with the model.</p>
+
+<h3 id="regularisation">Regularisation</h3>
+
+<p>We've already <a href="/2025/03/llm-from-scratch-10-dropout">looked at Dropout</a>, which is one
+of the standard ways to do that.  Although <a href="/2025/03/dropout-and-mandatory-vacation">my own mental model</a>
+of what it does goes some way beyond just helping to prevent overfitting, I may well be
+wrong -- and given that our LLM train is never seeing the same training data twice, being
+a single-epoch run, removing it <a href="/2026/02/llm-from-scratch-32c-interventions-removing-dropout">turned out to improve our model</a>.</p>
+
+<p>Another technique is just stopping the training run when you start seeing the validation
+loss rise, also known as "early stopping".  That's such an obvious thing to do that I
+came up with it independently <a href="/2024/12/fine-tuning-10#step-25-early-stopping">back when I was doing my early experiments with fine-tuning</a>.
+Now, we don't have a separate validation set for these training runs, but because we're doing
+a single epoch, the training data it sees is just as "new to it" as a held-back
+validation set would be, so we could use a similar trick and treat "train loss starts rising" instead of validation loss
+rising as a reason to stop the train early.  It's not exactly the same thing, but
+perhaps it would be close enough.</p>
+
+<p>But in all of the trains in this series,
+that's never happened -- while sometimes the train loss blips up for a bit, in the longer term
+it keeps going down.</p>
+
+<p>But there are other techniques that rely on a neat trick.  Let's think back to the
+manual, boring way of trying to find how many parameters are appropriate for a modelling
+task.  We tried one number, found that it overfit, then we might try a lower one, find that
+it underfit, then try something in the middle and find that it's better but still not
+perfect one way or the other, and rinse and repeat until we find something we're happy with.
+This kind of searching through a solution space to find an optimum is exactly what we're doing
+when training a model.  It would be really nice to automate it in the same way.</p>
+
+<p>One trick is: if we want to minimise the complexity of our model so that it doesn't overfit,
+we can try adding a measure of the model's complexity to the loss function -- and then
+our normal process of gradient descent will try to minimise that, just like it will
+try to minimise the loss from the training results themselves.  And that brings us
+on to weight decay.</p>
+
+<h3 id="weight-decay-finally">Weight decay (finally!)</h3>
+
+<p>Regularisation by weight decay starts off with the hypothesis that the "size" of all
+of the model's weights, taken together, is a measure of the model's complexity.  If
+the model's weights are small, then it's a simpler model than if they're large. <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup></p>
+
+<p>The "size" in this sense is the square of the L2 norm -- that's something we came across in
+<a href="/2026/02/llm-from-scratch-32b-interventions-gradient-clipping#how">gradient clipping</a>.
+The L2 norm is basically all of the weights squared, added together and then the resulting sum
+square-rooted.  You can think of it as the length of the vector that the weights
+represent -- that is, for our 163M-parameter model, it would be the length of the
+model's weights considered as a vector in 163-million dimensional space. <sup class="footnote-ref" id="fnref-2"><a href="#fn-2">2</a></sup>  And by
+using its square, we get something that penalises larger values more (and we
+also save the time in calculating a square root).</p>
+
+<p>To me, it's not intuitively obvious that that measure really does express
+the complexity of the model in any clear sense.  After all, you'd think that doubling
+all parameters would leave it no more complex than it was before, but it would double
+the L2 norm. <sup class="footnote-ref" id="fnref-3"><a href="#fn-3">3</a></sup>  But I imagine there is solid maths behind it to say that it does work in
+a more general way, so in the interests of not disappearing down a mathematical rabbit
+hole at this stage, I'll take it as given.</p>
+
+<p>So: we're using the squared L2 norm as a measure of model complexity, and we're going to
+add that on to the training loss as a way to try to minimise both.  The next question
+is, how do we balance between the two -- the training loss and the model complexity
+penalty?</p>
+
+<p>This is, in a somewhat hand-wavy way, similar to the decision of how much of the current
+loss function's gradient to use when adjusting the weights.  For that, we use <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003B7;</mi></mrow></math>, the
+learning rate to scale the gradients before applying them:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mi>&#x000D7;</mi><mtext>gradient</mtext></mrow></math>
+
+<p>And the balance between the "real" loss and the model complexity penalty is done in
+a similar way -- we have a number, the weight decay, normally represented
+by a lower-case lambda, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi></mrow></math>, and we multiply the squared L2 norm by that, something like this:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msup><mi>&#x02112;</mi><mi>&#x02032;</mi></msup><mo>&#x0003D;</mo><mi>&#x02112;</mi><mo>&#x0002B;</mo><mi>&#x003BB;</mi><mi>&#x000B7;</mi><msup><mi>N</mi><mn>2</mn></msup></mrow></math>
+
+<p>...where I'm using <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x02112;</mi></mrow></math> for the normal loss on the training inputs vs
+the targets, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msup><mi>N</mi><mn>2</mn></msup></mrow></math> for the squared L2 norm of the weights, and <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msup><mi>&#x02112;</mi><mi>&#x02032;</mi></msup></mrow></math> for the combined
+loss.  And <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msup><mi>&#x02112;</mi><mi>&#x02032;</mi></msup></mrow></math> is what we -- in theory -- actually try to minimise using our optimiser.</p>
+
+<p>But there's actually a neat simplification that we can apply to make this even easier.</p>
+
+<p>Firstly, let's make one small change to the equation above: we'll halve the
+squared L2 norm before multiplying it by <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi></mrow></math>.  That obviously doesn't change the underlying maths, it just
+means that we'd need to use larger values for <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi></mrow></math> to get the same effect.  You'll see why that's useful in a bit.</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msup><mi>&#x02112;</mi><mi>&#x02032;</mi></msup><mo>&#x0003D;</mo><mi>&#x02112;</mi><mo>&#x0002B;</mo><mi>&#x003BB;</mi><mi>&#x000B7;</mi><mfrac><mrow><msup><mi>N</mi><mn>2</mn></msup></mrow><mrow><mn>2</mn></mrow></mfrac></mrow></math>
+
+<p>Now let's think about normal gradient descent.  Again, we work out the gradient of the loss function for each weight,
+and subtract that times the learning rate <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003B7;</mi></mrow></math> from the weight's value to update it:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mi>&#x000D7;</mi><mtext>gradient</mtext></mrow></math>
+
+<p>Let's reformulate that a bit.  The gradient of the loss function for the weight is
+its partial derivative against that weight, so we can write the above like this
+for the version of the loss function including weight decay, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msup><mi>&#x02112;</mi><mi>&#x02032;</mi></msup></mrow></math>:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mfrac><mrow><mo>&#x02202;</mo><msup><mi>&#x02112;</mi><mi>&#x02032;</mi></msup></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac></mrow></math>
+
+<p>Now, we defined <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msup><mi>&#x02112;</mi><mi>&#x02032;</mi></msup></mrow></math> above as <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x02112;</mi><mo>&#x0002B;</mo><mi>&#x003BB;</mi><mi>&#x000B7;</mi><mfrac><mrow><msup><mi>N</mi><mn>2</mn></msup></mrow><mrow><mn>2</mn></mrow></mfrac></mrow></math>, so we can
+substitute that in there:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mfrac><mrow><mo>&#x02202;</mo></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mi>&#x02112;</mi><mo>&#x0002B;</mo><mi>&#x003BB;</mi><mi>&#x000B7;</mi><mfrac><mrow><msup><mi>N</mi><mn>2</mn></msup></mrow><mrow><mn>2</mn></mrow></mfrac><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow></mrow></math>
+
+<p>Now, let's think about that L2 norm, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>N</mi></mrow></math>.  It's
+the square root of the sum of all of the weights squared, or equivalently we can
+square it (like we do in the formula above) and say:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msup><mi>N</mi><mn>2</mn></msup><mo>&#x0003D;</mo><msup><mrow><msub><mi>w</mi><mn>0</mn></msub></mrow><mn>2</mn></msup><mo>&#x0002B;</mo><msup><mrow><msub><mi>w</mi><mn>1</mn></msub></mrow><mn>2</mn></msup><mo>&#x0002B;</mo><mo>&#x02026;</mo><mo>&#x0002B;</mo><msup><mrow><msub><mi>w</mi><mi>n</mi></msub></mrow><mn>2</mn></msup></mrow></math>
+
+<p>Let's drop that in:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mfrac><mrow><mo>&#x02202;</mo></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mi>&#x02112;</mi><mo>&#x0002B;</mo><mi>&#x003BB;</mi><mi>&#x000B7;</mi><mfrac><mrow><msup><mrow><msub><mi>w</mi><mn>0</mn></msub></mrow><mn>2</mn></msup><mo>&#x0002B;</mo><msup><mrow><msub><mi>w</mi><mn>1</mn></msub></mrow><mn>2</mn></msup><mo>&#x0002B;</mo><mo>&#x02026;</mo><mo>&#x0002B;</mo><msup><mrow><msub><mi>w</mi><mi>n</mi></msub></mrow><mn>2</mn></msup></mrow><mrow><mn>2</mn></mrow></mfrac><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow></mrow></math>
+
+<p>Now, the derivative of a bunch of things added together is just each of them differentiated
+separately and then added together.  Let's apply that to the two terms in the brackets:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mfrac><mrow><mo>&#x02202;</mo><mi>&#x02112;</mi></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><mo>&#x0002B;</mo><mfrac><mrow><mo>&#x02202;</mo></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mi>&#x003BB;</mi><mi>&#x000B7;</mi><mfrac><mrow><msup><mrow><msub><mi>w</mi><mn>0</mn></msub></mrow><mn>2</mn></msup><mo>&#x0002B;</mo><msup><mrow><msub><mi>w</mi><mn>1</mn></msub></mrow><mn>2</mn></msup><mo>&#x0002B;</mo><mo>&#x02026;</mo><mo>&#x0002B;</mo><msup><mrow><msub><mi>w</mi><mi>n</mi></msub></mrow><mn>2</mn></msup></mrow><mrow><mn>2</mn></mrow></mfrac><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow></mrow></math>
+
+<p>...and now pull the constant <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi></mrow></math> and the <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>2</mn></mrow></math> out of the second partial derivative:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mfrac><mrow><mo>&#x02202;</mo><mi>&#x02112;</mi></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><mo>&#x0002B;</mo><mfrac><mrow><mi>&#x003BB;</mi></mrow><mrow><mn>2</mn></mrow></mfrac><mfrac><mrow><mo>&#x02202;</mo></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><msup><mrow><msub><mi>w</mi><mn>0</mn></msub></mrow><mn>2</mn></msup><mo>&#x0002B;</mo><msup><mrow><msub><mi>w</mi><mn>1</mn></msub></mrow><mn>2</mn></msup><mo>&#x0002B;</mo><mo>&#x02026;</mo><mo>&#x0002B;</mo><msup><mrow><msub><mi>w</mi><mi>n</mi></msub></mrow><mn>2</mn></msup><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow></mrow></math>
+
+<p>Then we apply the rule for the derivative of a bunch of things added together again:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mfrac><mrow><mo>&#x02202;</mo><mi>&#x02112;</mi></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><mo>&#x0002B;</mo><mfrac><mrow><mi>&#x003BB;</mi></mrow><mrow><mn>2</mn></mrow></mfrac><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mfrac><mrow><mo>&#x02202;</mo></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><msup><mrow><msub><mi>w</mi><mn>0</mn></msub></mrow><mn>2</mn></msup><mo>&#x0002B;</mo><mfrac><mrow><mo>&#x02202;</mo></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><msup><mrow><msub><mi>w</mi><mn>1</mn></msub></mrow><mn>2</mn></msup><mo>&#x0002B;</mo><mo>&#x02026;</mo><mo>&#x0002B;</mo><mfrac><mrow><mo>&#x02202;</mo></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><msup><mrow><msub><mi>w</mi><mi>n</mi></msub></mrow><mn>2</mn></msup><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow></mrow></math>
+
+<p>Now, we're doing a partial derivative versus one specific weight, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>w</mi></mrow></math>, which is one of
+the <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>w</mi><mn>0</mn></msub></mrow></math>, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>w</mi><mn>1</mn></msub></mrow></math>, and so on in there.  From that perspective,
+all of the other weights are constant -- which means that their derivative
+with respect to <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>w</mi></mrow></math> is zero.  So we can just get rid of all of them apart from the one that
+actually <em>is</em> <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>w</mi></mrow></math>, and we wind up with this:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mfrac><mrow><mo>&#x02202;</mo><mi>&#x02112;</mi></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><mo>&#x0002B;</mo><mfrac><mrow><mi>&#x003BB;</mi></mrow><mrow><mn>2</mn></mrow></mfrac><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mfrac><mrow><mo>&#x02202;</mo></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><msup><mrow><mi>w</mi></mrow><mn>2</mn></msup><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow></mrow></math>
+
+<p>The derivative of <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msup><mi>w</mi><mn>2</mn></msup></mrow></math> with respect to <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>w</mi></mrow></math> is just <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>2</mn><mi>w</mi></mrow></math>.
+Thanks to that crafty halving of the <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msup><mi>N</mi><mn>2</mn></msup></mrow></math> earlier, that means that we can go to this:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mrow><mo stretchy="true" fence="true" form="prefix">&#x00028;</mo><mfrac><mrow><mo>&#x02202;</mo><mi>&#x02112;</mi></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><mo>&#x0002B;</mo><mi>&#x003BB;</mi><mi>&#x000B7;</mi><mi>w</mi><mo stretchy="true" fence="true" form="postfix">&#x00029;</mo></mrow></mrow></math>
+
+<p>Multiplying that <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mo>&#x02212;</mo><mi>&#x003B7;</mi></mrow></math> across the bracketed terms, we get:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>w</mi><mtext>new</mtext></msub><mo>&#x0003D;</mo><mi>w</mi><mo>&#x02212;</mo><mi>&#x003B7;</mi><mfrac><mrow><mo>&#x02202;</mo><mi>&#x02112;</mi></mrow><mrow><mo>&#x02202;</mo><mi>w</mi></mrow></mfrac><mo>&#x02212;</mo><mi>&#x003B7;</mi><mi>&#x003BB;</mi><mi>w</mi></mrow></math>
+
+<p>That's exactly the same as the normal gradient descent update, using the unmodified
+loss function without weight decay -- except that we're additionally subtracting
+the weight's original value scaled down by both the learning rate <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003B7;</mi></mrow></math> and the
+weight decay value <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi></mrow></math>.</p>
+
+<p>Much simpler :-)</p>
+
+<p>(As an aside: the description above
+is correct for "traditional" simple gradient descent and -- loosely -- for Adam, but AdamW's trick is
+to do things somewhat differently.  That's something I'll go into in more detail when I get round to writing
+my post on optimisers.)</p>
+
+<p>So: weight decay is a regularisation technique that tries to prevent our model from
+getting any more complex than it needs to be.  We have one number, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi></mrow></math>, which
+determines how much to weight complexity against the normal training loss.  And, as we
+can see from the code:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">AdamW</span><span class="p">(</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span>
+        <span class="n">lr</span><span class="o">=</span><span class="mf">0.0004</span><span class="p">,</span> <span class="n">weight_decay</span><span class="o">=</span><span class="mf">0.1</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...right now we're setting <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi></mrow></math> to 0.1.  Is that the right value?</p>
+
+<h3 id="the-literature">The literature</h3>
+
+<h3 id="best-guesses-for-gpt-2">Best guesses for GPT-2</h3>
+
+<p>As usual, the <a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf">GPT-2 paper</a>
+is light on the details of the hyperparameters they used, but nostalgebraist wrote
+<a href="https://nostalgebraist.tumblr.com/post/642136680709652480/gpt2s-weight-decay">a really nice post on Tumblr</a>
+where they dug into what the number might have been.  As they say:</p>
+
+<blockquote>
+  <p>It does say it follows the first GPT paper in most respects, and that paper used weight decay of 0.01.</p>
+</blockquote>
+
+<p><a href="https://arxiv.org/pdf/2001.08361">Their link</a> for the paper appears to be mistaken, as it's a different (albeit very interesting) paper from
+2020, a year after the GPT-2 one, but I believe <a href="https://www.cs.ubc.ca/~amuham01/LING530/papers/radford2018improving.pdf">this is the paper normally called the GPT-1 one</a>.
+They do indeed use 0.01 there:</p>
+
+<blockquote>
+  <p>We also
+  employed a modified version of L2 regularization proposed in [37], with w = 0.01 on all non bias or
+  gain weights.</p>
+</blockquote>
+
+<p>The link to the <a href="https://arxiv.org/pdf/2005.14165">GPT-3 paper</a> looks right, though, and as
+they say, it uses a weight decay of 0.1:</p>
+
+<blockquote>
+  <p>All models use weight decay of 0.1 to provide a
+  small amount of regularization</p>
+</blockquote>
+
+<p>They then do a bit of maths to work out whether the GPT-2 weights are likely to have
+been regularised by something like weight decay, and come to the conclusion that they
+probably used 0.01, just like the GPT-1 paper.  It seems plausible, but of course not
+certain.</p>
+
+<p>But: tentatively, GPT-2 used 0.01, while we're using 0.1, perhaps because the GPT-3 paper
+does.  What other data points do we have?</p>
+
+<p>The <a href="https://huggingface.co/spaces/HuggingFaceTB/smol-training-playbook">Hugging Face "Smol training playbook"</a> has some
+interesting stuff (including not using weight decay on embeddings, which they say
+they found helped), but the value that they use is 0.1, which they call "a very vanilla setting".
+And:</p>
+
+<blockquote>
+  <p>Interestingly, over the last few years the AdamW hyperparameters have barely moved:</p>
+  
+  <ul>
+  <li><math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>&#x003B2;</mi><mn>1</mn></msub></mrow></math> = 0.9, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>&#x003B2;</mi><mn>2</mn></msub></mrow></math> = 0.95</li>
+  <li>Grad norm clipping = 1.0</li>
+  <li>Weight decay = 0.1 (Llama 3 405B drops this to 0.01)</li>
+  </ul>
+  
+  <p>The same triplet is reused in Llama 1, 2, and 3 and DeepSeek-V1, V2, and V3-671B, with no changes.</p>
+</blockquote>
+
+<p>Anyway, assuming they're right about weight decay value for the models they mention
+(and I assume they've done the research -- I had the link to the <a href="https://arxiv.org/abs/2401.02954">DeepSeek paper</a>
+to hand, and that one certainly says 0.1), it looks like 0.1 is pretty much standard these
+days.  And a quick double-check of what a typical value would be -- asking ChatGPT, Claude,
+Gemini and Grok -- they all recommend 0.1 as a solid sensible default with AdamW (though they all
+also say that values between 0.01 and 0.1 are reasonable).</p>
+
+<p>So on that basis, I think we can say that 0.1 is a reasonable default, and has pretty much
+become the standard, but it might be worth trying 0.01 just to see if it does help with
+tiny models like ours.</p>
+
+<p>Are there any dissenting voices to the 0.1 orthodoxy?</p>
+
+<h3 id="the-cerebras-paper">The Cerebras paper</h3>
+
+<p>I came across a paper
+from a team at <a href="https://www.cerebras.ai/">Cerebras Systems</a>,
+"<a href="https://arxiv.org/abs/2505.13738">Power Lines: Scaling Laws for Weight Decay and Batch Size in LLM Pre-training</a>".</p>
+
+<p>It's essentially a Chinchilla-like attempt to get scaling laws, but rather than looking
+just at optimal tokens per parameter in order to work out what you should scale up when
+adding on more compute, they're trying to find optimal batch sizes and values for weight
+decay.  That's certainly relevant to our interests :-)</p>
+
+<p>However, it is very dense and in-depth, and fully understanding it at this stage would need quite a lot
+of work -- very much a side quest.  Definitely something to come back to later, but for now,
+I'll just try to extract the stuff we need.</p>
+
+<p>Let's start off with the optimal batch size, as they have it right there on the first page.
+We're not going to use it, but it will be interesting to compare with what we're using,
+and what the <a href="https://arxiv.org/abs/2401.02954">DeepSeek paper</a> that I looked at
+in the <a href="/2026/03/llm-from-scratch-32e-interventions-learning-rate">last post</a> suggested.</p>
+
+<p>They fit this formula:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>B</mi><mrow><mtext>opt</mtext></mrow></msub><mo>&#x0003D;</mo><mn>0.0306</mn><mi>&#x000B7;</mi><msup><mi>D</mi><mrow><mn>0.383</mn></mrow></msup></mrow></math>
+
+<p>...where <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>D</mi></mrow></math> is the total number of tokens that you're training on.  That's quite different
+to the formula in the DeepSeek paper, which was:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>B</mi><mrow><mtext>opt</mtext></mrow></msub><mo>&#x0003D;</mo><mn>0.2920</mn><mi>&#x000B7;</mi><msup><mi>C</mi><mrow><mn>0.3271</mn></mrow></msup></mrow></math>
+
+<p>...where <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>C</mi></mrow></math> is the number of FLOPs <sup class="footnote-ref" id="fnref-4"><a href="#fn-4">4</a></sup>.  <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>C</mi></mrow></math> scales up linearly with the number of tokens <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>D</mi></mrow></math>,
+but also with the number of parameters in the model <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>N</mi></mrow></math>, so you can see the DeepSeek formula
+as a function of <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>N</mi></mrow></math> and <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>D</mi></mrow></math> -- as your model gets bigger, so does <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>B</mi><mrow><mtext>opt</mtext></mrow></msub></mrow></math> --
+whereas this Cerebras paper is saying that it's just a function of <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>D</mi></mrow></math>, unaffected by model size.  They did
+train over a number of different sizes (from 111M parameters up to 1.7B) and their
+formula seems to hold, so it's not just that they didn't treat model size as relevant.</p>
+
+<p>Well, let's see what their formula comes up with.  We have 3,260,252,160 tokens in
+our train, so their formula for <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>B</mi><mrow><mtext>opt</mtext></mrow></msub></mrow></math> comes out as:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mn>0.0306</mn><mi>&#x000B7;</mi><mn>3</mn><mo>&#x0002C;</mo><mn>260</mn><mo>&#x0002C;</mo><mn>252</mn><mo>&#x0002C;</mo><msup><mn>160</mn><mrow><mn>0.383</mn></mrow></msup></mrow></math>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x02248;</mo><mn>0.0306</mn><mi>&#x000B7;</mi><mn>4401.24</mn></mrow></math>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x02248;</mo><mn>134.68</mn></mrow></math>
+
+<p>That's much closer to the 97-or-so sequences that appeared to be optimal when I did
+<a href="/2026/01/llm-from-scratch-29-ddp-training-a-base-model-in-the-cloud">some rough-and-ready curve-fitting</a>
+than the 373 that the DeepSeek formula gave for our setup :-)</p>
+
+<p>OK, so what about the weight decay?  They don't give a direct formula for that, but they
+do give a formula for the optimal <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003C4;</mi></mrow></math>, the AdamW timescale.  Without going into exactly what that means
+right now (that's one for my optimisers post later), they relate it to other numbers that
+we do know with this formula:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>&#x003C4;</mi><mo>&#x0003D;</mo><mfrac><mrow><mi>B</mi></mrow><mrow><mi>&#x003B7;</mi><mi>&#x003BB;</mi><mi>D</mi></mrow></mfrac></mrow></math>
+
+<p>...where <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>B</mi></mrow></math> is the batch size, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>D</mi></mrow></math> is the amount of data, and of
+course <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi></mrow></math> and <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003B7;</mi></mrow></math> are weight decay and learning rate respectively.
+So if we know the optimal <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003C4;</mi></mrow></math> we can work out the optimal <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi></mrow></math> for our training run;
+solving for <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi></mrow></math>, we get:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>&#x003BB;</mi><mrow><mtext>opt</mtext></mrow></msub><mo>&#x0003D;</mo><mfrac><mrow><mi>B</mi></mrow><mrow><mi>&#x003B7;</mi><msub><mi>&#x003C4;</mi><mrow><mtext>opt</mtext></mrow></msub><mi>D</mi></mrow></mfrac></mrow></math>
+
+<p>So let's work out the <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>&#x003C4;</mi><mrow><mtext>opt</mtext></mrow></msub></mrow></math>.  Their fitted formula is this:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>&#x003C4;</mi><mrow><mtext>opt</mtext></mrow></msub><mo>&#x0003D;</mo><mn>1.084</mn><mi>&#x000B7;</mi><mo stretchy="false">&#x00028;</mo><mtext>TPP</mtext><msup><mo stretchy="false">&#x00029;</mo><mrow><mo>&#x02212;</mo><mn>0.527</mn></mrow></msup></mrow></math>
+
+<p>...where <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mtext>TPP</mtext></mrow></math> is tokens-per-parameter.  For us, with our Chinchilla-optimal <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mtext>TPP</mtext></mrow></math> of 20,
+we get:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x0003D;</mo><mn>1.084</mn><mi>&#x000B7;</mi><msup><mn>20</mn><mrow><mo>&#x02212;</mo><mn>0.527</mn></mrow></msup></mrow></math>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x02248;</mo><mn>1.084</mn><mo>&#x0002A;</mo><mn>0.2062</mn></mrow></math>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x02248;</mo><mn>0.22352</mn></mrow></math>
+
+<p>Now, we're using a batch size <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>B</mi></mrow></math> of 96, and (as before) <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>D</mi></mrow></math> is 3,260,252,160.  Our
+learning rate <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003B7;</mi></mrow></math> is 0.0004 for this train -- remember, although in the last post
+we found that a scheduled learning rate with a peak at 0.0014 was better, in this
+post we're testing changing weight decay in isolation. <sup class="footnote-ref" id="fnref-5"><a href="#fn-5">5</a></sup></p>
+
+<p>So, we just need to plug our <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>&#x003C4;</mi><mrow><mtext>opt</mtext></mrow></msub></mrow></math> into this:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>&#x003BB;</mi><mrow><mtext>opt</mtext></mrow></msub><mo>&#x0003D;</mo><mfrac><mrow><mi>B</mi></mrow><mrow><mi>&#x003B7;</mi><msub><mi>&#x003C4;</mi><mrow><mtext>opt</mtext></mrow></msub><mi>D</mi></mrow></mfrac></mrow></math>
+
+<p>...right?</p>
+
+<p>Before we do: having a batch size and a number of tokens in the same formula feels like a unit
+mismatch.</p>
+
+<p>In particular,
+as part of the explanation of that formula, they tie it back to a value <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>S</mi></mrow></math>, the total number of optimisation steps, which they define
+as <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>D</mi><mo>&#x0002F;</mo><mi>B</mi></mrow></math>.  For that to work,  either both need to be in terms of tokens, or both need to be in terms
+of sequences</p>
+
+<p>They clearly say that "B is reported in units of sequences".  I'm not sure how
+to explain this, except by saying that perhaps the <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>D</mi></mrow></math> is also meant to be in terms
+of sequences too, even though I'm pretty sure that it's meant to be in terms
+of tokens in the equation for the batch size. <sup class="footnote-ref" id="fnref-6"><a href="#fn-6">6</a></sup></p>
+
+<p>Well, let's assume that is the case, and plug in numbers for sequences.  We have
+3,260,252,160 training tokens split into 1,024-token sequences, which is 3,183,840
+sequences, so that comes out as:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>&#x003BB;</mi><mrow><mtext>opt</mtext></mrow></msub><mo>&#x0003D;</mo><mfrac><mrow><mn>96</mn></mrow><mrow><mn>0.0004</mn><mi>&#x000B7;</mi><mn>0.22352</mn><mi>&#x000B7;</mi><mn>3</mn><mo>&#x0002C;</mo><mn>183</mn><mo>&#x0002C;</mo><mn>840</mn></mrow></mfrac></mrow></math>
+
+<p>(Note that
+we'd get the same numbers if we plugged in numbers for tokens in both cases, as it would just
+multiply the top and the bottom by 1,024.)</p>
+
+<p>That comes out as 0.33724.
+Wow!  That's even higher than the "traditional" 0.1, never
+mind the 0.01 that is the best guess we have for GPT-2.  Even if I'm missing something here
+(I certainly can't say I've read the paper in as much detail as it
+deserves), that actually gives us a nice number to try out as an experiment.</p>
+
+<p>We already have a loss on our test set for a model trained with a weight decay of 0.1, as that was what we used in
+our baseline train.  It looks like it might be worth doing two more, one with the
+GPT-2 estimate of 0.01, and one with this Cerebras-inspired 0.33724, neatly bracketing
+it.  Let's give them a go!</p>
+
+<h3 id="training-with-the-estimated-gpt-2-weight-decay-001">Training with the estimated GPT-2 weight decay, 0.01</h3>
+
+<p>Firstly, the training run with <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003BB;</mi><mo>&#x0003D;</mo><mn>0.01</mn></mrow></math>:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/gpt-2-lambda-loss-chart.png" alt="Loss for training run with estimated GPT-2 weight decay, 0.01" title="Loss for training run with estimated GPT-2 weight decay, 0.01" /></p>
+
+<p>Looks like a nice smooth train -- one small loss spike near the start but it quickly
+recovered.  The output was:</p>
+
+<pre><code>Training complete in 12,244.461 seconds
+Tokens seen: 3,260,252,160
+Throughput: 266,263 tokens/second
+Final train loss: 3.697
+</code></pre>
+
+<p>That's not a bad final train loss (which does tend to indicate a good model).</p>
+
+<p>Let's look at the evals; firstly, the smoke test -- how would it complete "Every
+effort moves you"?</p>
+
+<pre><code>Every effort moves you and any of the other staff at a time by using different techniques from the other members or staff who
+</code></pre>
+
+<p>Passably coherent.  Let's take a look at the loss it gets on our test set:</p>
+
+<pre><code>Loss against our test dataset: 3.643
+</code></pre>
+
+<p>Not bad at all!  Time to <a href="https://huggingface.co/gpjt/8xa100m40-weight-decay-gpt2">upload it to Hugging Face</a>
+and to add it to the table so that we can compare it to the other
+interventions we've tried so far.</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test set loss</th>
+  <th>Improvement vs baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>8xa100m40-baseline</td>
+  <td>3.692</td>
+  <td>-</td>
+</tr>
+<tr>
+  <td>8xa100m40-gradient-clipping</td>
+  <td>3.678</td>
+  <td>0.014</td>
+</tr>
+<tr>
+  <td>8xa100m40-qkv-bias</td>
+  <td>3.669</td>
+  <td>0.023</td>
+</tr>
+<tr>
+  <td>8xa100m40-weight-decay-gpt2</td>
+  <td>3.643</td>
+  <td>0.049</td>
+</tr>
+<tr>
+  <td>8xa100m40-remove-dropout</td>
+  <td>3.641</td>
+  <td>0.051</td>
+</tr>
+<tr>
+  <td>8xa100m40-schedule-learning-rate</td>
+  <td>3.602</td>
+  <td>0.09</td>
+</tr>
+</tbody>
+</table>
+
+<p>So, it's better than gradient clipping and the QKV bias, but slightly worse than removing
+dropout and much worse than scheduling (and increasing) the learning rate.</p>
+
+<p>Now, that suggests to me that the much-higher Cerebras-inspired weight decay will
+be worse.  My logic is this: if both decreasing it and increasing it improved loss,
+that would suggest that we have an inverted-U loss curve for weight decay like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/weight_decay_plot1.png" alt="Intuition on weight decay changes, part 1: an inverted U-shaped curve" title="Intuition on weight decay changes, part 1: an inverted U-shaped curve" /></p>
+
+<p>Now, it seems vanishingly unlikely that those downward trends on either
+side would continue so that you could get arbitrarily low loss by increasing or
+decreasing weight decay even more.  So the curve would perhaps look a bit more like
+this W-shaped one:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/weight_decay_plot2.png" alt="Intuition on weight decay changes, part 2: a W-shaped curve" title="Intuition on weight decay changes, part 2: a W-shaped curve" /></p>
+
+<p>My intuition is that having multiple minima -- especially ones that <em>just happen</em> to be
+on either side of the "standard" value for weight decay -- seems less likely than
+the alternative -- that the higher number will be worse because we're actually on a
+U-shaped curve more like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/weight_decay_plot3.png" alt="Intuition on weight decay changes, part 3: a U-shaped curve" title="Intuition on weight decay changes, part 3: a U-shaped curve" /></p>
+
+<p>Of course, my intuition could be completely off on this, and it's definitely still
+worth doing the test!</p>
+
+<h3 id="training-with-the-cerebras-inspired-weight-decay-033724">Training with the Cerebras-inspired weight decay, 0.33724</h3>
+
+<p>Here's the loss chart with that:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/cerebras-lambda-loss-chart.png" alt="Loss for training run with Cerebras-inspired weight decay, 0.33724" title="Loss for training run with Cerebras-inspired weight decay, 0.33724" /></p>
+
+<p>You can see right away that it was a much choppier train, with quite a few loss
+spikes, some quite late on.  The output at the end reflected this:</p>
+
+<pre><code>Training complete in 12,254.884 seconds
+Tokens seen: 3,260,252,160
+Throughput: 266,037 tokens/second
+Final train loss: 3.867
+</code></pre>
+
+<p>...a significantly worse loss at the end.  Still, we should do the evals.  Firstly
+the smoke test:</p>
+
+<pre><code>Every effort moves you so far away (but to no surprise, a real change was the only goal I did in 2009
+</code></pre>
+
+<p>Not too bad, but the loss test is the important one:</p>
+
+<pre><code>Loss against our test dataset: 3.814
+</code></pre>
+
+<p>That's terrible!  Our first result for loss on the test set for an intervention that is actually worse than the baseline.
+Much worse:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test set loss</th>
+  <th>Improvement vs baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>8xa100m40-weight-decay-cerebras</td>
+  <td>3.814</td>
+  <td>-0.122</td>
+</tr>
+<tr>
+  <td>8xa100m40-baseline</td>
+  <td>3.692</td>
+  <td>-</td>
+</tr>
+<tr>
+  <td>8xa100m40-gradient-clipping</td>
+  <td>3.678</td>
+  <td>0.014</td>
+</tr>
+<tr>
+  <td>8xa100m40-qkv-bias</td>
+  <td>3.669</td>
+  <td>0.023</td>
+</tr>
+<tr>
+  <td>8xa100m40-weight-decay-gpt2</td>
+  <td>3.643</td>
+  <td>0.049</td>
+</tr>
+<tr>
+  <td>8xa100m40-remove-dropout</td>
+  <td>3.641</td>
+  <td>0.051</td>
+</tr>
+<tr>
+  <td>8xa100m40-schedule-learning-rate</td>
+  <td>3.602</td>
+  <td>0.09</td>
+</tr>
+</tbody>
+</table>
+
+<p>However, at this point I started wondering.  When I was looking at the learning
+rate, <a href="/2026/03/llm-from-scratch-32e-interventions-learning-rate#the-initial-learning-rate-value">the number I selected based on the DeepSeek paper</a>
+worked well with learning rate scheduling, but failed to converge without.  The
+weight decay number is multiplied by the current learning rate before it's used
+to reduce weights' values, so will be affected by both scheduling and <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003B7;</mi></mrow></math>.</p>
+
+<p>It seemed likely that Cerebras used a learning rate schedule, and double-checking
+the paper:</p>
+
+<blockquote>
+  <p>We present results with a single (standard) learning rate schedule
+  ...
+  For a given TPP, all models have the exact same warmup phase: a linear warmup of the learning rate from
+  0 to the maximum value.
+  ...
+  We use the µP-tuned and adjusted peak
+  <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003B7;</mi></mrow></math>, for 111M models. The learning rate increases linearly to the peak for the first 10% of steps, then decreases
+  from the peak to 0 for the remainder of steps.</p>
+</blockquote>
+
+<p>Seems pretty certain.</p>
+
+<p>Now, I've been following a fairly strict rule of testing interventions in isolation;
+however, the learning rate and the weight decay parameters are so intertwined that
+perhaps that's just not reasonable here.  I decided to
+do two more trains, both with learning rate
+scheduling.  I'd use the same schedule as in the last blog post -- a warmup from
+pretty-much zero to the peak over 10% of the run, followed by a cosine decay to 10%
+of the peak.  In the first, I'd use the same learning rate as our baseline model, 0.0004.
+In the second, I'd use the one we got from the DeepSeek paper, which did really well
+when scheduled: 0.0014.</p>
+
+<h3 id="training-with-the-cerebras-inspired-weight-decay-scheduling-learning-rate-with-a-peak-of-00004">Training with the Cerebras-inspired weight decay, scheduling learning rate with a peak of 0.0004</h3>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/cerebras-lambda-scheduled-loss-chart.png" alt="Loss for training run with Cerebras-inspired weight decay, 0.33724, scheduled learning rate peaking at 0.0004" title="Loss for training run with Cerebras-inspired weight decay, 0.33724, scheduled learning rate peaking at 0.0004" /></p>
+
+<p>Well, that's less choppy, at least -- the scheduling calmed down the later parts of
+the run, as you'd expect given that the learning rate was dropping.  The output:</p>
+
+<pre><code>Training complete in 12,275.101 seconds
+Tokens seen: 3,260,252,160
+Throughput: 265,599 tokens/second
+Final train loss: 3.801
+</code></pre>
+
+<p>Still a kind of high training loss at the end, though.  The smoke test:</p>
+
+<pre><code>Every effort moves you toward the most beneficial method for the best outcomes is for your child, whether you are an expert,
+</code></pre>
+
+<p>Not too bad, and the test set loss:</p>
+
+<pre><code>Loss against our test dataset: 3.739
+</code></pre>
+
+<p>Unfortunately still worse than the baseline of 3.692, albeit better than the one without
+learning rate scheduling.  I'm not going to add it to the table, as this was more in
+the way of an exploratory training run.</p>
+
+<p>Let's see how we do with the larger DeepSeek-suggested learning rate.</p>
+
+<h3 id="training-with-the-cerebras-inspired-weight-decay-scheduling-learning-rate-with-a-peak-of-00014">Training with the Cerebras-inspired weight decay, scheduling learning rate with a peak of 0.0014</h3>
+
+<p>For this one, I kept the weight decay at 0.33724.  (This was an error, as I realised
+later -- more on that shortly)</p>
+
+<p><img src="/post-assets/llm-from-scratch-32f-interventions-weight-decay/cerebras-lambda-scheduled-and-higher-loss-chart.png" alt="Loss for training run with Cerebras-inspired weight decay, 0.33724, scheduled learning rate peaking at 0.0014" title="Loss for training run with Cerebras-inspired weight decay, 0.33724, scheduled learning rate peaking at 0.0014" /></p>
+
+<p>Ouch, super-choppy loss -- and the loss at the end of the train isn't promising either</p>
+
+<pre><code>Training complete in 12,258.767 seconds
+Tokens seen: 3,260,252,160
+Throughput: 265,953 tokens/second
+Final train loss: 3.911
+</code></pre>
+
+<p>Terrible loss at the end.  The smoke test gives this:</p>
+
+<pre><code>Every effort moves you forward, it doesn´t take time for the next chapter in our history as much time or a
+</code></pre>
+
+<p>...which is not too bad, but the test set loss:</p>
+
+<pre><code>Loss against our test dataset: 3.847
+</code></pre>
+
+<p>...is still pretty terrible (though still a tad better than the one without the learning
+rate scheduling).</p>
+
+<p>Another one to throw away, I think.</p>
+
+<p>But then something occurred to me: the formula to go from the optimal AdamW time horizon <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>&#x003C4;</mi><mrow><mtext>opt</mtext></mrow></msub></mrow></math> to
+the optimal weight decay <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>&#x003BB;</mi><mrow><mtext>opt</mtext></mrow></msub></mrow></math> is this:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>&#x003BB;</mi><mrow><mtext>opt</mtext></mrow></msub><mo>&#x0003D;</mo><mfrac><mrow><mi>B</mi></mrow><mrow><mi>&#x003B7;</mi><msub><mi>&#x003C4;</mi><mrow><mtext>opt</mtext></mrow></msub><mi>D</mi></mrow></mfrac></mrow></math>
+
+<p>It has the learning rate <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003B7;</mi></mrow></math> in it -- I even made a footnote saying that I was going to
+have to remember to recalculate the weight decay value when that changed :-S</p>
+
+<p>Luckily, though, running the real numbers through that:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>&#x003BB;</mi><mrow><mtext>opt</mtext></mrow></msub><mo>&#x0003D;</mo><mfrac><mrow><mn>96</mn></mrow><mrow><mn>0.0014</mn><mi>&#x000D7;</mi><mn>0.22352</mn><mi>&#x000D7;</mi><mn>3</mn><mo>&#x0002C;</mo><mn>183</mn><mo>&#x0002C;</mo><mn>840</mn></mrow></mfrac></mrow></math>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x02248;</mo><mn>0.096355</mn></mrow></math>
+
+<p>...which is almost exactly the same as the 0.1 that we've been using for all of
+our other experiments.</p>
+
+<p>So that actually suggests that the Cerebras equations come up with a reasonably
+usable number for weight decay if you use the DeepSeek-optimal level for the learning
+rate, and schedule it in a normal warmup-cosine decay manner.  But it's still not
+as good -- for this model -- as using the GPT-2 number. <sup class="footnote-ref" id="fnref-7"><a href="#fn-7">7</a></sup></p>
+
+<p>With that, I think it's time to wrap this intervention up!</p>
+
+<h3 id="conclusion">Conclusion</h3>
+
+<p>Let's look at our results table again:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test set loss</th>
+  <th>Improvement vs baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>8xa100m40-weight-decay-cerebras</td>
+  <td>3.814</td>
+  <td>-0.122</td>
+</tr>
+<tr>
+  <td>8xa100m40-baseline</td>
+  <td>3.692</td>
+  <td>-</td>
+</tr>
+<tr>
+  <td>8xa100m40-gradient-clipping</td>
+  <td>3.678</td>
+  <td>0.014</td>
+</tr>
+<tr>
+  <td>8xa100m40-qkv-bias</td>
+  <td>3.669</td>
+  <td>0.023</td>
+</tr>
+<tr>
+  <td>8xa100m40-weight-decay-gpt2</td>
+  <td>3.643</td>
+  <td>0.049</td>
+</tr>
+<tr>
+  <td>8xa100m40-remove-dropout</td>
+  <td>3.641</td>
+  <td>0.051</td>
+</tr>
+<tr>
+  <td>8xa100m40-schedule-learning-rate</td>
+  <td>3.602</td>
+  <td>0.09</td>
+</tr>
+</tbody>
+</table>
+
+<p>We've found that reducing the weight decay from the now-standard 0.1 to a GPT-2-inspired
+0.01 improves the loss our model gets on the test set; it's the third-best intervention
+so far, after getting rid of dropout and updating our learning rate -- and the difference
+between it and the dropout intervention is pretty small.</p>
+
+<p>It did surprise me that the Cerebras-inspired number did so badly, though.  To recap:</p>
+
+<ul>
+<li>With our too-low learning rate of 0.0004, it performed terribly</li>
+<li>When we added scheduling, it was a bit better but still not great.</li>
+<li>When we used a DeepSeek-optimal learning rate (and actually did the right calculations
+to get the real value for weight decay based on that), we got a number which was
+<em>very</em> close to our baseline train, and seems very unlikely on the face of it
+to have a significantly different resulting test set loss.</li>
+</ul>
+
+<p>I think that for now, I should not head any further down this rabbit hole and just take
+the win -- we have a weight decay parameter that works better than the one we had, and
+so that's something that can go into our set of working interventions.  I can revisit
+the Cerebras paper later when I've spent more time studying optimisers.</p>
+
+<p>As to why this old-fashioned GPT-2 value might work better than
+the current default of 0.1: I think that could plausibly be due to scale.  The 0.1
+value appears to come from the GPT-3 paper, which essentially was an experiment
+in scaling up GPT-2.  Perhaps larger models need larger weight decays?
+And the model we're working with here is really small, at 163M parameters.</p>
+
+<p>So, that's weight decay done!  Of the <a href="/2026/02/llm-from-scratch-32a-interventions-baseline-model">list of planned interventions I wanted to try</a>,
+only training in full-fat 32 bits (rather than AMP), and weight-tying remain.
+I think I'll look into the second of those next.  Stay tuned!</p>
+
+<p><a href="/2026/03/llm-from-scratch-32g-interventions-weight-tying">Here's a link to the next post in this series</a>.</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>More precisely, from <a href="https://www.deeplearningbook.org/">Deep Learning</a>:</p>
+
+<blockquote>
+  <p>Minimizing <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>J</mi><mo stretchy="false">&#x00028;</mo><mi>w</mi><mo stretchy="false">&#x00029;</mo></mrow></math> results in a choice of weights that make a tradeoff between
+  fitting the training data and being small. This gives us solutions that have
+  a smaller slope, or that put weight on fewer of the features.</p>
+</blockquote>
+
+<p>...where <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>J</mi><mo stretchy="false">&#x00028;</mo><mi>w</mi><mo stretchy="false">&#x00029;</mo></mrow></math> is the loss function we're trying to minimise in our training run,
+combining the "real" loss and a measure of the model's size.&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-2">
+<p>I can't decide whether that makes it easier or harder to understand ;-)&#160;<a href="#fnref-2" class="footnoteBackLink" title="Jump back to footnote 2 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-3">
+<p>Wild speculation: how about something using the Shannon entropy of the weights...?&#160;<a href="#fnref-3" class="footnoteBackLink" title="Jump back to footnote 3 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-4">
+<p>Specifically the non-embedding training FLOPs.&#160;<a href="#fnref-4" class="footnoteBackLink" title="Jump back to footnote 4 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-5">
+<p>Note to self: don't forget to adjust it if we do decide to combine this with the
+learning rate update.  Also: I'm pretty sure from reading the paper that
+the <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003B7;</mi></mrow></math> that they're using in these formulae is the peak -- they certainly are
+using learning rate scheduling, albeit with a decay-to-zero rather than the
+decay-to-10% we used.&#160;<a href="#fnref-5" class="footnoteBackLink" title="Jump back to footnote 5 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-6">
+<p>Plugging in the number of sequences into the batch size formula gives us an
+optimal value of 9.47, which definitely doesn't look right based on the trains
+I've done.&#160;<a href="#fnref-6" class="footnoteBackLink" title="Jump back to footnote 6 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-7">
+<p>Assuming that the GPT-2 value for weight decay "stacks up" well with the learning
+rate update and the scheduling from the last post.  There may be some useful
+tests to do when we try to put this all together.&#160;<a href="#fnref-7" class="footnoteBackLink" title="Jump back to footnote 7 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

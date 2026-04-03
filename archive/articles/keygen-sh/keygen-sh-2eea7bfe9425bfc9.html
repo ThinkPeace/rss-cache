@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to License and Distribute a Private Docker Image | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How to License and Distribute a Private Docker Image</h1>
+        <div class="meta">Keygen Blog 2021-12-13T06:00:00Z</div>
+        <div class="links">
+          <a href="https://keygen.sh/blog/how-to-license-and-distribute-a-private-docker-image/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/keygen-sh/keygen-sh-2eea7bfe9425bfc9.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Learn how to license and distribute commercial Docker images using Keygen&#x27;s software licensing and distribution API.</div>
+        <div class="content">
+          <html>
+  <body><h1>How to License and Distribute a Private Docker Image</h1><p>Monday, December 13th 2021</p><p>This blog post is outdated. We now offer an official OCI/Docker engine for distributing
+private container images. Please see <a href="https://keygen.sh/docs/api/engines/#engines-oci">the docs</a> to get
+started. We're leaving this blog post up for posterity, because it may still be helpful
+for those wanting to use an S3-compatible service for distributing images.</p><p>Continuing <a href="https://keygen.sh/blog/how-to-license-and-distribute-commercial-node-modules/">our</a> <a href="https://keygen.sh/blog/how-to-license-and-distribute-an-electron-app/">series</a> on licensing and distributing software products
+using Keygen — today, we're going to be diving into private Docker images. We're going to
+be taking advantage of Keygen's API, for licensing and distribution, as well as Keygen's
+<a href="https://keygen.sh/docs/cli/">brand new CLI</a>, for publishing application releases.</p><p>At the end of this post, we'll be securely distributing a private Docker image to licensed users, without having to run and manage a full-blown Docker registry.</p><p>It has become increasingly common for Independent Software Vendors (or ISVs) to ship on-premise and multi-prem software solutions using Docker containers. Containerization allows on-prem software applications to be easily installed by customers and other end-users, while giving the ISV control over the application environment. This not only reduces the support burden on the ISV, but it also decreases onboarding efforts since Docker containers are relatively plug-and-play in modern enterprise environments.</p><p>Today, we'll be working with Dockerizing a Node application, but the same could be done for most other types of applications. From Go, to Ruby on Rails, to Python's Django — the same principles apply — and that's why Docker is great for shipping on-prem.</p><h2>Building our Docker image</h2><p>To keep it simple, we're going to create a "Hello, world!" Node app, packaged up into a Docker image, which we'll distribute to our licensed users using Keygen.</p><h3>Add a <pre>package.json</pre> file</h3>
+<p>To kick things off — let's create a base <pre>package.json</pre> file. In it, we'll define our <pre>main</pre>
+and add a script for running the app.</p><pre><pre>cat &lt;&lt; EOF &gt; package.json  {    "private": true,    "main": "main.js",    "scripts": {      "start": "node main.js"    }  }EOF</pre></pre>
+<h3>Create our Express app</h3><p>Next, we'll add our <pre>main.js</pre> file. This is where our app's logic will live.</p><pre><pre>touch main.js</pre></pre>
+<p>Then we'll add a couple dependencies, such as <pre>express</pre>, and <pre>morgan</pre> for logging.</p><pre><pre>yarn add express morgan</pre></pre>
+<p>Then we'll add a simple "Hello, world!" Express app that runs on port <pre>8080</pre>.</p><pre><pre>const { PORT = 8080 } = process.env const express = require('express')const morgan = require('morgan')const app = express() app.use(morgan('combined')) app.get('/', (req, res) =&gt; res.send('Hello, world!')) app.listen(PORT, () =&gt; {  console.log(`Server is running on port ${port}`)})</pre></pre>
+<h3>Add a <pre>Dockerfile</pre></h3>
+<p>Then we'll add our <pre>Dockerfile</pre>.</p><pre><pre>touch Dockerfile</pre></pre>
+<p>We'll keep it super simple and use Alpine Node as our base image. Then we'll install dependencies
+with <pre>yarn</pre> and boot our Express app on port <pre>8080</pre>.</p><pre><pre>FROM node:alpine WORKDIR /usr/src/appCOPY . . RUN yarn install EXPOSE 8080CMD ["yarn", "start"]</pre></pre>
+<h3>Add a <pre>.dockerignore</pre> file</h3>
+<p>Finally, we'll create a <pre>.dockerignore</pre> alongside our other files.</p><pre><pre>touch .dockerignore echo 'node_modules/' &gt;&gt; .dockerignoreecho '.git/' &gt;&gt; .dockerignoreecho '*.log' &gt;&gt; .dockerignore</pre></pre>
+<p>This will prevent any locally installed Node modules and as well as any debug logs from being copied onto our final Docker image.</p><h3>Running our Docker image</h3><p>To review what we're done so far — we've created a small "Hello, world!" Express app, with a
+minimalistic <pre>Dockerfile</pre>, and a <pre>.dockerignore</pre> to prevent certain local files from being
+included in our final image.</p><p>Now that we've got all that out of the way — let's test our app! First, let's build our image
+and then boot it. Docker will expose it on port <pre>49160</pre> of <pre>localhost</pre>.</p><pre><pre>docker build . -t keygen/hello_world# =&gt; Sending build context to Docker daemon   21.5kB#    Step 1/6 : FROM node:alpine#    ...#    Successfully built df58ca39ab02#    Successfully tagged keygen/hello_world:latest docker run -p 49160:8080 -d keygen/hello_world# =&gt; 01aa53edb95783e2ea786c4cf95a82e2cc0e3264d5d1a8df437d3a32e3b254a1 docker ps# =&gt; CONTAINER ID   IMAGE                STATUS        PORTS#    01aa53edb957   keygen/hello_world   Up 1 minute   0.0.0.0:49160-&gt;8080/tcp docker logs 01aa53edb957# =&gt; Server is running on port 8080</pre></pre>
+<p>Now that it's booted, let's fire off an HTTP request using <pre>curl</pre> and make sure everything's
+working properly. Our app should be on <pre>localhost:49160</pre>.</p><pre><pre>curl http://localhost:49160# =&gt; Hello, world!</pre></pre>
+<p>Next, let's package our image.</p><h2>Packing our Docker image</h2><p>Keygen doesn't run a full Docker registry, so tagging and pushing an image with <pre>docker push</pre>
+isn't supported. Instead, Keygen's distribution API acts more like a private S3 bucket, but
+only accessible by licensed users. We'll be packing our image into a <pre>tar</pre> file, which we'll
+publish later on using <a href="https://keygen.sh/docs/cli/">the  keygen command line tool</a>.</p><p>To tag and pack a Docker image into a tarball, we'll use the <pre>docker save</pre> command.</p><pre><pre>docker image ls# =&gt; REPOSITORY           TAG       IMAGE ID       CREATED         SIZE#    keygen/hello_world   latest    df58ca39ab02   9 minutes ago   174MB#    node                 alpine    bb1fcdaff936   10 days ago     170MB docker tag df58ca39ab02 keygen/hello_world:v1.0.0# =&gt; Tagged image: keygen/hello_world:v1.0.0 docker save keygen/hello_world:v1.0.0 | gzip &gt; hello_world.tar.gz</pre></pre>
+<p>We should then have a packed Docker image, ready for upload.</p><pre><pre>ls -sh hello_world.tar.gz# =&gt; 49M hello_world.tar.gz</pre></pre>
+<h2>Publishing our Docker image</h2><p>Next, we'll want to <a href="https://app.keygen.sh/register?plan=984180df-07b3-4dc1-b138-ca68a0f913ed">sign up for a free Keygen account</a>. Once we've done that, we'll
+want to use the Dashboard to create a Product resource, and also generate a Token for our
+new product. This will allow us to authenticate with Keygen's API and authorize Keygen's CLI to
+upload releases on your account.</p><h3>Create a product</h3><p>On your account Dashboard, the first thing we'll need to do is create a new Product. In the Products section, click New Product and enter the name of your product and click Create Product. This will generate a product ID that we'll pass to Keygen's CLI.</p><h3>Create a product token</h3><p>Next on the Dashboard, we'll want to create a Token to authenticate and authorize the CLI so that
+we can publish releases. You'll want to click on the <pre>Tokens</pre> section, click New Product Token and
+create a new token. For security reasons, Keygen does not store your tokens. Copy it and store it
+somewhere secure.</p><p>Never share this token. It gives full access to your product, including the ability to create and read licenses, and publish new releases.</p><h3>Publishing a release</h3><p>If you haven't already, you'll want to <a href="https://keygen.sh/docs/cli/">download the  keygen CLI</a>. Once you've done that,
+we'll use the </p><pre>keygen</pre> CLI to publish our v1.0.0 release. We'll pass in our previously created
+values, our Account ID, Product ID, and our Product Token.<pre><pre># Export env variables for the CLI (or you could pass via flags e.g. --account)export KEYGEN_ACCOUNT_ID="&lt;YOUR_KEYGEN_ACCOUNT_UUID&gt;"export KEYGEN_PRODUCT_ID="&lt;YOUR_KEYGEN_PRODUCT_UUID&gt;"export KEYGEN_PRODUCT_TOKEN="&lt;YOUR_KEYGEN_PRODUCT_API_TOKEN&gt;" # Create a new releasekeygen new --version '1.0.0' # Upload the artifactkeygen upload ./hello_world.tar.gz --platform 'docker' --release '1.0.0' # Publish the releasekeygen publish --release '1.0.0'</pre></pre>
+<p>You can find your account ID in your <a href="https://app.keygen.sh/settings">settings page</a>.</p><h2>Downloading our Docker image</h2><p>Now that we have our Docker image published, on our Dashboard, we can navigate to the Releases section and see our new v1.0.0 release. Since by default, Keygen only allows releases to be downloaded by licensed users, we'll need to create a new license.</p><p>(Typically, license creation would be performed using the API, tied to your purchasing flow, but today we'll be doing things manually.)</p><h3>Create a policy</h3><p>On your account Dashboard, the next thing we'll need to do, if you haven't already, is create a Policy. These control the different types of products you offer. For this example, we'll be creating a simple 1 year timed license.</p><p>In the Policies section, click New Policy and enter a descriptive name and then select a 1
+year Duration and set the policy's Authentication Strategy to <pre>LICENSE</pre>. Everything else can
+be left blank, but feel free to customize. Finally, click Create Policy.</p><h3>Create a license</h3><p>Next, navigate on over to the Licenses section and create a new License using the policy. The license will inherit most of its rules from its policy, but feel free to give it a descriptive name to keep things organized. When you're ready, click Create License.</p><p>You'll use the license's Key to authenticate with Keygen's API.</p><h3>Download our release</h3><p>Finally, let's download our Docker image! We'll download our image tarball from Keygen's API, using our
+license key for authentication. Then we'll run the counterpart to the <pre>docker save</pre> command,
+<pre>docker load</pre>.</p><pre><pre>curl -sSLO https://get.keygen.sh/demo/1.0.0/hello_world.tar.gz \  -u "license:6F4FF7-AA8DC8-9B138D-EE76D6-E5BEF5-V3" docker load &lt; hello_world.tar.gz# =&gt; Loaded image: keygen/hello_world:v1.0.0</pre></pre>
+<p>Listing our images, we should now be able to see v1 of our <pre>hello_world</pre> image.</p><pre><pre>docker image ls# =&gt; REPOSITORY           TAG       IMAGE ID       CREATED              SIZE#    keygen/hello_world   v1.0.0    df58ca39ab02   About a minute ago   174MB</pre></pre>
+<p>The image can then be run and utilized as you would normally.</p><pre><pre>docker run -p 49160:8080 -d keygen/hello_world:v1.0.0# =&gt; Server is running on port 8080 curl http://localhost:49160# =&gt; Hello, world!</pre></pre>
+<h2>In conclusion</h2><p>I hope this article has helped shed some light on how to use Keygen to distribute private Docker images to your customers. We've covered creating a minimalistic Docker image, packing the Docker image into a tarball, and then finally distributing that image to our customers. Keygen's API will automatically assert that releases are only accessible by users with a valid license.</p><p>These same concepts of "packing" a Docker image and publishing the resulting tarball can be used to manage releases using other services as well, such as for hosting private Docker images on AWS S3. This is usually much simpler, operationally, than running and maintaining a full customer-facing Docker registry on your own infrastructure.</p><p>The immediate benefit of using Keygen over S3 is that you're able assert artifacts are only accessible to licensed users, making things like timed trials much easier to manage compared to managing IAM policies in S3 for each customer, or manually adding and removing customers from a private Docker Hub repository. *shudder*</p><p>After that, you can then go on to add licensing logic into your application itself, to support more fine-grained entitlement controls, such as activation limits, feature flags and more, by integrating with our software licensing API.</p><p>Until next time.</p><p>
+  If you find any errors in my code, or if you can think of ways to improve things, <a href="https://x.com/_m27e">ping me via Twitter</a>.
+</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

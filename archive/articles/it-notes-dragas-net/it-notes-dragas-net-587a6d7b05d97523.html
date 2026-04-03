@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Installing Void Linux on ZFS with Hibernation Support | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Installing Void Linux on ZFS with Hibernation Support</h1>
+        <div class="meta">IT Notes 2025-12-22T08:43:02Z</div>
+        <div class="links">
+          <a href="https://it-notes.dragas.net/2025/12/22/void-linux-zfs-hibernation-guide/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/it-notes-dragas-net/it-notes-dragas-net-587a6d7b05d97523.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Introduction FreeBSD continues to make strides in desktop support, but Linux still holds an advantage in hardware compatibility. After running openSUSE Tumbleweed on my mini PC for several months, I decided it was time to switch to a solution I could control more closely. Not because Tumbleweed doesn&#x27;t work well - it works great! - but I prefer having direc…</div>
+        <div class="content">
+          <p><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/02/Void_Linux_logo.svg/960px-Void_Linux_logo.svg.png" alt="Installing Void Linux on ZFS with Hibernation Support"></p><h2>Introduction</h2>
+<p>FreeBSD continues to make strides in desktop support, but Linux still holds an advantage in hardware compatibility. After running openSUSE Tumbleweed on my mini PC for several months, I decided it was time to switch to a solution I could control more closely. Not because Tumbleweed doesn't work well - it works great! - but I prefer having direct control over what happens on my machine. And I want native ZFS, because I prefer it over btrfs and it allows me to manage snapshots, backups, and rollbacks just as I do on FreeBSD, using the same tools and procedures.</p>
+<p>The choice of <a href="https://voidlinux.org/">Void Linux</a> comes from its BSD-like approach: modular and free of unnecessary complexity. This makes it an excellent solution for this type of setup.</p>
+<p><a href="https://docs.zfsbootmenu.org/">ZFSBootMenu</a> is an extremely powerful tool. It provides an experience similar to FreeBSD's boot loader and natively supports ZFS. I strongly recommend reading the documentation and exploring its features, as some of them - like the built-in SSH daemon - can be genuine lifesavers in recovery scenarios.</p>
+<h2>Prerequisites and Audience</h2>
+<p><strong>This guide is not for absolute beginners.</strong> If you're new to Linux or Unix-like operating systems, you'd be better served by a ready-to-use distribution like <a href="https://www.opensuse.org/">openSUSE</a> Leap (or Tumbleweed for a rolling distribution), <a href="https://linuxmint.com/">Linux Mint</a>, <a href="https://www.debian.org/">Debian</a>, <a href="https://ubuntu.com/">Ubuntu</a>, or <a href="https://manjaro.org/">Manjaro</a>. The purpose of this article is to demonstrate a stable, upgradeable, and reasonably secure base setup for users already comfortable with system administration. It uses the <strong>glibc</strong> variant of Void Linux. The <em><a href="https://docs.voidlinux.org/installation/musl.html">musl</a></em> version requires different commands, for example for locale generation.</p>
+<p><strong>Use at your own risk.</strong></p>
+<p>This guide synthesizes instructions from several sources:</p>
+<ul>
+<li><a href="https://docs.zfsbootmenu.org/en/latest/guides/void-linux/uefi.html">Void Linux (UEFI) from ZFSBootMenu</a> - which doesn't address swap. Using a zvol for swap (not the best solution) prevents hibernation and resume. Our approach uses a separate encrypted swap partition that enables proper resume.</li>
+<li><a href="https://docs.voidlinux.org/installation/guides/fde.html">Void Linux Full Disk Encryption</a> - excellent for btrfs or ext4, but we want ZFS. We'll borrow the swap configuration approach from here.</li>
+<li><a href="https://compactbunker.org/p/install-void-linux/">Install Void Linux with a desktop environment + Flatpaks</a> - for the desktop portion.</li>
+</ul>
+<p>If your setup differs from what's described here (NVMe disk, UEFI boot, Secure Boot disabled), consult the linked guides for explanations and variations.</p>
+<h3>Installation Script (Optional)</h3>
+<p>If you want to reproduce this setup quickly, I maintain a script that automates the procedure described in this guide: disk partitioning, ZFS pool and dataset creation, encrypted swap for hibernation resume, dracut configuration, and ZFSBootMenu EFI setup. An optional KDE Plasma desktop installation is also supported.</p>
+<p>The script is interactive and will ask for the required parameters (target disk, timezone and keymap, passphrases, desktop options). <a href="https://brew.bsd.cafe/stefano/void-zfs-hibernation">Requirements, usage instructions, and known limitations are documented in the repository README</a></p>
+<p>That said, I still recommend going through the manual process at least once. Understanding each step is part of the value of this setup, especially when troubleshooting or adapting it to different hardware.</p>
+<h2>Boot Environment</h2>
+<p>Since ZFS isn't supported by the base Void Linux image, we'll use <a href="https://github.com/leahneukirchen/hrmpf/releases">hrmpf</a>, an excellent rescue system based on Void Linux that includes ZFS support out of the box.</p>
+<p>After booting, you can either proceed directly or SSH into the machine to continue remotely. I generally prefer SSH since it makes copy-paste operations much easier - especially when dealing with UUIDs and long commands. To enable SSH access, set a root password and allow root login:</p>
+<pre class="highlight"><code class="language-bash">passwd
+</code></pre>
+
+<p>Edit <code>/etc/ssh/sshd_config</code> and enable:</p>
+<pre class="highlight"><code>PermitRootLogin yes
+</code></pre>
+
+<p>Restart the SSH daemon:</p>
+<pre class="highlight"><code class="language-bash">sv restart sshd
+</code></pre>
+
+<p>Find the machine's IP address:</p>
+<pre class="highlight"><code class="language-bash">ip addr
+</code></pre>
+
+<p>You can now connect via SSH from another device.</p>
+<h2>Initial Setup</h2>
+<p>Set up the environment variables and generate a host ID - we need it for ZFS:</p>
+<pre class="highlight"><code class="language-bash">source /etc/os-release
+export ID
+
+zgenhostid -f 0x00bab10c
+</code></pre>
+
+<h2>Disk Configuration</h2>
+<p>Identify your target disk and set up the partition variables. This approach keeps everything consistent and reduces errors:</p>
+<pre class="highlight"><code class="language-bash"># Set the base disk - adjust this to match your system
+export DISK=&quot;/dev/nvme0n1&quot;
+
+# For NVMe disks, partitions are named like nvme0n1p1, nvme0n1p2, etc.
+# For SATA/SAS disks (sda, sdb), partitions are named sda1, sda2, etc.
+# Set the partition separator accordingly:
+export PART_SEP=&quot;p&quot;  # Use &quot;p&quot; for NVMe, empty string &quot;&quot; for SATA/SAS
+
+# Define partition numbers
+export BOOT_PART=&quot;1&quot;
+export SWAP_PART=&quot;2&quot;
+export POOL_PART=&quot;3&quot;
+
+# Build full device paths
+export BOOT_DEVICE=&quot;${DISK}${PART_SEP}${BOOT_PART}&quot;
+export SWAP_DEVICE=&quot;${DISK}${PART_SEP}${SWAP_PART}&quot;
+export POOL_DEVICE=&quot;${DISK}${PART_SEP}${POOL_PART}&quot;
+</code></pre>
+
+<p>Verify your configuration before proceeding:</p>
+<pre class="highlight"><code class="language-bash">echo &quot;Boot device: $BOOT_DEVICE&quot;
+echo &quot;Swap device: $SWAP_DEVICE&quot;
+echo &quot;Pool device: $POOL_DEVICE&quot;
+</code></pre>
+
+<h2>Wipe the Disk</h2>
+<p><strong>Warning: This operation will irreversibly destroy all data on the selected disk. Double-check that you've selected the correct disk and be sure to have a complete backup of your system!</strong></p>
+<pre class="highlight"><code class="language-bash">zpool labelclear -f &quot;$DISK&quot;
+
+wipefs -a &quot;$DISK&quot;
+sgdisk --zap-all &quot;$DISK&quot;
+</code></pre>
+
+<h2>Create Partitions</h2>
+<h3>EFI System Partition</h3>
+<p>If you're not using UEFI boot, adapt this procedure following the appropriate guide linked at the beginning of this post:</p>
+<pre class="highlight"><code class="language-bash">sgdisk -n &quot;${BOOT_PART}:1m:+512m&quot; -t &quot;${BOOT_PART}:ef00&quot; &quot;$DISK&quot;
+</code></pre>
+
+<h3>Swap Partition</h3>
+<p>The swap partition should be slightly larger than your RAM to support hibernation. When you hibernate, the entire contents of RAM are written to swap, so you need enough space to hold it all plus some overhead. In this example, I have 16 GB of RAM, so I'm creating an 18 GB swap partition:</p>
+<pre class="highlight"><code class="language-bash">sgdisk -n &quot;${SWAP_PART}:0:+18g&quot; -t &quot;${SWAP_PART}:8200&quot; &quot;$DISK&quot;
+</code></pre>
+
+<h3>ZFS Pool Partition</h3>
+<pre class="highlight"><code class="language-bash">sgdisk -n &quot;${POOL_PART}:0:-10m&quot; -t &quot;${POOL_PART}:bf00&quot; &quot;$DISK&quot;
+</code></pre>
+
+<h2>Set Up ZFS Encryption</h2>
+<p>Encrypting the disk is strongly recommended, especially for laptops. Replace <code>SomeKeyphrase</code> with a strong passphrase that's easy to type. Keep in mind that during early boot, the keyboard layout might default to US, so choose a passphrase that's easy to type on a US keyboard layout:</p>
+<pre class="highlight"><code class="language-bash">echo 'SomeKeyphrase' &gt; /etc/zfs/zroot.key
+chmod 000 /etc/zfs/zroot.key
+</code></pre>
+
+<h2>Create the ZFS Pool</h2>
+<p>Create the pool with conservative, well-tested options:</p>
+<pre class="highlight"><code class="language-bash">zpool create -f -o ashift=12 \
+ -O compression=lz4 \
+ -O acltype=posixacl \
+ -O xattr=sa \
+ -O relatime=on \
+ -O encryption=aes-256-gcm \
+ -O keylocation=file:///etc/zfs/zroot.key \
+ -O keyformat=passphrase \
+ -o autotrim=on \
+ -o compatibility=openzfs-2.2-linux \
+ -m none zroot &quot;$POOL_DEVICE&quot;
+</code></pre>
+
+<h2>Create ZFS Datasets</h2>
+<pre class="highlight"><code class="language-bash">zfs create -o mountpoint=none zroot/ROOT
+zfs create -o mountpoint=/ -o canmount=noauto zroot/ROOT/${ID}
+zfs create -o mountpoint=/home zroot/home
+
+zpool set bootfs=zroot/ROOT/${ID} zroot
+</code></pre>
+
+<h2>Export and Reimport for Installation</h2>
+<pre class="highlight"><code class="language-bash">zpool export zroot
+zpool import -N -R /mnt zroot
+zfs load-key -L prompt zroot
+
+zfs mount zroot/ROOT/${ID}
+zfs mount zroot/home
+
+udevadm trigger
+</code></pre>
+
+<h2>Install the Base System</h2>
+<pre class="highlight"><code class="language-bash">XBPS_ARCH=x86_64 xbps-install \
+  -S -R https://mirrors.servercentral.com/voidlinux/current \
+  -r /mnt base-system
+</code></pre>
+
+<h2>Copy Host Configuration</h2>
+<p>Copy the files we generated earlier to the new system:</p>
+<pre class="highlight"><code class="language-bash">cp /etc/hostid /mnt/etc
+mkdir -p /mnt/etc/zfs
+cp /etc/zfs/zroot.key /mnt/etc/zfs
+</code></pre>
+
+<h2>Configure Encrypted Swap</h2>
+<p>Now we'll set up the encrypted swap partition. This is where the hibernation magic happens - by using a separate LUKS-encrypted partition instead of a ZFS zvol, we can properly resume from hibernation.</p>
+<p>Format the swap partition with LUKS:</p>
+<pre class="highlight"><code class="language-bash">cryptsetup luksFormat --type luks1 &quot;$SWAP_DEVICE&quot;
+</code></pre>
+
+<p>Open the encrypted partition, create the swap filesystem, and activate it:</p>
+<pre class="highlight"><code class="language-bash">cryptsetup luksOpen &quot;$SWAP_DEVICE&quot; cryptswap
+mkswap /dev/mapper/cryptswap
+swapon /dev/mapper/cryptswap
+</code></pre>
+
+<h2>Preserve Variables for Chroot</h2>
+<p>Before entering the chroot, save the disk variables so they remain available inside the new environment:</p>
+<pre class="highlight"><code class="language-bash">cat &lt;&lt; EOF &gt; /mnt/root/disk-vars.sh
+export DISK=&quot;$DISK&quot;
+export PART_SEP=&quot;$PART_SEP&quot;
+export BOOT_PART=&quot;$BOOT_PART&quot;
+export SWAP_PART=&quot;$SWAP_PART&quot;
+export POOL_PART=&quot;$POOL_PART&quot;
+export BOOT_DEVICE=&quot;$BOOT_DEVICE&quot;
+export SWAP_DEVICE=&quot;$SWAP_DEVICE&quot;
+export POOL_DEVICE=&quot;$POOL_DEVICE&quot;
+export ID=&quot;$ID&quot;
+EOF
+</code></pre>
+
+<h2>Enter the Chroot Environment</h2>
+<pre class="highlight"><code class="language-bash">xchroot /mnt
+</code></pre>
+
+<p>From this point forward, all commands are executed inside the new system.</p>
+<p>First, load the saved variables:</p>
+<pre class="highlight"><code class="language-bash">source /root/disk-vars.sh
+</code></pre>
+
+<h2>Configure fstab</h2>
+<p>Add the swap entry to <code>/etc/fstab</code>:</p>
+<pre class="highlight"><code>/dev/mapper/cryptswap   none            swap            defaults        0 0
+</code></pre>
+
+<h2>Set Up Automatic Swap Unlock</h2>
+<p>To avoid entering the swap password separately after unlocking the ZFS pool, we'll create a keyfile stored on the encrypted ZFS dataset. This is secure because the keyfile only becomes accessible after the ZFS pool is unlocked.</p>
+<p>First, install cryptsetup in the new system:</p>
+<pre class="highlight"><code class="language-bash">xbps-install -S cryptsetup
+</code></pre>
+
+<p>Generate a random keyfile and add it to the LUKS partition:</p>
+<pre class="highlight"><code class="language-bash">dd bs=1 count=64 if=/dev/urandom of=/boot/volume.key
+
+cryptsetup luksAddKey &quot;$SWAP_DEVICE&quot; /boot/volume.key
+
+chmod 000 /boot/volume.key
+chmod -R g-rwx,o-rwx /boot
+</code></pre>
+
+<p>Add the keyfile to <code>/etc/crypttab</code>:</p>
+<pre class="highlight"><code class="language-bash">echo &quot;cryptswap   $SWAP_DEVICE   /boot/volume.key   luks&quot; &gt;&gt; /etc/crypttab
+</code></pre>
+
+<p>Include the keyfile and crypttab in the initramfs. Create <code>/etc/dracut.conf.d/10-crypt.conf</code>:</p>
+<pre class="highlight"><code>install_items+=&quot; /boot/volume.key /etc/crypttab &quot;
+</code></pre>
+
+<h2>Basic System Configuration</h2>
+<p>Configure keyboard layout and hardware clock. Adjust the keymap and timezone to match your location:</p>
+<pre class="highlight"><code class="language-bash">cat &lt;&lt; EOF &gt;&gt; /etc/rc.conf
+KEYMAP=&quot;us&quot;
+HARDWARECLOCK=&quot;UTC&quot;
+EOF
+
+ln -sf /usr/share/zoneinfo/Europe/Rome /etc/localtime
+</code></pre>
+
+<p>Configure locales:</p>
+<pre class="highlight"><code class="language-bash">cat &lt;&lt; EOF &gt;&gt; /etc/default/libc-locales
+en_US.UTF-8 UTF-8
+en_US ISO-8859-1
+EOF
+
+echo &quot;LANG=en_US.UTF-8&quot; &gt; /etc/locale.conf
+
+xbps-reconfigure -f glibc-locales
+</code></pre>
+
+<p>Set the root password:</p>
+<pre class="highlight"><code class="language-bash">passwd
+</code></pre>
+
+<h2>Configure ZFS Boot Support</h2>
+<pre class="highlight"><code class="language-bash">cat &lt;&lt; EOF &gt; /etc/dracut.conf.d/zol.conf
+nofsck=&quot;yes&quot;
+add_dracutmodules+=&quot; zfs &quot;
+omit_dracutmodules+=&quot; btrfs &quot;
+install_items+=&quot; /etc/zfs/zroot.key &quot;
+EOF
+</code></pre>
+
+<p>Install ZFS:</p>
+<pre class="highlight"><code class="language-bash">xbps-install -S zfs
+</code></pre>
+
+<h2>Configure ZFSBootMenu</h2>
+<p>Set the basic boot properties:</p>
+<pre class="highlight"><code class="language-bash">zfs set org.zfsbootmenu:commandline=&quot;quiet&quot; zroot/ROOT
+zfs set org.zfsbootmenu:keysource=&quot;zroot/ROOT/${ID}&quot; zroot
+</code></pre>
+
+<h3>The Critical Step: Hibernation Support</h3>
+<p>Now we need to configure hibernation resume. This is the key insight that makes this setup work: normally, the encrypted ZFS root mounts first, and then it unlocks the swap partition. But when resuming from hibernation, the kernel needs to read the hibernation image from swap <em>before</em> mounting the root filesystem - otherwise, the saved state would be lost.</p>
+<p>To solve this, we tell ZFSBootMenu to unlock the swap partition early, before mounting ZFS, by specifying its LUKS UUID.</p>
+<p>Get the UUID of your swap partition:</p>
+<pre class="highlight"><code class="language-bash">blkid &quot;$SWAP_DEVICE&quot;
+</code></pre>
+
+<p>You'll see output like:</p>
+<pre class="highlight"><code>/dev/...: UUID=&quot;xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&quot; TYPE=&quot;crypto_LUKS&quot; PARTUUID=&quot;...&quot;
+</code></pre>
+
+<p>Store the UUID in a variable for the next step:</p>
+<pre class="highlight"><code class="language-bash">SWAP_UUID=$(blkid -s UUID -o value &quot;$SWAP_DEVICE&quot;)
+echo &quot;Swap UUID: $SWAP_UUID&quot;
+</code></pre>
+
+<p>Now set the boot parameters using the captured UUID:</p>
+<pre class="highlight"><code class="language-bash">zfs set org.zfsbootmenu:commandline=&quot;rd.luks.uuid=$SWAP_UUID resume=/dev/mapper/cryptswap&quot; zroot/ROOT/${ID}
+</code></pre>
+
+<h2>Set Up EFI Boot</h2>
+<p>Create and mount the EFI partition:</p>
+<pre class="highlight"><code class="language-bash">mkfs.vfat -F32 &quot;$BOOT_DEVICE&quot;
+
+mkdir -p /boot/efi
+</code></pre>
+
+<p>Add the EFI partition to <code>/etc/fstab</code> using its UUID:</p>
+<pre class="highlight"><code class="language-bash">BOOT_UUID=$(blkid -s UUID -o value &quot;$BOOT_DEVICE&quot;)
+echo &quot;UUID=$BOOT_UUID    /boot/efi    vfat    defaults    0 0&quot; &gt;&gt; /etc/fstab
+</code></pre>
+
+<p>Mount it:</p>
+<pre class="highlight"><code class="language-bash">mount /boot/efi
+</code></pre>
+
+<h2>Install ZFSBootMenu</h2>
+<pre class="highlight"><code class="language-bash">xbps-install -S curl
+
+mkdir -p /boot/efi/EFI/ZBM
+curl -o /boot/efi/EFI/ZBM/VMLINUZ.EFI -L https://get.zfsbootmenu.org/efi
+cp /boot/efi/EFI/ZBM/VMLINUZ.EFI /boot/efi/EFI/ZBM/VMLINUZ-BACKUP.EFI
+</code></pre>
+
+<p>Configure the EFI boot entries:</p>
+<pre class="highlight"><code class="language-bash">xbps-install -S efibootmgr
+
+efibootmgr -c -d &quot;$DISK&quot; -p &quot;$BOOT_PART&quot; \
+  -L &quot;ZFSBootMenu (Backup)&quot; \
+  -l '\EFI\ZBM\VMLINUZ-BACKUP.EFI'
+
+efibootmgr -c -d &quot;$DISK&quot; -p &quot;$BOOT_PART&quot; \
+  -L &quot;ZFSBootMenu&quot; \
+  -l '\EFI\ZBM\VMLINUZ.EFI'
+</code></pre>
+
+<h3>Microcode updates</h3>
+<p>Void Linux is modular, so you may need to install additional packages for your specific hardware. For the Intel microcode, you need the non-free repo:
+For example:</p>
+<pre class="highlight"><code class="language-bash"># For Intel CPUs
+xbps-install -S void-repo-nonfree 
+xbps-install -S intel-ucode
+
+# For AMD CPUs/GPUs
+xbps-install -S linux-firmware-amd
+</code></pre>
+
+<p>After installing microcode updates, regenerate the boot images and exit:</p>
+<pre class="highlight"><code class="language-bash">xbps-reconfigure -fa
+</code></pre>
+
+<h2>Desktop Installation (Optional)</h2>
+<p>If all you need is a minimal system or a server, you're done and ready to reboot. For a complete desktop environment, continue with the following steps.</p>
+<h3>Install Core Desktop Packages</h3>
+<pre class="highlight"><code class="language-bash">xbps-install -S vim nano dbus elogind polkit xorg xorg-fonts xorg-video-drivers xorg-input-drivers dejavu-fonts-ttf terminus-font NetworkManager pipewire alsa-pipewire wireplumber xdg-user-dirs unzip gzip xz 7zip
+</code></pre>
+
+<h3>Install KDE Plasma</h3>
+<pre class="highlight"><code class="language-bash">xbps-install -S kde-plasma dolphin konsole firefox kdegraphics-thumbnailers ffmpegthumbs vlc ark kwrite discover kf6-purpose
+</code></pre>
+
+<h3>Enable Services</h3>
+<pre class="highlight"><code class="language-bash">ln -s /etc/sv/NetworkManager /etc/runit/runsvdir/default/
+ln -s /etc/sv/dbus /etc/runit/runsvdir/default/
+ln -s /etc/sv/udevd /etc/runit/runsvdir/default/
+ln -s /etc/sv/polkitd /etc/runit/runsvdir/default/
+ln -s /etc/sv/sddm /etc/runit/runsvdir/default/
+</code></pre>
+
+<h3>Configure PipeWire Audio</h3>
+<pre class="highlight"><code class="language-bash">mkdir -p /etc/xdg/autostart
+ln -sf /usr/share/applications/pipewire.desktop /etc/xdg/autostart/
+
+mkdir -p /etc/pipewire/pipewire.conf.d
+ln -sf /usr/share/examples/wireplumber/10-wireplumber.conf /etc/pipewire/pipewire.conf.d/
+ln -sf /usr/share/examples/pipewire/20-pipewire-pulse.conf /etc/pipewire/pipewire.conf.d/
+
+mkdir -p /etc/alsa/conf.d
+ln -sf /usr/share/alsa/alsa.conf.d/50-pipewire.conf /etc/alsa/conf.d
+ln -sf /usr/share/alsa/alsa.conf.d/99-pipewire-default.conf /etc/alsa/conf.d
+</code></pre>
+
+<h3>Enable Additional Repositories and Flatpak (Optional)</h3>
+<pre class="highlight"><code class="language-bash">xbps-install -S void-repo-nonfree void-repo-multilib void-repo-multilib-nonfree
+
+xbps-install -S flatpak
+flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+</code></pre>
+
+<h3>Create a Regular User and exit</h3>
+<p>For desktop use, create a non-root user with appropriate group memberships.
+Replace <code>username</code> with your desired username.</p>
+<pre class="highlight"><code class="language-bash">useradd -m username
+passwd username
+usermod username -G video,wheel,plugdev,kvm,audio,network
+exit
+</code></pre>
+
+<h3>Fix for NetworkManager</h3>
+<p>xchroot will bind mount /etc/resolv.conf and leave an empty file. Network Manager won't like it. So let's clean it up:</p>
+<pre class="highlight"><code class="language-bash">umount -l /mnt/etc/resolv.conf 2&gt;/dev/null || true
+
+rm -f /mnt/etc/resolv.conf
+ln -s /run/NetworkManager/resolv.conf /mnt/etc/resolv.conf
+</code></pre>
+
+<h2>Exit and Reboot</h2>
+<pre class="highlight"><code class="language-bash">umount -n -R /mnt
+zpool export zroot
+reboot
+</code></pre>
+
+<h2>Post-Installation</h2>
+<p>If everything went well, after entering your ZFS encryption password, you'll be greeted by the SDDM login screen.</p>
+<h2>Testing Hibernation</h2>
+<p>To verify that hibernation works correctly, you can clock the "Hibernate" button or:</p>
+<pre class="highlight"><code class="language-bash">loginctl hibernate
+</code></pre>
+
+<p>The system should power off. When you turn it back on, ZFSBootMenu will prompt for the password, unlock the swap partition, detect the hibernation image, and resume your session exactly where you left off.</p>
+<p>If resume fails, check that:
+1. The LUKS UUID in the ZFS commandline property matches your swap partition
+2. The swap partition is large enough for your RAM
+3. The dracut configuration includes the crypttab and keyfile</p>
+<h2>Conclusion</h2>
+<p>You now have a fully functional Void Linux system with native ZFS, full disk encryption, and working hibernation. The system is rolling, lightweight, and easy to maintain. Enjoy!</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

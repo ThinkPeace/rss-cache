@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sftp sandboxing | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>sftp sandboxing</h1>
+        <div class="meta">the website of jyn 2025-05-05T00:00:00Z</div>
+        <div class="links">
+          <a href="https://jyn.dev/sftp-sandboxing/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jyn-dev/jyn-dev-2f7e09cd69f93af4.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">unix sure is a system</div>
+        <div class="content">
+          <p>consider the following problem:</p>
+<ul>
+<li>you want to share a 300 MB directory</li>
+<li>with a single other person, not publicly</li>
+<li>over a public network</li>
+</ul>
+<p>any hosting service that lets you serve 300 MB costs money. also, for sufficient file sizes the wasted upload becomes noticeable. it would be much nicer if we could peer-to-peer this.</p>
+<p>sftp to the rescue!</p>
+<p>small problem: sftp shows you a <em>lot</em> of the system state. for one thing, you have read access to basically every file on the system, and write access to anything owned by your user. for another, the easiest way to set up sftp is through an ssh server, which is. well. it has "shell" in the name for a reason.</p>
+<p>so! here is how to set up a read-only sftp server which doesn't allow any other kind of access.</p>
+<p>First, add the following to <code>/etc/ssh/sshd_config</code>:</p>
+<pre data-lang="sshd" class="language-sshd z-code"><code class="language-sshd" data-lang="sshd"><span class="z-text z-plain">Subsystem       sftp    internal-sftp
+</span><span class="z-text z-plain">Match User myuser
+</span><span class="z-text z-plain">	ChrootDirectory %h
+</span><span class="z-text z-plain">	ForceCommand internal-sftp -R
+</span><span class="z-text z-plain">	DisableForwarding yes
+</span></code></pre>
+<p>Then run the following commands in a root shell (e.g. with <code>sudo -i</code>):</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">mkdir</span></span><span class="z-meta z-function-call z-arguments z-shell"> /empty</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">chmod</span></span><span class="z-meta z-function-call z-arguments z-shell"> a-w /empty</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">useradd</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>s</span> /usr/sbin/nologin<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>m</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>skel</span> /empty myuser</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">chown</span></span><span class="z-meta z-function-call z-arguments z-shell"> root:root /home/myuser</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">chmod</span></span><span class="z-meta z-function-call z-arguments z-shell"> a+rx /home/myuser</span>
+</span></code></pre>
+<p>Finally, create <code>/home/myuser/.ssh/authorized_keys</code> in any way you wish</p>
+<p>This creates a sftp session that looks like this:</p>
+<pre class="z-code"><code><span class="z-text z-plain">$ ssh myuser@localhost
+</span><span class="z-text z-plain">This service allows sftp connections only.
+</span><span class="z-text z-plain">Connection to localhost closed.
+</span><span class="z-text z-plain">$ sftp myuser@localhost
+</span><span class="z-text z-plain">Connected to localhost.
+</span><span class="z-text z-plain">sftp&gt; pwd
+</span><span class="z-text z-plain">Remote working directory: /
+</span><span class="z-text z-plain">sftp&gt; ls
+</span><span class="z-text z-plain">myfile
+</span><span class="z-text z-plain">sftp&gt; ls ..
+</span><span class="z-text z-plain">../myfile
+</span><span class="z-text z-plain">sftp&gt; ls ../../..
+</span><span class="z-text z-plain">../../../myfile
+</span><span class="z-text z-plain">sftp&gt; mkdir x
+</span><span class="z-text z-plain">remote mkdir &quot;/x&quot;: Permission denied
+</span><span class="z-text z-plain">sftp&gt; chmod 644	myfile
+</span><span class="z-text z-plain">Changing mode on /myfile
+</span><span class="z-text z-plain">remote setstat &quot;/myfile&quot;: Permission denied
+</span><span class="z-text z-plain">sftp&gt; get myfile
+</span><span class="z-text z-plain">Fetching /myfile to myfile
+</span><span class="z-text z-plain">myfile       100%   46MB 899.5MB/s   00:00
+</span></code></pre>
+<hr />
+<p>Some explanations and references:</p>
+<p><a href="https://man.openbsd.org/cgi-bin/man.cgi/OpenBSD-current/man5/sshd_config.5#Subsystem"><code>Subsystem</code></a> is documented as follows:</p>
+<blockquote>
+<p>Configures an external subsystem (e.g. file transfer daemon). [...] the name <code>internal-sftp</code> implements an in-process SFTP server. [...] It accepts the same command line arguments as <code>sftp-server</code> [...]</p>
+</blockquote>
+<p>what arguments can we pass to <a href="https://man.openbsd.org/sftp-server#R"><code>sftp-server</code></a>?</p>
+<blockquote>
+<p><code>-R</code>	Places this instance of <code>sftp-server</code> into a read-only mode. Attempts to open files for writing, as well as other operations that change the state of the filesystem, will be denied.</p>
+</blockquote>
+<p>just what we want!</p>
+<p><a href="https://man.openbsd.org/cgi-bin/man.cgi/OpenBSD-current/man5/sshd_config.5#ForceCommand"><code>ForceCommand internal-sftp</code></a> is a cute little feature of openssh:</p>
+<blockquote>
+<p>Specifying a command of <code>internal-sftp</code> will force the use of an in-process SFTP server that requires no support files when used with <code>ChrootDirectory</code>.</p>
+</blockquote>
+<p>In particular, this denies shell and command access.</p>
+<p>What is <code>ChrootDirectory</code>?</p>
+<blockquote>
+<p>Specifies the pathname of a directory to <a href="https://man.openbsd.org/chroot.2">chroot(2)</a> to after authentication. At session startup <a href="https://man.openbsd.org/sshd.8">sshd(8)</a> checks that all components of the pathname are root-owned directories which are not writable by group or others. After the chroot, <a href="https://man.openbsd.org/sshd.8">sshd(8)</a> changes the working directory to the user's home directory. [...] For file transfer sessions using SFTP no additional configuration of the environment is necessary if the in-process sftp-server is used [...]</p>
+</blockquote>
+<p>cute! an easy way to deny even reading other parts of the rest of the system.</p>
+<p>why does it require the path to be owned by root? <a href="https://lists.mindrot.org/pipermail/openssh-unix-dev/2009-May/027651.html">https://lists.mindrot.org/pipermail/openssh-unix-dev/2009-May/027651.html</a></p>
+<blockquote>
+<p>If you ever let the user chroot to this directory and execute his
+hard-linked /bin/su, he can become root within that directory and then
+escape the chroot. Even if you could prevent him from escaping chroot,
+he can create device nodes and operate directly on filesystems, mount
+/proc and operate on external processes, etc. It should be clear that
+this is Very Bad (tm).</p>
+</blockquote>
+<p>cool cool cool. love unix. this sure is a tool we use to build software.</p>
+<p><a href="https://man.openbsd.org/cgi-bin/man.cgi/OpenBSD-current/man5/sshd_config.5#Match"><code>Match</code></a> is surprisingly complicated in the general case but simple enough here.
+<a href="https://man.openbsd.org/cgi-bin/man.cgi/OpenBSD-current/man5/sshd_config.5#DisableForwarding"><code>DisableForwarding</code></a> is probably not <em>strictly</em> necessary but we don't want people using this file server as a jumpbox to whatever other networks it's connected to, nor as e.g. a tor exit node.</p>
+<p>lastly i want to point out that <code>useradd</code> by default creates a user with no login password, which takes care of people guessing passwords for this without the proper ssh public key. i have <code>PasswordAuthentication no</code> set in <code>sshd_config</code>, but this allows disabling the password for just your sftp access without disabling it altogether. alternatively you could put it under the <code>Match User</code>.</p>
+<hr />
+<p><strong>NOTE:</strong> an earlier version of this post suggested <code>Subsystem sftp internal-sftp -R</code> and <code>ForceCommand internal-sftp</code>. that disables write access for <em>all</em> users, not just the selected user. the new version only disables it for the selected user.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

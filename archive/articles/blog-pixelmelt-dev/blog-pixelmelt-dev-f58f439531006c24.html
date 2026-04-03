@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Attacking a stack based JavaScript virtual machine | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Attacking a stack based JavaScript virtual machine</h1>
+        <div class="meta">Cats with power tools 2025-07-16T17:42:03Z</div>
+        <div class="links">
+          <a href="https://blog.pixelmelt.dev/analysing-pistoljsvm/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/blog-pixelmelt-dev/blog-pixelmelt-dev-f58f439531006c24.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Analysing Pixelmelt&#x27;s Javascript Virtualisation Obfuscation - A Research Study</div>
+        <div class="content">
+          <img src="https://blog.pixelmelt.dev/content/images/2025/06/470685956_1363842918332076_620415779121275422_n-1.jpg" alt="Attacking a stack based JavaScript virtual machine"><p>I was asked by my friend <a href="https://github.com/PixelMelt?ref=blog.pixelmelt.dev">@PixelMelt</a> to help out with a research project he was working on, focused on the analysis of a few JavaScript obfuscators. I happily agreed to take part and was asked to analyse one of three different obfuscators:</p><ol><li><strong>Obfuscator.io</strong>: Likely the most common JavaScript obfuscator.</li><li><strong>JS-Confuser:</strong> A newer obfuscator with some nice techniques.</li><li><strong>PISTOL:</strong> PixelMelt&apos;s JavaScript Virtualisation Obfuscation.</li></ol><p>I chose to go with PISTOL as I am already familiar enough with the others, and VM based obfuscation is much more interesting than transformation obfuscation.</p><hr><h2 id="preface">Preface:</h2><pre><code>You are going to be given 3 JavaScript samples to attempt to retrieve a flag from, easy, medium, and hard. 
+You will stop after attempting to retrieve the flag from each sample either after 120 minutes pass, or you find the flag. 
+The flag is a string in the format &#x201C;FLAG{}&#x201D;. 
+Once you complete each test you will fill out the following form with your results. 
+You should start with the easiest sample and work up to hard. 
+You will have until June 28th to submit the results.</code></pre><p>Pix did also make it clear that the primary goal of this study was not just to successfully reverse the samples, but to gather useful and thoughtful feedback on the challenges and techniques used. The analysis and insight provided being more important than just recovering the flag.<br>With this information I set out downloading the PISTOL samples <code>1.0.js</code>, <code>2.o.js</code> &amp; <code>3.o.js</code>, then writing down a few goals I had before starting.</p><hr><h2 id="follow-along">Follow along:</h2><p>If you would like to follow along with this post or attempt to solve the samples yourself beforehand (little competition between us lol) you can find the samples and my full solutions here:</p><figure class="kg-card kg-bookmark-card"><a class="kg-bookmark-container" href="https://github.com/Ciarands/PistolAnalysis/tree/main?ref=blog.pixelmelt.dev"><div class="kg-bookmark-content"><div class="kg-bookmark-title">GitHub - Ciarands/PistolAnalysis: Challenges and solutions for a CTF-style JSVM reversing research study</div><div class="kg-bookmark-description">Challenges and solutions for a CTF-style JSVM reversing research study - Ciarands/PistolAnalysis</div><div class="kg-bookmark-metadata"><img class="kg-bookmark-icon" src="https://blog.pixelmelt.dev/content/images/icon/pinned-octocat-093da3e6fa40-3.svg" alt="Attacking a stack based JavaScript virtual machine"><span class="kg-bookmark-author">GitHub</span><span class="kg-bookmark-publisher">Ciarands</span></div></div><div class="kg-bookmark-thumbnail"><img src="https://opengraph.githubassets.com/edfb06bcbdd307cfcdb8f371f6e3fab9c5027993877bd28cd121f7dcf54a1e63/Ciarands/PistolAnalysis" alt="Attacking a stack based JavaScript virtual machine"></div></a></figure><hr><h2 id="goals">Goals:</h2><ol><li>Complete all 3 challenges within the 120 minute time constraint</li><li>Reverse each sample properly but I also want to try and attack it in ways that I am maybe not expected to</li><li>We are supposed to be emulating an attacker, so thinking like an attacker I want to try the simplest possible attack vectors first</li><li>It will be funny if I can guess a flag :&gt;</li></ol><hr><h2 id="10js-swimming-in-the-constant-pool"><code>1.0.js</code>: <strong>Swimming in the Constant Pool</strong></h2><p>After downloading the challenges, I saw what appeared to be <a href="https://terser.org/?ref=blog.pixelmelt.dev">Terser</a> output, a popular aggressive JavaScript mangler and compressor. I ran the sample which revealed in its default state the program returns <code>false</code>, our goal is likely to make the program return <code>true</code>.</p><p>Establishing this goal I skimmed the code, making some observations:</p><ul><li>The sample abuses quirks such as invoking functions via JavaScript&apos;s backticks e.g. V``</li><li>Around the bottom I noticed that what I assumed to be the VMs bytecode. It looked to be base64 encoded.</li><li><code>module.check</code> at the very bottom seems to be what validates our flag, but <code>check</code> isn&apos;t defined anywhere.</li></ul><p>Using that information, we want to try and look for base64 related functions to determine the VM entry point as it will need to be decoded first. We also know that <code>module.check</code> must be registered by the VM, we maybe want to do some tracing to try and figure out where its created.</p>
+<!--kg-card-begin: html-->
+<p>Now we know what we&apos;re looking for, I started by doing a simple <kbd>Ctrl</kbd> + <kbd>f</kbd> search for &quot;atob&quot; and &quot;base64&quot; which didn&apos;t yield any immediate results. So I decided to look a bit closer, searching for logic which contained functions that are commonly used for string manipulation and came across 2 functions.</p>
+<!--kg-card-end: html-->
+<h4 id="function-1">Function 1:</h4><pre><code class="language-js">R = ((A, e = 0) =&gt; {
+  for (l = A[E], n = (3 * l + 1) &gt;&gt; 2, a = e ? (n % 1 ? -~n : n / e) * e : n, f = new w(a), i = 0, _ = 0, s = 0; s &lt; l; s++)
+    if (((p = 3 &amp; s), 
+      (i |= ((r = A[s].charCodeAt(0)), ((r &gt; 64) &amp; (r &lt; 91) ? r - 65 : (r &gt; 96) &amp; (r &lt; 123) ? r - 71 : (r &gt; 47) &amp; (r &lt; 58) ? r + 4 : 43 == r ? 62 : 47 == r ? 63 : 0) &lt;&lt; (6 * (3 - p))
+    )), 3 == p || l - s == 1)) {
+      for (d = 0; d &lt; 3 &amp;&amp; _ &lt; a; d++, _++) f[_] = (i &gt;&gt;&gt; ((16 &gt;&gt;&gt; d) &amp; 24)) &amp; 255;
+      i = 0;
+    } return f;
+})(e)</code></pre><p>This is the Base64 decoder, it&apos;s manually implemented but has the same character-to-value lookup table as standard b64 implementations.</p>
+<!--kg-card-begin: html-->
+<p><kbd>Ctrl</kbd> + clicking on the identifer <b>R</b> reveals that it is passed to an IIFE, which just so happens to be our second function. &#x1F440;</p>
+<!--kg-card-end: html-->
+<h4 id="function-2">Function 2:</h4><pre><code class="language-js">x = ((A) =&gt; {
+	let e = 0;
+	for (; 35 != A[e] || 74 != A[e + 1] || 13 != A[e + 2] || 91 != A[e + 3]; )
+		e++;
+	e += 4;
+	let t = new c(A[U][b](e, e + 2))[0],
+		r = new g(A[U][b](e + 2, e + 6))[0];
+	e += 6;
+	let l = new c(A[U][b](e, e + 6 * t)),
+		n = {};
+	for (let A = 0; A &lt; l[E]; A += 3)
+		n[(l[A + 2] &lt;&lt; 16) | l[A + 1]] = String.fromCharCode(l[A]);
+	e += 6 * t;
+	let o = &apos;&apos;,
+		a = 0,
+		f = 0,
+		i = 0;
+	for (let t of A[b](e))
+		for (let A = 7; A &gt;= 0 &amp;&amp; i &lt; r; A--) {
+			(a = (a &lt;&lt; 1) | ((t &gt;&gt; A) &amp; 1)), f++, i++;
+			let e = (a &lt;&lt; 16) | f;
+			n[e] &amp;&amp; ((o += n[e]), (a = 0), (f = 0));
+		}
+	return o.split(&apos;|~|&apos;);
+})(R)</code></pre><p>It&apos;s pretty clear this function is doing some more manipulation on our now-decoded bytecode, and notably returning a string split at the separator <code>|~|</code>. This really stood out to me, so I added a <code>console.log</code> to figure out what it was.</p><p>Running the program a second time the console outputted:</p><pre><code>VM62:96 FLAG{l3vel-0ne}|~|check
+VM62:96 FLAG{l3vel-0ne}|~|check
+false</code></pre><p>Solving the challenge with the first try with the flag living in the constant pool.&#x1F389;</p>
+<!--kg-card-begin: html-->
+<p>
+  <b><font color="#8A3FFC" size="5">|</font></b>&#xA0;Time taken (HH-MM):&#xA0;<b>00:05</b>
+</p>
+<!--kg-card-end: html-->
+<hr><h2 id="2ojs-chasing-a-rolling-key"><code>2.o.js</code>: <strong>Chasing a Rolling Key</strong></h2><h2 id></h2><p>Since the flag was so simple, in the first challenge and the constraints of the challenge allow for flag retrieval &quot;by any means necessary&quot;. I followed the &quot;Keep it Simple, Stupid&quot; (KISS) principle, I attempted to run it again with a guessed flag. The previous flag was <code>FLAG{l3vel-0ne}</code>, so a logical guess was <code>FLAG{l3vel-Tw0}</code>.</p><h3 id="picking-at-the-seams">Picking at the Seams</h3><p>Glancing over the code once again, it looked virtually identical to the previous sample, so I decided to once again inspect the constant pool, outputting: </p><p><code>length|~|charCodeAt|~|check</code></p><p>This suggested the program&apos;s logic would:</p><ol><li><code>length</code> - Perform a length check on our input.</li><li><code>charCodeAt</code> - Iterate through the character codes of the flag.</li><li><code>check</code> - Register the check function.</li></ol><p>Another &quot;Find Usages&quot; on the IIFE revealed it was only called by a single instruction.<br>Pulling up the chrome debugger and breakpointing this instruction revealed the first few operations: </p><ul><li>The VM accessed <code>check</code> to create the <code>module.check</code> function, just as it had before. </li><li>It indexed length and the program terminated.</li></ul><p>My assumption was that my empty input flag was failing the length check immediately. With this info I had two paths forward: </p><ul><li>Bruteforce the length by trying different inputs and counting instructions executed. </li><li>Inspect the stack to see if the correct length was ever directly compared. </li></ul><p>I chose the latter, as it would likely reveal more information.</p><h3 id="a-glimmer-in-the-stack">A Glimmer in the Stack</h3><p>Upon inspecting the stack, before any length-related logic even executed, something caught my eye; a newly created array of numbers.<br><code>[207, 130, 193, 133, 250, 206, 188, 200, 237, 148, 255, 134, 254, 222, 226, 144]</code></p><p>My first instinct was to map these to characters, but the result was a jumble of unprintable data: <code>&#xCF;\x82&#xC1;\x85&#xFA;&#xCE;&#xBC;&#xC8;&#xED;\x94&#xFF;\x86&#xFE;&#xDE;&#xE2;\x90</code>. This screamed &quot;encrypted data.&quot; I mentally tagged it as the <code>encrypted_array</code> and kept digging.</p><p>Just after the <code>length</code> string was pulled from the constant pool, two numbers were pushed to the stack. The second was 16 the exact same length as my <code>encrypted_array</code>. The pieces were starting to click.</p><p>I set my input flag to a dummy value of the correct length, <code>FLAG{xxxxxxxxxx}</code>, and re-ran the debugger. Stepping through I saw the VM performed a strict not-equal (!==) check between my flag&apos;s length and 16, then took the logical NOT of the result (false). This inverted logic meant my flag of length 16 passed the first check. &#x1F389;</p><h3 id="unraveling-the-cipher">Unraveling the Cipher</h3><p>My working theory was that the program XORed the character codes of my input against the <code>encrypted_array</code>. So I tried to find any XOR related opcodes and placed breakpoints on them.</p><p>My assumption was close, but slightly off. Stepping through the execution revealed the following sequence for the first character, &apos;F&apos;:</p><ol><li>The flag <code>FLAG{xxxxxxxxxx}</code> and <code>charCodeAt</code> are popped from the stack to get the character code of the character at index 0.</li></ol><pre><code>&lt;- POPPED: FLAG{xxxxxxxxxx}
+&lt;- POPPED: charCodeAt
+&lt;- POPPED: 0
+-&gt; PUSHED: 70  // charCode for &apos;F&apos;</code></pre><ol start="2"><li>This character code is then XORed with <code>137</code>. I&apos;d overlooked it before, but 137 was pushed to the stack right before the <code>encrypted_array</code>. This was our initial <code>key</code>.</li></ol><pre><code>&lt;- POPPED: 70
+&lt;- POPPED: 137
+-&gt; PUSHED: 207</code></pre><ol start="3"><li>This result, <code>207</code>, is then XORed against the character&apos;s index in the string (0).</li></ol><pre><code>&lt;- POPPED: 207
+&lt;- POPPED: 0
+-&gt; PUSHED: 207</code></pre><ol start="4"><li>Finally, this result is compared against the first element of our <code>encrypted_array</code>. So, <code>encrypted_array</code> was really <code>validation_array</code>.</li></ol><p>Following the execution for the second character, &apos;L&apos; which was accessed sequentially, revealed the key wasn&apos;t static; it was a <strong>rolling key</strong>.</p><figure class="kg-card kg-code-card"><pre><code>&lt;- POPPED: 76
+&lt;- POPPED: 207
+-&gt; PUSHED: 131</code></pre><figcaption><p><span>The character code for &apos;L&apos; (76) is retrieved, then it&apos;s XORed against the result of the previous operation. This result now serves as the key for the current character.</span></p></figcaption></figure><h3 id="reversing-the-final-algorithm">Reversing the final algorithm</h3><p>The full validation logic was essentially doing:</p><pre><code class="language-js">result = (key ^ char_code) ^ index;
+is_valid = (result === validation_arr[index]);</code></pre><p>Since XOR is a reversible operation we can do the exact opposite to generate our flag:</p><pre><code class="language-js">char_code = (validation_array ^ index) ^ key;</code></pre><p>Mapping the result to a string, revealed the final flag: <code>FLAG{1ts-part-2}</code>. &#x1F389;</p>
+<!--kg-card-begin: html-->
+<p>
+  <b><font color="#8A3FFC" size="5">|</font></b>&#xA0;Time taken (HH-MM):&#xA0;<b>00:17</b>
+</p>
+<!--kg-card-end: html-->
+<hr><h2 id="3ojs-when-tracers-lie"><code>3.o.js</code>: When Tracers Lie</h2><h2 id="-1"></h2><p>The third challenge began with familiar routine, with the script once again looking very similar to the previous samples. </p><p>Running the script revealed another length check, this time for <code>20</code> characters, using the same strict not-equal (!==) comparison as before. I padded my input to the correct length, then started my stack inspection.</p><p>This is where the routine broke down. The volume of data being pushed and popped was overwhelming; it was impossible to follow the logic mentally. I needed to see the machine&apos;s instructions, not just its data. I decided to pivot and build a naive tracer by asking Google Gemini to inject console.log statements for each opcode. In retrospect, I should have done this myself... :/</p><p>The trace worked, but it produced over <code>18,000</code> lines of output. While still massive, it was a structured view of the program&apos;s execution and we could hunt for patterns.</p><h3 id="a-fingerprint-key-scheduling-algorithm">A Fingerprint: Key-Scheduling Algorithm</h3><p>Almost immediately, a repeating block of operations at the very beginning of the trace caught my eye.</p><pre><code class="language-js">[PUSH_CONST] 256
+[GET_CLOSURE_VAR] id: 12
+[LT] 256 &lt; 0
+[BRANCH_IF_FALSE] cond: true target: 553
+[PUSH_CONST] 257
+[GET_CLOSURE_VAR] id: 12
+[GET_CLOSURE_VAR] id: 11
+[GET_CLOSURE_VAR] id: 9
+[MUL] 6 * 251
+[ADD] 0 + 1506
+[MOD] 257 % 1506
+[SET_CLOSURE_VAR] id: 9, scope: 0, value: 221
+...
+[INC] 0 + 1
+[SET_CLOSURE_VAR] id: 12, scope: 0, value: 1
+...
+[JUMP] target: 350</code></pre><p>This pattern of <code>MUL</code> -&gt; <code>ADD</code> -&gt; <code>MOD</code> was executing inside a loop that incremented from 0 to 255. Reconstructing this into a high-level representation:</p><pre><code class="language-js">// Closure variables
+let S = [];       // v7
+let j = 251;      // v9 (initial value from first iteration)
+const C1 = 6;     // v11 (constant value from first iteration)
+
+// Loop from i = 0 to 255
+for (let i = 0; i &lt; 256; i++) {
+  // Update state variable &apos;j&apos;
+  j = (i + C1 * j) % 257;
+  // Store the new &apos;j&apos; in array &apos;S&apos; at the current index &apos;i&apos;
+  S[i] = j;
+}</code></pre><p>My pattern-recognition alarms went off. This reminded me of a modified version of the Key-Scheduling Algorithm (KSA) from the RC4 stream cipher. The program was initialising a state array, or S-box, for a symmetric encryption scheme.</p><figure class="kg-card kg-code-card"><pre><code>for i from 0 to 255
+    S[i] := i
+endfor
+j := 0
+for i from 0 to 255
+    j := (j + S[i] + key[i mod keylength]) mod 256
+    swap values of S[i] and S[j]
+endfor</code></pre><figcaption><p><span>RC4 Psudeocode for reference</span></p></figcaption></figure><h3 id="sanitising-the-s-box">Sanitising the S-Box</h3><p>After this first loop, the <code>KSA</code> array was fully populated but contained duplicate values. The program entered a second 256-iteration loop. </p><pre><code class="language-js">[PUSH_FALSE]
+[PUSH_CONST] &quot;fill&quot;
+[PUSH_CONST] 256
+[PUSH_CONST] &quot;Array&quot;
+[GET_GLOBAL] d[Array]
+[NEW] constructor: 256 args count: 1
+[CALL_PROP] obj: false prop: fill args count: 1
+[SET_CLOSURE_VAR] id: 14, scope: 1, value: (256)&#xA0;[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,&#xA0;&#x2026;]
+[POP_MULTI] count: 1
+[PUSH_CONST] 256
+[PUSH_CONST] &quot;Array&quot;
+[GET_GLOBAL] d[Array]
+[NEW] constructor: 256 args count: 1
+[SET_CLOSURE_VAR] id: 16, scope: 1, value: (256)&#xA0;[empty &#xD7; 256]
+[POP_MULTI] count: 1
+[PUSH_CONST] 0
+[SET_CLOSURE_VAR] id: 18, scope: 1, value: 0
+[POP_MULTI] count: 1
+[PUSH_CONST] 0
+[SET_CLOSURE_VAR] id: 19, scope: 1, value: 0
+</code></pre><p>This section initialises some new variables:&#xA0; </p><ul><li><code>id: 14</code>: An array of 256 <code>false</code> values. Let&apos;s call this <code>unconfident_array</code>.&#xA0;</li><li><code>id: 16</code>: A new empty array of size 256. &#xA0;Let&apos;s call it <code>KSA2</code>.&#xA0;</li><li><code>id: 18</code>: A counter initialised to 0. Let&apos;s call this <code>fallback_counter</code>.&#xA0; </li><li><code>id: 19</code>: Another counter initialised to 0. This is the main loop counter.</li></ul><p>Tracing its logic revealed a sanitisation process:</p><ul><li>It iterates through the initial <code>KSA</code>.</li><li>For each value <code>v = KSA[i]</code>, it checks if <code>v</code> has been seen before using the <code>unconfident_array</code>.</li><li>If <code>v</code> is new, it&apos;s placed into a second array, <code>KSA2</code>, at the current index <code>i</code>, and marked as &quot;seen&quot;.</li><li>If <code>v</code> is a duplicate, the program uses the <code>fallback_counter</code> to find the next available integer (from 0-255) that hasn&apos;t been used, places that into <code>KSA2[i]</code>, and marks it as seen.</li></ul><p>The goal of this entire process was to create <code>KSA2</code>: a valid permutation where every number from <code>0-255</code> appears exactly once. This was the final, clean S-box for the cipher.</p><h3 id="the-ciphers-core">The Cipher&apos;s Core</h3><p>With the key schedule established, the final validation loop began. </p><pre><code class="language-js">[SET_CLOSURE_VAR] id: 21, scope: 1, value: 83
+[CREATE_ARRAY] with 20 items from stack
+[SET_CLOSURE_VAR] id: 23, scope: 1, value: (20) [85, 39, 30, ...]
+[SET_CLOSURE_VAR] id: 25, scope: 1, value: 83</code></pre><p>It initialised a state variable (id: 21) to <code>83</code> and loads a hardcoded 20-byte array, which I tagged <code>target_data</code>. This was the ciphertext my input needed to produce.</p><p>For each character of my 20-character input, the VM performed the following steps:</p><ol><li>Calculate an index into the S-box: <code>x = state ^ i ^ charCodeAt(i)</code></li><li>Get the resulting keystream byte: <code>result = KSA2[x]</code></li><li>Check its valid: <code>is_valid = (result === target_data[i])</code></li><li>Update the state for the next round: <code>state = result</code></li></ol><h3 id="reversing-the-final-algorithm-and-a-painful-twist">Reversing the final algorithm and a Painful Twist</h3><p>Since the entire cipher was based on XOR and S-box lookups, it was reversible. To find the original character code, I just needed to work backward:</p><ol><li>For a given <code>target_data[i]</code>, find the index <code>j</code> in <code>KSA2</code> such that <code>KSA2[j] == target_data[i]</code>.</li><li>This <code>j</code> is the result of the initial <code>XOR</code> chain: <code>j = state ^ i ^ charCodeAt(i)</code>.</li><li>Solve for the unknown: <code>charCodeAt(i) = state ^ i ^ j</code>.</li><li>Remember that the state for the next iteration is simply the current <code>target_data[i]</code>.</li></ol><p>I wrote a solver script to perform the KSA generation and then run this decryption logic...</p><p>Which gave me the flag <code>FLAG{chster-thr2e2}</code>...</p><p>...what?</p><figure class="kg-card kg-code-card"><pre><code class="language-js">// This array (closure var 7) is generated by the first major loop
+const initial_ksa = [
+  221, 42, 254, 242, 171, 3, 24, 151, 143, 96, 72, 186, 100, 99, 94, 65, 149,
+  140, 87, 27, 182, 85, 18, 131, 39, 2, 38, 255, 16, 125, 9, 85, 28, 201, 212,
+  22, 168, 17, 140, 108, 174, 57, 127, 34, 248, 248, 249, 256, 42, 44, 57, 136,
+  97, 121, 9, 109, 196, 205, 3, 77, 8, 109, 202, 247, 4, 89, 86, 69, 225, 134,
+  103, 175, 94, 123, 41, 64, 203, 10, 138, 136, 125, 60, 185, 165, 46, 104, 196,
+  235, 213, 82, 68, 242, 2, 105, 210, 70, 2, 109, 238, 242, 10, 161, 40, 86,
+  106, 227, 183, 177, 142, 190, 222, 158, 32, 48, 145, 214, 115, 36, 77, 67, 8,
+  169, 108, 0, 124, 98, 200, 42, 123, 96, 192, 255, 120, 82, 112, 36, 95, 193,
+  11, 205, 85, 137, 193, 16, 240, 43, 147, 1, 154, 45, 163, 101, 244, 75, 90,
+  181, 214, 156, 66, 41, 149, 27, 67, 51, 213, 158, 86, 169, 154, 65, 46, 190,
+  27, 78, 128, 172, 180, 229, 10, 239, 72, 99, 5, 213, 177, 219, 215, 192, 55,
+  5, 220, 226, 6, 229, 26, 94, 246, 131, 213, 192, 67, 89, 222, 250, 162, 149,
+  72, 125, 187, 46, 229, 43, 213, 206, 165, 177, 250, 175, 240, 117, 151, 99,
+  45, 236, 98, 42, 221, 11, 37, 194, 109, 114, 145, 75, 170, 227, 56, 59, 78,
+  193, 113, 148, 102, 84, 234, 107, 117, 178, 31, 178, 33, 192, 119, 196, 145,
+  97,
+];
+
+const KSA2 = new Array(256);
+const unconfident_array = new Array(256).fill(false);
+let fallback_counter = 0;
+
+for (let i = 0; i &lt; 256; i++) {
+  const value_from_ksa = initial_ksa[i];
+  if (!unconfident_array[value_from_ksa]) {
+    KSA2[i] = value_from_ksa;
+    unconfident_array[value_from_ksa] = true;
+  } else {
+    while (unconfident_array[fallback_counter]) {
+      fallback_counter++;
+    }
+    KSA2[i] = fallback_counter;
+    unconfident_array[fallback_counter] = true;
+  }
+}
+
+// The target ciphertext array (closure var 23)
+const target_data = [
+  85, 39, 30, 68, 77, 34, 203, 235, 240, 137, 195, 215, 230, 71, 201, 110, 203,
+  226, 129, 216,
+];
+// correct array
+// [85,39,30,68,77,34,203,232,240,137,195,215,230,71,201,110,203,226,129,216]
+
+// The initial state (closure var 21)
+const initial_state = 83;
+
+let flag = &quot;&quot;;
+let state = initial_state;
+target_data.map((keystream_byte, i) =&gt; {
+  const j = KSA2.indexOf(keystream_byte);
+
+  // Original: j = state ^ i ^ charCode
+  // Reversed: charCode = state ^ i ^ j
+  const charCode = state ^ i ^ j;
+  flag += String.fromCharCode(charCode);
+  state = keystream_byte;
+})
+
+console.log(&quot;Recovered Flag:&quot;, flag);
+</code></pre><figcaption><p><span>solve-flag.js</span></p></figcaption></figure><p>Not being weary of how much time I had left I started re-analysing. I thought I must have missed some novel technique that was influencing the <code>target_data</code> somehow. The <code>target_data</code> array was the perfect length for our flag, but the flag string result <code>FLAG{chster-thr2e2}</code> was <code>19</code> characters, we needed <code>20</code>?</p><p>After trying and failing to understand where I had went wrong, I finally noticed I had ran out of time :( and just guessed the flag: &quot;chster&quot;? That had to be &quot;chapter.&quot; Our flag <code>FLAG{ch4pter-thr2e2}</code>, passed in the original VM but not my traced version? </p><p>I had the flag, but the fact that it only worked in the untampered VM revealed that the issue was with my own tooling.</p><h3 id="postmortem">Postmortem</h3><p>The most frustrating part of this challenge was this near-miss. My logic was fine but the solver seemingly for no reason produced a bad result. The AI-generated trace was the culprit.</p><p>In its task to add logging into the VM&apos;s instructions, Gemini had made a single, almost imperceptible change. It had converted one character in the Base64-encoded bytecode from an <code>&apos;A&apos;</code> to a <code>&apos;Y&apos;</code>.</p><ul><li>&apos;A&apos; in Base64 is index 0 (6-bit <code>000000</code>).</li><li>&apos;Y&apos; in Base64 is index 24 (6-bit <code>011000</code>).</li></ul><p>This two-bit flip cascaded through the decoding process, corrupting a single byte in the hardcoded <code>target_data</code> array, arguably the worst thing it could have broken. The value <code>232</code> became <code>235</code>. My reliance on an LLM for a &quot;simple&quot; but critical task introduced a bug that was nearly impossible to spot, leading me down a rabbit hole of debugging my already correct logic. This experience was a harsh lesson in trusting black-box tools: the blame lies with me for not validating the output. :/</p>
+<!--kg-card-begin: html-->
+<p>
+  <b><font color="#8A3FFC" size="5">|</font></b>&#xA0;Time taken (HH-MM):&#xA0;<b>01:00</b>
+</p>
+<!--kg-card-end: html-->
+<hr><h2 id="did-i-achieve-my-goals">Did I achieve my goals?:</h2>
+<!--kg-card-begin: html-->
+<table>
+<thead>
+<tr>
+<th>Goal</th>
+<th>Success</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Complete all challenges within time constraint</td>
+<td>&#x274C;</td>
+</tr>
+<tr>
+<td>Attack in novel way</td>
+<td>&#x2705;</td>
+</tr>
+<tr>
+<td>Simple attack vectors</td>
+<td>&#x2705;</td>
+</tr>
+<tr>
+<td>Guess a flag</td>
+<td>&#x2705; *not how I hoped</td>
+</tr>
+</tbody>
+</table>
+<!--kg-card-end: html-->
+<hr><h3 id="thanks">Thanks</h3><p>Big thank you to <a href="https://github.com/PixelMelt?ref=blog.pixelmelt.dev">@PixelMelt</a> for providing the opportunity to take part and the fun challenge! :&gt;</p><p></p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Pentium contains a complicated circuit to multiply by three | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The Pentium contains a complicated circuit to multiply by three</h1>
+        <div class="meta">Ken Shirriff&#x27;s blog 2025-03-02T17:46:00Z</div>
+        <div class="links">
+          <a href="http://www.righto.com/2025/03/pentium-multiplier-adder-reverse-engineered.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/righto-com/righto-com-cd89ac0c6d1b4d1a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">This article is available in German at Heise Online . In 1993, Intel released the high-performance Pentium processor, the start of the long-running Pentium line. I&#x27;ve been examining the Pentium&#x27;s circuitry in detail and I came across a circuit to multiply by three, a complex circuit with thousands of transistors. Why does the Pentium have a circuit to multi…</div>
+        <div class="content">
+          <div>This article is available in German at <a href="https://www.heise.de/hintergrund/Zahlen-bitte-Verrueckt-Fuer-X3-brauchte-der-Pentium-einen-eigenen-Schaltkreis-10323633.html">Heise Online</a>.</div>
+<p>In 1993, Intel released the high-performance Pentium processor, the start of the long-running Pentium line.
+I've been examining the Pentium's circuitry in detail and I came across a circuit to multiply by three, a complex circuit with thousands of
+transistors. Why does the Pentium have a circuit to multiply specifically by three? Why is it so complicated? In this article, I examine
+this multiplier&mdash;which I'll call the &times;3 circuit&mdash;and explain its purpose and how it is implemented.</p>
+<p>It turns out that this multiplier is a small part of the Pentium's floating-point multiplier circuit. In particular, the Pentium multiplies two
+64-bit numbers using base-8 multiplication, which is faster than binary multiplication.<span id="fnref:speed"><a class="ref" href="#fn:speed">1</a></span> However, multiplying by 3 needs to be handled as a special case.
+Moreover, since the rest of the multiplication process can't start until the multiplication by 3 finishes, this circuit must be very fast.
+If you've studied digital design, you may have heard of techniques such as carry lookahead, Kogge-Stone addition, and carry-select addition.
+I'll explain how the &times;3 circuit combines all these techniques to maximize performance.</p>
+<p>The photo below shows the Pentium's thumbnail-sized silicon die under a microscope.
+I've labeled the main functional blocks.
+In the center is the integer execution unit that performs most instructions. On the left, the code and data caches improve memory performance. The floating point
+unit, in the lower right, performs floating point operations.
+Almost half of the floating point unit is occupied by the multiplier, which uses an array of adders to rapidly multiply two 64-bit numbers.
+The focus of this article is the &times;3 circuit, highlighted in yellow near the top of the multiplier.
+As you can see, the &times;3 circuit takes up a nontrivial amount of the Pentium die, especially considering that its task seems simple.</p>
+<p><a href="https://static.righto.com/images/pentium-mult3/pentium-labeled.jpg"><img alt="This die photo of the Pentium shows the location of the multiplier." class="hilite" height="524" src="https://static.righto.com/images/pentium-mult3/pentium-labeled-w500.jpg" title="This die photo of the Pentium shows the location of the multiplier." width="500" /></a><div class="cite">This die photo of the Pentium shows the location of the multiplier.</div></p>
+<h2>Why does the Pentium use base-8 to multiply numbers?</h2>
+<p>Multiplying two numbers in binary is conceptually straightforward.
+You can think of binary multiplication as similar to grade-school long multiplication, but with binary numbers instead of decimal numbers.
+The example below shows how 5&times;6 is computed in binary: the three terms are added to produce the result.
+Conveniently, each term is either the multiplicand (101 in this case) or 0, shifted appropriately, so computing the terms is easy.</p>
+<pre>
+     101
+    &times;110
+     ―――
+     000    <span>i.e. 0&times;101</span>
+    101     <span>i.e. 1&times;101</span>
+  +101      <span>i.e. 1&times;101</span>
+   ―――――
+   11110
+</pre>
+
+<p>Unfortunately, this straightforward multiplication approach is slow. With the three-bit numbers above, there are three terms to add.
+But if you multiply two 64-bit numbers, you have 64 terms to add, requiring a lot of time and/or circuitry.</p>
+<p>The Pentium uses a more complicated approach, computing multiplication in base 8.
+The idea is to consider the multiplier in groups of three bits, so instead of multiplying by 0 or 1 in each step, you multiply by a number from 0 to 7.
+Each term that gets added is still in binary, but the number of terms is reduced by a factor of three.
+Thus, instead of adding 64 terms, you add 22 terms, providing a substantial reduction in
+the circuitry required.
+(I'll describe the full details of the Pentium multiplier in a future article.<span id="fnref:details"><a class="ref" href="#fn:details">2</a></span>)</p>
+<p>The downside to radix-8 multiplication is that multiplying by a number from 0 to 7 is much more complicated than multiplying by 0 or 1, which is almost trivial.
+Fortunately, there are some shortcuts.
+Note that multiplying by 2 is the same as shifting the number to the left by 1 bit position, which is very easy in hardware&mdash;you wire each bit one position to the left.
+Similarly, to multiply by 4, shift the multiplicand two bit positions to the left.</p>
+<p>Multiplying by 7 seems inconvenient, but there is a trick, known as Booth's multiplication algorithm.
+Instead of multiplying by 7, you add 8 times the number and subtract the number, ending up with 7 times the number.
+You might think this requires two steps, but the trick is to multiply by one more in the (base-8) digit to the left, so you get the factor of 8 without an additional step.
+(A base-10 analogy is that if you want to multiply by 19, you can multiply by 20 and subtract the multiplicand.)
+Thus, you can get the &times;7 by subtracting.
+Similarly, for a &times;6 term, you can subtract a &times;2 multiple and add &times;8 in the next digit.
+Thus, the only difficult multiple is &times;3.
+(What about &times;5? If you can compute &times;3, you can subtract that from &times;8 to get &times;5.)</p>
+<p>To summarize, the Pentium's radix-8 Booth's algorithm is a fast way to multiply, but it requires a special circuit to produce the &times;3 multiple
+of the multiplicand.</p>
+<h2>Implementing a fast &times;3 circuit with carry lookahead</h2>
+<p>Multiplying a number by three is straightforward in binary: add the number to itself, shifted to the left one position.
+(As mentioned above, shifting to the left is the same as multiplying by two and is easy in hardware.)
+Unfortunately, using a simple adder is too slow.</p>
+<p>The problem with addition is that carries make addition slow.
+Consider calculating 99999+1 by hand.
+You'll start with 9+1=10, then carry the one, generating another carry, which generates another carry, and so forth, until you go through all the digits.
+Computer addition has the same problem:
+If you're adding two numbers, the low-order bits can generate a carry that then propagates through all the bits.
+An adder that works this way&mdash;known as a ripple carry adder&mdash;will be slow because the carry has to ripple through
+all the bits.
+As a result, CPUs use special circuits to make addition faster.</p>
+<p>One solution is the carry-lookahead adder. In this adder, all the carry bits are computed in parallel, before computing
+the sums. Then, the sum bits can be computed in parallel, using the carry bits.
+As a result, the addition can be completed quickly, without waiting for the carries to ripple through
+the entire sum.</p>
+<p>It may seem impossible to compute the carries without computing the sum first, but there's a way to do it.
+For each bit position, you determine signals called "carry generate" and "carry propagate".
+These signals can then be used to determine all the carries in parallel.
+The <em>generate</em> signal indicates that the position generates a carry. For instance, if you add binary
+<code>1xx</code> and <code>1xx</code> (where <code>x</code> is an arbitrary bit), a carry will be generated from the top bit,
+regardless of the unspecified bits.
+On the other hand, adding <code>0xx</code> and <code>0xx</code> will never generate a carry.
+Thus, the <em>generate</em> signal is produced for the first case but not the second.</p>
+<p>But what about <code>1xx</code> plus <code>0xx</code>? We might get a carry, for instance, <code>111+001</code>, but we might not,
+for instance, <code>101+001</code>. In this "maybe" case, we set the <em>carry propagate</em> signal, indicating that a carry into the
+position will get propagated out of the position. For example, if there is a carry out of
+the middle position, <code>1xx+0xx</code> will have a carry from the top bit. But if there is no carry out of the middle position, then
+there will not be a carry from the top bit. In other words, the <em>propagate</em> signal indicates that a carry into the top bit will be propagated out of the top
+bit.</p>
+<p>To summarize, adding <code>1+1</code> will generate a carry. Adding <code>0+1</code> or <code>1+0</code> will propagate a
+carry.
+Thus, the <em>generate</em> signal is formed at each position by <em>G<sub>n</sub> = A<sub>n</sub>·B<sub>n</sub></em>, where <em>A</em> and <em>B</em> are the inputs.
+The <em>propagate</em> signal is <em>P<sub>n</sub> = A<sub>n</sub>+B<sub>n</sub></em>,
+the logical-OR of the inputs.<span id="fnref:propagate"><a class="ref" href="#fn:propagate">3</a></span></p>
+<p>Now that the <em>propagate</em> and <em>generate</em> signals are defined, some moderately complex logic<span id="fnref:carry"><a class="ref" href="#fn:carry">4</a></span> can compute the carry <em>C<sub>n</sub></em> into
+each bit position.
+The important thing is that all the carry bits can be computed in parallel, without waiting for the carry to ripple through each bit position.
+Once each carry is computed, the sum bits can be computed in parallel: <em>S<sub>n</sub> = A<sub>n</sub> ⊕ B<sub>n</sub> ⊕ C<sub>n</sub></em>. In other words, the two input bits and the computed carry are combined with exclusive-or.
+Thus, the entire sum can be computed in parallel by using carry lookahead.
+However, there are complications.</p>
+<h2>Implementing carry lookahead with a parallel prefix adder</h2>
+<p>The carry bits can be generated directly from the <em>G</em> and <em>P</em> signals.
+However, the straightforward approach requires too much hardware as the number of bits increases.
+Moreover, this approach needs gates with many inputs, which are slow for electrical reasons.
+For these reasons, the Pentium uses two techniques to keep the hardware requirements for carry lookahead tractable.
+First, it uses a "parallel prefix adder" algorithm for carry lookahead across 8-bit chunks.<span id="fnref:parallel-prefix"><a class="ref" href="#fn:parallel-prefix">7</a></span>
+Second, it uses a two-level hierarchical approach for carry lookahead: the upper carry-lookahead circuit handles eight 8-bit chunks, using
+the same 8-bit algorithm.<span id="fnref:bytes"><a class="ref" href="#fn:bytes">5</a></span></p>
+<p>The photo below shows the complete &times;3 circuit;
+you can see that the circuitry is divided into blocks of 8 bits.
+(Although I'm calling this a 64-bit circuit, it really produces a 69-bit output: there are 5 "extra" bits on the left to avoid overflow and to provide additional bits for rounding.)</p>
+<p><a href="https://static.righto.com/images/pentium-mult3/wide-view.jpg"><img alt="The full &times;3 adder circuit under a microscope." class="hilite" height="65" src="https://static.righto.com/images/pentium-mult3/wide-view-w800.jpg" title="The full &times;3 adder circuit under a microscope." width="800" /></a><div class="cite">The full &times;3 adder circuit under a microscope.</div></p>
+<p>The idea of the parallel-prefix adder is to
+produce the <em>propagate</em> and <em>generate</em> signals across ranges of bits, not just single bits as before.
+For instance, the <em>propagate</em> signal <em>P<sub>32</sub></em> indicates that a carry in to bit 2 would be propagated out of bit 3,
+(This would happen with <code>10xx+01xx</code>, for example.)
+And <em>G<sub>30</sub></em> indicates that bits 3 to 0 generate a carry out of bit 3.
+(This would happen with <code>1011+0111</code>, for example.)</p>
+<p>Using some mathematical tricks,<span id="fnref:pg"><a class="ref" href="#fn:pg">6</a></span> you can take the <em>P</em> and <em>G</em> values for two smaller ranges and merge them into
+the <em>P</em> and <em>G</em> values for the combined range.
+For instance, you can start with the <em>P</em> and <em>G</em> values for bits 0 and 1, and produce <em>P<sub>10</sub></em> and <em>G<sub>10</sub></em>, the <em>propagate</em> and <em>generate</em>
+signals describing two bits.
+These could be merged with <em>P<sub>32</sub></em> and <em>G<sub>32</sub></em> to produce <em>P<sub>30</sub></em> and <em>G<sub>30</sub></em>,
+indicating if a carry is propagated across bits 3-0 or generated by bits 3-0.
+Note that <em>G<sub>n0</sub></em> tells us if a carry is generated into bit <em>n+1</em> from all the lower bits, which is the <em>C<sub>n+1</sub></em> carry value that we
+need to compute the final sum.
+This merging process is more efficient than the "brute force" implementation of the carry-lookahead logic since
+logic subexpressions can be reused.</p>
+<p>There are many different ways that you can combine the <em>P</em> and <em>G</em> terms to generate the necessary terms.<span id="fnref:brent-kung"><a class="ref" href="#fn:brent-kung">8</a></span>
+The Pentium uses an approach called
+<a href="https://en.wikipedia.org/wiki/Kogge%E2%80%93Stone_adder">Kogge-Stone</a>
+that attempts to minimize the total delay while keeping the amount of circuitry reasonable.
+The diagram below is the standard diagram that illustrates how a
+Kogge-Stone adder works.
+It's rather abstract, but I'll try to explain it.
+The diagram shows how the <em>P</em> and <em>G</em> signals are merged to produce each output at the bottom. 
+Each square box at the top generates the <em>P</em> and <em>G</em> signals for that bit.
+Each line corresponds to both the <em>P</em> and the <em>G</em> signal.
+Each diamond combines two ranges of <em>P</em> and <em>G</em> signals to generate new <em>P</em> and <em>G</em> signals for the combined
+range.
+Thus, the signals cover wider ranges of bits as they progress downward, ending with the <em>G<sub>n0</sub></em> outputs that indicate carries.</p>
+<p><a href="https://static.righto.com/images/pentium-mult3/kogge-stone.jpg"><img alt="A diagram of an 8-bit Kogge-Stone adder highlighting the carry out of bit 6 (green) and out of bit 2 (purple). Modification of the diagram by Robey Pointer, Wikimedia Commons." class="hilite" height="437" src="https://static.righto.com/images/pentium-mult3/kogge-stone-w500.jpg" title="A diagram of an 8-bit Kogge-Stone adder highlighting the carry out of bit 6 (green) and out of bit 2 (purple). Modification of the diagram by Robey Pointer, Wikimedia Commons." width="500" /></a><div class="cite">A diagram of an 8-bit Kogge-Stone adder highlighting the carry out of bit 6 (green) and out of bit 2 (purple). Modification of the diagram by Robey Pointer, <a href="https://commons.wikimedia.org/wiki/File:Kogge-stone-8-bit.png">Wikimedia Commons</a>.</div></p>
+<p>I've labeled a few of the intermediate signals so you can get an idea of how it works. Circuit "A" combines
+<em>P<sub>7</sub></em> and <em>G<sub>7</sub></em> with <em>P<sub>6</sub></em> and <em>G<sub>6</sub></em> to produce the signals describing two bits: <em>P<sub>76</sub></em> and
+<em>G<sub>76</sub></em>.
+Similarly, circuit "B" combines
+<em>P<sub>76</sub></em> and <em>G<sub>76</sub></em> with <em>P<sub>54</sub></em> and <em>G<sub>54</sub></em> to produce the signals describing four bits: <em>P<sub>74</sub></em> and
+<em>G<sub>74</sub></em>.
+Finally, circuit "C" produces the final outputs for bit 7: <em>P<sub>70</sub></em> and <em>G<sub>70</sub></em>.
+Note that most of the intermediate results are used twice, reducing the amount of circuitry.
+Moreover, there are at most three levels of combination circuitry, reducing the delay compared to a deeper network.</p>
+<p>The key point is the <em>P</em> and <em>G</em> values are computed in parallel so the carry bits can all be computed in parallel,
+without waiting for the carry to ripple through all the bits.
+(If this explanation doesn't make sense, see my discussion of the Kogge-Stone adder
+in the <a href="https://www.righto.com/2025/01/pentium-carry-lookahead-reverse-engineered.html">Pentium's division circuit</a> for a different&mdash;but maybe still confusing&mdash;explanation.)</p>
+<h2>Recursive Kogge-Stone lookahead</h2>
+<p>The Kogge-Stone approach can be extended to 64 bits, but the amount of circuitry and wiring becomes overwhelming.
+Instead, the Pentium uses a recursive, hierarchical approach with two levels of Kogge-Stone lookahead.
+The lower layer uses eight Kogge-Stone adders as described above, supporting 64 bits in total.</p>
+<p>The upper layer uses a single eight-bit Kogge-Stone lookahead circuit, treating each of the lower chunks as a single bit.
+That is, a lower chunk has a propagate signal <em>P</em> indicating that a carry into the chunk will be propagated out, as well as a generate signal <em>G</em>
+indicating that the chunk generates a carry.
+The upper Kogge-Stone circuit combines these chunked signals to determine if carries will be generated or propagated by groups of chunks.<span id="fnref:recursive"><a class="ref" href="#fn:recursive">9</a></span></p>
+<p>To summarize, each of the eight lower lookahead circuits computes the carries within an 8-bit chunk.
+The upper lookahead circuit computes the carries into and out of each 8-bit chunk.
+In combination, the circuits rapidly provide all the carries needed to compute the 64-bit sum.</p>
+<h2>The carry-select adder</h2>
+<p>Suppose you're on a game show: "What is 553 + 246 + <em>c</em>? In 10 seconds, I'll tell you if <em>c</em> is 0 or 1 and whoever gives the answer first wins $1000."
+Obviously, you shouldn't just sit around until you get <em>c</em>. You should do the two sums now, so you can hit the buzzer as soon as <em>c</em> is announced.
+This is the concept behind the carry-select adder: perform two additions&mdash;with a carry-in and without--and then supply the correct answer as soon as the
+carry is available.
+The carry-select adder requires additional hardware&mdash;two adders along with a multiplexer to select the result&mdash;but it overlaps the time to compute
+the sum with the time to compute the carry.
+In effect, the addition and the carry lookahead operations are performed in parallel, with the multiplexer combining the results from each.</p>
+<p>The Pentium uses a carry-select adder for each 8-bit chunk in the &times;3 circuit. The carry from the second-level carry-lookahead selects which sum should be produced for the chunk.
+Thus, the time to compute the carry is overlapped with the time to compute the sum.</p>
+<h2>Putting the adder pieces together</h2>
+<p>The image below zooms in on an 8-bit chunk of the &times;3 multiplier, implementing an 8-bit adder.
+Eight input lines are at the top (along with some unrelated wires). Note that each
+input line splits with a signal going to the adder on the left and a signal going to the right.
+This is what causes the adder to multiply by 3: it adds the input and the input shifted one bit to the left, i.e. multiplied by two.
+The top part of the adder has eight circuits to produce the <em>propagate</em> and <em>generate</em> signals.
+These signals go into the 8-bit Kogge-Stone lookahead circuit. Although most of the adder consists of a circuit block repeated eight times, the
+Kogge-Stone circuitry appears chaotic. 
+This is because each bit of the Kogge-Stone circuit is different&mdash;higher bits are more complicated to compute than lower bits.</p>
+<p><a href="https://static.righto.com/images/pentium-mult3/block-poly-labeled.jpg"><img alt="One 8-bit block of the &times;3 circuit." class="hilite" height="323" src="https://static.righto.com/images/pentium-mult3/block-poly-labeled-w500.jpg" title="One 8-bit block of the &times;3 circuit." width="500" /></a><div class="cite">One 8-bit block of the &times;3 circuit.</div></p>
+<p>The lower half of the circuit block contains an 8-bit carry-select adder. This circuit produces two sums, with multiplexers selecting the correct sum
+based on the carry into the block.
+Note that the carry-select adder blocks are narrower than the other circuitry.<span id="fnref:cell"><a class="ref" href="#fn:cell">10</a></span>
+This makes room for a Kogge-Stone block on the left. The second level Kogge-Stone circuitry is split up; the 8-bit carry-lookahead circuitry has one bit
+implemented in each block of the adder, and produces the carry-in signal for that adder block.
+In other words, the image above includes 1/8 of the second-level Kogge-Stone circuit.
+Finally, eight driver circuits amplify the output bits before they are sent to the rest of the floating-point multiplier.</p>
+<p>The block diagram below shows the pieces are combined to form the &times;3 multiplier.
+The multiplier has eight 8-bit adder blocks (green boxes, corresponding to the image above).
+Each block computes eight bits of the total sum.
+Each block provides
+<em>P<sub>70</sub></em> and <em>G<sub>70</sub></em> signals to the second-level lookahead, which determines if each block receives a carry in.
+The key point to this architecture is that everything is computed in parallel, making the addition fast.</p>
+<p><a href="https://static.righto.com/images/pentium-mult3/overall-diagram.jpg"><img alt="A block diagram of the multiplier." class="hilite" height="312" src="https://static.righto.com/images/pentium-mult3/overall-diagram-w600.jpg" title="A block diagram of the multiplier." width="600" /></a><div class="cite">A block diagram of the multiplier.</div></p>
+<p>In the diagram above, the first 8-bit block is expanded to show its contents. The 8-bit lookahead circuit generates the <em>P</em> and <em>G</em> signals that determine the
+internal carry signals.
+The carry-select adder contains two 8-bit adders that use the carry lookahead values.
+As described earlier, one adder assumes that the block's carry-in is 1 and the second assumes the carry-in is 0. When the real carry in value is
+provided by the second-level lookahead circuit, the multiplexer selects the correct sum.</p>
+<p>The photo below shows how the complete multiplier is constructed from 8-bit blocks.
+The multiplier produces a 69-bit output; there are 5 "extra" bits on the left.
+Note that the second-level Kogge-Stone blocks are larger on the right than the left since the lookahead circuitry is more complex for higher-order bits.</p>
+<p><a href="https://static.righto.com/images/pentium-mult3/wide-view.jpg"><img alt="The full adder circuit. This is the same image as before, but hopefully it makes more sense at this point." class="hilite" height="65" src="https://static.righto.com/images/pentium-mult3/wide-view-w800.jpg" title="The full adder circuit. This is the same image as before, but hopefully it makes more sense at this point." width="800" /></a><div class="cite">The full adder circuit. This is the same image as before, but hopefully it makes more sense at this point.</div></p>
+<p>Going back to the full &times;3 circuit above, you can see that the 
+8 bits on the right have significantly simpler circuitry.
+Because there is no carry-in to this block, the carry-select circuitry can be omitted.
+The block's internal carries, generated by the Kogge-Stone lookahead circuitry, are added using exclusive-NOR gates.
+The diagram below shows the implementation of an XNOR gate, using inverters and a multiplexer.</p>
+<h2>The XNOR circuit</h2>
+<p>I'll now describe one of the multiplier's circuits at the transistor level, in particular an XNOR gate.
+It's interesting to look at XNOR because XNOR (like XOR) is a tricky gate to implement and different processors use very different approaches. 
+For instance, the Intel 386 implements XOR from AND-NOR gates (<a href="https://www.righto.com/2023/12/386-xor-circuits.html">details</a>) while the
+Z-80 uses pass transistors (<a href="https://www.righto.com/2013/09/understanding-z-80-processor-one-gate.html">details</a>).
+The Pentium, on the other hand, uses a multiplexer.</p>
+<p><a href="https://static.righto.com/images/pentium-mult3/xnor-diagram.jpg"><img alt="An exclusive-NOR gate with the components labeled. This is a focus-stacked image." class="hilite" height="271" src="https://static.righto.com/images/pentium-mult3/xnor-diagram-w500.jpg" title="An exclusive-NOR gate with the components labeled. This is a focus-stacked image." width="500" /></a><div class="cite">An exclusive-NOR gate with the components labeled. This is a focus-stacked image.</div></p>
+<p>The diagram above shows one of the XNOR gates in the adder's low bits.<span id="fnref:low-bits"><a class="ref" href="#fn:low-bits">11</a></span>
+The gate is constructed from four inverters and a pass-transistor multiplexer.
+Input B selects one of the multiplexer's two inputs: input A or input A inverted. The result is the XNOR function.
+(Inverter 1 buffers the input, inverter 5 buffers the output, and inverter 4 provides the complemented B signal to drive the multiplexer.)</p>
+<p>For the photo, I removed the top two metal layers from the chip, leaving the bottom metal layer, called M1. 
+The doped silicon regions are barely visible beneath the metal.
+When a polysilicon line crosses doped silicon, it forms the gate of a transistor.
+This CMOS circuit has NMOS transistors at the top and PMOS transistors at the bottom.
+Each inverter consists of two transistors, while the multiplexer consists of four transistors.</p>
+<h2>The BiCMOS output drivers</h2>
+<p>The outputs from the &times;3 circuit require high current.
+In particular, each signal from the &times;3 circuit can drive up to 22 terms in the floating-point multiplier.
+Moreover, the destination circuits
+can be a significant distance from the &times;3 circuit due to the size of the multiplier.
+Since the &times;3 signals are connected to many transistor gates through long wires, the capacitance is high, requiring high current to change the
+signals quickly.</p>
+<p>The Pentium is constructed with a somewhat unusual process called BiCMOS, which combines bipolar transistors and CMOS on the same chip.
+The Pentium extensively uses BiCMOS circuits since they reduced signal delays by up to 35%.
+Intel also used BiCMOS for the Pentium Pro, Pentium II, Pentium III, and Xeon processors.
+However, as chip voltages dropped, the benefit from bipolar transistors dropped too and BiCMOS was eventually abandoned.</p>
+<p>The schematic below shows a simplified BiCMOS driver that inverts its input.
+A 0 input turns on the upper inverter, providing current into the bipolar (NPN) transistor's base.
+This turns on the transistor, causing it to pull the output high strongly and rapidly.
+A 1 input, on the other hand, will stop the current flow through the NPN transistor's base, turning it off.
+At the same time, the lower inverter will pull the output low. (The NPN transistor can only pull the output high.)</p>
+<p>Note the asymmetrical construction of the inverters. Since the upper inverter must provide a large current into the NPN transistor's base, it is designed to produce a strong (high-current)
+positive output and a weak low output.
+The lower inverter, on the other hand, is responsible for pulling the output low. Thus, it is constructed to produce a strong low output, while the
+high output can be weak.</p>
+<p><a href="https://static.righto.com/images/pentium-mult3/bicmos-driver.jpg"><img alt="The basic circuit for a BiCMOS driver." class="hilite" height="150" src="https://static.righto.com/images/pentium-mult3/bicmos-driver-w200.jpg" title="The basic circuit for a BiCMOS driver." width="200" /></a><div class="cite">The basic circuit for a BiCMOS driver.</div></p>
+<p>The driver of the &times;3 circuit goes one step further: it uses a BiCMOS driver to drive a second BiCMOS driver.
+The motivation is that the high-current inverters have fairly large transistor gates, so they need to be driven with high current (but not as much as they produce, so there isn't an infinite regress).<span id="fnref:logical-effort"><a class="ref" href="#fn:logical-effort">12</a></span></p>
+<p>The schematic below shows the BiCMOS driver circuit that the &times;3 multiplier uses.
+Note the large, box-like appearance of the NPN transistors, very different from the regular MOS transistors.
+Each box contains two NPN transistors sharing collectors: a larger transistor on the left and a smaller one on the right.
+You might expect these transistors to work together, but the contiguous transistors are part of two
+separate circuits.
+Instead, the small NPN transistor to the left and the large NPN transistor to the right are part of the same circuit.</p>
+<p><a href="https://static.righto.com/images/pentium-mult3/driver-diagram.jpg"><img alt="One of the output driver circuits, showing the polysilicon and silicon." class="hilite" height="292" src="https://static.righto.com/images/pentium-mult3/driver-diagram-w800.jpg" title="One of the output driver circuits, showing the polysilicon and silicon." width="800" /></a><div class="cite">One of the output driver circuits, showing the polysilicon and silicon.</div></p>
+<p>The inverters are constructed as standard CMOS circuits with PMOS transistors to pull the output high and NMOS transistors to pull the output low.
+The inverters are carefully structured to provide asymmetrical current, making them more interesting than typical inverters.
+Two pullup transistors have a long gate, making these transistors unusually weak.
+Other parts of the inverters have multiple transistors in parallel, providing more current.
+Moreover, the inverters have unusual layouts, with the NMOS and PMOS transistors widely separated to make the layout more efficient.
+For more on BiCMOS in the Pentium, see my article on <a href="https://www.righto.com/2025/01/pentium-reverse-engineering-bicmos.html">interesting BiCMOS circuits in the Pentium</a>.</p>
+<h2>Conclusions</h2>
+<p>Hardware support for computer multiplication has a long history going back to the 1950s.<span id="fnref:history"><a class="ref" href="#fn:history">13</a></span>
+Early microprocessors, though, had very limited capabilities, so microprocessors such as the 6502 didn't have hardware support for multiplication;
+users had to implement multiplication in software through shifts and adds.
+As hardware advanced, processors provided multiplication instructions but they were still slow.
+For example, the Intel 8086 processor (1978) implemented multiplication in microcode, performing a slow shift-and-add loop internally.
+Processors became exponentially more powerful over time, as described by Moore's Law, allowing later processors to include dedicated multiplication hardware.
+The 386 processor (1985) included a <a href="https://bitsavers.trailing-edge.com/components/intel/80386/231746-001_Introduction_to_the_80386_Apr86.pdf#page=9">multiply unit</a>, but it was still slow, taking up to 41 clock cycles for a multiplication instruction.</p>
+<p>By the time of the Pentium (1993), microprocessors contained millions of transistors, opening up new possibilities for design.
+With a seemingly unlimited number of transistors, chip architects could look at complicated new approaches to squeeze more performance out of a system.
+This &times;3 multiplier contains roughly 9000 transistors, a bit more than an entire Z80 microprocessor (1976).
+Keep in mind that the &times;3 multiplier is a small part of the floating-point multiplier, which is part of the floating-point unit in the
+Pentium.
+Thus, this small piece of a feature is more complicated than an entire microprocessor from 17 years earlier, illustrating
+the incredible growth in processor complexity.</p>
+<p>I plan to write more about the implementation of the Pentium, so
+follow me on Bluesky (<a href="https://bsky.app/profile/righto.com">@righto.com</a>) or <a href="https://www.righto.com/feeds/posts/default">RSS</a> for updates. (I'm no longer on Twitter.)
+The <a href="https://www.righto.com/2024/08/pentium-navajo-fairchild-shiprock.html">Pentium Navajo rug</a> inspired me to examine the Pentium in more detail.</p>
+<h2>Footnotes and references</h2>
+<div class="footnote">
+<ol>
+<li id="fn:speed">
+<p>A floating-point multiplication on the Pentium takes three clock cycles, of which the multiplication circuitry is busy for two cycles.
+(See Agner Fog's <a href="https://www.agner.org/optimize/instruction_tables.pdf#page=164">optimization manual</a>.)
+In comparison, integer multiplication (<code>MUL</code>) is much slower, taking 11 cycles.
+The Nehalem microarchitecture (2008) reduced floating-point multiplication time to 1 cycle.&#160;<a class="footnote-backref" href="#fnref:speed" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+</li>
+<li id="fn:details">
+<p>I'll give a quick outline of the Pentium's floating-point multiplier as a preview.
+The multiplier is built from a tree of ten carry-save adders to sum the terms. Each carry-save adder is a 4:2 compression adder, taking
+four input bits and producing two output bits.
+The output from the carry-save adder is converted to the final result by an adder using Kogge-Stone lookahead and carry select.
+Multiplying two 64-bit numbers yields 128 bits, but the Pentium produces a 64-bit result. (There are actually a few more bits for rounding.)
+The low 64 bits can't simply be discarded because they could produce a carry into the preserved bits. Thus, the low 64 bits go into another
+Kogge-Stone lookahead circuit that doesn't produce a sum, but indicates if there is a carry.
+Since the datapath is 64 bits wide, but the product is 128 bits, there are many shift stages to move the bits to the right column.
+Moreover, the adders are somewhat wider than 64 bits as needed to hold the intermediate sums.&#160;<a class="footnote-backref" href="#fnref:details" title="Jump back to footnote 2 in the text">&#8617;</a></p>
+</li>
+<li id="fn:propagate">
+<p>The bits <code>1+1</code> will set <em>generate</em>, but should <em>propagate</em> be set too?
+It doesn't make a difference as far as the equations. This adder sets <em>propagate</em> for <code>1+1</code> but some
+other adders do not.
+The answer depends on if you use an inclusive-or or exclusive-or gate
+to produce the <em>propagate</em> signal.&#160;<a class="footnote-backref" href="#fnref:propagate" title="Jump back to footnote 3 in the text">&#8617;</a></p>
+</li>
+<li id="fn:carry">
+<p>The carry <em>C<sub>n</sub></em> at each bit position <em>n</em> can be computed from the <em>G</em> and <em>P</em> signals by considering the various cases:</p>
+<p><em>C<sub>1</sub> = G<sub>0</sub></em>: a carry into bit 1 occurs if a carry is generated from bit 0.
+<br><em>C<sub>2</sub> = G<sub>1</sub> + G<sub>0</sub>P<sub>1</sub></em>: A carry into bit 2 occurs if bit 1 generates a carry or bit 1 propagates a carry from bit 0.
+<br><em>C<sub>3</sub> = G<sub>2</sub> + G<sub>1</sub>P<sub>2</sub> + G<sub>0</sub>P<sub>1</sub>P<sub>2</sub></em>: A carry into bit 3 occurs if bit 2 generates a carry, or bit 2 propagates a carry generated from bit 1, or bits 2 and 1 propagate a carry generated from bit 0.
+<br><em>C<sub>4</sub> = G<sub>3</sub> + G<sub>2</sub>P<sub>3</sub> + G<sub>1</sub>P<sub>2</sub>P<sub>3</sub> + G<sub>0</sub>P<sub>1</sub>P<sub>2</sub>P<sub>3</sub></em>: A carry into bit 4 occurs if a carry is generated from bit 3, 2, 1, or 0 along with the necessary propagate signals.
+<br>And so on...</p>
+<p>Note that the formula gets more complicated for each bit position.
+The circuit complexity is approximately <em>O(N<sup>3</sup>)</em>, depending on how you measure it.
+Thus, implementing the carry lookahead formula directly becomes impractical as
+the number of bits gets large.
+The Kogge-Stone approach uses approximately <em>O(N log N)</em> transistors, but the wiring becomes excessive for large <em>N</em> since there are <em>N/2</em> wires of
+length <em>N/2</em>.
+Using a tree of Kogge-Stone circuits reduces the amount of wiring.&#160;<a class="footnote-backref" href="#fnref:carry" title="Jump back to footnote 4 in the text">&#8617;</a></p>
+</li>
+<li id="fn:bytes">
+<p>The 8-bit chunks in the circuitry have nothing to do with bytes.
+The motivation is that 8 bits is a reasonable size for a chunk, as well as providing a nice breakdown into 8 chunks of 8 bits.
+Other systems have used 4-bit chunks for carry lookahead (such as minicomputers based on the 74181 ALU chip).&#160;<a class="footnote-backref" href="#fnref:bytes" title="Jump back to footnote 5 in the text">&#8617;</a></p>
+</li>
+<li id="fn:pg">
+<p>I won't go into the mathematics of merging <em>P</em> and <em>G</em> signals; see, for example, <a href="https://bpb-us-w2.wpmucdn.com/sites.coecis.cornell.edu/dist/4/81/files/2019/06/4740_lecture21-adder-circuits.pdf#page=14">Adder Circuits</a> or
+<a href="https://personal.utdallas.edu/~ivor/ce6305/m4.pdf">Carry Lookahead Adders</a> for additional details.
+The important factor is that the carry merge operator is associative (actually a monoid),
+so the sub-ranges can be merged in any order. This flexibility is what allows different algorithms with
+different tradeoffs.&#160;<a class="footnote-backref" href="#fnref:pg" title="Jump back to footnote 6 in the text">&#8617;</a></p>
+</li>
+<li id="fn:parallel-prefix">
+<p>The idea behind a prefix adder is that we want to see if there is a carry out of bit 0, bits 0-1, bits 0-2, bits 0-3, 0-4, and so forth. These are all the prefixes of the word. Since the prefixes are computed in parallel,
+it's called a parallel prefix adder.&#160;<a class="footnote-backref" href="#fnref:parallel-prefix" title="Jump back to footnote 7 in the text">&#8617;</a></p>
+</li>
+<li id="fn:brent-kung">
+<p>The lookahead merging process can be implemented in many ways, including 
+<a href="https://en.wikipedia.org/wiki/Kogge%E2%80%93Stone_adder">Kogge-Stone</a>, <a href="https://en.wikipedia.org/wiki/Brent%E2%80%93Kung_adder">Brent-Kung</a>, and Ladner-Fischer, with different tradeoffs.
+For one example, the diagram below shows that Brent-Kung uses fewer "diamonds" but more layers. Thus, a Brent-Kung adder uses less circuitry but is slower.
+(You can follow each output upward to verify that the tree reaches the correct inputs.)</p>
+<p><a href="https://static.righto.com/images/pentium-mult3/brent-kung.png"><img alt="A diagram of an 8-bit Brent-Kung adder. Diagram by Robey Pointer, Wikimedia Commons." class="hilite" height="300" src="https://static.righto.com/images/pentium-mult3/brent-kung-w300.png" title="A diagram of an 8-bit Brent-Kung adder. Diagram by Robey Pointer, Wikimedia Commons." width="300" /></a><div class="cite">A diagram of an 8-bit Brent-Kung adder. Diagram by Robey Pointer, <a href="https://commons.wikimedia.org/wiki/File:Brent-kung-8-bit.png">Wikimedia Commons</a>.</div></p>
+<p><!-- -->&#160;<a class="footnote-backref" href="#fnref:brent-kung" title="Jump back to footnote 8 in the text">&#8617;</a></p>
+</li>
+<li id="fn:recursive">
+<p>The higher-level Kogge-Stone lookahead circuit uses the eight <em>P<sub>70</sub></em> and <em>G<sub>70</sub></em> signals from the eight lower-level lookahead circuits.
+Note that <em>P<sub>70</sub></em> and <em>G<sub>70</sub></em> indicate that an 8-bit chunk will propagate or generate a carry.
+The higher-level lookahead circuit treats 8-bit chunks as a unit, while the lower-level lookahead circuit treats 1-bit chunks as a unit.
+Thus, the higher-level and lower-level lookahead circuits are essentially identical, acting on 8-bit values.&#160;<a class="footnote-backref" href="#fnref:recursive" title="Jump back to footnote 9 in the text">&#8617;</a></p>
+</li>
+<li id="fn:cell">
+<p>The floating-point unit is built from fixed-width columns, one for each bit. Each column is 38.5 µm wide, so the circuitry in each column must
+be designed to fit that width. For the most part, the same circuitry is repeated for each of the 64 (or so) bits.
+The carry-select adder is unusual since it doesn't follow the column width of the rest of the floating-point unit. Instead, it crams 8 circuits
+into the width of 6.5 regular circuits. This leaves room for one Kogge-Stone circuitry block.&#160;<a class="footnote-backref" href="#fnref:cell" title="Jump back to footnote 10 in the text">&#8617;</a></p>
+</li>
+<li id="fn:low-bits">
+<p>Because there is no carry-in to the lowest 8-bit block of the &times;3 circuit, the carry-select circuit is not needed. Instead, each output bit
+can be computed using an XNOR gate.&#160;<a class="footnote-backref" href="#fnref:low-bits" title="Jump back to footnote 11 in the text">&#8617;</a></p>
+</li>
+<li id="fn:logical-effort">
+<p>The principle of <a href="https://en.wikipedia.org/wiki/Logical_effort">Logical Effort</a> explains that for best performance, you don't want to jump from a
+small signal to a high-current signal in one step.
+Instead, a small signal produces a medium signal, which produces a larger signal.
+By using multiple stages of circuitry, the overall delay can be reduced.&#160;<a class="footnote-backref" href="#fnref:logical-effort" title="Jump back to footnote 12 in the text">&#8617;</a></p>
+</li>
+<li id="fn:history">
+<p>The <a href="https://www.ece.ucdavis.edu/~bbaas/281/papers/Booth.1951.pdf">Booth multiplication technique</a> was described in 1951, while
+parallel multipliers were proposed in the mid-1960s by <a href="https://doi.org/10.1109/PGEC.1964.263830">Wallace</a> and <a href="https://ieeemilestones.ethw.org/w/images/8/82/Some_schemes_for_parallel_multipliers_%28reprint%29.pdf">Dadda</a>.
+Jumping ahead to higher-radix multiplication,
+a 1992 paper <a href="https://doi.org/10.1109/MWSCAS.1992.271307">A Fast Hybrid Multiplier Combining Booth and Wallace/Dadda Algorithms</a> from Motorola discusses radix-4 and radix-8 algorithms for a 32-bit multiplier, but decides that computing the &times;3 multiple makes radix-8 impractical.
+IBM discussed a 32-bit multiplier in 1997: <a href="https://doi.org/10.1109/ARITH.1997.614873">A Radix-8 CMOS S/390 Multiplier</a>.
+Bewick's 1994 PhD thesis <a href="http://i.stanford.edu/pub/cstr/reports/csl/tr/94/617/CSL-TR-94-617.pdf">Fast Multiplication: Algorithms and Implementation</a>
+describes numerous algorithms.</p>
+<p>For adders,
+<a href="https://pdfs.semanticscholar.org/9da8/de2627aa0d4669995c430210c6ea9844ddf1.pdf">Two-Operand Addition</a> is an interesting presentation on different
+approaches.
+<a href="https://pages.hmc.edu/harris/cmosvlsi/4e/cmosvlsidesign_4e_ch11.pdf">CMOS VLSI Design</a> has a good discussion of addition and various lookahead networks.
+It summarizes the tradeoffs: "Brent-Kung has too many logic levels. Sklansky has too much fanout. And Kogge-Stone has too many
+wires. Between these three extremes, the Han-Carlson, Ladner-Fischer, and Knowles
+trees fill out the design space with different compromises between number of stages,
+fanout, and wire count."
+The approach used in the Pentium's &times;3 multiplier is sometimes called a sparse-tree adder.&#160;<a class="footnote-backref" href="#fnref:history" title="Jump back to footnote 13 in the text">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

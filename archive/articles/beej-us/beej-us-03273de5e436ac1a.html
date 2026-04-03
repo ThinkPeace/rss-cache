@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Object Pools | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Object Pools</h1>
+        <div class="meta">Beej&#x27;s Bit Bucket 2012-04-01T00:00:00Z</div>
+        <div class="links">
+          <a href="http://beej.us/blog/data/object-pool/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/beej-us/beej-us-03273de5e436ac1a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Featuring goats!</div>
+        <div class="content">
+          <html>
+  <body><p>2012-04-01</p><h1>Object Pools</h1><p>Your browser doesn't support HTML canvas. Get a modern browser such
+as <a href="http://www.google.com/chrome/">Chrome</a>,
+<a href="http://firefox.com/">Firefox</a>, <a href="http://www.opera.com/">Opera</a>, or
+<a href="http://windows.microsoft.com/en-us/internet-explorer/products/ie/home">IE9</a>.
+And then, only then, will you be able to see this demo. Sorry!</p><p>Let's take a quick dip in the object pool!</p><p>Wait, wait! Before you issue the command to fire, it is not customary to allow the condemned a few last words?</p><p>First a bit of background: there's this thing called <a href="http://en.wikipedia.org/wiki/Garbage_collection_(computer_science)">garbage
+collection</a>
+that certain languages and libraries use to handle automatic memory
+management. This way if you allocate a new object, you don't have to
+worry about deallocating it—the garbage collector does it for you at
+some point in the future when it's sure the object is no longer
+"reachable" (i.e. referenceable or usable in any way).</p><p>Modern garbage collectors are pretty freakin' awesome, but from time to time, they might decide to collect the garbage when it's not convenient, and collecting the garbage might introduce delays. This can manifest when you are creating and discarding a large number of objects very quickly. Anecdotal evidence around the web suggests this might sometimes occur when doing 3D rendering and allocating large numbers of temporary vector objects per frame; sometimes the framerate hitches while the garbage collector tries to clean up the mess.</p><p><graphic src="images/goatpool.png" alt="Goat Pool"/></p><p>The general solution is to stop allocating temporary objects, and reuse existing ones. You can keep a "pool" of unused instances of objects on stand-by, and just pull objects out of it when they are needed. This way the garbage collector has a lot less work to do, since nothing is every collected; every object is either in-use, or stored idle in the object pool.</p><blockquote><p/><graphic>Here Be Dragons. Remember when I said your garbage collector was freakin' awesome? It is. You should trust it and let it do its job. In fact, you could actually negatively impact performance by trying to out-perform it using an object pool.</graphic><p>But if you find sometime that you're experiencing garbage collection delays (which, mind you, look exactly like non-garbage collection delays), and that you're creating huge numbers of short-lived objects in a big hurry, you might consider switching to something like an object pool to see if that helps.</p></blockquote><p>For this object pool, I didn't allocate any goats in advance. If a goat
+is needed, the object pool is asked for one with a call to <pre>alloc()</pre>.
+The object pool first looks to see if there are any goats in the free
+list, and if so, removes it from the free list and returns it. If there
+are no goats in the free list, it simply allocates one and returns it.</p><p>The opposite is <pre>free()</pre>. When the goat has finshed its job of walking
+across the screen, it is passed back to the object pool with a call to
+<pre>free()</pre>. The object pool adds it to the free list where it will remain
+until called upon again.</p><p>So far, the memory allocator has been called a number of times in
+<pre>alloc()</pre>, but each goat is still referenced at all times. If in use,
+the canvas renderer holds a reference to that goat.  If not in use, the
+object pool holds a reference to it. So the goat will never be garbage
+collected.</p><blockquote><p>Playtime: Decrease the spawn delay to 0.5 seconds, and let a bunch of goats spawn and run. Notice that the number of allocated goats quickly increases as more are brought into existence. But then notice how the number stabilizes as the pool grows large enough for our needs.</p><p>Increase the delay to 1.0 seconds, and you'll see how we begin using fewer goats. The rest remain on standby in the pool in case we need them.</p><p>After a bit, set it back to 0.5. Less spawn delay means more goats, and they are again drawn from the pool; note that the total number allocated remains the same.</p><p>I've clamped the spawn delay so you can't go too nuts with it. How low can you make it until your browser starts to choke? Because, honestly, can one ever have too many goats?</p><p>No. The answer to that question is "no".</p></blockquote><p>Lastly, you might notice a button in the lower right of the app titled "Collect". This button nukes the free list in the object pool. This can be useful in certain cases where the pool was needlessly large. Keep in mind, though, that there are still goats in existence (used by the canvas renderer). The renderer just returns these to the pool, which adds them back into the freelist as if nothing had ever happened.</p><h2>Implementation</h2><p>For the object pool, we need to be able to add objects to the pool and
+remove them from it.  Plenty of data structures could be used for this,
+and the exact one you choose might be language-dependent.  In this case,
+in JavaScript, I used an <pre>Array</pre> treated like a stack (using the
+<pre>push()</pre> and <pre>pop()</pre> methods).</p><p>What kinds of things can be stored in the pool? In this implementation, you tell the object pool what class of object it will be composed of by passing the constructor to the pool.</p><pre><pre>// constructor of Goat objects
+function Goat() {
+    this.init();
+}
+
+// Goat object init function:
+Goat.prototype.init = function(happyLevel) {
+    this.happyLevel = happyLevel;
+}
+
+// make a new object pool of Goats:
+var goatPool = new ObjectPool(Goat);
+
+var goat1 = goatPool.alloc();
+var goat2 = goatPool.alloc();
+var goat3 = goatPool.alloc();
+
+goat1.init(10); // goat happy level 10
+goat2.init(20); // goat happy level 20
+goat3.init(30); // goat happy level 30
+
+goat2.init(null); // hide data from future allocators
+goatPool.free(goat2); // return goat2 to the pool
+</pre></pre>
+<h2>Misc Notes</h2><p>Some <pre>Array</pre> methods create new arrays, so it's important to steer clear
+of those. You don't want to be inadvertently creating temporary objects
+in your attempt to avoid creating temporary objects!</p><p>Another important safety tip is that you should zero out your object when it is returned to the pool. The object might have important information in it, like the goat's bank account number, and it would be bad if an evil goatherd attacker grabbed that goat from the object pool and read its secret information.</p><h2>Code</h2><ul><li><a href="http://beej.us/us.beej/us.beej.objectpool.js"/>—object pool source<pre>us.beej.objectpool.js</pre></li><li><a href="http://beej.us/us.beej/us.beej.js"/>—base JS file for us.beej (include this before<pre>us.beej.js</pre><pre>us.beej.objectpool.js</pre>)</li><li><a href="http://beej.us/goatrace.js"/>—the JS driving this page<pre>goatrace.js</pre></li></ul></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

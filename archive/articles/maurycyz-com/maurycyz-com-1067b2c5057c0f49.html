@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Life TV: Video with 2 bits to spare | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Life TV: Video with 2 bits to spare</h1>
+        <div class="meta">Maurycy&#x27;s Blog 2026-03-19T00:00:00Z</div>
+        <div class="links">
+          <a href="https://maurycyz.com/projects/lifetv/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/maurycyz-com/maurycyz-com-1067b2c5057c0f49.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The Sony FD-30A has a very weird display: On the surface, it looks like a normal CRT, except that it&#x27;s impossibly thin: the whole device is just under 4 cm thick. To do this, the tube is mounted sideways, and the phosphor is viewed from the back. Unfortunately, this rather unique display is completely useless: There are no analog TV stations on my continent…</div>
+        <div class="content">
+          <!-- mksite: start of content -->
+<p>
+
+The Sony FD-30A has a very weird display:
+</p><p>
+<img alt="Photograph of a pocket TV." src=/projects/lifetv/tv.jpg>
+</p><p>
+On the surface, it looks like a normal CRT, except that it's impossibly thin:
+the whole device is just under 4 cm thick.
+To do this, the tube is mounted sideways, and the phosphor is viewed from the back.
+</p><p>
+<img alt="Diagram of the CRT in said TV" src=/projects/lifetv/crt.png>
+</p><p>
+Unfortunately, this rather unique display is completely useless:
+There are no analog TV stations on my continent...
+at least not with that attitude.
+<!-- snip -->
+</p>
+<p>
+<em>To get started, I grabbed my favorite 8-bit microcontroller</em>, the AVR128DA28.
+(soon to be unaffordable due to its whooping 16k of onboard RAM)
+</p><p>
+The CPU has a maximum clock frequency of 24 MHz, but everything else maxes out at 12 MHz.
+Because an IO pin can only be toggled on a clock edge, the maximum output frequency is 6 MHz.
+</p><p>
+That's... not great.
+The lowest my TV can tune is 45 MHz.
+However, the micro&shy;controller's output is a square wave,
+which contain frequency components at odd multiples of the nominal frequency.
+</p><p>
+These harmonics go quite far up the spectrum:
+a 6 MHz square wave can easily be picked up by a receiver tuned to 198 MHz (33rd multiple) several meters away.
+</p><p>
+<em>Because of this, the microcontroller can create a signal in the (VHF) television band by toggling a pin</em>.
+Video signals are inverted, so the output should be enabled to draw black, and disabled to draw white.
+</p><p>
+... except that doesn't quite work:
+</p><p>
+TVs need darker-then-black synchronization pulses to know when to begin each line and frame.
+The amplitude of these pulses must be higher then anything in the image so
+&mdash; even for a black and white image &mdash;
+the signal needs to have at least three levels.
+</p><p>
+The easiest way to do this is with two resistors:
+</p><p>
+<img src=/projects/lifetv/sch.png alt="Schematic showing a 100 ohm resistor between pin PA1 and the antenna, and a 50 ohm resistor between PA2 and the antenna.">
+</p><p>
+<center>Code: <a href=/projects/lifetv/tv.tar.gz>source</a>, <a href=/projects/lifetv/tv.elf>binary</a></center>
+</p><p>
+By changing which pins have the 6 MHz square wave and which ones are grounded, the MCU can produce 4 different RF powers:
+</p>
+<table>
+<tr><th>PA1, PA2</th><th>Output</th><th>Color</th></tr>
+<tr><td>RF, RF</td><td>1 VCC</td><td>Sync pulse</td></tr>
+<tr><td>GND, RF</td><td>2/3 VCC</td><td>Black</td></tr>
+<tr><td>RF, GND</td><td>1/3 VCC</td><td>Gray</td></tr>
+<tr><td>GND, GND</td><td>0</td><td>White</td></tr>
+</table>
+<p>
+</p><p>
+<em>Because analog TVs don't have any storage</em>, the video signal has gaps during which the electron beam returns to the top of the CRT.
+During these gaps, the CPU doesn't have any transmitting to do, so I decided to run Conway's game of life:
+</p><p>
+<video width=100% controls>
+  [Video. See web or files directory: life.mp4]
+  <source src=/projects/lifetv/life.mp4 type=video/mp4 />
+</video>
+</p><p>
+<em>It isn't a game in the conventional sense.</em>
+It has a grid of square cells which can have one of two states: "dead" or "alive".
+The game progresses by applying three rules to the grid:
+</p><p>
+If a living cell dies if it has fewer than 2, or more then 3, living neighbors. (includes diagonals)
+If a dead cell has exactly 3 neighbors, it comes to life.
+</p><p>
+Over time, these rules give rise to complex behavior: some patterns don't do anything, but others oscillate, move or even replicate.
+Simulating a random starting grid makes a good "screensaver", but some interactivity would be nice.
+To fix this, I added a small keypad which can be used to draw patterns:
+</p><p>
+<video width=100% controls>
+  [Video. See web or files directory: glider.mp4]
+  <source src=/projects/lifetv/glider.mp4 type=video/mp4 />
+</video>
+</p><p>
+<em>The image is surprisingly good for how hacky the transmitter is</em>, and can be received ten meters away &mdash;
+a testament as to just how noisy digital electronics are.
+</p><p>
+The switching frequency doesn't matter: what's important is the signal's rise time.
+Any microcontroller project with long wiring will be spewing junk in the hundreds of MHz or even low GHz.
+</p><p>
+The only difference is that my circuit carefully controls the interference to send information...
+but with a specially designed receiver, it's possible to snoop in on almost any circuit.
+</p><p>
+<h1><em>Important considerations:</em></h1>
+</p><p>
+<em>The old TV bands aren't empty</em>:
+The circuit is unlikely to cause any interference due to its insignificant output power, but other transmitters can interfere with it.
+Depending on your local conditions, you might not be able to get it working at all.
+</p><p>
+<em>My TV hasn't been adjusted in decades,</em> and microcontrollers don't have super accurate clocks.
+You might have to adjust the timings in the code.
+</p><p>
+<em>... it also has continuous tuning</em>:
+If your doesn't (tuning dial clicks), you will have to mess around with the OSCHFTUNE register to make it work.
+A spectrum analyzer would be very helpful.
+</p>
+<h1><em>Links:</em></h1>
+<p></p>
+<link-box>
+<ul>
+<li><a href=https://slyka.net/blog/2026/tinyvision/>https://slyka.net/blog/2026/tinyvision/</a></li>
+<li><a href=https://ww1.microchip.com/downloads/en/DeviceDoc/AVR128DA28-32-48-64-DataSheet-DS40002183B.pdf>AVR128DA28 Datasheet</a>
+</li>
+<li>
+<a href=https://lcamtuf.substack.com/p/square-waves-or-non-elephant-biology>https://lcamtuf.substack.com/p/square-waves-or-non-elephant-biology</a>
+</li><br>
+<li><a href=/projects/lifetv/tv.tar.gz>tv.tar.gz</a>: Firmware</li>
+<li><a href=/projects/lifetv/tv.elf>tv.elf</a>: ... just the binary</li>
+</ul>
+</link-box>
+</p>
+<!-- mksite: end of content -->
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

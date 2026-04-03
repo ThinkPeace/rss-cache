@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to License and Distribute a Private Node Module | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How to License and Distribute a Private Node Module</h1>
+        <div class="meta">Keygen Blog 2021-08-04T05:00:00Z</div>
+        <div class="links">
+          <a href="https://keygen.sh/blog/how-to-license-and-distribute-commercial-node-modules/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/keygen-sh/keygen-sh-91d793a80d2932ec.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Learn how to license and distribute private Node.js packages using Keygen&#x27;s software licensing and distribution API.</div>
+        <div class="content">
+          <html>
+  <body><h1>How to License and Distribute a Private Node Module</h1><p>Wednesday, August 4th 2021</p><p>This blog post is outdated. We now offer an official npm engine for distributing private
+packages. Please see <a href="https://keygen.sh/docs/api/engines/#engines-npm">the docs</a> to get started. We're
+leaving this blog post up for posterity, because it may still be helpful for those wanting
+to use an S3-compatible service for distributing packages.</p><p>Last month, we quietly launched "version 2" of our distribution API. While version 1 will
+continue to see maintenance, we made the decision to build a better version from the ground
+up — one that is <a href="https://keygen.sh/docs/api/releases/">fully integrated into our flagship software licensing API</a>.
+This has been a goal of ours since, really, early 2018 when we first launched Keygen Dist. We're
+excited to get this new version into the hands of our customers!</p><p>Over the next few months, we'll be showcasing how to license and distribute various
+types of commercial software using our API, including Node modules, PHP packages,
+RubyGems, cross-platform <a href="https://keygen.sh/blog/how-to-license-and-distribute-an-electron-app/">Electron apps</a>,
+and Docker images.</p><p>Today, we'll start with distributing a private npm package.</p><p>Have you ever built an awesome set of React components, or a slick Tailwind theme, and wondered
+how you could sell it? Or perhaps you maintain an open source Node module and you want to
+dual-license it to businesses and enterprises, à la <a href="https://sidekiq.org/">Sidekiq</a>?</p><p>Well, today we're going to cover how to license and distribute a private Node module that can be installed via npm through a private package registry, Keygen.</p><h2>Creating a private module</h2><p>The module that we'll be creating today will be a simple <pre>@demo/hello-world</pre> package. Using
+npm package scopes, e.g. <pre>@scope/package</pre>, we'll be able to configure npm to use a
+private registry for specific packages under that scope.</p><p>To get things kicked off, let's create a new directory for our module:</p><pre><pre>mkdir hello-worldcd hello-world</pre></pre>
+<p>Then we'll create a new <pre>package.json</pre> for our private module:</p><pre><pre>touch package.json</pre></pre>
+<p>And we'll populate it with the following JSON:</p><pre><pre>{  "private": true,  "name": "@demo/hello-world",  "version": "1.0.0",  "main": "index.js",  "files": []}</pre></pre>
+<pre>@demo</pre>. We'll get into this more a bit later on,
+    but this is very important. Without that scope, npm will attempt to install our module
+    from <pre>registry.npmjs.org</pre>, instead of installing from our private registry.
+  
+<p>Next, let's create our module's <pre>index.js</pre> file:</p><pre><pre>touch index.js</pre></pre>
+<p>Finally, we'll add our package's logic:</p><pre><pre>module.exports = () =&gt; 'hello world'</pre></pre>
+<h2>Publishing a private module</h2><p>We'll be using our <pre>demo</pre> Keygen account and product, but feel free to pass in your own identifiers
+if you're following along. You'll also need to <a href="https://app.keygen.sh/tokens/product/new">generate a secret product token</a>
+in order to have permission to create and upload release artifacts.</p><h3>Packaging the module</h3><p>The first step in publishing our Node module is to <pre>pack</pre> it up into a gzipped tarball, the
+format that npm expects from a registry. Let's go ahead and do that:</p><pre><pre>mkdir distnpm pack --pack-destination dist</pre></pre>
+<p>This should create a new tarball <pre>dist/demo-hello-world-1.0.0.tgz</pre>. If not, you may need to
+upgrade npm to v7. At time of writing, I'm on Node v16.6.1, npm v7.20.3.</p><h3>Publishing the module</h3><p>Next, let's publish our tarball. We'll create a new release using <pre>curl</pre> with the filename <pre>@demo/hello-world/1.0.0.tgz</pre>,
+which is again, what npm expects when requesting a specific version tarball from a registry:</p><p>(If you're not a fan of <pre>curl</pre>, we'll link to a GitHub repo at the bottom of this article
+that codifies all these steps, written in Node.)</p><pre><pre>curl -v -X PUT 'https://api.keygen.sh/v1/accounts/demo/releases' \  -u token:prod-1d2dedc2b12a376cfc5ee0622e9c0803ef1755d29baff43e8a8b0e790413f645v3 \  -H 'content-type: application/json' \  -d '{        "data": {          "type": "release",          "attributes": {            "status": "PUBLISHED",            "channel": "stable",            "version": "1.0.0"          },          "relationships": {            "product": {              "data": {                "type": "product",                "id": "855ef427-6f68-4153-ab88-e63c631014c3"              }            }          }        }      }'# =&gt; {#      "data": {#        "id": "5b4c27ab-8b1e-4257-b056-1db82a4ce8cf",#        "type": "releases",#        ...#      }#    }</pre></pre>
+<p>We'll want to note our new release's ID so that we can create and upload our first artifact: our
+packed <pre>demo-hello-world-1.0.0.tgz</pre> tarball:</p><pre><pre>curl -v -X POST 'https://api.keygen.sh/v1/accounts/demo/artifacts' \  -u token:prod-1d2dedc2b12a376cfc5ee0622e9c0803ef1755d29baff43e8a8b0e790413f645v3 \  -H 'content-type: application/json' \  -d '{        "data": {          "type": "artifact",          "attributes": {            "filename": "@demo/hello-world/1.0.0.tgz",            "filetype": "tgz",            "platform": "npm"          },          "relationships": {            "release": {              "data": {                "type": "release",                "id": "5b4c27ab-8b1e-4257-b056-1db82a4ce8cf"              }            }          }        }      }'# =&gt; {#      "data": {#        "id": "9053969d-7615-417b-887b-342ef143b926",#        "type": "artifacts",#        ...#        "links": {#          "redirect": "https://bucket.s3.us-east-2.amazonaws.com/artifacts/%40demo/hello-world/1.0.0.tgz...",#        }#      }#    }</pre></pre>
+<p>Next, follow the redirect to upload the file:</p><pre><pre>curl -vL -X PUT 'https://bucket.s3.us-east-2.amazonaws.com/artifacts/%40demo/hello-world/1.0.0.tgz...'  -H 'content-type: application/tar+gzip' \  -T dist/demo-hello-world-1.0.0.tgz</pre></pre>
+<p>Given that succeeded, we've now uploaded a tarball of our module! But we still need to publish a manifest so that npm can know the available versions of our module.</p><h2>Publishing an npm manifest</h2><p>In order for npm to be able to use our module, we need to define a manifest that npm
+can use to determine the available versions of our module. A manifest is simply a
+JSON file, kind of similar to <pre>package.json</pre>.</p><p>An abbreviated manifest looks like this:</p><pre><pre>{  "name": "@demo/hello-world",  "dist-tags": {    "latest": "1.0.0"  },  "versions": {    "1.0.0": {      "dist": {        "tarball": "https://api.keygen.sh/v1/accounts/demo/artifacts/@demo/hello-world/1.0.0.tgz"      }    }  }}</pre></pre>
+<p>The manifest can include additional information, such as an <pre>integrity</pre> digest for each version,
+<a href="https://github.com/npm/registry/blob/master/docs/responses/package-metadata.md">among other metadata properties</a>.
+But this is the bare-minimum metadata needed for npm to be able to install a private module.</p><p>Let's go ahead and create our manifest release:</p><pre><pre>curl -v -X PUT 'https://api.keygen.sh/v1/accounts/demo/releases' \  -u prod-1d2dedc2b12a376cfc5ee0622e9c0803ef1755d29baff43e8a8b0e790413f645v3: \  -H 'content-type: application/json' \  -d '{        "data": {          "type": "release",          "attributes": {            "status": "PUBLISHED",            "channel": "stable",            "version": "1.0.0"          },          "relationships": {            "product": {              "data": {                "type": "product",                "id": "855ef427-6f68-4153-ab88-e63c631014c3"              }            }          }        }      }'# =&gt; {#      "data": {#        "id": "c07c9f7c-37f1-4401-96c7-1c6e4cde2705",#        "type": "releases",#        ...#      }#    }</pre></pre>
+<p>Once we've done that, we'll want to again note our new release's ID, and then create and upload an artifact for our manifest JSON:</p><pre><pre>curl -v -X POST 'https://api.keygen.sh/v1/accounts/demo/artifacts' \  -u token:prod-1d2dedc2b12a376cfc5ee0622e9c0803ef1755d29baff43e8a8b0e790413f645v3 \  -H 'content-type: application/json' \  -d '{        "data": {          "type": "artifact",          "attributes": {            "filename": "@demo/hello-world",            "filetype": "json",            "platform": "npm",          },          "relationships": {            "release": {              "data": {                "type": "release",                "id": "c07c9f7c-37f1-4401-96c7-1c6e4cde2705"              }            }          }        }      }'# =&gt; {#      "data": {#        "id": "ea27199f-2aa7-4851-a78c-e3a4346d3977",#        "type": "artifacts",#        ...#        "links": {#          "redirect": "https://bucket.s3.us-east-2.amazonaws.com/artifacts/%40demo/hello-world...",#        }#      }#    }</pre></pre>
+<p>Lastly, you'll want to upload the artifact payload:</p><pre><pre>curl -vL -X PUT 'https://bucket.s3.us-east-2.amazonaws.com/artifacts/%40demo/hello-world...'  -H 'content-type: application/json' \  -d '{        "name": "@demo/hello-world",        "dist-tags": {          "latest": "1.0.0"        },        "versions": {          "1.0.0": {            "dist": {              "tarball": "https://api.keygen.sh/v1/accounts/demo/artifacts/@demo/hello-world/1.0.0.tgz"            }          }        }      }'</pre></pre>
+<p>Simple as that — we've successfully uploaded the first tarball of our module, and we
+have a manifest available for npm to read. To make things even easier next time, we
+could use <a href="https://keygen.sh/docs/cli/">Keygen's CLI</a> to publish releases and to upload artifacts,
+or <a href="https://github.com/keygen-sh/example-private-npm-package/blob/master/scripts/publish.js">we could use Node to script everything</a>
+as part of our build or release process.</p><p>So, how do we use it?</p><h2>Using a private registry</h2><p>In order for npm to install our private module, we need to tell it about our
+registry. For our <pre>demo</pre> account, we can add a registry with the following
+configuration:</p><pre><pre>npm config set @demo:registry \  'https://api.keygen.sh/v1/accounts/demo/artifacts/'</pre></pre>
+<p>This will configure npm to install all packages with the <pre>@demo</pre> scope from
+our private artifact registry. Pretty cool, huh?</p><h2>Installing our module</h2><p>Let's try it out by installing our npm package! You can install it like any other
+npm package — just remember the <pre>@demo</pre> package scope:</p><pre><pre>npm install -g @demo/hello-world# =&gt; npm ERR! code E401# =&gt; npm ERR! Unable to authenticate, your authentication#             token seems to be invalid.</pre></pre>
+<p>But… that didn't work, did it? Well, that's good! Our distribution API only
+allows licensed users to access release artifacts. So, we'll need to <a href="https://app.keygen.sh/licenses/new">create
+a new license</a> for the product and then
+create <a href="https://app.keygen.sh/tokens/activation/new">a license token</a> for
+that license. Alternatively, you can use a license key here, given <a href="https://keygen.sh/docs/api/authentication/">license key
+authentication</a> is enabled on the policy.</p><p>A license token will look something like this:</p><pre><pre>activ-b04db8523196a234f52748ef61cba077v3</pre></pre><p><a href="https://keygen.sh/docs/api/machines/#machines-create">activate machines for the specific license</a>.</p><p>To resolve the authentication issue, let's also configure npm to use our license's license token when accessing our private npm registry:</p><pre><pre>npm config set '//api.keygen.sh/v1/accounts/demo/artifacts/:_authToken' \  'activ-b04db8523196a234f52748ef61cba077v3'</pre></pre>
+<p>The syntax is a bit … odd, but that's how you configure npm to use an API token for authentication. Let's give installation another try:</p><pre><pre>npm install -g @demo/hello-world# =&gt; + @demo/<a href="https://keygen.sh/cdn-cgi/l/email-protection">[email protected]</a># =&gt; added 1 package in 0.413s</pre></pre>
+<p>Eureka! We've successfully published our Node module to Keygen's distribution API, and
+then we configured npm to use Keygen as a private npm registry for packages scoped under
+the <pre>@demo</pre> package scope. Finally, we masqueraded as a licensed user and installed our
+package using a license token.</p><h2>Publishing updates</h2><p>Publishing updates for the package is as simple as creating a new release, uploading the new tarball artifact, and then updating the manifest JSON to include the new version.</p><p>One thing to note —</p><p>When updating the manifest, we'll want to make sure that our changes are additive so
+that we retain a correct <pre>versions</pre> history — we don't want to overwrite the manifest
+with a single version every time, otherwise npm won't be able to install previous
+versions, breaking builds for any licensed users not on latest.</p><p>For example, updating the manifest to include version <pre>2.0.0</pre> of our module should also
+include version <pre>1.0.0</pre>. We'll also want to tag <pre>2.0.0</pre> as latest:</p><pre><pre>curl -vL -X PUT 'https://bucket.s3.us-east-2.amazonaws.com/artifacts/%40demo/hello-world...'  -H 'content-type: application/json' \  -d '{        "name": "@demo/hello-world",        "dist-tags": {          "latest": "2.0.0"        },        "versions": {          "2.0.0": {            "dist": {              "tarball": "https://api.keygen.sh/v1/accounts/demo/artifacts/@demo/hello-world/2.0.0.tgz"            }          },          "1.0.0": {            "dist": {              "tarball": "https://api.keygen.sh/v1/accounts/demo/artifacts/@demo/hello-world/1.0.0.tgz"            }          }        }      }'</pre></pre>
+<h2>In conclusion</h2><p>I hope you enjoyed the read. It look quite a bit of reverse-engineering of the npm API to figure out how all of this works. :grin: I hadn't ever come across an article on how to distribute a private npm package using static files and no database, so I hope this was helpful to some folks!</p><p>Although we're using Keygen to distribute our private npm package, a similar approach can be used to host a private registry on AWS S3 or similar. All you need to do is host a collection of static tarballs and a JSON manifest pointing to those tarballs.</p><p>If you're interested in a "codified" publishing workflow, <a href="https://github.com/keygen-sh/example-private-npm-package">we've set up a Node.js
+repo on our GitHub</a> with
+a codified example. Check it out if that sounds interesting!</p><p>Some other things to explore next:</p><ul><li>Add entitlement constraints to specific releases. For example, you could attach an
+<pre>INSTALL_V2</pre>entitlement constraint to v2, ensuring that only customers who "upgraded" their license can access v2 (while still allowing them to access v1.)</li><li>Add additional licensing logic into your module, such as for example, <a href="https://keygen.sh/docs/api/machines/#machines-create">device activation</a>, where you can set an upper limit on how many unique devices, or running instances of your module, can be used at a given time.</li><li>Use a CI/CD pipeline, such as GitHub actions, to automate publishing new versions
+from a <pre>master</pre>branch.</li></ul><p>Until next time.</p><p>
+  If you find any errors in my code, or if you can think of ways to improve things, <a href="https://x.com/_m27e">ping me via Twitter</a>.
+</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

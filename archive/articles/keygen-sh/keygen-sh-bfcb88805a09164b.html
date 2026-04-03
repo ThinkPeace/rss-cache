@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to Implement TOTP 2FA in Rails using ROTP | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How to Implement TOTP 2FA in Rails using ROTP</h1>
+        <div class="meta">Keygen Blog 2021-10-04T05:00:00Z</div>
+        <div class="links">
+          <a href="https://keygen.sh/blog/how-to-implement-totp-2fa-in-rails-using-rotp/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/keygen-sh/keygen-sh-bfcb88805a09164b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Learn how to implement OTP second factor authentication in a Ruby on Rails app using the ROTP gem.</div>
+        <div class="content">
+          <html>
+  <body><h1>How to Implement TOTP 2FA in Rails using ROTP</h1><p>Monday, October 4th 2021</p><p>Today, we're going to expand upon the work we did for <a href="https://keygen.sh/blog/how-to-implement-api-key-authentication-in-rails-without-devise/">implementing API key authentication in Rails</a>
+and add two-factor authentication into our app's authentication flow. We're going to cover how to
+implement a flexible second factor model, which can be extended to support other types of second
+factors such as backup codes as well as U2F hardware keys (which we'll cover later in a follow
+up post.)</p><p>But first, an important note — <a href="https://blog.cmpxchg8b.com/2020/07/you-dont-need-sms-2fa.html">friends don't let friends use SMS 2FA.</a></p><p>Thank you for coming to my TED talk.</p><h2>Reviewing our current authentication flow</h2><p>In the <a href="https://keygen.sh/blog/how-to-implement-api-key-authentication-in-rails-without-devise/">previous post</a>, we covered
+how to implement API key authentication and standard CRUD operations on API keys. API keys are generated
+by sending the user's email and password, which we authenticate before generating a new API key and
+finally sending it to the user. API key tokens are securely hashed before being stored in the database.</p><p>We ended up implementing the following CRUD routes:</p><ul><li><pre>POST /tokens</pre>to generate new tokens</li><li><pre>DELETE /tokens/:id</pre>to revoke a token</li><li><pre>GET /tokens</pre>to list all tokens</li></ul><p>That's what we'll be working with. The code is <a href="https://github.com/ezekg/example-rails-api-key-authentication">available here on GitHub</a>.</p><h2>Creating a second factor table</h2><p>To kick things off, let's create a new <pre>second_factors</pre> table:</p><pre><pre>$ rails g migration CreateSecondFactors</pre></pre>
+<p>Then fill the migration with the following:</p><pre><pre>class CreateSecondFactors &lt; ActiveRecord::Migration[6.1]  def change    create_table :second_factors do |t|      t.references :user, null: false      t.text :otp_secret, null: false, index: { unique: true }      t.boolean :enabled, null: false, default: false       t.timestamps    end  endend</pre></pre>
+<p>Then we'll apply the migration:</p><pre><pre>$ rails db:migrate</pre></pre>
+<h2>Creating a second factor model</h2><p>Before we go any further, we'll need to add <a href="https://github.com/mdp/rotp/">the ROTP gem</a> to our
+app's <pre>Gemfile</pre> so that we can generate and verify one-time-passwords, or OTPs:</p><pre><pre>+gem 'rotp' </pre></pre>
+<p>Next, we'll create our <pre>SecondFactor</pre> model:</p><pre><pre>class SecondFactor &lt; ApplicationRecord  OTP_ISSUER = 'keygen.example'   encrypts :otp_secret   belongs_to :user   before_create :generate_otp_secret   validates :user,    presence: true   scope :enabled,    -&gt; { where(enabled: true) }   def verify_with_otp(otp)    totp = ROTP::TOTP.new(otp_secret, issuer: OTP_ISSUER)     totp.verify(otp.to_s)  end   private   def generate_otp_secret    self.otp_secret = ROTP::Base32.random  endend</pre></pre>
+<p>Note the <pre>verify_with_otp</pre> method. We'll be using a timed-one-time-password, or TOTP. These
+one-time passwords will refresh, or "rotate", every 30 seconds. Our method here is concerned with
+verifying the provided TOTP, while an authenticator app will be the one actually generating
+the TOTP for the end-user.</p><p>Next, we'll update our <pre>User</pre> model. We're going to define a has-many relationship for a
+user's second factors, to be able to support multiple second factor types, e.g. TOTP,
+backup codes, or hardware keys.</p><p>Let's go ahead and add the <pre>second_factors</pre> association:</p><pre><pre> class User &lt; ApplicationRecord   has_many :api_keys, as: :bearer+  has_many :second_factors      has_secure_password end</pre></pre>
+<h2>Managing second factors</h2><p>Next up, we'll want to create a few CRUD (create-read-update-destroy) routes for managing a user's second factors. To do that, we'll want to add a new route:</p><pre><pre> Rails.application.routes.draw do   resources :api_keys, path: 'api-keys', only: %i[index create destroy]+  resources :second_factors, path: 'second-factors'  end</pre></pre>
+<p>Then we'll create our <pre>SecondFactorsController</pre>:</p><pre><pre>class SecondFactorsController &lt; ApplicationController  prepend_before_action :authenticate_with_api_key! <h3>  def index </h3>    render json: SecondFactorResource.new(current_bearer.second_factors)   end <h3>  def show </h3>    second_factor = current_bearer.second_factors.find(params[:id])     render json: SecondFactorResource.new(second_factor)   end   def create    second_factor = current_bearer.second_factors.new     # Verify second factor if enabled, otherwise verify password.    if current_bearer.second_factor_enabled?      raise UnauthorizedRequestError, message: 'second factor must be valid', code: 'OTP_INVALID' unless        current_bearer.authenticate_with_second_factor(otp: params[:otp])    else      raise UnauthorizedRequestError, message: 'password must be valid', code: 'PWD_INVALID' unless        current_bearer.authenticate(params[:password])    end     second_factor.save!     render json: SecondFactorResource.new(second_factor), status: :created  end <h3>  def update </h3>    second_factor = current_bearer.second_factors.find(params[:id])     # Verify this particular second factor (which may not be enabled yet).    raise UnauthorizedRequestError, message: 'second factor must be valid', code: 'OTP_INVALID' unless      second_factor.verify_with_otp(params[:otp])     second_factor.update!(enabled: params[:enabled])     render json: SecondFactorResource.new(second_factor)   end <h3>  def destroy </h3>    second_factor = current_bearer.second_factors.find(params[:id])     # Verify user's second factor if currently enabled.    if current_user.second_factor_enabled?      raise UnauthorizedRequestError, message: 'second factor must be valid', code: 'OTP_INVALID' unless        current_bearer.authenticate_with_second_factor(otp: params[:otp])    end     second_factor.destroy   endend</pre></pre>
+<p>Let's start with the create part in CRUD. Our create method is going to initialized a new second factor for the user, and then either verify the user's current second factor, or verify their password, before saving the second factor to the database.</p><p>Before we test it out, we're going to need to add a couple methods to our <pre>User</pre> model:</p><pre><pre> class User &lt; ApplicationRecord   has_many :api_keys, as: :bearer   has_many :second_factors  +  def second_factor_enabled? +    second_factors.enabled.any?+  end   +  def authenticate_with_second_factor(otp:) +    return false unless+      second_factor_enabled?+ +    # We only allow a single 2FA key right now, but we may allow more later,+    # e.g. multiple 2FA keys, backup codes, or U2F.+    second_factor = second_factors.enabled.first+ +    second_factor.verify_with_otp(otp)+  end      has_secure_password end</pre></pre>
+<p>The first method will be used to check if the user has a second factor enabled, and the second method will let us authenticate a user's enabled second factor. To test it out, we'll go ahead and generate an API key so we can make a few subsequent requests:</p><pre><pre>$ curl -X POST http://localhost:3000/api-keys \# &lt; HTTP/1.1 201 Created# {#   "id": 1,#   "token": "e6e11a88df4db29958214ac9c48868f0",#   "created_at": "2021-10-04T14:22:56.532Z",#   "updated_at": "2021-10-04T14:22:56.532Z"# }</pre></pre>
+<p>Next, let's use that <pre>token</pre> to add a second factor for the current user:</p><pre><pre>$ curl -X POST http://localhost:3000/seconds-factors \    -H 'Authorization: Bearer e6e11a88df4db29958214ac9c48868f0'# &lt; HTTP/1.1 401 Unauthorized# {#   "error": {#     "message": "password must be valid",#     "code": "PWD_INVALID"#   }# }</pre></pre>
+<p>Ah yeah —</p><p>Our controller requires a password if a second factor has not been added yet. Let's adjust
+our request to include the user's <pre>password</pre>:</p><pre><pre>$ curl -X POST http://localhost:3000/seconds-factors \    -H 'Authorization: Bearer e6e11a88df4db29958214ac9c48868f0' \    -d password=secret# &lt; HTTP/1.1 201 Created# {#   "id": 1,#   "otp_secret": "V63MJH44EZXT5FAQSRZFVQVSNCI62UDJ",#   "enabled": false,#   "created_at": "2021-10-04T14:26:30.352Z",#   "updated_at": "2021-10-04T14:26:30.352Z"# }</pre></pre>
+<p>Success! See that <pre>otp_secret</pre>? Somehow, we'll need to get that value into our TOTP authenticator app.
+Most authenticator apps will let you input the secret by hand, but that's error prone and a terrible
+user-experience. Instead, what we can do is utilize a QR code drawing library to render the <pre>otp_secret</pre>
+client-side, which can be scanned and stored in the TOTP authenticator app.</p><p>(Don't have a TOTP authenticator app? Check out <a href="https://authy.com/">Authy</a>.)</p><p>But we can't just send the raw <pre>otp_secret</pre> to the client — QR code scanners don't understand random
+strings.</p><p>We'll actually need to generate a provisioning URI, which is a format QR code scanners can
+understand. Let's adjust our <pre>SecondFactor</pre> model to do so:</p><pre><pre> class SecondFactor &lt; ApplicationRecord   OTP_ISSUER = 'keygen.example'     belongs_to :user     before_create :generate_otp_secret     validates :user,     presence: true     scope :enabled,     -&gt; { where(enabled: true) }  +  def provisioning_uri +    return nil if+      enabled?+ +    totp = ROTP::TOTP.new(otp_secret, issuer: OTP_ISSUER)+ +    totp.provisioning_uri(user.email)+  end      def verify_with_otp(otp)     totp = ROTP::TOTP.new(otp_secret, issuer: OTP_ISSUER)       totp.verify(otp.to_s)   end     private     def generate_otp_secret     self.otp_secret = ROTP::Base32.random   end end</pre></pre>
+<p>Then we'll want to send that <pre>provisioning_uri</pre> to the client, instead of the <pre>otp_secret</pre>. Then
+we'll use that value within a QR code rendering component. For example, with <pre>react-qr-svg</pre>,
+that'd look something like this:</p><pre><pre>import { QRCode } from 'react-qr-svg' &lt;QRCode value={provisioning_uri} /&gt;</pre></pre>
+<p>So let's go ahead and retrieve our second factor and check out the <pre>provisioning_uri</pre>:</p><pre><pre>$ curl -X GET http://localhost:3000/seconds-factors/1 \    -H 'Authorization: Bearer e6e11a88df4db29958214ac9c48868f0'# &lt; HTTP/1.1 200 OK# {#   "id": 1,#   "otp_secret": "V63MJH44EZXT5FAQSRZFVQVSNCI62UDJ",#   "provisioning_uri": "otpauth://totp/keygen.example:zeke%40keygen.example?secret=V63MJH44EZXT5FAQSRZFVQVSNCI62UDJ&amp;issuer=keygen.example",#   "enabled": false,#   "created_at": "2021-10-04T14:26:30.352Z",#   "updated_at": "2021-10-04T14:26:30.352Z"# }</pre></pre>
+<p>Again, we'd want to render that URI into a QR code that the end-user can scan and add to their authenticator app. This will also be used in the second factor verification process, which we'll cover in a minute.</p><h2>Adjusting our authentication flow</h2><p>Next, we're going to want to update our authentication flow to verify a user's second factor
+before authenticating the user. In our case, our only authentication endpoint is the one where
+you generate a new API key, covered <a href="https://keygen.sh/blog/how-to-implement-api-key-authentication-in-rails-without-devise/">in an earlier post</a>.</p><p>Let's open up our <pre>ApiKeysController</pre> and verify the user's second factor:</p><pre><pre> class ApiKeysController &lt; ApplicationController   prepend_before_action :authenticate_with_api_key!, only: %i[index destroy]  <h3>   def index </h3>     render json: ApiKeyResource.new(current_bearer.api_keys)    end     def create     authenticate_with_http_basic do |email, password|       user = User.find_by(email: email)  +      # Request or verify user's second factor if enabled. +      if user&amp;.second_factor_enabled?+        otp = params[:otp]+        raise UnauthorizedRequestError, message: 'second factor is required', code: 'OTP_REQUIRED' unless+          otp.present?+ +        raise UnauthorizedRequestError, message: 'second factor is invalid', code: 'OTP_INVALID' unless+          user.authenticate_with_second_factor(otp: otp)+      end          if user&amp;.authenticate(password)         api_key = user.api_keys.create!(token: SecureRandom.hex)           render json: ApiKeyResource.new(api_key), status: :created and return       end     end       render status: :unauthorized   end  <h3>   def destroy </h3>     api_key = current_bearer.api_keys.find(params[:id])       api_key.destroy    end end</pre></pre>
+<p>We're added a couple assertions to our authentication flow:</p><ul><li>When the user has a second factor, we assert that an <pre>otp</pre>parameter be provided.</li><li>When the user has a second factor, we assert that the <pre>otp</pre>parameter is valid.</li></ul><p>Why the 2 separate steps for this? Simple: to make things easier on the front-end side of things. Sending 2 different error codes, one for when the OTP is required but missing, and one where the OTP was provided but invalid, allows us to adjust our login UI accordingly.</p><p>For example, when the user is logging in and we get back an <pre>OTP_REQUIRED</pre> error code, we can
+prompt the user for their TOTP using a friendly UI. But if we receive the <pre>OTP_INVALID</pre> error
+code, we can display an error message instead.</p><p>Okay, so we've added a second factor — what happens when we authenticate?</p><p>*drum roll...*</p><pre><pre>$ curl -X POST http://localhost:3000/api-keys \# &lt; HTTP/1.1 201 Created# {#   "id": 2,#   "token": "d389df3ee7a31ab3510b0f944a291c0a",#   "created_at": "2021-10-04T14:22:56.532Z",#   "updated_at": "2021-10-04T14:22:56.532Z"# }</pre></pre>
+<p>Hmm. Shouldn't we have been prompted for a second factor?</p><p>Well, no. Because our second factor isn't enabled yet.</p><p>Let's open up our <pre>SecondFactorsController</pre> and look at how we can enable our user's second
+factor. We'll be working within the <pre>update</pre> method:</p><pre><pre>class SecondFactorsController &lt; ApplicationController  prepend_before_action :authenticate_with_api_key! <h3>  def index </h3>    render json: SecondFactorResource.new(current_bearer.second_factors)   end <h3>  def show </h3>    second_factor = current_bearer.second_factors.find(params[:id])     render json: SecondFactorResource.new(second_factor)   end <h3>  def create </h3>    second_factor = current_bearer.second_factors.new     # Verify second factor if enabled, otherwise verify password.    if current_bearer.second_factor_enabled?      raise UnauthorizedRequestError, message: 'second factor must be valid', code: 'OTP_INVALID' unless        current_bearer.authenticate_with_second_factor(otp: params[:otp])    else      raise UnauthorizedRequestError, message: 'password must be valid', code: 'PWD_INVALID' unless        current_bearer.authenticate(params[:password])    end     second_factor.save!     render json: SecondFactorResource.new(second_factor), status: :created   end   def update    second_factor = current_bearer.second_factors.find(params[:id])     # Verify this particular second factor (which may not be enabled yet).    raise UnauthorizedRequestError, message: 'second factor must be valid', code: 'OTP_INVALID' unless      second_factor.verify_with_otp(params[:otp])     second_factor.update!(enabled: params[:enabled])     render json: SecondFactorResource.new(second_factor)  end <h3>  def destroy </h3>    second_factor = current_bearer.second_factors.find(params[:id])     # Verify user's second factor if currently enabled.    if current_user.second_factor_enabled?      raise UnauthorizedRequestError, message: 'second factor must be valid', code: 'OTP_INVALID' unless        current_bearer.authenticate_with_second_factor(otp: params[:otp])    end     second_factor.destroy   endend</pre></pre>
+<p>Here, we're verifying the current second factor using an OTP, to assert that the end-user has correctly
+set up their authenticator app. To test, we'll want to send a <pre>PATCH</pre> request to update our second
+factor's <pre>enabled</pre> attribute:</p><pre><pre> $ curl -X PATCH http://localhost:3000/seconds-factors/1 \     -H 'Authorization: Bearer e6e11a88df4db29958214ac9c48868f0' \+    -d enabled=1  # &lt; HTTP/1.1 401 Unauthorized # { #   "error": { #     "message": "second factor must be valid", #     "code": "OTP_INVALID" #   } # }</pre></pre>
+<p>Well, that didn't work. It didn't work because our update controller requires us to send an OTP, in order to, like I mentioned a second ago, verify that we correctly set up our second factor within an authenticator app. Because remember, once this second factor is enabled, the user will not be able to authenticate without an OTP moving forward. So if things are not set up correctly, then the user gets locked out of their account.</p><p>To test, you can go ahead and take this time to render the provisioning URI into a QR code and scan it with your authenticator app if that works for you, but for the sake of time, we're going to use the Rails console instead:</p><pre><pre>$ rails c&gt; s = SecondFactor.first&gt; totp = ROTP::TOTP.new(s.otp_secret)&gt; totp.now# =&gt; 737880</pre></pre>
+<p>Now, anytime we want a new OTP, we can call <pre>totp.now</pre> in our Rails console. But we have to be quick!
+The OTPs only last for about 30 seconds.</p><p>So let's try again, but with an OTP this time:</p><pre><pre> $ curl -X POST http://localhost:3000/seconds-factors \     -H 'Authorization: Bearer e6e11a88df4db29958214ac9c48868f0' \     -d enabled=1 \+    -d otp=737880  # &lt; HTTP/1.1 200 OK # { #   "id": 1, #   "enabled": true, #   "created_at": "2021-10-04T14:26:30.352Z", #   "updated_at": "2021-10-04T15:12:13.328Z" # }</pre></pre>
+<p>We can see the <pre>enabled</pre> attribute now shows enabled, so let's go ahead and try authenticating
+one more time:</p><pre><pre>$ curl -X POST http://localhost:3000/api-keys \# &lt; HTTP/1.1 401 Unauthorized# {#   "error": {#     "message": "second factor is required",#     "code": "OTP_REQUIRED"#   }# }</pre></pre>
+<p>Great, we got the expected <pre>OTP_REQUIRED</pre> code! But what happens when we provide an invalid
+OTP? (Hopefully it throws an error.)</p><pre><pre> $ curl -X POST http://localhost:3000/api-keys \+    -d otp=000000  # &lt; HTTP/1.1 401 Unauthorized # { #   "error": { #     "message": "second factor is invalid", #     "code": "OTP_INVALID" #   } # }</pre></pre>
+<p>Perfect — our expected <pre>OTP_INVALID</pre> code. And lastly, what happens when we provide an OTP
+that's valid? Let's generate a new OTP code with <pre>totp.now</pre> in our Rails console session
+and then try it out:</p><pre><pre> $ curl -X POST http://localhost:3000/api-keys \+    -d otp=621061  # &lt; HTTP/1.1 201 Created # { #   "id": 3, #   "token": "1d66e6186fafecc09609fc45b207f5bd", #   "created_at": "2021-10-04T15:18:08.917Z", #   "updated_at": "2021-10-04T15:18:08.917Z" # }</pre></pre>
+<p>Success! We've successfully implemented TOTP 2FA verification into our app's normal authentication flow. This is great because not only is TOTP 2FA free, but it's more secure than SMS 2FA.</p><h2>Fixing a vulnerability</h2><p>Before we close, we need to resolve a vulnerability in our OTP implementation. Right now, OTP tokens can be reused. We need to ensure that OTPs (one-time-passwords) are actually, as the name would suggest, one-time passwords.</p><p>To do so, we'll need to add a new column to our <pre>second_factors</pre> table:</p><pre><pre>$ rails g migration AddOtpVerifiedAtToSecondFactors</pre></pre>
+<p>We'll add an <pre>otp_verified_at</pre> column to keep track of the last verification time:</p><pre><pre>class AddOtpVerifiedAtToSecondFactors &lt; ActiveRecord::Migration[6.1]  def change    add_column :second_factors, :otp_verified_at, :datetime, null: true  endend</pre></pre>
+<p>Next, we'll apply our migration:</p><pre><pre>$ rails db:migrate</pre></pre>
+<p>Lastly, we'll want to adjust our OTP verification method to utilize the <pre>otp_verified_at</pre>
+column, and also automatically update it when a successful verification occurs:</p><pre><pre> class SecondFactor &lt; ApplicationRecord<h3>   OTP_ISSUER = 'keygen.example' </h3>     belongs_to :user     before_create :generate_otp_secret     validates :user,     presence: true     scope :enabled,     -&gt; { where(enabled: true) }   <h3>   def provisioning_uri </h3>     return nil if enabled?       totp = ROTP::TOTP.new(otp_secret, issuer: OTP_ISSUER)       totp.provisioning_uri(user.email)    end     def verify_with_otp(otp)     totp = ROTP::TOTP.new(otp_secret, issuer: OTP_ISSUER)- -    totp.verify(otp.to_s) +    ts = totp.verify(otp.to_s, after: otp_verified_at.to_i) + +    update(otp_verified_at: Time.at(ts)) if+      ts.present?+ +    ts    end  <h3>   private </h3>     def generate_otp_secret     self.otp_secret = ROTP::Base32.random   end  end</pre></pre>
+<p>And that's it! ROTP will now assert that any provided TOTP token was generated after <pre>otp_verified_at</pre>,
+preventing OTP reuse.</p><p>Let's recap before you go.</p><h2>Conclusion</h2><p>Today we've covered how to implement TOTP 2FA into our app's authentication flow. Using the <a href="https://github.com/mdp/rotp/">ROTP gem</a>
+made this relatively painless. We also identified and fixed a vulnerability in our 2FA implementation.</p><p>If you have password management routes, such as password resets, you'll want to make sure that you're verifying a user's second factor before allowing such actions.</p><p>The full example app is <a href="https://github.com/ezekg/example-rails-totp-2fa">available on GitHub</a>.</p><p>Until next time.</p><p>
+  If you find any errors in my code, or if you can think of ways to improve things, <a href="https://x.com/_m27e">ping me via Twitter</a>.
+</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

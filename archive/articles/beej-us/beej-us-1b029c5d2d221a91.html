@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HTML5 Canvas Part II: Pixel Manipulation | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>HTML5 Canvas Part II: Pixel Manipulation</h1>
+        <div class="meta">Beej&#x27;s Bit Bucket 2010-02-09T00:00:00Z</div>
+        <div class="links">
+          <a href="http://beej.us/blog/data/html5s-canvas-2-pixel/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/beej-us/beej-us-1b029c5d2d221a91.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body><p>2010-02-09</p><h1>HTML5's canvas Part II: Pixel Manipulation</h1><p><graphic src="images/pixelmanip.jpg" alt="Manipulated Pixels"/></p><p>Your browser doesn't support HTML canvas. Get a modern browser such
+as <a href="http://www.google.com/chrome/">Chrome</a>,
+<a href="http://firefox.com/">Firefox</a>, <a href="http://www.opera.com/">Opera</a>, or
+<a href="http://windows.microsoft.com/en-us/internet-explorer/products/ie/home">IE9</a>.
+Otherwise, you'll just see images of canvases, below, instead of
+canvases. Admittedly, this isn't much of an issue for this particular
+demo, but you should upgrade, anyway.</p><p>In <a href="http://beej.us/html5-canvas/">an earlier post</a>, I wrote about a few of the
+things <a href="http://en.wikipedia.org/wiki/HTML5">HTML5</a>'s
+<a href="http://en.wikipedia.org/wiki/Canvas_(HTML_element)"> &lt;canvas&gt;</a> element
+could do. This post is about one more of them: direct pixel
+manipulation.  You can basically do the three following things:</p><ul><li>Create an array of empty pixels, or</li><li>Get an array of pixels from an existing canvas, or</li><li>Set the pixels of a canvas from a pixel array</li></ul><p>Once you have an array of pixels, you can manipulate it using the
+standard array accessors "[", "]". The pixels in the array are
+arranged in <a href="http://en.wikipedia.org/wiki/Row_major#Row-major_order">row-major
+order</a>, and are
+represented as integers between 0 and
+<a href="http://en.wikipedia.org/wiki/Octet_(computing)">255</a>, where each
+four-integer group represents the four <a href="http://en.wikipedia.org/wiki/Channel_(digital_image)#RGB">color
+channels</a> of
+one pixel: red, green, blue, and
+<a href="http://en.wikipedia.org/wiki/Alpha_compositing">alpha</a>
+(<a href="http://en.wikipedia.org/wiki/RGBA">RGBA</a>).  What did I just say?
+Basically, it looks like this... say you have an image that's 3 pixels
+wide, and 2 pixels high. I know that's tiny, but I want to fit it all in
+the following super-busy diagram which shows the array indices for given
+elements of each pixel.</p><p><graphic src="images/pixellayout.png" alt="Pixel Layout"/></p><p>We'll get to a quick-and-easy calculation to find your way around the
+array in just a moment, but first, how does one create a pixel data
+array to be used on a canvas? You use the drawing context's
+<a href="http://www.whatwg.org/specs/web-apps/current-work/multipage/the-canvas-element.html#dom-context-2d-createimagedata"> createImageData()</a>
+method. (Use
+</p><p><a href="http://www.whatwg.org/specs/web-apps/current-work/multipage/the-canvas-element.html#dom-context-2d-getimagedata">to get the array from an existing canvas.)</a></p><pre>getImageData()</pre><pre><pre>&lt;canvas id="canvas1" width="100", height="100"&gt;&lt;/canvas&gt;
+
+&lt;script type="text/javascript"&gt;
+    element = document.getElementById("canvas1");
+    c = element.getContext("2d");
+
+    // read the width and height of the canvas
+    width = element.width;
+    height = element.height;
+
+    // create a new batch of pixels with the same
+    // dimensions as the image:
+    imageData = c.createImageData(width, height);
+</pre></pre>
+<p>It's going to be useful later to know the width of the image data, and
+fortunately that's <a href="http://www.whatwg.org/specs/web-apps/current-work/multipage/the-canvas-element.html#imagedata">baked into the ImageData
+object</a>:</p><pre><pre>    imageData.width   // width of the image data in pixels
+    imageData.height  // height of the image data in pixels
+    imageData.data    // pixel data array of (width*height*4) elements&lt;/pre&gt;
+</pre></pre>
+<p>Now we have what we need to write a pixel-setting routine:</p><pre><pre>function setPixel(imageData, x, y, r, g, b, a) {
+    index = (x + y * imageData.width) * 4;
+    imageData.data[index + 0] = r;
+    imageData.data[index + 1] = g;
+    imageData.data[index + 2] = b;
+    imageData.data[index + 3] = a;
+}
+</pre></pre>
+<p>There you can see how we first calculate the pixel "position" in the
+array (which is the row number <pre>y</pre> times the number of pixels in each
+row (the width), plus the column number <pre>x</pre>) and then we multiply it by
+4 to get the first channel for that pixel, namely red, because each
+pixel takes up 4 array elements.</p><p>Exercise: write a <pre>getPixel(x,y)</pre> function that returns the RGBA
+values for a given pixel as an array, or as a packed 32-bit number
+(<pre>0x_RRGGBBAA_</pre>).</p><p>We've seen how to create an image pixel data array, and we've seen how
+to access it. The only thing left to do is to "paste" the pixels back
+onto the canvas so that we see them.  We do this with a call to
+<a href="http://www.whatwg.org/specs/web-apps/current-work/multipage/the-canvas-element.html#dom-context-2d-putimagedata"> putImageData()</a>,
+to which we pass the image data object, plus an X and Y offset at which
+to stamp the new data.  Let's use this to produce a canvas that is
+covered with randomly-colored pixels:</p><pre><pre>&lt;canvas id="canvas1" width="100", height="100"&gt;
+Random Canvas
+&lt;/canvas&gt;
+
+&lt;script type="text/javascript"&gt;
+function setPixel(imageData, x, y, r, g, b, a) {
+    index = (x + y * imageData.width) * 4;
+    imageData.data[index+0] = r;
+    imageData.data[index+1] = g;
+    imageData.data[index+2] = b;
+    imageData.data[index+3] = a;
+}
+
+element = document.getElementById("canvas1");
+c = element.getContext("2d");
+
+// read the width and height of the canvas
+width = element.width;
+height = element.height;
+
+// create a new pixel array
+imageData = c.createImageData(width, height);
+
+// draw random dots
+for (i = 0; i &lt; 10000; i++) {
+    x = Math.random() * width | 0; // |0 to truncate to Int32
+    y = Math.random() * height | 0;
+    r = Math.random() * 256 | 0;
+    g = Math.random() * 256 | 0;
+    b = Math.random() * 256 | 0;
+    setPixel(imageData, x, y, r, g, b, 255); // 255 opaque
+}
+
+// copy the image data back onto the canvas
+c.putImageData(imageData, 0, 0); // at coords 0,0
+
+&lt;/script&gt;
+</pre></pre>
+<p>But that's so ugly. Let's do something a little prettier, by setting the color of each pixel depending on the sine of the distance it is away from some point on the canvas:</p><pre><pre>pos = 0; // index position into imagedata array
+
+xoff = width / 3; // offsets to "center"
+yoff = height / 3;
+
+// walk left-to-right, top-to-bottom; it's the
+// same as the ordering in the imagedata array:
+
+for (y = 0; y &lt; height; y++) {
+	for (x = 0; x &lt; width; x++) {
+		// calculate sine based on distance
+		x2 = x - xoff;
+		y2 = y - yoff;
+		d = Math.sqrt(x2*x2 + y2*y2);
+		t = Math.sin(d/6.0);
+
+		// calculate RGB values based on sine
+		r = t * 200;
+		g = 125 + t * 80;
+		b = 235 + t * 20;
+
+		// set red, green, blue, and alpha:
+		imageData.data[pos++] = Math.max(0,Math.min(255, r));
+		imageData.data[pos++] = Math.max(0,Math.min(255, g));
+		imageData.data[pos++] = Math.max(0,Math.min(255, b));
+		imageData.data[pos++] = 255; // opaque alpha
+	}
+}
+</pre></pre>
+<p>And that'll give you one of these:</p><p>Notice in that case how I didn't bother calling my <pre>setPixel()</pre>
+function—I just walked all the way through the array one element at a
+time (indexed by the <pre>pos</pre> variable.)</p><p>What's going on there with all that <pre>Math.max()</pre> and <pre>Math.min()</pre> stuff?
+That's clamping the value between 0 and 255, inclusive. The <pre>min()</pre> call
+makes sure the value is less than 255, and then the <pre>max()</pre> call makes
+sure that result is greater than 0.  Every browser I tried would
+automatically clamp the values in the array between 0 and 255, but the
+HTML5 draft says thou shalt not use values outside that range, so you'd
+better do the clamping yourself.</p><p>Exercise: write a script that generates a gradient that goes from black on the top to yellow on the bottom. Then modify it to also make the gradient go from black on the left to blue on the right.</p><p>There's just one final thing needed to wrap up this post, I feel, and that's to show manipulation of an existing canvas.</p><p>For this demo, we'll load an image, we'll draw that image onto the left
+half of the canvas (using the
+<a href="http://www.whatwg.org/specs/web-apps/current-work/multipage/the-canvas-element.html#dom-context-2d-drawimage"> drawImage()</a>
+method), then we'll get the pixel data (with the
+</p><p><a href="http://www.whatwg.org/specs/web-apps/current-work/multipage/the-canvas-element.html#dom-context-2d-getimagedata">method), and copy the image to the right half of the canvas—except along the way we'll be munging the colors to make it way more blue! Only about 87 million things get more exciting than that, yes?</a></p><pre>getImageData()</pre><p>There's a little bit of JavaScript code in here for loading the image,
+and the drawing all takes place in the image's <pre>onload</pre> callback, which
+is called when the image loading is complete.</p><pre><pre>&lt;canvas id="cancan" width="400", height="200"&gt;Canvas Blue Goat&lt;/canvas&gt;
+
+&lt;script type="text/javascript"&gt;
+function imageLoaded(ev) {
+    element = document.getElementById("cancan");
+    c = element.getContext("2d");
+
+    im = ev.target; // the image, assumed to be 200x200
+
+    // read the width and height of the canvas
+    width = element.width;
+    height = element.height;
+
+    // stamp the image on the left of the canvas:
+    c.drawImage(im, 0, 0);
+
+    // get all canvas pixel data
+    imageData = c.getImageData(0, 0, width, height);
+
+    w2 = width / 2;
+
+    // run through the image, increasing blue, but filtering
+    // down red and green:
+
+    for (y = 0; y &lt; height; y++) {
+        inpos = y * width * 4; // *4 for 4 ints per pixel
+        outpos = inpos + w2 * 4
+        for (x = 0; x &lt; w2; x++) {
+            r = imageData.data[inpos++] / 3; // less red
+            g = imageData.data[inpos++] / 3; // less green
+            b = imageData.data[inpos++] * 5; // MORE BLUE
+            a = imageData.data[inpos++];     // same alpha
+
+            b = Math.min(255, b); // clamp to [0..255]
+
+            imageData.data[outpos++] = r;
+            imageData.data[outpos++] = g;
+            imageData.data[outpos++] = b;
+            imageData.data[outpos++] = a;
+        }
+    }
+
+    // put pixel data on canvas
+    c.putImageData(imageData, 0, 0);
+}
+
+im = new Image();
+im.onload = imageLoaded;
+im.src = "goat200.jpg"; // code assumes this image is 200x200
+
+&lt;/script&gt;
+</pre></pre>
+<p>Exercise: modify the goat blueifier to instead perform <a href="http://en.wikipedia.org/wiki/Sobel_operator">Sobel edge
+detection</a> on the image.
+(<a href="http://www.pages.drexel.edu/~weg22/edge.html">Follow this link for a
+tutorial</a> and C code.)</p><p>Have fun!</p><p>References:</p><p>See Also:</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Using the Brother DS-640 Scanner on NixOS | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Using the Brother DS-640 Scanner on NixOS</h1>
+        <div class="meta">Fernando Borretti 2025-12-27T00:00:00Z</div>
+        <div class="links">
+          <a href="https://borretti.me/article/using-the-brother-ds-640-scanner-on-nixos">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/borretti-me/borretti-me-5ca42dedf8597a47.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I suffer so you don&#x27;t have to.</div>
+        <div class="content">
+          <p>The <a href="https://www.brother.com.au/en/scanners/all-scanners/ds-640">DS-640</a> is a compact USB scanner from <a href="https://en.wikipedia.org/wiki/Brother_Industries">Brother</a>. It was surprisingly hard to get it working on NixOS, so I wrote up my solution so others don’t have this problem. The bad news is you need Brother’s proprietary drivers to make this work.</p>
+
+<p>You need this configuration:</p>
+
+<div class="language-nix highlighter-rouge">
+  <div class="highlight">
+    <pre class="highlight"><code><span class="c"># Enable SANE scanners.</span>
+<span class="nv">hardware</span><span class="o">.</span><span class="nv">sane</span><span class="o">.</span><span class="nv">enable</span> <span class="o">=</span> <span class="kc">true</span><span class="p">;</span>
+
+<span class="c"># Add yourself to the scanner and printer groups.</span>
+<span class="nv">users</span><span class="o">.</span><span class="nv">users</span><span class="o">.</span><span class="nv">USERNAME</span><span class="o">.</span><span class="nv">extraGroups</span> <span class="o">=</span> <span class="p">[</span> <span class="s2">"scanner"</span> <span class="s2">"lp"</span> <span class="p">];</span>
+
+<span class="c"># Add support for Brother scanners.</span>
+<span class="nv">hardware</span><span class="o">.</span><span class="nv">sane</span><span class="o">.</span><span class="nv">brscan5</span><span class="o">.</span><span class="nv">enable</span> <span class="o">=</span> <span class="kc">true</span><span class="p">;</span>
+</code></pre>
+  </div>
+</div>
+
+<p>After applying this you have to log out and in, or reboot, for the usergroup changes to apply.</p>
+
+<p>Note also <code class="language-plaintext highlighter-rouge">brscan5</code>: if you use <code class="language-plaintext highlighter-rouge">brscan4</code> (as I did initially), the scanner will kind of work, but it only scans the first third or so of every page.</p>
+
+<p>And if you want a GUI:</p>
+
+<div class="language-nix highlighter-rouge">
+  <div class="highlight">
+    <pre class="highlight"><code><span class="c"># Install GNOME Document Scanner.</span>
+<span class="nv">home-manager</span><span class="o">.</span><span class="nv">users</span><span class="o">.</span><span class="nv">USERNAME</span><span class="o">.</span><span class="nv">home</span><span class="o">.</span><span class="nv">packages</span> <span class="o">=</span> <span class="kn">with</span> <span class="nv">pkgs</span><span class="p">;</span> <span class="p">[</span>
+  <span class="nv">simple-scan</span>
+<span class="p">];</span>
+</code></pre>
+  </div>
+</div>
+
+<p>Now, make sure the scanner is there:</p>
+
+<div class="language-plaintext highlighter-rouge">
+  <div class="highlight">
+    <pre class="highlight"><code>$ scanimage --list-devices
+device `brother5:bus4;dev2' is a Brother DS-640 USB scanner
+</code></pre>
+  </div>
+</div>
+
+<p>If you get <code class="language-plaintext highlighter-rouge">Brother *Unknown USB scanner</code>, you either have the wrong driver or (as I did, surprisingly) a faulty USB port. In which case move the scanner to another port. <code class="language-plaintext highlighter-rouge">scanimage --list-devices</code> should recognize the model number.</p>
+
+<p>The most basic test that should work: put a page in the scanner until it locks and run:</p>
+
+<div class="language-plaintext highlighter-rouge">
+  <div class="highlight">
+    <pre class="highlight"><code>$ scanimage --device="brother5:bus4;dev2" \
+  --format=jpeg \
+  --output-file=scan.jpg
+</code></pre>
+  </div>
+</div>
+
+<p>This will produce a (probably not very good) scan in <code class="language-plaintext highlighter-rouge">scan.jpg</code>. Now, we can improve things using the device-specific options, which you can check with this command:</p>
+
+<div class="language-plaintext highlighter-rouge">
+  <div class="highlight">
+    <pre class="highlight"><code>$ scanimage --all-options --device="brother5:bus4;dev2"
+All options specific to device `brother5:bus4;dev2':
+    --mode 24bit Color[Fast]|Black &amp; White|True Gray|Gray[Error Diffusion] [24bit Color[Fast]]
+        Select the scan mode
+    --resolution 100|150|200|300|400|600|1200dpi [100]
+        Sets the resolution of the scanned image.
+    --source Automatic Document Feeder(left aligned) [Automatic Document Feeder(left aligned)]
+        Selects the scan source (such as a document-feeder).
+    --brightness -50..50% (in steps of 1) [inactive]
+        Controls the brightness of the acquired image.
+    --contrast -50..50% (in steps of 1) [inactive]
+        Controls the contrast of the acquired image.
+    --MultifeedDetection[=(yes|no)] [inactive]
+
+    --AutoDocumentSize[=(yes|no)] [no] [advanced]
+
+    --AutoDeskew[=(yes|no)] [no] [advanced]
+
+    --SkipBlankPage[=(yes|no)] [inactive]
+
+    --SkipBlankPageSensitivity 0..100% (in steps of 1) [inactive]
+
+    -l 0..215.9mm (in steps of 0.0999908) [0]
+        Top-left x position of scan area.
+    -t 0..355.6mm (in steps of 0.0999908) [0]
+        Top-left y position of scan area.
+    -x 0..215.9mm (in steps of 0.0999908) [215.88]
+        Width of scan-area.
+    -y 0..355.6mm (in steps of 0.0999908) [355.567]
+        Height of scan-area.
+</code></pre>
+  </div>
+</div>
+
+<p>Try this for a better scan:</p>
+
+<div class="language-plaintext highlighter-rouge">
+  <div class="highlight">
+    <pre class="highlight"><code>$ scanimage --device="brother5:bus4;dev2" \
+  --AutoDeskew=yes \
+  --AutoDocumentSize=yes \
+  --resolution 300 \
+  --format=jpeg \
+  --output-file=scan.jpg
+</code></pre>
+  </div>
+</div>
+
+<p>Note that some of the flags are in <code class="language-plaintext highlighter-rouge">--key value</code> format and others <code class="language-plaintext highlighter-rouge">--key=value</code>, and if you mess it up you get a cryptic error message.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

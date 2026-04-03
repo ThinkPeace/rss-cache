@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dealing with weird ELF libraries | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Dealing with weird ELF libraries</h1>
+        <div class="meta">Matthew Garrett 2024-01-02T19:04:32Z</div>
+        <div class="links">
+          <a href="https://mjg59.dreamwidth.org/69070.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/mjg59-dreamwidth-org/mjg59-dreamwidth-org-5d60d324e503d756.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Libraries are collections of code that are intended to be usable by multiple consumers (if you&#x27;re interested in the etymology, watch this video ). In the old days we had what we now refer to as &quot;static&quot; libraries, collections of code that existed on disk but which would be copied into newly compiled binaries. We&#x27;ve moved beyond that, thankfully, and now mak…</div>
+        <div class="content">
+          Libraries are collections of code that are intended to be usable by multiple consumers (if you're interested in the etymology, watch <a href="https://youtu.be/6v4Juzn10gM?t=221">this video</a>). In the old days we had what we now refer to as "static" libraries, collections of code that existed on disk but which would be copied into newly compiled binaries. We've moved beyond that, thankfully, and now make use of what we call "dynamic" or "shared" libraries - instead of the code being copied into the binary, a reference to the library function is incorporated, and at runtime the code is mapped from the on-disk copy of the shared object[1]. This allows libraries to be upgraded without needing to modify the binaries using them, and if multiple applications are using the same library at once it only requires that one copy of the code be kept in RAM.<br /><br />But for this to work, two things are necessary: when we build a binary, there has to be a way to reference the relevant library functions in the binary; and when we run a binary, the library code needs to be mapped into the process.<br /><br />(I'm going to somewhat simplify the explanations from here on - things like symbol versioning make this a bit more complicated but aren't strictly relevant to what I was working on here)<br /><br />For the first of these, the goal is to replace a call to a function (eg, <tt>printf()</tt>) with a reference to the actual implementation. This is the job of the linker rather than the compiler (eg, if you use the <tt>-c</tt> argument to tell gcc to simply compile to an object rather than linking an executable, it's not going to care about whether or not every function called in your code actually exists or not - that'll be figured out when you link all the objects together), and the linker needs to know which symbols (which aren't just functions - libraries can export variables or structures and so on) are available in which libraries. You give the linker a list of libraries, it extracts the symbols available, and resolves the references in your code with references to the library.<br /><br />But how is that information extracted? Each ELF object has a fixed-size header that contains references to various things, including a reference to a list of "section headers". Each section has a name and a type, but the ones we're interested in are <tt>.dynstr</tt> and <tt>.dynsym</tt>. <tt>.dynstr</tt> contains a list of strings, representing the name of each exported symbol. <tt>.dynsym</tt> is where things get more interesting - it's a list of structs that contain information about each symbol. This includes a bunch of fairly complicated stuff that you need to care about if you're actually writing a linker, but the relevant entries for this discussion are an index into <tt>.dynstr</tt> (which means the <tt>.dynsym</tt> entry isn't sufficient to know the name of a symbol, you need to extract that from <tt>.dynstr</tt>), along with the location of that symbol within the library. The linker can parse this information and obtain a list of symbol names and addresses, and can now replace the call to <tt>printf()</tt> with a reference to libc instead.<br /><br />(Note that it's not possible to simply encode this as "Call this address in this library" - if the library is rebuilt or is a different version, the function could move to a different location)<br /><br />Experimentally, <tt>.dynstr</tt> and <tt>.dynsym</tt> appear to be sufficient for linking a dynamic library at build time - there are other sections related to dynamic linking, but you can link against a library that's missing them. Runtime is where things get more complicated.<br /><br />When you run a binary that makes use of dynamic libraries, the code from those libraries needs to be mapped into the resulting process. This is the job of the runtime dynamic linker, or RTLD[2]. The RTLD needs to open every library the process requires, map the relevant code into the process's address space, and then rewrite the references in the binary into calls to the library code. This requires more information than is present in <tt>.dynstr</tt> and <tt>.dynsym</tt> - at the very least, it needs to know the list of required libraries.<br /><br />There's a separate section called <tt>.dynamic</tt> that contains another list of structures, and it's the data here that's used for this purpose. For example, <tt>.dynamic</tt> contains a bunch of entries of type <tt>DT_NEEDED</tt> - this is the list of libraries that an executable requires. There's also a bunch of other stuff that's required to actually make all of this work, but the only thing I'm going to touch on is <tt>DT_HASH</tt>. Doing all this re-linking at runtime involves resolving the locations of a large number of symbols, and if the only way you can do that is by reading a list from <tt>.dynsym</tt> and then looking up every name in <tt>.dynstr</tt> that's going to take some time. The <tt>DT_HASH</tt> entry points to a hash table - the RTLD hashes the symbol name it's trying to resolve, looks it up in that hash table, and gets the symbol entry directly (it still needs to resolve that against <tt>.dynstr</tt> to make sure it hasn't hit a hash collision - if it has it needs to look up the next hash entry, but this is still generally faster than walking the entire <tt>.dynsym</tt> list to find the relevant symbol). There's also <tt>DT_GNU_HASH</tt> which fulfills the same purpose as <tt>DT_HASH</tt> but uses a more complicated algorithm that performs even better. <tt>.dynamic</tt> also contains entries pointing at <tt>.dynstr</tt> and <tt>.dynsym</tt>, which seems redundant but will become relevant shortly.<br /><br />So, <tt>.dynsym</tt> and <tt>.dynstr</tt> are required at build time, and both are required along with <tt>.dynamic</tt> at runtime. This seems simple enough, but obviously there's a twist and I'm sorry it's taken so long to get to this point.<br /><br />I bought a <a href="https://synology.com">Synology NAS</a> for home backup purposes (my previous solution was a single external USB drive plugged into a small server, which had uncomfortable single point of failure properties). Obviously I decided to poke around at it, and I found something odd - all the libraries Synology ships were entirely lacking any ELF section headers. This meant no <tt>.dynstr</tt>, <tt>.dynsym</tt> or <tt>.dynamic</tt> sections, so how was any of this working? <tt>nm</tt> asserted that the libraries exported no symbols, and <tt>readelf</tt> agreed. If I wrote a small app that called a function in one of the libraries and built it, <tt>gcc</tt> complained that the function was undefined. But executables on the device were clearly resolving the symbols at runtime, and if I loaded them into <a href="https://ghidra-sre.org/">ghidra</a> the exported functions were visible. If I <tt>dlopen()</tt>ed them, <tt>dlsym()</tt> couldn't resolve the symbols - but if I hardcoded the offset into my code, I could call them directly.<br /><br />Things finally made sense when I discovered that if I passed the <tt>--use-dynamic</tt> argument to <tt>readelf</tt>, I <em>did</em> get a list of exported symbols. It turns out that ELF is weirder than I realised. As well as the aforementioned section headers, ELF objects also include a set of program headers. One of the program header types is <tt>PT_DYNAMIC</tt>. This typically points to the same data that's present in the <tt>.dynamic</tt> section. Remember when I mentioned that <tt>.dynamic</tt> contained references to <tt>.dynsym</tt> and <tt>.dynstr</tt>? This means that simply pointing at <tt>.dynamic</tt> is sufficient, there's no need to have separate entries for them.<br /><br />The same information can be reached from two different locations. The information in the section headers is used at build time, and the information in the program headers at run time[3]. I do not have an explanation for this. But if the information is present in two places, it seems obvious that it should be able to reconstruct the missing section headers in my weird libraries? So that's what <a href="https://gitlab.com/mjg59/elf-library-fixup">this</a> does. It extracts information from the <tt>DYNAMIC</tt> entry in the program headers and creates equivalent section headers.<br /><br />There's one thing that makes this more difficult than it might seem. The section header for <tt>.dynsym</tt> has to contain the number of symbols present in the section. And that information doesn't directly exist in <tt>DYNAMIC</tt> - to figure out how many symbols exist, you're expected to walk the hash tables and keep track of the largest number you've seen. Since every symbol has to be referenced in the hash table, once you've hit every entry the largest number is the number of exported symbols. This seemed annoying to implement, so instead I cheated, added code to simply pass in the number of symbols on the command line, and then just parsed the output of <tt>readelf</tt> against the original binaries to extract that information and pass it to my tool.<br /><br />Somehow, this worked. I now have a bunch of library files that I can link into my own binaries to make it easier to figure out how various things on the Synology work. Now, could someone explain (a) why this information is present in two locations, and (b) why the build-time linker and run-time linker disagree on the canonical source of truth?<br /><br />[1] "Shared object" is the source of the .so filename extension used in various Unix-style operating systems<br />[2] You'll note that "RTLD" is not an acryonym for "runtime dynamic linker", because reasons<br />[3] For environments using the GNU RTLD, at least - I have no idea whether this is the case in all ELF environments<br /><br /><img src="https://www.dreamwidth.org/tools/commentcount?user=mjg59&ditemid=69070" width="30" height="12" alt="comment count unavailable"/> comments
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

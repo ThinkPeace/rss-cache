@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Git Remote Helpers | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Git Remote Helpers</h1>
+        <div class="meta">Andrew Nesbitt 2026-03-18T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/03/18/git-remote-helpers.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-fe42e5c50f3bea85.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Git can talk to anything if you write the right helper.</div>
+        <div class="content">
+          <p><a href="https://bzg.fr/">Bastien Guerry</a> from <a href="https://www.softwareheritage.org/">Software Heritage</a> recently nerd-sniped me with <a href="https://nanodash.knowledgepixels.com/explore?id=https://w3id.org/np/RAJIQOw50gSAqzKUJoFSbNQghA_b72Y3-ImjTRN4YOF9s&amp;label=Idea:+git+clone+from+SoftWare+Hash+IDentifiers&amp;forward-to-part=true">an idea</a> for a <code class="language-plaintext highlighter-rouge">git-remote-swh</code> that would let you <code class="language-plaintext highlighter-rouge">git clone</code> from a <a href="https://www.swhid.org/">SWHID</a>, pulling source code directly from Software Heritage’s archive by content hash rather than by URL. Building that means writing a git remote helper, which sent me back to the <a href="https://git-scm.com/docs/gitremote-helpers">gitremote-helpers docs</a> and down the rabbit hole of how many of these things already exist. I covered remote helpers briefly in my earlier post on <a href="/2025/11/26/extending-git-functionality.html">extending git functionality</a>, but the protocol deserves a closer look.</p>
+
+<p>A <code class="language-plaintext highlighter-rouge">git-remote-swh</code> would need to be an executable on your <code class="language-plaintext highlighter-rouge">$PATH</code> so that git invokes it when it sees a URL like <code class="language-plaintext highlighter-rouge">swh://</code>. The helper and git talk over stdin/stdout using a text-based line protocol. For <code class="language-plaintext highlighter-rouge">git-remote-swh</code> the end goal would be something like:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git clone swh://swh:1:rev:676fe44740a14c4f0e09ef4a6dc335864e1727ca;origin=https://github.com/wikimedia/mediawiki
+</code></pre></div></div>
+
+<p>Or using the double-colon form, which reads a bit cleaner when adding a remote:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git remote add archive swh::swh:1:rev:676fe44740a14c4f0e09ef4a6dc335864e1727ca;origin=https://github.com/wikimedia/mediawiki
+</code></pre></div></div>
+
+<p>The SWHID identifies a specific revision by content hash, and the <code class="language-plaintext highlighter-rouge">origin</code> qualifier tells the helper where to fall back if that revision isn’t in the archive yet. The helper would resolve the SWHID against Software Heritage’s archive, and if the revision isn’t archived yet, use the <code class="language-plaintext highlighter-rouge">origin</code> qualifier to ask Software Heritage to <a href="https://archive.softwareheritage.org/save/">import it</a> first, so the clone always comes through the archive and can be verified against the content hash. You’d end up with <code class="language-plaintext highlighter-rouge">git clone</code> as a content-addressed fetch primitive rather than just a URL fetch, which is an interesting building block for reproducible builds and supply chain verification.</p>
+
+<p>Git opens by sending <code class="language-plaintext highlighter-rouge">capabilities</code> and the helper responds with what it can do: <code class="language-plaintext highlighter-rouge">fetch</code>, <code class="language-plaintext highlighter-rouge">push</code>, <code class="language-plaintext highlighter-rouge">import</code>, <code class="language-plaintext highlighter-rouge">export</code>, <code class="language-plaintext highlighter-rouge">connect</code>, or some combination. A SWHID helper would only need <code class="language-plaintext highlighter-rouge">import</code> and <code class="language-plaintext highlighter-rouge">list</code> since Software Heritage is a read-only archive and its API returns objects individually rather than as packfiles. <code class="language-plaintext highlighter-rouge">import</code> lets the helper pull snapshots, revisions, trees, and blobs via the REST API and stream them into git’s fast-import format, which is easier to implement than <code class="language-plaintext highlighter-rouge">fetch</code> where you’d have to reconstruct packfiles yourself for not much gain on a read-only helper. <code class="language-plaintext highlighter-rouge">connect</code> establishes a bidirectional pipe where git speaks its native pack protocol as if it were talking to a real git server, but that only makes sense when the remote actually speaks git’s wire protocol.</p>
+
+<p>After capability negotiation, git sends <code class="language-plaintext highlighter-rouge">list</code> to get the remote’s refs, then issues import commands in batches. For a SWHID helper, <code class="language-plaintext highlighter-rouge">list</code> would resolve the SWHID against Software Heritage’s <a href="https://archive.softwareheritage.org/api/">API</a>, translate the archive’s snapshot into a ref listing, and then <code class="language-plaintext highlighter-rouge">import</code> would stream the objects through as fast-import data. Each batch ends with a blank line, and the helper responds with status lines like <code class="language-plaintext highlighter-rouge">ok refs/heads/main</code> or <code class="language-plaintext highlighter-rouge">error refs/heads/main &lt;reason&gt;</code>.</p>
+
+<p>Writing a remote helper from scratch is more work than writing a git subcommand but less work than building a full git server. Most implementations are a few hundred to a few thousand lines of code, and the hardest part is mapping git’s object model onto whatever storage backend you’re targeting. Software Heritage already stores git objects natively, so a SWHID helper might be one of the easier ones to build.</p>
+
+<h3 id="built-in">Built-in</h3>
+
+<p>Git ships with remote helpers for its standard network transports, and they follow the same protocol as everything else below.</p>
+
+<ul>
+  <li><strong>git-remote-http</strong> / <strong>git-remote-https</strong> implement the <a href="https://git-scm.com/docs/http-protocol">smart HTTP protocol</a> that most hosted git services use</li>
+  <li><strong>git-remote-ftp</strong> / <strong>git-remote-ftps</strong> fetch over FTP, though this is rarely used in practice</li>
+  <li><strong>git-remote-ext</strong> pipes git’s protocol through an arbitrary command, which makes it a building block for custom transports without writing a full remote helper</li>
+</ul>
+
+<h3 id="cloud-and-object-storage">Cloud and object storage</h3>
+
+<ul>
+  <li><a href="https://github.com/anishathalye/git-remote-dropbox"><strong>git-remote-dropbox</strong></a> stores git repos in Dropbox using the Dropbox API, and is one of the better documented remote helpers if you’re looking for implementation examples.</li>
+  <li><a href="https://github.com/awslabs/git-remote-s3"><strong>git-remote-s3</strong></a> from AWS Labs uses S3 as a serverless git server with LFS support. Written in Rust. There are several other S3-backed helpers floating around but this is the most complete.</li>
+  <li><a href="https://github.com/aws/git-remote-codecommit"><strong>git-remote-codecommit</strong></a> provides authenticated access to AWS CodeCommit repositories without needing to configure SSH keys or manage HTTPS credentials manually.</li>
+  <li><a href="https://github.com/datalad/git-remote-rclone"><strong>git-remote-rclone</strong></a> pushes and fetches through <a href="https://rclone.org/">rclone</a>, so it gets rclone’s 70+ cloud storage providers for free: Google Drive, Azure Blob Storage, Backblaze B2, and the rest.</li>
+</ul>
+
+<h3 id="encryption">Encryption</h3>
+
+<ul>
+  <li><a href="https://github.com/spwhitton/git-remote-gcrypt"><strong>git-remote-gcrypt</strong></a> encrypts an entire git repository with GPG before pushing it to any standard git remote. The remote stores only encrypted data, so you can use an untrusted host as a private git server with multiple participants sharing access through GPG’s key infrastructure.</li>
+  <li><a href="https://github.com/GenerousLabs/git-remote-encrypted"><strong>git-remote-encrypted</strong></a> takes a different approach where each git object is individually encrypted before being stored as a file in a separate git repository. The remote looks like a normal git repo full of encrypted blobs.</li>
+  <li><strong>git-remote-keybase</strong> was part of the <a href="https://github.com/keybase/client">Keybase client</a> and stored encrypted git repos on Keybase’s infrastructure using the Keybase identity and key management system. Keybase was <a href="https://keybase.io/blog/keybase-joins-zoom">acquired by Zoom in 2020</a> and the service has been winding down since.</li>
+</ul>
+
+<h3 id="content-addressed-storage">Content-addressed storage</h3>
+
+<ul>
+  <li><a href="https://github.com/cryptix/git-remote-ipfs"><strong>git-remote-ipfs</strong></a> maps git objects onto IPFS, storing repositories in a content-addressed merkle DAG. Written in Go using the IPFS API. Several other IPFS-based remote helpers exist (<a href="https://github.com/dhappy/git-remote-ipfs">dhappy/git-remote-ipfs</a>, <a href="https://github.com/ipfs-shipyard/git-remote-ipld">git-remote-ipld</a>, <a href="https://github.com/ElettraSciComp/Git-IPFS-Remote-Bridge">Git-IPFS-Remote-Bridge</a>) taking slightly different approaches to the same problem.</li>
+</ul>
+
+<h3 id="vcs-bridges">VCS bridges</h3>
+
+<ul>
+  <li><a href="https://github.com/felipec/git-remote-hg"><strong>git-remote-hg</strong></a> lets you clone and push to Mercurial repositories transparently using git commands, converting between the two object models on the fly using the fast-import/fast-export capabilities.</li>
+  <li><a href="https://github.com/felipec/git-remote-bzr"><strong>git-remote-bzr</strong></a> does the same for Bazaar repositories, also by Felipe Contreras.</li>
+  <li><a href="https://github.com/Git-Mediawiki/Git-Mediawiki"><strong>git-remote-mediawiki</strong></a> treats a MediaWiki instance as a git remote where each wiki page becomes a file. You can clone a wiki, edit pages locally with your text editor, and push changes back. Written in Perl.</li>
+</ul>
+
+<h3 id="p2p-and-decentralised">P2P and decentralised</h3>
+
+<ul>
+  <li><a href="https://github.com/cjb/GitTorrent"><strong>git-remote-gittorrent</strong></a> distributed git over BitTorrent, using a DHT for peer discovery and Bitcoin’s blockchain for user identity. A research prototype from 2015 that demonstrated the concept but never saw wide adoption.</li>
+  <li><a href="https://github.com/gugabfigueiredo/git-remote-nostr"><strong>git-remote-nostr</strong></a> publishes git objects as <a href="https://nostr.com/">Nostr</a> events, using the relay network for distribution.</li>
+  <li><a href="https://github.com/lez/git-remote-blossom"><strong>git-remote-blossom</strong></a> builds on the <a href="https://github.com/hzrd149/blossom">Blossom protocol</a>, a Nostr-adjacent system for content-addressed blob storage.</li>
+  <li><a href="https://github.com/clehner/git-remote-ssb"><strong>git-remote-ssb</strong></a> stored repositories on <a href="https://scuttlebutt.nz/">Secure Scuttlebutt</a>, a gossip-based peer-to-peer protocol where data replicates through social connections rather than central servers. Dormant since the SSB ecosystem contracted.</li>
+</ul>
+
+<h3 id="transport-wrappers">Transport wrappers</h3>
+
+<p>These don’t provide their own storage or collaboration model, they wrap existing git remotes with a different transport layer, closer in spirit to the built-in <code class="language-plaintext highlighter-rouge">git-remote-ext</code> than to the storage-backed helpers above.</p>
+
+<ul>
+  <li><a href="https://github.com/agentofuser/git-remote-tor"><strong>git-remote-tor</strong></a> routes git traffic through Tor hidden services, written in Rust.</li>
+</ul>
+
+<h3 id="blockchain">Blockchain</h3>
+
+<ul>
+  <li><a href="https://github.com/harry-hov/git-remote-gitopia"><strong>git-remote-gitopia</strong></a> pushes repositories to <a href="https://gitopia.com/">Gitopia</a>, a code collaboration platform built on the Cosmos blockchain where repository metadata and access control live on-chain.</li>
+</ul>
+
+<h3 id="other-storage-backends">Other storage backends</h3>
+
+<ul>
+  <li><a href="https://github.com/chrislloyd/git-remote-sqlite"><strong>git-remote-sqlite</strong></a> stores git objects as rows in a SQLite database, which can then be replicated using tools like <a href="https://litestream.io/">Litestream</a>.</li>
+  <li><a href="https://github.com/CGamesPlay/git-remote-restic"><strong>git-remote-restic</strong></a> bridges git and <a href="https://restic.net/">restic</a> backup repositories, inheriting restic’s encryption and support for dozens of storage backends.</li>
+  <li><a href="https://github.com/peritus/git-remote-couch"><strong>git-remote-couch</strong></a> stores git repos in CouchDB, gaining CouchDB’s replication and conflict resolution for free.</li>
+  <li><a href="https://github.com/rovaughn/git-remote-grave"><strong>git-remote-grave</strong></a> pushes repositories into a content-addressable store that deduplicates across multiple repos.</li>
+</ul>
+
+<p>If I’ve missed one, reach out on <a href="https://mastodon.social/@andrewnez">Mastodon</a> or submit a pull request on <a href="https://github.com/andrew/nesbitt.io/blob/master/_posts/2026-03-18-git-remote-helpers.md">GitHub</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

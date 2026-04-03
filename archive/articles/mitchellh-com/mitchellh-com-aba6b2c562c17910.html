@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tagged Union Subsets with Comptime in Zig | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Tagged Union Subsets with Comptime in Zig</h1>
+        <div class="meta">Mitchell Hashimoto 2024-09-23T00:00:00Z</div>
+        <div class="links">
+          <a href="https://mitchellh.com/writing/zig-comptime-tagged-union-subset">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/mitchellh-com/mitchellh-com-aba6b2c562c17910.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body><h1><a href="https://mitchellh.com/">Mitchell Hashimoto</a></h1><h1>Tagged Union Subsets with Comptime in Zig</h1><p>This is part of a series on <a href="https://mitchellh.com/zig">Zig comptime usecases</a>.</p><p>Zig supports tagged unions<a href="https://mitchellh.com#user-content-fn-1">1</a> and the Zig compiler will error if you <pre>switch</pre>
+on a tagged union without handling all possible cases. This is a great feature
+because it helps you avoid bugs when new cases are added to the union. Many
+languages support similar functionality.</p><p>However, sometimes you want to work with a subset of the tagged union.
+You don't want to lose compiler safety by using catch-all cases in your
+<pre>switch</pre> statement, but you also don't want to handle every case with a noop.</p><p>In this post, I'll illustrate a real world example of this scenario and how
+Zig's comptime can be used to elegantly solve it. The real world example
+will come from <a href="https://mitchellh.com/ghostty">my terminal project</a>.</p><h2><a href="https://mitchellh.com#a-real-example-keybind-actions"/>A Real Example: Keybind Actions</h2>
+<p>The following is how keybind actions are represented in
+<a href="https://mitchellh.com/ghostty">Ghostty</a>. A keybind action is the action that a keyboard
+shortcut triggers. For example: <pre>ctrl+n</pre> might trigger the action to
+open a new window.</p><pre><pre>pub const Action = union(enum) {
+  quit: void,
+  new_window: void,
+  close_window: void,
+  close_all_windows: void,
+  open_config: void,
+  reload_config: void,
+  scroll_lines: i16,
+
+  // Many more in reality, but we'll use the above for this blog post.
+};</pre></pre><p>Most keybinding actions have no data associated with them (<pre>void</pre>) but
+some do. For example, the <pre>scroll_lines</pre> action has an <pre>i16</pre> associated
+with it to specify the number of lines up (negative) or down (positive)
+to scroll.</p><p>This tagged union approach is nice because in the part of the code
+that executes keybind actions, I can <pre>switch</pre> on the <pre>Action</pre> union
+and the compiler will error if I don't handle all cases. This ensures that
+when I add a new keybind action, I also add the code to handle it.</p><pre><pre>pub fn performAction(action: Action) void {
+  switch (action) {
+    .quit =&gt; ...,
+    .new_window =&gt; ...,
+    .close_window =&gt; ...,
+    .close_all_windows =&gt; ...,
+    .open_config =&gt; ...,
+    .reload_config =&gt; ...,
+    .scroll_lines =&gt; |amount| ...,
+  }
+}</pre></pre><p>This is how Ghostty initially implemented keybind actions.</p><h2><a href="https://mitchellh.com#the-case-for-union-subsets"/>The Case for Union Subsets</h2>
+<p>Recently, I needed to add a new keybind action that was scoped not
+to a specific terminal but to the entire Ghostty application. As part of this,
+I wanted to refactor out <pre>performAction</pre> so that the terminal-specific
+actions were handled by the terminal structure and the application-wide
+actions were handled by the application structure.</p><p>The problem is that the <pre>Action</pre> union contains both terminal-specific
+actions and application-wide actions. Initially, I did something like this:</p><pre><pre>pub fn performAppAction(action: Action) void {
+  switch (action) {
+    .quit =&gt; ...,
+    .close_all_windows =&gt; ...,
+    .open_config =&gt; ...,
+    .reload_config =&gt; ...,
+    else =&gt; {},
+  }
+}</pre></pre><p>This works but do you see the <pre>else</pre> there? That's a catch-all case
+and when there is a catch-all case, the compiler can't error if I add
+a new action to the <pre>Action</pre> union and forget to handle it in
+<pre>performAppAction</pre>.</p><p>Next, I exhaustively listed out all the actions I didn't care about and did nothing:</p><pre><pre>pub fn performAppAction(action: Action) void {
+  switch (action) {
+    .quit =&gt; ...,
+    .close_all_windows =&gt; ...,
+    .open_config =&gt; ...,
+    .reload_config =&gt; ...,
+
+    // Do nothing for terminal-specific actions.
+    .new_window,
+    .close_window,
+    .scroll_lines,
+    =&gt; {},
+  }
+}</pre></pre><p>This works but I have a few issues with it:</p><ul><li>
+<p>It's verbose. I have to list out all the terminal-specific actions even though I don't care about them. The blog post example only shows a half dozen actions but in reality there are many, many more.</p></li><li>
+<p>From a types perspective, I don't like that</p><pre>performAppAction</pre>can accept terminal-specific actions. It'd be nicer if the type signature self-documented that it only accepts application-wide actions and what those were.</li><li>
+<p>This same issue is mirrored in the</p><pre>performTerminalAction</pre>function (which I didn't show here).</li></ul><p>What I really want is something like the following:</p><pre><pre>// NOT REAL ZIG CODE! THIS IS PSUEDO CODE!
+const AppAction = union(enum) {
+  quit: void,
+  // ... other app actions ...
+};
+
+const TerminalAction = union(enum) {
+  new_window: void,
+  // ... other terminal actions ...
+};
+
+// Union of both. NOTE THIS IS NOT REAL CODE. THIS IS CONCEPTUAL.
+const Action = AppAction | TerminalAction;</pre></pre><p>One might ask: "why not just have two separate unions?" The answer is
+because other parts of the codebase need to work with the single <pre>Action</pre>.
+For example, the configuration parser needs to be able to parse all actions
+for keybinds.</p><h2><a href="https://mitchellh.com#comptime-union-subsets"/>Comptime Union Subsets</h2>
+<p>We can use Zig comptime to create our subset types.</p><p>We could've just as easily created our subset types and used comptime to create our full union type. As an exercise to the reader, I encourage you to try this. It works just as well, but has different edge cases and ergonomic tradeoffs.</p><p>The first thing we need to know is what scope each action belongs to. To do this, we can introduce a new function to tell us:</p><pre><pre>pub const Scope = enum { app, terminal };
+
+pub fn scope(action: Action) Scope {
+  return switch (action) {
+    .quit, .close_all_windows, .open_config, .reload_config =&gt; .app,
+    .new_window, .close_window, .scroll_lines =&gt; .terminal,
+  };
+}</pre></pre><p>This is a very straightforward function. It is verbose since we need to include every case, but it is centralized in a single location and easy to maintain.</p><p>Next, we can use this function and comptime to create our subset types:</p><pre><pre>/// Returns a union type that only contains actions that are scoped to
+/// the given scope.
+pub fn ScopedAction(comptime s: Scope) type {
+  const all_fields = @typeInfo(Action).Union.fields;
+
+  // Find all fields that are scoped to s
+  var i: usize = 0;
+  var fields: [all_fields.len]std.builtin.Type.UnionField = undefined;
+  for (all_fields) |field| {
+    const action = @unionInit(Action, field.name, undefined);
+    if (action.scope() == s) {
+      fields[i] = field;
+      i += 1;
+    }
+  }
+
+  // Build our union
+  return @Type(.{ .Union = .{
+    .layout = .auto,
+    .tag_type = null,
+    .fields = fields[0..i],
+    .decls = &amp;.{},
+  } });
+}</pre></pre><p>I'm sorry, I know this is a "draw the rest of the fucking owl" moment<a href="https://mitchellh.com#user-content-fn-2">2</a>.
+I'll walk through this step by step.</p><pre><pre>pub fn ScopedAction(comptime s: Scope) type {</pre></pre><p>First, capitalized identifiers in Zig are idiomatically types. The compiler doesn't enforce or require this, it's just idiomatic styling. When a function is capitalized, it signals to the caller that it will return a type.</p><p>This is a function that returns a type. This is how Zig does generics. Since Zig has comptime code execution, and comptime code execution is the full language, we can use functions that take parameters at comptime and return things like... types.</p><p>In this case, our function is taking a <pre>Scope</pre> and using that to generate
+a new action union that only contains actions that have that scope.</p><pre><pre>  const all_fields = @typeInfo(Action).Union.fields;</pre></pre><p>The <pre>@typeInfo</pre> builtin function<a href="https://mitchellh.com#user-content-fn-3">3</a> returns structured information
+about a type at comptime. We call it on <pre>Action</pre> to extract all the
+fields in the union.</p><pre><pre>  // Find all fields that are scoped to s
+  var i: usize = 0;
+  var fields: [all_fields.len]std.builtin.Type.UnionField = undefined;
+  for (all_fields) |field| {
+    const action = @unionInit(Action, field.name, undefined);
+    if (action.scope() == s) {
+      fields[i] = field;
+      i += 1;
+    }
+  }</pre></pre><p>We now iterate over all the fields in the <pre>Action</pre> union. For each field,
+we determine if it belongs to the scope we're interested in. If it does,
+we save it.</p><p>The <pre>@unionInit</pre> function is a builtin that creates a union value with
+a comptime-known field name and value. The value we use is <pre>undefined</pre>
+(uninitialized memory) because we don't care about the value; our
+<pre>scope()</pre> function only looks at the tag. If we ever access undefined
+memory in comptime, we'll get a compiler error, so this is safe.</p><p>We need to create a value with the given type so we can call <pre>scope()</pre>
+on it. Note that our <pre>scope()</pre> function above has no idea if it is
+being executed in comptime or runtime. It doesn't care. It's just a
+normal function. Comptime is fucking cool that way.</p><pre><pre>  // Build our union
+  return @Type(.{ .Union = .{
+    .layout = .auto,
+    .tag_type = null,
+    .fields = fields[0..i],
+    .decls = &amp;.{},
+  } });</pre></pre><p>The <pre>@Type</pre> builtin reifies a type (creates a new type). In this case,
+we're creating a union with the fields we accumulated; the fields that
+have the scope we're looking for.</p><p>Fun fact, I <a href="https://github.com/ziglang/zig/pulls?q=is%3Apr+is%3Aclosed+author%3Amitchellh">implemented a lot of the type reification logic</a>
+in the Zig compiler. If you use <pre>@Type</pre>, you're probably hitting at
+least one line of code I wrote.</p><p>Finally, at the end of all this, we have a new type that only contains a subset of our original union. It looks like this:</p><pre><pre>pub fn performAppAction(action: ScopedAction(.app)) void {
+  switch (action) {
+    .quit =&gt; ...,
+    .close_all_windows =&gt; ...,
+    .open_config =&gt; ...,
+    .reload_config =&gt; ...,
+  }
+}</pre></pre><p>Beautiful. We have a simple <pre>switch</pre> with compiler-enforced exhaustiveness
+and our function signature self-documents that it only accepts application-wide
+actions. When we add new actions to the <pre>Action</pre> union, we'll get a compiler
+error to update the <pre>scope()</pre> function and after that everything else will
+just work.</p><p>Also, in case its not obvious: all of this logic happens at compile time. There is no runtime cost to doing any of this. Since we only execute this logic at compile time, it also doesn't generate any new runtime code.</p><h2><a href="https://mitchellh.com#converting-to-a-subset"/>Converting To A Subset</h2>
+<p>The final challenge: given a full <pre>Action</pre>, how do we convert it to a
+typed subset such as <pre>ScopedAction(.app)</pre>? The function below does
+just that:</p><pre><pre>pub fn scoped(self: Action, comptime s: Scope) ?ScopedAction(s) {
+  switch (self) {
+    inline else =&gt; |v, tag| {
+      // Use comptime to prune out invalid actions
+      if (comptime @unionInit(
+        Action,
+        @tagName(tag),
+        undefined,
+      ).scope() != s) return null;
+
+      // Initialize our app action
+      return @unionInit(
+        ScopedAction(s),
+        @tagName(tag),
+        v,
+      );
+    },
+  }
+}</pre></pre><p>Let's walk through this one as well.</p><pre><pre>pub fn scoped(self: Action, comptime s: Scope) ?ScopedAction(s) {</pre></pre><p>A few neat things here. First, this function takes both runtime and comptime parameters. The compiler will enforce that the comptime parameters are known at compile time.</p><p>The scope parameter must be comptime known because we use it to determine
+our return value. Notice we use <pre>s</pre> in the return type <pre>?ScopedAction(s)</pre>.
+If we didn't have the <pre>comptime</pre> prefix on <pre>s</pre>, the compiler would error
+because we can't use a runtime value to generate information that must
+be compile-time known (a type).</p><p>The <pre>?</pre> in the return type notates an optional return value. This means
+that the return value may be null. For this function, we'll return null
+if the <pre>self</pre> action doesn't belong to the scope we're looking for.</p><pre><pre>  switch (self) {
+    inline else =&gt; |v, tag| {</pre></pre><p>The <pre>inline else</pre> is a special case in Zig. It is a catch-all case that
+generates runtime code for each case that wasn't explicitly handled. Because
+it is inline, the compiler will provide the <pre>tag</pre> as a compile-time known
+value. This is important because we need to use it to determine the scope
+of the action.</p><p><pre>inline else</pre> can be hard to understand at first. I recommend trying to
+delete the <pre>inline</pre> keyword and see what the compiler tells you. Then
+think through what the compiler is trying to do and it should become
+more clear why <pre>inline</pre> is necessary.</p><pre><pre>      // Use comptime to prune out invalid actions
+      if (comptime @unionInit(
+        Action,
+        @tagName(tag),
+        undefined,
+      ).scope() != s) return null;</pre></pre><p>Here we use <pre>@unionInit</pre> again to create a union value with the comptime-known
+tag. We then call <pre>scope()</pre> on it to determine if it belongs to the scope
+we're looking for. If it doesn't, we return null. Since this conditional
+is a comptime, this will conditionally compile out the rest of the block
+so we don't get a type error initializing a scoped action for an invalid
+tag.</p><p>I wrote an entire blog post dedicated to
+<a href="https://mitchellh.com/writing/zig-comptime-conditional-disable">conditionally disabling code with comptime</a>
+that explains this pattern.</p><pre><pre>      // Initialize our app action
+      return @unionInit(
+        ScopedAction(s),
+        @tagName(tag),
+        v,
+      );</pre></pre><p>Finally, we return the initialized scoped action.</p><p>Compared to the previous section, this function does have some runtime cost. This function uses a runtime switch statement to filter out actions that don't belong to the scope we're looking for. I didn't bother disassemblying the code to see how this is lowered, but I suspect the compiler optimizes a lot of this away because the converted unions have the same memory layout. I did profile this function in a synthetic case where I infinite loop a cheap keyboard shortcut in Ghostty and it didn't show up in the profile, so I'm not worried about it.</p><h2><a href="https://mitchellh.com#conclusion"/>Conclusion</h2>
+<p>Zig's comptime is a powerful feature that allows you to do some really
+amazing things. In this post, I combined multiple comptime features
+of Zig to solve a real-world problem: generating types at comptime,
+calling comptime-oblivious functions at comptime, <pre>inline else</pre>,
+<pre>@unionInit</pre>, and more.</p><p>This post demonstrates an admittedly advanced use of Zig's comptime. For newcomers to Zig, the techniques and language features used here are likely to be overwhelming. It took me some time to get comfortable with these features, but they are incredibly powerful once you do.</p><p>I'm a type pragmatist. I believe leaning on the type system to enforce correctness is a powerful tool. At the same time, I believe some languages take this too far and make the type system a burden. Zig strikes a nice balance for me and I believe this post demonstrates that.</p><h2><a href="https://mitchellh.com#footnote-label"/>Footnotes</h2>
+<ul><li></li><li></li><li>
+<p>Functions that start with</p><pre>@</pre>in Zig are builtin to the compiler.<a href="https://mitchellh.com#user-content-fnref-3">↩</a></li></ul></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

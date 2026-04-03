@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reverse-engineering a carry-lookahead adder in the Pentium | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Reverse-engineering a carry-lookahead adder in the Pentium</h1>
+        <div class="meta">Ken Shirriff&#x27;s blog 2025-01-18T18:19:00Z</div>
+        <div class="links">
+          <a href="http://www.righto.com/2025/01/pentium-carry-lookahead-reverse-engineered.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/righto-com/righto-com-f609e2df187c4b94.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Addition is harder than you&#x27;d expect, at least for a computer. Computers use multiple types of adder circuits with different tradeoffs of size versus speed. In this article, I reverse-engineer an 8-bit adder in the Pentium&#x27;s floating point unit. This adder turns out to be a carry-lookahead adder, in particular, a type known as &quot;Kogge-Stone.&quot; 1 In this artic…</div>
+        <div class="content">
+          <p>Addition is harder than you'd expect, at least for a computer.
+Computers use multiple types of adder circuits with different tradeoffs of size versus speed.
+In this article, I reverse-engineer an 8-bit adder in the Pentium's floating point unit.
+This adder turns out to be a carry-lookahead adder,
+in particular, a type known as "Kogge-Stone."<span id="fnref:kogge-stone"><a class="ref" href="#fn:kogge-stone">1</a></span>
+In this article, I'll explain how a carry-lookahead adder works and I'll show how the Pentium implemented it.
+Warning: lots of Boolean logic ahead.</p>
+<p><a href="https://static.righto.com/images/pentium-adder/pentium-labeled.jpg"><img alt="The Pentium die, showing the adder. Click this image (or any other) for a larger version." class="hilite" height="627" src="https://static.righto.com/images/pentium-adder/pentium-labeled-w600.jpg" title="The Pentium die, showing the adder. Click this image (or any other) for a larger version." width="600" /></a><div class="cite">The Pentium die, showing the adder. Click this image (or any other) for a larger version.</div></p>
+<p>The die photo above shows the main functional units of the Pentium.
+The adder, in the lower right, is a small component of the floating point unit.
+It is not a general-purpose adder, but is used only for determining quotient digits during division.
+It played a role in the famous
+Pentium FDIV division bug, which I wrote about <a href="https://www.righto.com/2024/12/this-die-photo-of-pentium-shows.html">here</a>.</p>
+<h2>The hardware implementation</h2>
+<p>The photo below shows the carry-lookahead adder used by the divider.
+The adder itself consists of the circuitry highlighted in red.
+At the top, logic gates compute signals in parallel for each of the 8 pairs of inputs: partial sum, carry generate, and carry propagate.
+Next, the complex carry-lookahead logic determines in parallel if there will be a carry at each position.
+Finally, XOR gates apply the carry to each bit.
+Note that the sum/generate/propagate circuitry consists of 8 repeated blocks, and the same with the carry XOR
+circuitry.
+The carry lookahead circuitry, however, doesn't have any visible structure since it is different for each bit.<span id="fnref:8bit"><a class="ref" href="#fn:8bit">2</a></span></p>
+<p><a href="https://static.righto.com/images/pentium-adder/adder-silicon.jpg"><img alt="The carry-lookahead adder that feeds the lookup table. This block of circuitry is just above the PLA on the die. I removed the metal layers, so this photo shows the doped silicon (dark) and the polysilicon (faint gray)." class="hilite" height="787" src="https://static.righto.com/images/pentium-adder/adder-silicon-w550.jpg" title="The carry-lookahead adder that feeds the lookup table. This block of circuitry is just above the PLA on the die. I removed the metal layers, so this photo shows the doped silicon (dark) and the polysilicon (faint gray)." width="550" /></a><div class="cite">The carry-lookahead adder that feeds the lookup table. This block of circuitry is just above the PLA on the die. I removed the metal layers, so this photo shows the doped silicon (dark) and the polysilicon (faint gray).</div></p>
+<p>The large amount of circuitry in the middle is used for testing; see the footnote.<span id="fnref:testing"><a class="ref" href="#fn:testing">3</a></span>
+At the bottom, the drivers amplify control signals for various parts of the circuit.</p>
+<h2>The carry-lookahead adder concept</h2>
+<p>The problem with addition is that carries make addition slow.
+Consider calculating 99999+1 by hand.
+You'll start with 9+1=10, then carry the one, generating another carry, which generates another carry, and so forth, until you go through all the digits.
+Computer addition has the same problem:
+If you're adding two numbers, the low-order bits can generate a carry that then propagates through all the bits.
+An adder that works this way&mdash;known as a ripple carry adder&mdash;will be slow because the carry has to ripple through
+all the bits.
+As a result, CPUs use special circuits to make addition faster.</p>
+<p>One solution is the carry-lookahead adder. In this adder, all the carry bits are computed in parallel, before computing
+the sums. Then, the sum bits can be computed in parallel, using the carry bits.
+As a result, the addition can be completed quickly, without waiting for the carries to ripple through
+the entire sum.</p>
+<p>It may seem impossible to compute the carries without computing the sum first, but there's a way to do it.
+For each bit position, you determine signals called "carry generate" and "carry propagate".
+These signals can then be used to determine all the carries in parallel.
+The <em>generate</em> signal indicates that the position generates a carry. For instance, if you add binary
+<code>1xx</code> and <code>1xx</code> (where <code>x</code> is an arbitrary bit), a carry will be generated from the top bit,
+regardless of the unspecified bits.
+On the other hand, adding <code>0xx</code> and <code>0xx</code> will never produce a carry.
+Thus, the <em>generate</em> signal is produced for the first case but not the second.</p>
+<p>But what about <code>1xx</code> plus <code>0xx</code>? We might get a carry, for instance, <code>111+001</code>, but we might not get a carry,
+for instance, <code>101+001</code>. In this "maybe" case, we set the <em>carry propagate</em> signal, indicating that a carry into the
+position will get propagated out of the position. For example, if there is a carry out of
+the middle position, <code>1xx+0xx</code> will have a carry from the top bit. But if there is no carry out of the middle position, then
+there will not be a carry from the top bit. In other words, the <em>propagate</em> signal indicates that a carry into the top bit will be propagated out of the top
+bit.</p>
+<p>To summarize, adding <code>1+1</code> will generate a carry. Adding <code>0+1</code> or <code>1+0</code> will propagate a
+carry.
+Thus, the <em>generate</em> signal is formed at each position by <em>G<sub>n</sub> = A<sub>n</sub>·B<sub>n</sub></em>, where <em>A</em> and <em>B</em> are the inputs.
+The <em>propagate</em> signal is <em>P<sub>n</sub> = A<sub>n</sub>+B<sub>n</sub></em>,
+the logical-OR of the inputs.<span id="fnref:propagate"><a class="ref" href="#fn:propagate">4</a></span></p>
+<p>Now that the <em>propagate</em> and <em>generate</em> signals are defined, they can be used to compute the carry <em>C<sub>n</sub></em> at
+each bit position:
+<br><em>C<sub>1</sub> = G<sub>0</sub></em>: a carry into bit 1 occurs if a carry is generated from bit 0.
+<br><em>C<sub>2</sub> = G<sub>1</sub> + G<sub>0</sub>P<sub>1</sub></em>: A carry into bit 2 occur if bit 1 generates a carry or bit 1 propagates a carry from bit 0.
+<br><em>C<sub>3</sub> = G<sub>2</sub> + G<sub>1</sub>P<sub>2</sub> + G<sub>0</sub>P<sub>1</sub>P<sub>2</sub></em>: A carry into bit 3 occurs if bit 2 generates a carry, or bit 2 propagates a carry generated from bit 1, or bits 2 and 1 propagate a carry generated from bit 0.
+<br><em>C<sub>4</sub> = G<sub>3</sub> + G<sub>2</sub>P<sub>3</sub> + G<sub>1</sub>P<sub>2</sub>P<sub>3</sub> + G<sub>0</sub>P<sub>1</sub>P<sub>2</sub>P<sub>3</sub></em>: A carry into bit 4 occurs if a carry is generated from bit 3, 2, 1, or 0 along with the necessary propagate signals.
+<br>... and so forth, getting more complicated with each bit ...</p>
+<p>The important thing about these equations is that they can be computed in parallel, without waiting for a
+carry to ripple through each position.
+Once each carry is computed, the sum bits can be computed in parallel: <em>S<sub>n</sub> = A<sub>n</sub> ⊕ B<sub>n</sub> ⊕ C<sub>n</sub></em>. In other words, the two input bits and the computed carry are combined with exclusive-or.</p>
+<h2>Implementing carry lookahead with a parallel prefix adder</h2>
+<p>The straightforward way to implement carry lookahead is to directly implement the equations above.
+However, this approach requires a lot of circuitry due to the complicated equations.
+Moreover, it needs gates with many inputs, which are slow for electrical reasons.<span id="fnref:74181"><a class="ref" href="#fn:74181">5</a></span></p>
+<p>The Pentium's adder implements the carry lookahead in a different way, called the "parallel prefix adder."<span id="fnref:parallel-prefix"><a class="ref" href="#fn:parallel-prefix">7</a></span>
+The idea is to produce the propagate and generate signals across ranges of bits, not just single bits as before.
+For instance, the <em>propagate</em> signal <em>P<sub>32</sub></em> indicates that a carry in to bit 2 would be propagated out of bit 3.
+And <em>G<sub>30</sub></em> indicates that bits 3 to 0 generate a carry out of bit 3.</p>
+<p>Using some mathematical tricks,<span id="fnref:pg"><a class="ref" href="#fn:pg">6</a></span> you can take the <em>P</em> and <em>G</em> values for two smaller ranges and merge them into
+the <em>P</em> and <em>G</em> values for the combined range.
+For instance, you can start with the <em>P</em> and <em>G</em> values for bits 0 and 1, and produce <em>P<sub>10</sub></em> and <em>G<sub>10</sub></em>.
+These could be merged with <em>P<sub>32</sub></em> and <em>G<sub>32</sub></em> to produce <em>P<sub>30</sub></em> and <em>G<sub>30</sub></em>,
+indicating if a carry is propagated across bits 3-0 or generated by bits 3-0.
+Note that <em>G<sub>n0</sub></em> is the carry-lookahead value we need for bit <em>n</em>, so producing these <em>G</em> values gives 
+the results that we need from the carry-lookahead implementation.</p>
+<p>This merging process is more efficient than the "brute force" implementation of the carry-lookahead logic since
+logic subexpressions can be reused.
+This merging process can be implemented in many ways, including 
+<a href="https://en.wikipedia.org/wiki/Kogge%E2%80%93Stone_adder">Kogge-Stone</a>, <a href="https://en.wikipedia.org/wiki/Brent%E2%80%93Kung_adder">Brent-Kung</a>, and Ladner-Fischer.
+The different algorithms have different tradeoffs of performance versus circuit area.
+In the next section, I'll show how the Pentium implements the Kogge-Stone algorithm.</p>
+<h2>The Pentium's implementation of the carry-lookahead adder</h2>
+<p>The Pentium's adder is implemented with four layers of circuitry.
+The first layer produces the <em>propagate</em> and <em>generate</em> signals (<em>P</em> and <em>G</em>) for each bit, along with a partial sum (the sum
+without any carries).
+The second layer merges pairs of neighboring <em>P</em> and <em>G</em> values, producing, for instance <em>G<sub>65</sub></em> and <em>P<sub>21</sub></em>.
+The third layer generates the carry-lookahead bits by merging previous <em>P</em> and <em>G</em> values. 
+This layer is complicated because it has different circuitry for each bit.
+Finally, the fourth layer applies the carry bits to the partial sum, producing the final arithmetic sum.</p>
+<p>Here is the schematic of the adder, from my reverse engineering.
+The circuit in the upper left is repeated 8 times to produce the propagate, generate, and partial sum for
+each bit. This corresponds to the first layer of logic.
+At the left are the circuits to merge the <em>generate</em> and <em>propagate</em> signals across pairs of bits. These circuits
+are the second layer of logic.</p>
+<p><a href="https://static.righto.com/images/pentium-adder/adder-schematic.jpg"><img alt="Schematic of the Pentium's 8-bit carry-lookahead adder. Click for a larger version." class="hilite" height="522" src="https://static.righto.com/images/pentium-adder/adder-schematic-w500.jpg" title="Schematic of the Pentium's 8-bit carry-lookahead adder. Click for a larger version." width="500" /></a><div class="cite">Schematic of the Pentium's 8-bit carry-lookahead adder. Click for a larger version.</div></p>
+<p>The circuitry at the right is the interesting part&mdash;it computes the carries in parallel and then computes the
+final sum bits using XOR. This corresponds to the third and fourth layers of circuitry respectively.
+The circuitry gets more complicated going from bottom to top as the bit position increases.</p>
+<p>The diagram below is the standard diagram that illustrates how a
+<a href="https://en.wikipedia.org/wiki/Kogge%E2%80%93Stone_adder">Kogge-Stone</a> adder works.
+It's rather abstract, but I'll try to explain it.
+The diagram shows how the <em>P</em> and <em>G</em> signals are merged to produce each output at the bottom. 
+Each line coresponds to both the <em>P</em> and the <em>G</em> signal.
+Each square box generates the <em>P</em> and <em>G</em> signals for that bit.
+(Confusingly, the vertical and diagonal lines have the same meaning, indicating inputs going into a diamond
+and outputs coming out of a diamond.)
+Each diamond combines two ranges of <em>P</em> and <em>G</em> signals to generate new <em>P</em> and <em>G</em> signals for the combined
+range.
+Thus, the signals cover wider ranges as they progress downward, ending with the <em>G<sub>n0</sub></em> signals that
+are the outputs.</p>
+<p><a href="https://static.righto.com/images/pentium-adder/kogge-stone7.png"><img alt="A diagram of an 8-bit Kogge-Stone adder highlighting the carry out of bit 6 (green) and out of bit 2 (purple). Modification of the diagram by Robey Pointer, Wikimedia Commons." class="hilite" height="276" src="https://static.righto.com/images/pentium-adder/kogge-stone7-w350.png" title="A diagram of an 8-bit Kogge-Stone adder highlighting the carry out of bit 6 (green) and out of bit 2 (purple). Modification of the diagram by Robey Pointer, Wikimedia Commons." width="350" /></a><div class="cite">A diagram of an 8-bit Kogge-Stone adder highlighting the carry out of bit 6 (green) and out of bit 2 (purple). Modification of the diagram by Robey Pointer, <a href="https://commons.wikimedia.org/wiki/File:Kogge-stone-8-bit.png">Wikimedia Commons</a>.</div></p>
+<p>It may be easier to understand the diagram by starting with the outputs.
+I've highlighted two circuits: The purple circuit computes the carry into bit 3 (out of bit 2),
+while the green circuit computes the carry into bit 7 (out of bit 6).
+Following the purple output upward, note that it forms a tree reaching bits 2, 1, and 0, so it generates the
+carry based on these bits, as desired.
+In more detail, the upper purple diamond combines the <em>P</em> and <em>G</em> signals for bits 2 and 1, generating <em>P<sub>21</sub></em> and <em>G<sub>21</sub></em>.
+The lower purple diamond merges in <em>P<sub>0</sub></em> and <em>G<sub>0</sub></em> to create <em>P<sub>20</sub></em> and <em>G<sub>20</sub></em>.
+Signal <em>G<sub>20</sub></em> indicates of bits 2 through 0 generate a carry; this is the desired carry value into bit 3.</p>
+<p>Now, look at the green output and see how it forms a tree going upward, combining bits 6 through 0.
+Notice how it takes advantage of the purple carry output, reducing the circuitry required.
+It also uses <em>P<sub>65</sub></em>, <em>P<sub>43</sub></em>, and the corresponding <em>G</em> signals.
+Comparing with the earlier schematic shows how the diagram corresponds to the schematic, but abstracts out
+the details of the gates.</p>
+<p>Comparing the diagram to the schematic, each square box corresponds to
+to the circuit in the upper left of the schematic that generates <em>P</em> and <em>G</em>, the first layer of circuitry.
+The first row of diamonds corresponds to the pairwise combination circuitry on the left of the schematic, the
+second layer of circuitry.
+The remaining diamonds correspond to the circuitry on the right of the schematic, with each column
+corresponding to a bit, the third layer of circuitry. (The diagram ignores the final XOR step, the fourth layer of circuitry.)</p>
+<p>Next, I'll show how the diagram above, the logic equations, and the schematic are related.
+The diagram below shows the logic equation for <em>C<sub>7</sub></em> and how it is implemented with gates; this
+corresponds to the green diamonds above.
+The gates on the left below computes <em>G<sub>63</sub></em>; this corresponds to the middle green diamond on the left.
+The next gate below computes <em>P<sub>63</sub></em> from <em>P<sub>65</sub></em> and <em>P<sub>43</sub></em>; this corresponds to
+the same green diamond.
+The last gates mix in <em>C<sub>3</sub></em> (the purple line above); this corresponds to the bottom green diamond.
+As you can see, the diamonds abstract away the complexity of the gates.
+Finally, the colored boxes below show how the gate inputs map onto the logic equation. Each input corresponds to multiple
+terms in the equation (6 inputs replace 28 terms), showing how this approach reduces the circuitry required.</p>
+<p><a href="https://static.righto.com/images/pentium-adder/term7.jpg"><img alt="This diagram shows how the carry into bit 7 is computed, comparing the equations to the logic circuit." class="hilite" height="300" src="https://static.righto.com/images/pentium-adder/term7-w450.jpg" title="This diagram shows how the carry into bit 7 is computed, comparing the equations to the logic circuit." width="450" /></a><div class="cite">This diagram shows how the carry into bit 7 is computed, comparing the equations to the logic circuit.</div></p>
+<p>There are alternatives to the Kogge-Stone adder. For example, a <a href="https://en.wikipedia.org/wiki/Brent%E2%80%93Kung_adder">Brent-Kung adder</a> (below) uses a different arrangement with fewer diamonds but more layers. Thus, a Brent-Kung adder uses less circuitry but is slower.
+(You can follow each output upward to verify that the tree reaches the correct inputs.)</p>
+<p><a href="https://static.righto.com/images/pentium-adder/brent-kung.png"><img alt="A diagram of an 8-bit Brent-Kung adder. Diagram by Robey Pointer, Wikimedia Commons." class="hilite" height="300" src="https://static.righto.com/images/pentium-adder/brent-kung-w300.png" title="A diagram of an 8-bit Brent-Kung adder. Diagram by Robey Pointer, Wikimedia Commons." width="300" /></a><div class="cite">A diagram of an 8-bit Brent-Kung adder. Diagram by Robey Pointer, <a href="https://commons.wikimedia.org/wiki/File:Brent-kung-8-bit.png">Wikimedia Commons</a>.</div></p>
+<h2>Conclusions</h2>
+<p>The photo below shows the adder circuitry. I've removed the top two layers of metal, leaving the bottom layer
+of metal. Underneath the metal, polysilicon wiring and doped silicon regions are barely visible; they form
+the transistors. At the top are eight blocks of gates to generate the partial sum, generate, and propagate signals
+for each bit.
+(This corresponds to the first layer of circuitry as described earlier.)
+In the middle is the carry lookahead circuitry. It is irregular since each bit has different circuitry.
+(This corresponds to the second and third layers of circuitry, jumbled together.)
+At the bottom, eight XOR gates combine the carry lookahead output with the partial sum to produce the adder's output.
+(This corresponds to the fourth layer of circuitry.)</p>
+<p><a href="https://static.righto.com/images/pentium-adder/adder-m1.jpg"><img alt="The Pentium's adder circuitry with the top two layers of metal removed." class="hilite" height="362" src="https://static.righto.com/images/pentium-adder/adder-m1-w700.jpg" title="The Pentium's adder circuitry with the top two layers of metal removed." width="700" /></a><div class="cite">The Pentium's adder circuitry with the top two layers of metal removed.</div></p>
+<p>The Pentium uses many adders for different purposes: in the integer unit, in the floating point unit, and for
+address calculation, among others.
+Floating-point division is known to use a carry-save adder to hold the partial remainder at each step;
+see my post on the <a href="https://www.righto.com/2024/12/this-die-photo-of-pentium-shows.html">Pentium FDIV division bug</a> for details.
+I don't know what types of adders are used in other parts of the chip, but maybe I'll reverse-engineer some of them.
+Follow me on Bluesky (<a href="https://bsky.app/profile/righto.com">@righto.com</a>) or <a href="https://www.righto.com/feeds/posts/default">RSS</a> for updates. (I'm no longer on Twitter.)</p>
+<h1>Footnotes and references</h1>
+<div class="footnote">
+<ol>
+<li id="fn:kogge-stone">
+<p>Strangely, the original paper by Kogge and Stone had nothing to do with addition and carries. Their 1973 <a href="https://doi.org/10.1109/TC.1973.5009159">paper</a> was titled, 
+"A Parallel Algorithm for the Efficient Solution of a General Class of Recurrence Equations."
+It described how to solve recurrence problems on parallel computers, in particular the massively parallel
+ILLIAC IV.
+As far as I can tell, it wasn't until 1987 that their algorithm was applied to carry lookahead, in
+<a href="https://www.acsel-lab.com/Projects/fast_adder/references/papers/Han-Carlson-ARITH8.pdf">Fast Area-Efficient VLSI Adders</a>.&#160;<a class="footnote-backref" href="#fnref:kogge-stone" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+</li>
+<li id="fn:8bit">
+<p>I'm a bit puzzled why the circuit uses an 8-bit carry-lookahead adder since only 7 bits are used.
+Moreover, the carry-out is unused.
+However, the adder's bottom output bit is not connected to anything.
+Perhaps the 8-bit adder was a standard logic block at Intel and was used as-is.&#160;<a class="footnote-backref" href="#fnref:8bit" title="Jump back to footnote 2 in the text">&#8617;</a></p>
+</li>
+<li id="fn:testing">
+<p>I probably won't make a separate blog post on the testing circuitry, so I'll put details in this footnote.
+Half of the circuitry in the adder block is used to test the lookup table.
+The reason is that
+a chip such as the Pentium is very difficult to test: if one out of 3.1 million transistors goes bad, how do you detect it?  For a simple processor like the 8080, you can run through the instruction set and be fairly confident that any problem would turn up.
+But with a complex chip, it
+is almost impossible to come up with an instruction sequence that would test every bit of the microcode ROM, every bit of the cache, and so forth.
+Starting with the 386, Intel added circuitry to the processor solely to make testing easier; about 2.7% of the transistors in the 386 were for testing.</p>
+<p>To test a ROM inside the processor, Intel added circuitry to scan the entire ROM and checksum its contents.
+Specifically, a pseudo-random number generator runs through each address, while another circuit computes a checksum of the ROM output, forming a "signature" word.
+At the end, if the signature word has the right value, the ROM is almost certainly correct.
+But if there is even a single bit error, the checksum will be wrong and the chip will be rejected.
+The pseudo-random numbers and the checksum are both implemented with linear feedback shift registers (LFSR), a shift register along with a few XOR gates to feed the output back to the input.
+For more information on testing circuitry in the 386, see <a href="https://doi.org/10.1109/MDT.1987.295165">Design and Test of the 80386</a>,
+written by Pat Gelsinger, who became Intel's CEO years later.
+Even with the test circuitry, 48% of the transistor sites in the 386 were untested.
+The instruction-level test suite to test the remaining circuitry took almost 800,000 clock cycles to run.
+The overhead of the test circuitry was about 10% more transistors in the blocks that were tested.</p>
+<p>In the Pentium, the circuitry to test the lookup table PLA is just below the 7-bit adder.
+An 11-bit LFSR creates the 11-bit input value to the lookup table.
+A 13-bit LFSR hashes the two-bit quotient result from the PLA, forming a 13-bit checksum.
+The checksum is fed serially to test circuitry elsewhere in the chip, where it is merged with
+other test data and written to a register. If the register is 0 at the end, all the tests pass.
+In particular, if the checksum is correct, you can be 99.99% sure that the lookup table
+is operating as expected.
+The ironic thing is that this test circuit was useless for the FDIV bug: it ensured that the lookup table held the intended values, but the intended values were wrong.</p>
+<p>Why did Intel generate test addresses with a pseudo-random sequence instead of a sequential
+counter?
+It turns out that a linear feedback shift register (LFSR) is slightly more compact than a
+counter.
+This LFSR trick was also used in a <a href="https://www.righto.com/2017/08/inside-fake-ram-chip-i-found-something.html">touch-tone chip</a> and the program counter of the Texas Instruments TMS 1000 microcontroller (1974).
+In the TMS 1000, the program counter steps through the
+program pseudo-randomly rather than sequentially.
+The program is shuffled appropriately in the ROM to counteract the
+sequence, so the program executes as expected and a few transistors are saved.</p>
+<p><a class="footnote-backref" href="#fnref:testing" title="Jump back to footnote 3 in the text">&#8617;</a><a href="https://static.righto.com/images/pentium-adder/overall-schematic.jpg"><img alt="Block diagram of the testing circuitry." class="hilite" height="437" src="https://static.righto.com/images/pentium-adder/overall-schematic-w600.jpg" title="Block diagram of the testing circuitry." width="600" /></a><div class="cite">Block diagram of the testing circuitry.</div></p>
+</li>
+<li id="fn:propagate">
+<p>The bits <code>1+1</code> will set <em>generate</em>, but should <em>propagate</em> be set too?
+It doesn't make a difference as far as the equations. This adder sets <em>propagate</em> for <code>1+1</code> but some
+other adders do not.
+The answer depends on if you use an inclusive-or or exclusive-or gate
+to produce the propagate signal.&#160;<a class="footnote-backref" href="#fnref:propagate" title="Jump back to footnote 4 in the text">&#8617;</a></p>
+</li>
+<li id="fn:74181">
+<p>One solution is to implement the carry-lookahead circuit in blocks of four.
+This can be scaled up with 
+a second level of carry-lookahead to provide the carry lookahead across each group of four blocks.
+A third level can provide carry lookahead for groups of four second-level blocks, and so forth.
+This approach requires <em>O(log(N))</em> levels for N-bit addition.
+This approach is used by the venerable 74181 ALU, a chip used by many minicomputers in the 1970s;
+I reverse-engineered the 74181 <a href="https://www.righto.com/2017/03/inside-vintage-74181-alu-chip-how-it.html">here</a>.
+The 74182 chip provides carry lookahead for the higher levels.&#160;<a class="footnote-backref" href="#fnref:74181" title="Jump back to footnote 5 in the text">&#8617;</a></p>
+</li>
+<li id="fn:pg">
+<p>I won't go into the mathematics of merging <em>P</em> and <em>G</em> signals; see, for example, <a href="https://bpb-us-w2.wpmucdn.com/sites.coecis.cornell.edu/dist/4/81/files/2019/06/4740_lecture21-adder-circuits.pdf#page=14">Adder Circuits</a>, <a href="https://pages.hmc.edu/harris/cmosvlsi/4e/lect/lect17.pdf">Adders</a>, or
+<a href="https://personal.utdallas.edu/~ivor/ce6305/m4.pdf">Carry Lookahead Adders</a> for additional details.
+The important factor is that the carry merge operator is associative (actually a monoid),
+so the sub-ranges can be merged in any order. This flexibility is what allows different algorithms with
+different tradeoffs.&#160;<a class="footnote-backref" href="#fnref:pg" title="Jump back to footnote 6 in the text">&#8617;</a></p>
+</li>
+<li id="fn:parallel-prefix">
+<p>The idea behind a prefix adder is that we want to see if there is a carry out of bit 0, bits 0-1, bits 0-2, bits 0-3, 0-4, and so forth. These are all the prefixes of the word. Since the prefixes are computed in parallel,
+it's called a parallel prefix adder.&#160;<a class="footnote-backref" href="#fnref:parallel-prefix" title="Jump back to footnote 7 in the text">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

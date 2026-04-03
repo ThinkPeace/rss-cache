@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>When compilers surprise you | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>When compilers surprise you</h1>
+        <div class="meta">Matt Godbolt’s blog 2025-12-24T12:00:00Z</div>
+        <div class="links">
+          <a href="http://xania.org/202512/24-cunning-clang?utm_source=feed&amp;utm_medium=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xania-org/xania-org-2a222a8876bb356c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Sometimes compilers can surprise and delight even a jaded old engineer like me</div>
+        <div class="content">
+          <html:div xmlns:html="http://www.w3.org/1999/xhtml">
+<html:p class="ai-disclaimer">Written by me, proof-read by an LLM.
+<html:br />Details at end.</html:p>
+
+<html:p>Every now and then a compiler will surprise me with a really smart trick. When I first saw this optimisation I could hardly believe it. I was looking at loop optimisation, and wrote something like this simple function that sums all the numbers up to a given value:</html:p>
+
+<html:p>So far so decent: GCC has done some preliminary checks, then fallen into a loop that efficiently sums numbers using <html:code>lea</html:code> (we've <html:a href="/202512/02-adding-integers">seen this before</html:a>). But taking a closer look at the loop we see something unusual:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="nl">.L3:</html:span>
+<html:span class="w">  </html:span><html:span class="nf">lea</html:span><html:span class="w"> </html:span><html:span class="no">edx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdx</html:span><html:span class="err">+</html:span><html:span class="mi">1</html:span><html:span class="err">+</html:span><html:span class="no">rax</html:span><html:span class="p">*</html:span><html:span class="mi">2</html:span><html:span class="p">]</html:span><html:span class="w">        </html:span><html:span class="c1">; result = result + 1 + x*2</html:span>
+<html:span class="w">  </html:span><html:span class="nf">add</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="mi">2</html:span><html:span class="w">                    </html:span><html:span class="c1">; x += 2</html:span>
+<html:span class="w">  </html:span><html:span class="nf">cmp</html:span><html:span class="w"> </html:span><html:span class="no">edi</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="w">                  </html:span><html:span class="c1">; x != value</html:span>
+<html:span class="w">  </html:span><html:span class="nf">jne</html:span><html:span class="w"> </html:span><html:span class="no">.L3</html:span><html:span class="w">                       </html:span><html:span class="c1">; keep looping</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>The compiler has cleverly realised it can do two numbers<html:sup id="fnref:check"><html:a class="footnote-ref" href="#fn:check">1</html:a></html:sup> at a time using the fact it can see we're going to add <html:code>x</html:code> <html:em>and</html:em> <html:code>x + 1</html:code>, which is the same as adding <html:code>x*2 + 1</html:code>. Very cunning, I think you'll agree!</html:p>
+
+<html:p>If you turn the optimiser up to <html:code>-O3</html:code> you'll see the compiler works even harder to vectorise the loop using parallel adds. All very clever.</html:p>
+
+<html:p>This is all for GCC. Let's see what clang does with our code:</html:p>
+
+<html:p>This is where I nearly fell off my chair: <html:strong>there is no loop</html:strong>! Clang checks for positive <html:code>value</html:code>, and if so it does:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code><html:span class="w">  </html:span><html:span class="nf">lea</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="w"> </html:span><html:span class="p">-</html:span><html:span class="w"> </html:span><html:span class="mi">1</html:span><html:span class="p">]</html:span><html:span class="w">        </html:span><html:span class="c1">; eax = value - 1</html:span>
+<html:span class="w">  </html:span><html:span class="nf">lea</html:span><html:span class="w"> </html:span><html:span class="no">ecx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="w"> </html:span><html:span class="p">-</html:span><html:span class="w"> </html:span><html:span class="mi">2</html:span><html:span class="p">]</html:span><html:span class="w">        </html:span><html:span class="c1">; ecx = value - 2</html:span>
+<html:span class="w">  </html:span><html:span class="nf">imul</html:span><html:span class="w"> </html:span><html:span class="no">rcx</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="no">rax</html:span><html:span class="w">             </html:span><html:span class="c1">; rcx = (value - 1) * (value - 2)</html:span>
+<html:span class="w">  </html:span><html:span class="nf">shr</html:span><html:span class="w"> </html:span><html:span class="no">rcx</html:span><html:span class="w">                   </html:span><html:span class="c1">; rcx &gt;&gt;= 1</html:span>
+<html:span class="w">  </html:span><html:span class="nf">lea</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="p">,</html:span><html:span class="w"> </html:span><html:span class="p">[</html:span><html:span class="no">rdi</html:span><html:span class="w"> </html:span><html:span class="err">+</html:span><html:span class="w"> </html:span><html:span class="no">rcx</html:span><html:span class="p">]</html:span><html:span class="w">      </html:span><html:span class="c1">; eax = value + rcx</html:span>
+<html:span class="w">  </html:span><html:span class="nf">dec</html:span><html:span class="w"> </html:span><html:span class="no">eax</html:span><html:span class="w">                   </html:span><html:span class="c1">; --eax</html:span>
+<html:span class="w">  </html:span><html:span class="nf">ret</html:span>
+</html:code></html:pre></html:div>
+
+
+<html:p>It was not at all obvious to me what on earth was going on here. By backing out the maths a little, this is equivalent to:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code>v + ((v - 1)(v - 2) / 2) - 1;
+</html:code></html:pre></html:div>
+
+
+<html:p>Expanding the parentheses:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code>v + (v² - 2v - v + 2) / 2 - 1
+</html:code></html:pre></html:div>
+
+
+<html:p>Rearranging a bit:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code>(v² - 3v + 2) / 2 + (v - 1)
+</html:code></html:pre></html:div>
+
+
+<html:p>Multiplying the <html:code>(v - 1)</html:code> by 2 / 2:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code>(v² - 3v + 2) / 2 + (2v - 2)/2
+</html:code></html:pre></html:div>
+
+
+<html:p>Combining those and cancelling:</html:p>
+
+<html:div class="codehilite"><html:pre><html:span /><html:code>(v² - v) / 2
+</html:code></html:pre></html:div>
+
+
+<html:p>Simplifying and factoring gives us <html:code>v(v - 1) / 2</html:code> which is the closed-form solution to the "sum of integers"! Truly amazing<html:sup id="fnref:why"><html:a class="footnote-ref" href="#fn:why">2</html:a></html:sup> - we've gone from an O(n) algorithm as written, to an O(1) one!</html:p>
+
+<html:p>I love that despite working with compilers for more than twenty years, they can still surprise and delight me. The years of experience and work that have been poured into making compilers great is truly humbling, and inspiring.</html:p>
+
+<html:p>We're nearly at the end of this series - there's so much more to say but that will have to wait for another time. Tomorrow will be a little different: see you then!</html:p>
+
+<html:p><html:em>See <html:a href="https://youtu.be/V9dy34slaxA">the video</html:a> that accompanies this post.</html:em></html:p>
+
+<html:hr />
+
+<html:p><html:em>This post is day 24 of <html:a href="/AoCO2025-archive">Advent of Compiler Optimisations 2025</html:a>,
+a 25-day series exploring how compilers transform our code.</html:em></html:p>
+
+<html:p><html:em>← <html:a href="/202512/23-switching-it-up">Switching it up a bit</html:a> | <html:a href="/202512/25-thank-you">Thank you</html:a> →</html:em></html:p>
+
+<html:p><html:em>This post was written by a human (<html:a href="/MattGodbolt">Matt Godbolt</html:a>) and reviewed and proof-read by LLMs and humans.</html:em></html:p>
+
+<html:p><html:em>Support Compiler Explorer on <html:a href="https://patreon.com/c/mattgodbolt">Patreon</html:a>
+or <html:a href="https://github.com/sponsors/compiler-explorer">GitHub</html:a>,
+or by buying CE products in the <html:a href="https://shop.compiler-explorer.com">Compiler Explorer Shop</html:a></html:em>.</html:p>
+
+<html:div class="footnote">
+<html:hr />
+<html:ol>
+<html:li id="fn:check">
+<html:p>Some of the initial code checks for odd/even and accounts accordingly. <html:a class="footnote-backref" href="#fnref:check" title="Jump back to footnote 1 in the text">↩</html:a></html:p>
+</html:li>
+<html:li id="fn:why">
+<html:p>Why does the compiler emit this exact sequence and not a slightly more straightforward sequence? I think it's partly avoiding overflow in cases where it might otherwise overflow <html:em>and</html:em> just a side effect of the way clang tracks and infers <html:a href="/202512/09-induction-variables">induction variables</html:a>. I really don't know for sure, though. <html:a class="footnote-backref" href="#fnref:why" title="Jump back to footnote 2 in the text">↩</html:a></html:p>
+</html:li>
+</html:ol>
+</html:div>
+
+    </html:div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
