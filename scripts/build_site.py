@@ -118,8 +118,21 @@ def main() -> int:
             generated_at=generated_at,
             items=recent_72h_articles,
             fulltext=False,
-            channel_title=f"rss-cache recent {RECENT_FEED_HOURS}h feed",
-            channel_description=f"Recent archived articles from the last {RECENT_FEED_HOURS} hours.",
+            channel_title=f"rss-cache recent {RECENT_FEED_HOURS}h summary feed",
+            channel_description=f"Recent archived article summaries from the last {RECENT_FEED_HOURS} hours.",
+            item_link_key="archive_html_url",
+        ),
+    )
+    write_text(
+        feeds_dir / "history-72h.xml",
+        build_rss_feed(
+            site_url=site_url,
+            generated_at=generated_at,
+            items=recent_72h_articles,
+            fulltext=False,
+            channel_title=f"rss-cache recent {RECENT_FEED_HOURS}h summary feed",
+            channel_description=f"Recent archived article summaries from the last {RECENT_FEED_HOURS} hours.",
+            item_link_key="archive_html_url",
         ),
     )
     write_text(
@@ -145,7 +158,7 @@ def main() -> int:
         ),
     )
     write_text(
-        feeds_dir / "fulltext-all.xml",
+        feeds_dir / "history.xml",
         build_rss_feed(
             site_url=site_url,
             generated_at=generated_at,
@@ -998,7 +1011,8 @@ def build_home_page(
         <a href="{escape(site_url)}/feeds/combined.json">feeds/combined.json</a>
         <a href="{escape(site_url)}/feeds/fulltext.xml">feeds/fulltext.xml</a>
         <a href="{escape(site_url)}/feeds/fulltext-72h.xml">feeds/fulltext-72h.xml</a>
-        <a href="{escape(site_url)}/feeds/fulltext-all.xml">feeds/fulltext-all.xml</a>
+        <a href="{escape(site_url)}/feeds/history-72h.xml">feeds/history-72h.xml</a>
+        <a href="{escape(site_url)}/feeds/history.xml">feeds/history.xml</a>
       </div>
       <section class="stats">
         <div class="panel"><strong>{escape(str(stats.get("configured_feed_count")))}</strong>Configured feeds</div>
