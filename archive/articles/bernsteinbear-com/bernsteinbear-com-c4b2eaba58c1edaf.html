@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Value numbering | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Value numbering</h1>
+        <div class="meta">Max Bernstein&#x27;s Blog 2026-04-04T00:00:00Z</div>
+        <div class="links">
+          <a href="https://bernsteinbear.com/blog/value-numbering/?utm_source=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/bernsteinbear-com/bernsteinbear-com-c4b2eaba58c1edaf.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Welcome back to compiler land. Today we’re going to talk about value numbering , which is like SSA, but more. Static single assignment (SSA) gives names to values: every expression has a name, and each name corresponds to exactly one expression. It transforms programs like this: x = 0 x = x + 1 x = x + 1 where the variable x is assigned more than once in th…</div>
+        <div class="content">
+          <p>Welcome back to compiler land. Today we’re going to talk about <em>value
+numbering</em>, which is like SSA, but more.</p>
+
+<p>Static single assignment (SSA) gives names to values: every expression has a
+name, and each name corresponds to exactly one expression. It transforms
+programs like this:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">x</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="mi">1</span>
+</code></pre></div></div>
+
+<p>where the variable <code class="language-plaintext highlighter-rouge">x</code> is assigned more than once in the program text, into
+programs like this:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">v0</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">v1</span> <span class="o">=</span> <span class="n">v0</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="n">v2</span> <span class="o">=</span> <span class="n">v1</span> <span class="o">+</span> <span class="mi">1</span>
+</code></pre></div></div>
+
+<p>where each assignment to <code class="language-plaintext highlighter-rouge">x</code> has been replaced with an assignment to a new
+fresh name.</p>
+
+<p>It’s great because it makes clear the differences between the two <code class="language-plaintext highlighter-rouge">x + 1</code>
+expressions. Though they textually look similar, they compute different values.
+The first computes 1 and the second computes 2. In this example, it is not
+possible to substitute in a variable and re-use the value of <code class="language-plaintext highlighter-rouge">x + 1</code>, because
+the <code class="language-plaintext highlighter-rouge">x</code>s are different.</p>
+
+<p>But what if we see two “textually” identical instructions in SSA? That sounds
+much more promising than non-SSA because the transformation into SSA form has
+removed (much of) the statefulness of it all. When can we re-use the result?</p>
+
+<p>Identifying instructions that are known at compile-time to always produce the
+same value at run-time is called <em>value numbering</em>. <!-- This is also called common
+subexpression elimination (CSE), though for some reason the two mean slightly
+different things to different groups of people. --></p>
+
+<h2 id="eliminating-common-subexpressions">Eliminating common subexpressions</h2>
+
+<p>To understand value numbering, let’s extend the above IR snippet with two more
+instructions, v3 and v4.</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">v0</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">v1</span> <span class="o">=</span> <span class="n">v0</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="n">v2</span> <span class="o">=</span> <span class="n">v1</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="n">v3</span> <span class="o">=</span> <span class="n">v0</span> <span class="o">+</span> <span class="mi">1</span>  <span class="c1"># new
+</span><span class="n">v4</span> <span class="o">=</span> <span class="n">do_something</span><span class="p">(</span><span class="n">v2</span><span class="p">,</span> <span class="n">v3</span><span class="p">)</span>  <span class="c1"># new
+</span></code></pre></div></div>
+
+<p>In this new snippet, v3 looks the same as v1: adding v0 and 1. Assuming our
+addition operation is some ideal mathematical addition, we can absolutely
+re-use v1; no need to compute the addition again. We can rewrite the IR to
+something like:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">v0</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">v1</span> <span class="o">=</span> <span class="n">v0</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="n">v2</span> <span class="o">=</span> <span class="n">v1</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="n">v3</span> <span class="o">=</span> <span class="n">v1</span>
+<span class="n">v4</span> <span class="o">=</span> <span class="n">do_something</span><span class="p">(</span><span class="n">v2</span><span class="p">,</span> <span class="n">v3</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This is kind of similar to the destructive union-find representation that
+JavaScriptCore and a couple other compilers use, where the optimizer doesn’t
+eagerly re-write all uses but instead leaves a little breadcrumb
+<code class="language-plaintext highlighter-rouge">Identity</code>/<code class="language-plaintext highlighter-rouge">Assign</code> instruction<sup id="fnref:cinder" role="doc-noteref"><a href="#fn:cinder" class="footnote" rel="footnote">1</a></sup>.</p>
+
+<p>We could then run our copy propagation pass (“union-find cleanup”?) and get:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">v0</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">v1</span> <span class="o">=</span> <span class="n">v0</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="n">v2</span> <span class="o">=</span> <span class="n">v1</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="n">v4</span> <span class="o">=</span> <span class="n">do_something</span><span class="p">(</span><span class="n">v2</span><span class="p">,</span> <span class="n">v1</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Great. But how does this happen? How does an optimizer identify reusable
+instruction candidates that are “textually identical”? Generally, there is <a href="https://pointersgonewild.com/2011/10/07/optimizing-global-value-numbering/">no
+actual text in the
+IR</a>.</p>
+
+<p>One popular solution is to compute a hash of each instruction. Then any
+instructions with the same hash (that also compare equal, in case of
+collisions) are considered equivalent. This is called <em>hash-consing</em>.</p>
+
+<p>When trying to figure all this out, I read through a couple of different
+implementations. I particularly like the <a href="https://maxine-vm.readthedocs.io/en/stable/">Maxine VM</a> implementation.
+For example, here is the <code class="language-plaintext highlighter-rouge">valueNumber</code> (hashing) and <code class="language-plaintext highlighter-rouge">valueEqual</code>
+functions for most binary operations, slightly modified for clarity:</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">abstract</span> <span class="kd">class</span> <span class="nc">Instruction</span> <span class="kd">extends</span> <span class="nc">Value</span> <span class="o">{</span> <span class="o">...</span> <span class="o">}</span>
+
+<span class="c1">// The base class for binary operations</span>
+<span class="kd">public</span> <span class="kd">abstract</span> <span class="kd">class</span> <span class="nc">Op2</span> <span class="kd">extends</span> <span class="nc">Instruction</span> <span class="o">{</span>
+    <span class="c1">// Each binary operation has an opcode and two opearands</span>
+    <span class="kd">public</span> <span class="kd">final</span> <span class="kt">int</span> <span class="n">opcode</span><span class="o">;</span>  <span class="c1">// (IMUL, IADD, ...)</span>
+    <span class="nc">Value</span> <span class="n">x</span><span class="o">;</span>
+    <span class="nc">Value</span> <span class="n">y</span><span class="o">;</span>
+
+    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="kt">int</span> <span class="nf">valueNumber</span><span class="o">()</span> <span class="o">{</span>
+        <span class="c1">// There are other fields but only opcode, and operands get hashed.</span>
+        <span class="c1">// Always set at least one bit in case the hash wraps to zero.</span>
+        <span class="k">return</span> <span class="mh">0x20000000</span>
+        <span class="o">|</span> <span class="o">(</span><span class="n">opcode</span>
+           <span class="o">+</span> <span class="mi">7</span>  <span class="o">*</span> <span class="nc">System</span><span class="o">.</span><span class="na">identityHashCode</span><span class="o">(</span><span class="n">x</span><span class="o">)</span>
+           <span class="o">+</span> <span class="mi">11</span> <span class="o">*</span> <span class="nc">System</span><span class="o">.</span><span class="na">identityHashCode</span><span class="o">(</span><span class="n">y</span><span class="o">));</span>
+    <span class="o">}</span>
+
+    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="kt">boolean</span> <span class="nf">valueEqual</span><span class="o">(</span><span class="nc">Instruction</span> <span class="n">i</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">i</span> <span class="k">instanceof</span> <span class="nc">Op2</span><span class="o">)</span> <span class="o">{</span>
+            <span class="nc">Op2</span> <span class="n">o</span> <span class="o">=</span> <span class="o">(</span><span class="nc">Op2</span><span class="o">)</span> <span class="n">i</span><span class="o">;</span>
+            <span class="k">return</span> <span class="n">opcode</span> <span class="o">==</span> <span class="n">o</span><span class="o">.</span><span class="na">opcode</span> <span class="o">&amp;&amp;</span> <span class="n">x</span> <span class="o">==</span> <span class="n">o</span><span class="o">.</span><span class="na">x</span> <span class="o">&amp;&amp;</span> <span class="n">y</span> <span class="o">==</span> <span class="n">o</span><span class="o">.</span><span class="na">y</span><span class="o">;</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="kc">false</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>The rest of the value numbering implementation assumes that if a <code class="language-plaintext highlighter-rouge">valueNumber</code>
+function returns 0, it does not wish to be considered for value
+numbering. Why might an instruction opt-out of value numbering?</p>
+
+<h2 id="pure-vs-impure">Pure vs impure</h2>
+
+<p>An instruction might opt out of value numbering if it is not “pure”.</p>
+
+<p>Some instructions are not pure. Purity is in the eye of the beholder, but in
+general it means that an instruction does not interact with the state of the
+outside world, except for trivial computation on its operands. (What does it
+mean to de-duplicate/cache/reuse <code class="language-plaintext highlighter-rouge">printf</code>?)</p>
+
+<p>A load from an array object is also not a pure operation<sup id="fnref:heap-ssa" role="doc-noteref"><a href="#fn:heap-ssa" class="footnote" rel="footnote">2</a></sup>. The load operation
+implicitly relies on the state of the memory. Also, even if the array was
+known-constant, in some runtime
+systems, the load might raise an exception. Changing the source location where
+an exception is raised is generally frowned upon. Languages such as Java often
+have requirements about where exceptions are raised codified in their
+specifications.</p>
+
+<p>We’ll work only on pure operations for now, but we’ll come back to this later.
+We do often want to optimize impure operations as well!</p>
+
+<p>We’ll start off with the simplest form of value numbering, which operates only
+on linear sequences of instructions, like basic blocks or traces.</p>
+
+<h2 id="local-value-numbering">Local value numbering</h2>
+
+<p>Let’s build a small implementation of local value numbering (LVN). We’ll start with
+straight-line code—no branches or anything tricky.</p>
+
+<p>Most compiler optimizations on control-flow graphs (CFGs) iterate over the
+instructions “top to bottom”<sup id="fnref:order" role="doc-noteref"><a href="#fn:order" class="footnote" rel="footnote">3</a></sup> and it seems like we can do the same thing
+here too.</p>
+
+<p>From what we’ve seen so far optimizing our made-up IR snippet, we can do
+something like this:</p>
+
+<ul>
+  <li>initialize a map from instruction numbers to instruction pointers</li>
+  <li>for each instruction <code class="language-plaintext highlighter-rouge">i</code>
+    <ul>
+      <li>if <code class="language-plaintext highlighter-rouge">i</code> wants to participate in value numbering
+        <ul>
+          <li>if <code class="language-plaintext highlighter-rouge">i</code>’s value number is already in the map, replace all pointers to <code class="language-plaintext highlighter-rouge">i</code>
+in the rest of the program with the corresponding value from the map</li>
+          <li>otherwise, add <code class="language-plaintext highlighter-rouge">i</code> to the map</li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<p>The find-and-replace, remember, is not a literal find-and-replace, but instead
+something like:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">instr</span><span class="p">.</span><span class="n">opcode</span> <span class="o">=</span> <span class="s">"Assign"</span>
+<span class="n">instr</span><span class="p">.</span><span class="n">operands</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">replacement</span>
+</code></pre></div></div>
+
+<p>or</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">instr</span><span class="p">.</span><span class="n">make_equal_to</span><span class="p">(</span><span class="n">replacement</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>(if you have been following along with the <a href="https://pypy.org/categories/toy-optimizer.html">toy optimizer</a> series)</p>
+
+<p>This several-line function (as long as you already have a hash map and a
+union-find available to you) is enough to build local value numbering! And real
+compilers are built this way, too.</p>
+
+<p>If you don’t believe me, take a look at this slightly edited snippet from
+<a href="https://maxine-vm.readthedocs.io/en/stable/">Maxine’s</a> value numbering implementation. It has all of the components
+we just talked about: iterating over instructions, map lookup, and some
+substitution.</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Local value numbering</span>
+<span class="nc">BlockBegin</span> <span class="n">block</span> <span class="o">=</span> <span class="o">...;</span>
+<span class="nc">ValueMap</span> <span class="n">currentMap</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ValueMap</span><span class="o">();</span>
+<span class="nc">InstructionSubstituter</span> <span class="n">subst</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">InstructionSubstituter</span><span class="o">();</span>
+
+<span class="c1">// visit all instructions of this block</span>
+<span class="k">for</span> <span class="o">(</span><span class="nc">Instruction</span> <span class="n">instr</span> <span class="o">=</span> <span class="n">block</span><span class="o">.</span><span class="na">next</span><span class="o">();</span> <span class="n">instr</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">;</span> <span class="n">instr</span> <span class="o">=</span> <span class="n">instr</span><span class="o">.</span><span class="na">next</span><span class="o">())</span> <span class="o">{</span>
+    <span class="c1">// attempt value numbering (uses valueNumber() and valueEqual())</span>
+    <span class="c1">//</span>
+    <span class="c1">// return a previous instruction if it exists in the map, or insert the</span>
+    <span class="c1">// current instruction into the map and return it</span>
+    <span class="nc">Instruction</span> <span class="n">f</span> <span class="o">=</span> <span class="n">currentMap</span><span class="o">.</span><span class="na">findInsert</span><span class="o">(</span><span class="n">instr</span><span class="o">);</span>
+    <span class="k">if</span> <span class="o">(</span><span class="n">f</span> <span class="o">!=</span> <span class="n">instr</span><span class="o">)</span> <span class="o">{</span>
+        <span class="c1">// remember the replacement in the union-find</span>
+        <span class="n">subst</span><span class="o">.</span><span class="na">setSubst</span><span class="o">(</span><span class="n">instr</span><span class="o">,</span> <span class="n">f</span><span class="o">);</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>This alone will get you pretty far. Code generators of all shapes tend to leave
+messy repeated computations all over their generated code and this will make
+short work of them.</p>
+
+<p>Sometimes, though, your computations are spread across control flow—over
+multiple basic blocks. What do you do then?</p>
+
+<!--
+## Equivalence classes
+-->
+
+<h2 id="global-value-numbering">Global value numbering</h2>
+
+<p>Computing value numbers for an entire function is called <em>global value
+numbering</em> (GVN) and it requires dealing with control flow (if, loops, etc). I
+don’t just mean that for an entire function, we run local value numbering
+block-by-block. Global value numbering implies that expressions can be
+de-duplicated and shared across blocks.</p>
+
+<p>Let’s tackle control flow case by case.</p>
+
+<p>First is the simple case from above: one block. In this case, we can go top to
+bottom with our value numbering and do alright.</p>
+
+<figure>
+  <object class="svg" type="image/svg+xml" data="/assets/img/gvn-one-block.svg"></object>
+</figure>
+
+<p>The second case is also reasonable to handle: one block flowing into another. In this
+case, we can still go top to bottom. We just have to find a way to iterate over
+the blocks.</p>
+
+<p>If we’re not going to share value maps between blocks, the order doesn’t
+matter. But since the point of global value numbering is to share values, we
+have to iterate them in topological order (reverse post order (RPO)). This
+ensures that predecessors get visited before successors. If you have <code class="language-plaintext highlighter-rouge">bb0 -&gt;
+bb1</code>, we have to visit first <code class="language-plaintext highlighter-rouge">bb0</code> and then <code class="language-plaintext highlighter-rouge">bb1</code>.</p>
+
+<p>Because of how SSA works and how CFGs work, the second block can “look up” into
+the first block and use the values from it. To get global value numbering
+working, we have to copy <code class="language-plaintext highlighter-rouge">bb0</code>’s value map before we start processing <code class="language-plaintext highlighter-rouge">bb1</code> so
+we can re-use the instructions.</p>
+
+<figure>
+  <object class="svg" type="image/svg+xml" data="/assets/img/gvn-two-blocks.svg"></object>
+</figure>
+
+<p>Maybe something like:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">value_map</span> <span class="o">=</span> <span class="n">ValueMap</span><span class="p">()</span>
+<span class="k">for</span> <span class="n">block</span> <span class="ow">in</span> <span class="n">function</span><span class="p">.</span><span class="n">reverse_post_order</span><span class="p">():</span>
+    <span class="n">local_value_numbering</span><span class="p">(</span><span class="n">block</span><span class="p">,</span> <span class="n">value_map</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Then the expressions can accrue across blocks. <code class="language-plaintext highlighter-rouge">bb1</code> can re-use the
+already-computed <code class="language-plaintext highlighter-rouge">Add v0, 1</code> from <code class="language-plaintext highlighter-rouge">bb0</code> because it is still in the map.</p>
+
+<p>…but this breaks as soon as you have control-flow splits. Consider the
+following shape graph:</p>
+
+<!--
+digraph G {
+  node [shape=square];
+  A -> B;
+  A -> C;
+}
+-->
+<figure>
+  <object class="svg" type="image/svg+xml" data="/assets/img/gvn-split.svg"></object>
+</figure>
+
+<p>We’re going to iterate over that graph in one of two orders: A B C or A C B. In
+either case, we’re going to be adding all this stuff into the value map from
+one block (say, B) that is not actually available to its sibling block (say,
+C).</p>
+
+<p>When I say “not available”, I mean “would not have been computed before”. This
+is because we execute either A then B or A then C. There’s no world in which we
+execute B then C.</p>
+
+<p>But alright, look at a third case where there is such a world: a control-flow
+join. In this diagram, we have two predecessor blocks B and C each flowing into
+D. In this diagram, B <em>always</em> flows into D and also C <em>always</em> flows into D.
+So the iterator order is fine, right?</p>
+
+<!--
+digraph G {
+  node [shape=square];
+  A -> B;
+  A -> C;
+  B -> D;
+  C -> D;
+}
+-->
+<figure>
+  <object class="svg" type="image/svg+xml" data="/assets/img/gvn-join.svg"></object>
+</figure>
+
+<p>Well, still no. We have the same sibling problem as before. B and C still can’t
+share value maps.</p>
+
+<p>We also have a weird question when we enter D: where did we come from? If we
+came from B, we can re-use expressions from B. If we came from C, we can re-use
+expressions from C. But we cannot in general know which predecessor block we
+came from.</p>
+
+<p>The only block we know <em>for sure</em> that we executed before D is A. This means we
+can re-use A’s value map in D because we can guarantee that all execution paths
+that enter D have previously gone through A.</p>
+
+<p>This relationship is called a <em>dominator</em> relationship and this is the key to
+one style of global value numbering that we’re going to talk about in this
+post. A block can always use the value map from any other block that dominates
+it. For completeness’ sake, in the diamond diagram, A dominates each of B and
+C, too.</p>
+
+<p>We can compute dominators a couple of ways<sup id="fnref:compute-doms" role="doc-noteref"><a href="#fn:compute-doms" class="footnote" rel="footnote">4</a></sup>, but that’s a little
+bit out of scope for this blog post. If we assume that we have dominator
+information available in our CFG, we can use that for global value numbering.
+And that’s just what—you guessed it—Maxine VM does.</p>
+
+<p>It iterates over all blocks in reverse post-order, doing local value numbering,
+threading through value maps from dominator blocks. In this case, their method
+<code class="language-plaintext highlighter-rouge">dominator</code> gets the <em>immediate dominator</em>: the “closest” dominator block of
+all the blocks that dominate the current one.</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">GlobalValueNumberer</span> <span class="o">{</span>
+    <span class="kd">final</span> <span class="nc">HashMap</span><span class="o">&lt;</span><span class="nc">BlockBegin</span><span class="o">,</span> <span class="nc">ValueMap</span><span class="o">&gt;</span> <span class="n">valueMaps</span><span class="o">;</span>
+    <span class="kd">final</span> <span class="nc">InstructionSubstituter</span> <span class="n">subst</span><span class="o">;</span>
+    <span class="nc">ValueMap</span> <span class="n">currentMap</span><span class="o">;</span>
+
+    <span class="kd">public</span> <span class="nf">GlobalValueNumberer</span><span class="o">(</span><span class="no">IR</span> <span class="n">ir</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">this</span><span class="o">.</span><span class="na">subst</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">InstructionSubstituter</span><span class="o">(</span><span class="n">ir</span><span class="o">);</span>
+        <span class="c1">// reverse post-order</span>
+        <span class="nc">List</span><span class="o">&lt;</span><span class="nc">BlockBegin</span><span class="o">&gt;</span> <span class="n">blocks</span> <span class="o">=</span> <span class="n">ir</span><span class="o">.</span><span class="na">linearScanOrder</span><span class="o">();</span>
+        <span class="n">valueMaps</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">HashMap</span><span class="o">&lt;</span><span class="nc">BlockBegin</span><span class="o">,</span> <span class="nc">ValueMap</span><span class="o">&gt;(</span><span class="n">blocks</span><span class="o">.</span><span class="na">size</span><span class="o">());</span>
+        <span class="n">optimize</span><span class="o">(</span><span class="n">blocks</span><span class="o">);</span>
+        <span class="n">subst</span><span class="o">.</span><span class="na">finish</span><span class="o">();</span>
+    <span class="o">}</span>
+
+    <span class="kt">void</span> <span class="nf">optimize</span><span class="o">(</span><span class="nc">List</span><span class="o">&lt;</span><span class="nc">BlockBegin</span><span class="o">&gt;</span> <span class="n">blocks</span><span class="o">)</span> <span class="o">{</span>
+        <span class="kt">int</span> <span class="n">numBlocks</span> <span class="o">=</span> <span class="n">blocks</span><span class="o">.</span><span class="na">size</span><span class="o">();</span>
+        <span class="nc">BlockBegin</span> <span class="n">startBlock</span> <span class="o">=</span> <span class="n">blocks</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">);</span>
+
+        <span class="c1">// initial value map, with nesting 0</span>
+        <span class="n">valueMaps</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="n">startBlock</span><span class="o">,</span> <span class="k">new</span> <span class="nc">ValueMap</span><span class="o">());</span>
+
+        <span class="k">for</span> <span class="o">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">1</span><span class="o">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">numBlocks</span><span class="o">;</span> <span class="n">i</span><span class="o">++)</span> <span class="o">{</span>
+            <span class="c1">// iterate through all the blocks</span>
+            <span class="nc">BlockBegin</span> <span class="n">block</span> <span class="o">=</span> <span class="n">blocks</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">i</span><span class="o">);</span>
+            <span class="nc">BlockBegin</span> <span class="n">dominator</span> <span class="o">=</span> <span class="n">block</span><span class="o">.</span><span class="na">dominator</span><span class="o">();</span>
+
+            <span class="c1">// create new value map with increased nesting</span>
+            <span class="n">currentMap</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ValueMap</span><span class="o">(</span><span class="n">valueMaps</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">dominator</span><span class="o">));</span>
+
+            <span class="c1">// &lt;&lt; INSERT LOCAL VALUE NUMBERING HERE &gt;&gt;</span>
+
+            <span class="c1">// remember value map for successors</span>
+            <span class="n">valueMaps</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="n">block</span><span class="o">,</span> <span class="n">currentMap</span><span class="o">);</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>And that’s it! That’s the core of Maxine’s <a href="https://github.com/beehive-lab/Maxine-VM/blob/e213a842f78983e2ba112ae46de8c64317bc206e/com.sun.c1x/src/com/sun/c1x/opt/GlobalValueNumberer.java">GVN implementation</a>. I
+love how short it is. For not very much code, you can remove a lot of duplicate
+pure SSA instructions.</p>
+
+<p>This does still work with loops, but with some caveats. From p7 of <a href="/assets/img/briggs-gvn.pdf">Briggs GVN</a>:</p>
+
+<blockquote>
+  <p>The φ-functions require special treatment. Before the compiler can analyze
+the φ-functions in a block, it must previously have assigned value numbers to
+all of the inputs. This is not possible in all cases; specifically, any
+φ-function input whose value flows along a back edge (with respect to the
+dominator tree) cannot have a value number. If any of the parameters of a
+φ-function have not been assigned a value number, then the compiler cannot
+analyze the φ-function, and it must assign a unique, new value number to the
+result.</p>
+</blockquote>
+
+<p>It also talks about eliminating useless phis, which is optional, but would
+the strengthen global value numbering pass: it makes more information
+transparent.</p>
+
+<p>But what if we want to handle impure instructions?</p>
+
+<h2 id="state-management-and-invalidation">State management and invalidation</h2>
+
+<p>Languages such as Java allow for reading fields from the <code class="language-plaintext highlighter-rouge">this</code>/<code class="language-plaintext highlighter-rouge">self</code> object within
+methods as if the field were a variable name. This makes code like the
+following common:</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">class</span> <span class="nc">CPU</span> <span class="o">{</span>
+    <span class="kd">private</span> <span class="kt">void</span> <span class="nf">exec_adc</span><span class="o">()</span> <span class="o">{</span>
+        <span class="kt">int</span> <span class="n">result_int</span> <span class="o">=</span> <span class="n">regA</span> <span class="o">+</span> <span class="n">fetched_data</span> <span class="o">+</span> <span class="n">flagCARRY</span><span class="o">;</span>
+        <span class="kt">byte</span> <span class="n">result</span> <span class="o">=</span> <span class="o">(</span><span class="kt">byte</span><span class="o">)</span> <span class="n">result_int</span><span class="o">;</span>
+        <span class="c1">// ...</span>
+        <span class="kt">int</span> <span class="n">a</span> <span class="o">=</span> <span class="n">result_int</span> <span class="o">^</span> <span class="n">regA</span><span class="o">;</span>
+        <span class="kt">int</span> <span class="n">b</span> <span class="o">=</span> <span class="n">result_int</span> <span class="o">^</span> <span class="n">fetched_data</span><span class="o">;</span>
+        <span class="c1">// ...</span>
+        <span class="n">regA</span> <span class="o">=</span> <span class="n">result</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>Each of these reference to <code class="language-plaintext highlighter-rouge">regA</code> and <code class="language-plaintext highlighter-rouge">fetched_data</code> is an implicit reference
+to <code class="language-plaintext highlighter-rouge">this.regA</code> or <code class="language-plaintext highlighter-rouge">this.fetched_data</code>, which is semantically a field load off
+an object. You can see it in <a href="https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:java,selection:(endColumn:19,endLineNumber:14,positionColumn:19,positionLineNumber:14,selectionStartColumn:19,selectionStartLineNumber:14,startColumn:19,startLineNumber:14),source:'class+CPU+%7B%0A++++private+void+exec_adc()+%7B%0A++++++++int+result_int+%3D+regA+%2B+fetched_data+%2B+flagCARRY%3B%0A++++++++byte+result+%3D+(byte)+result_int%3B%0A++++++++//+...%0A++++++++int+a+%3D+result_int+%5E+regA%3B%0A++++++++int+b+%3D+result_int+%5E+fetched_data%3B%0A++++++++//+...%0A++++++++regA+%3D+result%3B%0A++++%7D%0A%0A++++int+regA%3B%0A++++int+fetched_data%3B%0A++++int+flagCARRY%3B%0A%7D%0A'),l:'5',n:'0',o:'Java+source+%231',t:'0')),k:50,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((h:compiler,i:(compiler:java2501,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'1',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:java,libs:!(),options:'',overrides:!(),selection:(endColumn:19,endLineNumber:40,positionColumn:1,positionLineNumber:1,selectionStartColumn:19,selectionStartLineNumber:40,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+jdk+25.0.1+(Editor+%231)',t:'0')),k:50,l:'4',n:'0',o:'',s:0,t:'0')),l:'2',n:'0',o:'',t:'0')),version:4">the bytecode</a> (thanks, Matt Godbolt):</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>class CPU {
+  int regA;
+
+  int fetched_data;
+
+  int flagCARRY;
+
+  CPU();
+         0: aload_0
+         1: invokespecial #1                  // Method java/lang/Object."&lt;init&gt;":()V
+         4: return
+
+
+  private void exec_adc();
+         0: aload_0
+         1: getfield      #7                  // Field regA:I
+         4: aload_0
+         // ...
+        20: getfield      #7                  // Field regA:I
+        23: ixor
+        24: istore_3
+        25: iload_1
+        26: aload_0
+        27: getfield      #13                 // Field fetched_data:I
+        30: ixor
+        31: istore        4
+        33: aload_0
+        34: iload_2
+        35: putfield      #7                  // Field regA:I
+        38: return
+}
+</code></pre></div></div>
+
+<p>When straightforwardly building an SSA IR from the JVM bytecode for this
+method, you will end up with a bunch of IR that looks like this:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>v0 = LoadField self, :regA
+v1 = LoadField self, :fetched_data
+v2 = LoadField self, :flagCARRY
+v3 = IntAdd v0, v1
+v4 = IntAdd v3, v2
+// ...
+v7 = LoadField self, :regA
+v8 = IntXor v4, v7
+v9 = LoadField self, :fetched_data
+v10 = IntXor v4, v9
+// ...
+StoreField self, :regA, ...
+</code></pre></div></div>
+
+<p>Pretty much the same as the bytecode. Even though no code in the middle could
+modify the field <code class="language-plaintext highlighter-rouge">regA</code> (which would require a re-load), we still have a
+duplicate load. Bummer.</p>
+
+<p>I don’t want to re-hash this too much but it’s possible to fold <a href="/blog/toy-load-store/">Load and store
+forwarding</a> into your GVN implementation by either:</p>
+
+<ul>
+  <li>doing load-store forwarding as part of local value numbering and clearing
+memory information from the value map at the end of each block, or</li>
+  <li>keeping track of effects across blocks</li>
+</ul>
+
+<p>See, there’s nothing fundamentally stopping you from tracking the state of your
+heap at compile-time across blocks. You just have to do a little more
+bookkeeping. In our dominator-based GVN implementation, for example, you can:</p>
+
+<ol>
+  <li>track heap write effects for each block</li>
+  <li>at the start of each block B, union all of the “kill” sets for every block
+back to its immediate dominator</li>
+  <li>finally, remove the stuff that got killed from the dominator’s value map</li>
+</ol>
+
+<p>Not so bad.</p>
+
+<p>Maxine doesn’t do global memory tracking, but they do a limited form of
+load-store forwarding while building their HIR from bytecode: see
+<a href="https://github.com/beehive-lab/Maxine-VM/blob/e213a842f78983e2ba112ae46de8c64317bc206e/com.sun.c1x/src/com/sun/c1x/graph/GraphBuilder.java#L871">GraphBuilder</a> which uses the <a href="https://github.com/beehive-lab/Maxine-VM/blob/e213a842f78983e2ba112ae46de8c64317bc206e/com.sun.c1x/src/com/sun/c1x/graph/MemoryMap.java">MemoryMap</a> to help track this stuff. At least
+they would not have the same duplicate <code class="language-plaintext highlighter-rouge">LoadField</code> instructions in the example
+above!</p>
+
+<!--
+```ruby
+module Psych
+  module Visitors
+    class YAMLTree < Psych::Visitors::Visitor
+      def initialize emitter, ss, options
+        # ...
+        @line_width = options[:line_width]
+        if @line_width && @line_width < 0
+          if @line_width == -1
+            # Treat -1 as unlimited line-width, same as libyaml does.
+            @line_width = nil
+          else
+            fail(...)
+          end
+        end
+        # ...
+    end
+  end
+end
+```
+-->
+
+<p>We’ve now looked at one kind of value numbering and one implementation of it.
+What else is out there?</p>
+
+<h2 id="out-in-the-world">Out in the world</h2>
+
+<p>Apparently, you can get better results by having a unified hash table (p9 of
+<a href="/assets/img/briggs-gvn.pdf">Briggs GVN</a>) of expressions, not limiting the
+value map to dominator-available expressions. Not 100% on how this works yet.
+<!-- TODO What do you do in the second pass for available expressions? -->
+They note:</p>
+
+<blockquote>
+  <p>Using a unified hash-table has one important algorithmic consequence.
+Replacements cannot be performed on-line because the table no longer reflects
+availability.</p>
+</blockquote>
+
+<p>Which is the first time that it occurred to me that hash-based value numbering
+with dominators was an approximation of available expression analysis.</p>
+
+<p>There’s also a totally different kind of value numbering called value
+partitioning (p12 of <a href="/assets/img/briggs-gvn.pdf">Briggs GVN</a>). See also a nice
+blog post about this by Allen Wang from the <a href="https://www.cs.cornell.edu/courses/cs6120/2025sp/blog/global-value-numbering/">Cornell compiler
+course</a>.
+I think this mostly replaces the hashing bit, and you still need some other
+thing for the available expressions bit.</p>
+
+<p>Ben Titzer and Seth Goldstein have some good <a href="https://www.cs.cmu.edu/~411/slides/s25-24-gvn-inlining.pdf">slides from
+CMU</a>. Where they
+talk about the worklist dataflow approach. Apparently this is slower but gets
+you more available expressions than just looking to dominator blocks. I wonder
+how much it differs from dominator+unified hash table.</p>
+
+<p>While Maxine uses hash table cloning to copy value maps from dominator blocks,
+there are also compilers such as Cranelift that use
+<a href="https://github.com/bytecodealliance/wasmtime/blob/main/cranelift/codegen/src/scoped_hash_map.rs">scoped hash maps</a>
+to track this information more efficiently. (Though <a href="https://github.com/bytecodealliance/wasmtime/issues/4371#issuecomment-1255956651">Amanieu
+notes</a> that you may
+not need a scoped hash map and instead can tag values in your value map with the
+block they came from, ignoring non-dominating values with a quick check. The
+dominance check makes sense but I haven’t internalized how this affects the set
+of available expressions yet.)</p>
+
+<p>You may be wondering if this kind of algorithm even helps at all in a dynamic
+language JIT context. Surely everything is too dynamic, right? Actually, no!
+The JIT hopes to eliminate a lot of method calls and dynamic behaviors,
+replacing them with guards, assumptions, and simpler operations. These strength
+reductions often leave behind a lot of repeated instructions. Just the other
+day, Kokubun filed a <a href="https://github.com/ruby/ruby/pull/16654">value-numbering-like
+PR</a> to clean up some of the waste.</p>
+
+<p>ART has a recent <a href="https://android-developers.googleblog.com/2025/12/18-faster-compiles-0-compromises.html">blog
+post</a>
+about speeding up GVN.</p>
+
+<h2 id="wrapping-up-bits-and-bobbles">Wrapping up; bits and bobbles</h2>
+
+<p>Go forth and give your values more numbers.</p>
+
+<p>There’s been an ongoing discussion with Phil Zucker on SSI, GVN, acyclic
+egraphs, and scoped union-find. TODO summarize</p>
+
+<h3 id="acyclic-e-graphs">Acyclic e-graphs</h3>
+
+<p>Commutativity; canonicalization</p>
+
+<p>Seeding alternative representations into the GVN</p>
+
+<p>Aegraphs and union-find during GVN</p>
+
+<p>https://github.com/bytecodealliance/rfcs/blob/main/accepted/cranelift-egraph.md
+https://github.com/bytecodealliance/wasmtime/issues/9049
+https://github.com/bytecodealliance/wasmtime/issues/4371</p>
+
+<h3 id="partial-redundancy-elimination">Partial redundancy elimination</h3>
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:cinder" role="doc-endnote">
+      <p>Writing this post is roughly the time when I realized that the whole
+time I was wondering why Cinder did not use union-find for rewriting, it
+actually did! Optimizing instruction <code class="language-plaintext highlighter-rouge">X = A + 0</code> by replacing with <code class="language-plaintext highlighter-rouge">X =
+Assign A</code> followed by copy propagation is equivalent to union-find. <a href="#fnref:cinder" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:heap-ssa" role="doc-endnote">
+      <p>In some forms of SSA, like heap-array SSA or sea of nodes, it’s
+possible to more easily de-duplicate loads because the memory
+representation has been folded into (modeled in) the IR. <a href="#fnref:heap-ssa" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:order" role="doc-endnote">
+      <p>The order is a little more complicated than that: <a href="https://stackoverflow.com/questions/36131500/what-is-the-reverse-postorder">reverse
+post-order</a>
+(RPO). And there’s a paper called “A Simple Algorithm for Global Data Flow
+Analysis Problems” that I don’t yet have a PDF for that claims that RPO is
+optimal for solving dataflow problems. <a href="#fnref:order" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:compute-doms" role="doc-endnote">
+      <p>There’s the iterative dataflow way (described in the <a href="/assets/img/dominators-engineered.pdf">Cooper
+paper</a> (PDF)),
+<a href="/assets/img/dominators-lengauer-tarjan.pdf">Lengauer-Tarjan</a> (PDF), the
+<a href="/assets/img/dominators-engineered.pdf">Engineered Algorithm</a> (PDF),
+<a href="/assets/img/dominators-practice.pdf">hybrid/Semi-NCA approach</a> (PDF), … <a href="#fnref:compute-doms" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
