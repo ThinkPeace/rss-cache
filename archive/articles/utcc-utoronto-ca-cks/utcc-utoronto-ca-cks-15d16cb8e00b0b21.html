@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Users and session classes in Systemd v258 and later (and a gotcha) | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Users and session classes in Systemd v258 and later (and a gotcha)</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-04-08T00:14:24Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/Systemd258UsersAndSessions">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-15d16cb8e00b0b21.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">So I upgraded my home desktop from Fedora 42 to Fedora 43 and sound stopped working. Having your audio stop working is practically a rite of passage for Linux people, so I&#x27;ve been through the drill, but things rapidly turned weird when trying to restart sound daemons through &#x27;systemctl --user restart ...&#x27; failed with systemd errors about not being able to c…</div>
+        <div class="content">
+          <div class="wikitext"><p>So I upgraded <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/HomeMachine2018">my home desktop</a> from Fedora 42
+to Fedora 43 and sound stopped working. Having your audio stop
+working is practically a rite of passage for Linux people, so I've
+been through the drill, but things rapidly turned weird when trying
+to restart sound daemons through 'systemctl --user restart ...'
+failed with systemd errors about not being able to contact the 
+(systemd) user service manager.</p>
+
+<p>Let me skip ahead and show you the culprit:</p>
+
+<blockquote><pre>
+systemd-logind[2524]: New session '1' of user 'cks' with class 'user-light' and type 'tty'.
+</pre>
+</blockquote>
+
+<p>Establishing your user service manager when you log in is one of
+the jobs of <a href="https://www.freedesktop.org/software/systemd/man/latest/pam_systemd.html">pam_systemd</a>.
+One of the things pam_systemd decides about your session is <a href="https://www.freedesktop.org/software/systemd/man/latest/pam_systemd.html#class=">its class</a>.
+In System v258 and later, one of the possible classes is '<code>user-light</code>',
+for which systemd notes:</p>
+
+<blockquote><p>Similar to user, but sessions of this class will not pull in the
+<a href="https://www.freedesktop.org/software/systemd/man/latest/user@.service.html">user@.service(5)</a>
+of the user, and <strong>thus possibly have no service manager of the user
+running</strong>.</p>
+</blockquote>
+
+<p>(Emphasis mine.)</p>
+
+<p>This 'possibly' is understated. What it means in practice is that
+a 'user-light' class session won't have a systemd user service
+manager running unless something else started it for you, for example
+another session that wasn't a 'user-light' one (because you only
+ever have one user service manager; it normally starts with your
+first session and exits after your last one). In turn, anything
+that runs as a systemd user service won't start and can't be started
+indirectly through, for example, systemd socket activation. And in
+modern Fedora, all of the sound infrastructure is handled as systemd
+user services (as is your user D-Bus session).</p>
+
+<p>So how did we get here? Well, as the rest of the section notes:</p>
+
+<blockquote><p>If no session class is specified via either the <a href="https://en.wikipedia.org/wiki/Linux_PAM">PAM</a> module option
+or via the <code>$XDG_SESSION_CLASS</code> environment variable, the class is
+automatically chosen, depending on various session parameters, such
+as the session type (if known), whether the session has a TTY or X11
+display, and the user disposition.</p>
+</blockquote>
+
+<p>(The 'user disposition' comes from <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-userdbd.html">systemd-userdbd</a>
+and its <a href="https://systemd.io/USER_RECORD/">JSON User Records</a>. For normal
+/etc/passwd accounts, the user disposition is determined from their
+UID.)</p>
+
+<p>The <a href="https://github.com/systemd/systemd/blob/main/src/login/pam_systemd.c#L919">actual process pam_systemd follows is somewhat arcane</a>.
+To simplify, all SSH logins are 'class=user', root is always
+'user-early', and system users on the console are 'user-light'.  So
+if you log in on the console (<a href="https://utcc.utoronto.ca/~cks/space/blog/unix/XDMHeresy">as I do</a>, <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/MyXSessionHowItExits">also</a>) and you're considered a 'system
+user', you don't get a user service manager started automatically
+(and then things break).</p>
+
+<p>Systemd is more or less hard coded to consider all UIDs up to
+<code>SYS_UID_MAX</code> in <code>/etc/login.defs</code> to be 'system users' (<a href="https://github.com/systemd/systemd/blob/main/src/basic/uid-classification.c#L119">cf</a>).
+On many machines, this will be all UIDs up to 999, and this number
+has been drifting upward over time. At various times in the past
+the first non-system UID and GID has been 200, and then later it
+was 500, so if you have logins created this long ago, systemd now
+considers them system users who get special handling. I have been
+using my Fedora desktops for a very long time, so even without
+<a href="https://mastodon.social/@cks/116361257069579452">even weirder things</a>
+I would have fallen victim to this.</p>
+
+<p>(Even on <a href="https://support.cs.toronto.edu/">our</a> servers, my UID
+is 915 and we have a significant number of people with UIDs under
+1000. If pam_systemd ever stops forcing all SSH logins into
+class 'user', we're going to have a whole collection of problems.
+On my desktops, my 'natural' UID would be either 200 or 500, based
+on the GIDs that were created to go with it on my home and work
+desktops.)</p>
+
+<p><a href="https://mastodon.social/@cks/116363836943941277">Unfortunately there's no way to set a single account parameter
+in systemd-userdbd</a>,
+so there's no way to keep using /etc/passwd but tag your historical,
+low-UID account to be a regular account. There's also no direct
+way to manipulate pam_systemd's hard coded class (re)mapping
+process; your only option is to completely override all class
+assignments with a 'class=' option on pam_systemd. This is made
+extra difficult on Fedora because (of course) pam_systemd is
+invoked in a number of <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/PAMStackingAndStopping">generic PAM stacks</a>
+such as 'system-auth', and you may not want to force all uses
+of pam_systemd through them to force a 'user' class for all
+accounts in all situations.</p>
+
+<p>It's possible to work around this with <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/PAMSkipModuleWithPamAccess">sufficiently complex PAM
+conditionals</a> (<a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/PAMModuleResultsEffects">also</a>). Or I could make /etc/pam.d/login
+use a different version of system-auth that's customized for it,
+although that would force root logins into class 'user' instead of
+'user-early' unless I engaged in other PAM hacks.</p>
+
+<p>PS: Given how much breaks without a user service manager, it feels
+like either pam_systemd or the 'login' PAM stack should
+specifically make it so that everyone who logs in on a console tty
+has one, with all system UIDs being class 'user-early', not just
+root.</p>
+
+<p>PPS: I won't be working around this by changing my local UID, however
+peculiar it is. Partly this is because I can't fix it by adopting
+the same UID as we have on our servers, which would let me usefully
+NFS mount my home directory from <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/ZFSFileserverSetupIII">our fileservers</a>
+on my work desktop; as mentioned, that UID is also under the current
+Fedora <code>SYS_UID_MAX</code>.</p>
+
+<p>(<a href="https://unix.stackexchange.com/questions/438939/how-to-get-nfsv4-idmap-working-with-sec-sys/464950#464950">You can't truly fix NFS UID mapping issues with NFS v4 without
+Kerberos</a>.)</p>
+
+<h3>Sidebar: Why my work machine didn't experience this</h3>
+
+<p>One reason I was willing to <a href="https://mastodon.social/@cks/116361079019607366">impulsively upgrade my home desktop</a> last night was
+that the upgrade to Fedora 43 had gone fine on <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/WorkMachine2017">my work desktop</a>, and it certainly had no sound problems afterward.
+My console login on my work machine was still a 'user-light' session,
+but the reason it had a systemd user service manager was that one
+had been created earlier and was sticking around. To cut <a href="https://mastodon.social/@cks/116361239767522731">a long
+story</a> short, on
+my work desktop I was set up as a <a href="https://www.freedesktop.org/software/systemd/man/latest/loginctl.html#enable-linger%20USER%E2%80%A6">loginctl 'linger'</a>
+account (/var/lib/systemd/linger says this happened May 21st 2021).
+Such a 'linger' account creates a session at system boot, which
+creates a user service manager as the result, and that session
+and user service manager remains until system shutdown.</p>
+
+<p>Regardless of how many times you log in, you only ever have one
+systemd user service manager. So once a user service manager is
+created for any reason, including the user service manager that's
+started at boot for a 'linger' account, your console 'user-light'
+logins will still get access to that user service manager, Pipewire
+and other things will start normally, sound will work, and you (I)
+won't notice anything different.</p>
+
+<p>In theory I could work around this today by setting myself up as a
+'loginctl linger' account on my home machine too, and skip any PAM
+changes. In practice, I'm reluctant to assume that pam_systemd
+will always create systemd user service managers for system UIDs
+that are set 'linger'. It strikes me as rather the kind of thing
+that might get optimized some day, much as 'user-light' was optimized
+into systemd v258 (<a href="https://github.com/systemd/systemd/blob/v258-stable/NEWS#L41">cf</a>,
+<a href="https://github.com/systemd/systemd/issues/34988">also</a>, <a href="https://github.com/systemd/systemd/commit/cf8f6cd0571a4f474c449d4b1fda1c4192c01824">also</a>).</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
