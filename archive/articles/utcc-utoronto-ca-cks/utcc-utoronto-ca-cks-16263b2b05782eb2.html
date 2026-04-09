@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Systemd v258&#x27;s &#x27;systemctl -v restart&#x27; and its limitations | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Systemd v258&#x27;s &#x27;systemctl -v restart&#x27; and its limitations</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-04-09T02:43:31Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/SystemdVerboseRestartNotes">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-16263b2b05782eb2.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">If you&#x27;ve done much work with systemd services, you&#x27;ve probably gotten entirely used to the traditional dance of &#x27; systemctl restart something; journalctl -f -u something &#x27; so you can see the shutdown and restart log messages of what you just theoretically restarted, assuming it&#x27;s happy with life. In systemd v258, systemctl gained a new feature to help with…</div>
+        <div class="content">
+          <div class="wikitext"><p>If you've done much work with systemd services, you've probably
+gotten entirely used to the traditional dance of '<code>systemctl restart
+something; journalctl -f -u something</code>' so you can see the shutdown
+and restart log messages of what you just theoretically restarted,
+assuming it's happy with life. In systemd v258, systemctl gained a
+new feature to help with this, <a href="https://www.freedesktop.org/software/systemd/man/latest/systemctl.html#-v"><code>systemctl -v</code></a>.
+The help describes it reasonably well:</p>
+
+<blockquote><p>Display unit log output while executing unit operations.</p>
+</blockquote>
+
+<p>(This means any unit operation; you can use it with 'systemctl stop',
+'systemctl start', and 'systemctl reload' too.)</p>
+
+<p>All of this is nice and I'm certainly going to enjoy using this
+feature on our future Ubuntu 26.04 machines and on my Fedora machines.
+However, it has an obvious limitation for 'restart', 'start', and
+'reload' that in many cases is going to have me still using the the
+journalctl stuff as well.</p>
+
+<p>That limitation is right there in the description: 'while executing
+unit operations'. If you do 'systemctl -v restart something',
+systemctl stops following your service's log output the moment it
+considers your service to have started. In some services, this will
+be when the service has genuinely started and reported this to
+systemd, for example for a <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html#Type="><code>Type=notify</code></a>
+service. In many others, for example '<code>Type=exec</code>' services where
+you directly run some binary and it sits there doing things, systemd
+will consider the service started the moment your binary is running.
+Since systemd considers the service started, it will stop following
+the logs in 'systemctl -v restart'.</p>
+
+<p>This is often not sufficient. Many services have a certain amount
+of post-exec work to do before they've genuinely started, such as
+loading configuration files, opening databases, initializing internal
+services, and so on. Some services can error out at this point, so
+that (as systemd sees it) they were successfully started but then
+immediately failed. Sometimes, the service itself intrinsically is
+only 'up' after it has talked to the outside world and established
+something, such as <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/SystemdResettingUnitBackoff">a DSL PPPoE link</a>.</p>
+
+<p>All of this isn't systemd's fault, but it means that 'systemctl -v
+restart' may only tell you the very early part of the story. And
+that's why for a lot of services I need to keep doing the 'journalctl'
+part too.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
