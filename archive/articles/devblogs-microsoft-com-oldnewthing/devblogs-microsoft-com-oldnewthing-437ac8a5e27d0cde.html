@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How do you add or remove a handle from an active Wait­For­Multiple­Objects? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How do you add or remove a handle from an active Wait­For­Multiple­Objects?</h1>
+        <div class="meta">The Old New Thing 2026-04-09T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260409-00/?p=112220">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-437ac8a5e27d0cde.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">You can&#x27;t, but you can cooperate with the other thread. The post How do you add or remove a handle from an active &lt;CODE&gt;Wait­For­Multiple­Objects&lt;/CODE&gt;? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, we looked at <a title="How do you add or remove a handle from an active Msg­Wait­For­Multiple­Objects?" href="https://devblogs.microsoft.com/oldnewthing/20260408-00/?p=112218"> adding or removing a handle from an active <code>Msg­Wait­For­Multiple­Objects</code></a>, and observed that we could send a message to both break out of the wait <i>and</i> update the list of handles. But what if the other thread is waiting in a <code>Wait­For­Multiple­Objects</code>? You can&#8217;t send a message since <code>Wait­For­Multiple­Objects</code> doesn&#8217;t wake for messages.</p>
+<p>You can fake it by using an event which means &#8220;I want to change the list of handles.&#8221; The background thread can add that handle to its list, and if the &#8220;I want to change the list of handles&#8221; event is signaled, it updates its list.</p>
+<p>One of the easier ways to represent the desired change is to maintain two lists, the &#8220;active&#8221; list (the one being waited on) and the &#8220;desired&#8221; list (the one you want to change it to). The background thread can make whatever changes to the &#8220;desired&#8221; list it wants, and then it signals the &#8220;changed&#8221; event. The waiting thread sees that the &#8220;changed&#8221; event is set and copies the &#8220;desired&#8221; list to the &#8220;active&#8221; list. This copying needs to be done with <code>Duplicate­Handle</code> because the background thread might close a handle in the &#8220;desired&#8221; list, and we can&#8217;t close a handle while it is being waited on.</p>
+<pre>wil::unique_handle duplicate_handle(HANDLE other)
+{
+    HANDLE result;
+    THROW_IF_WIN32_BOOL_FALSE(
+        DuplicateHandle(GetCurrentProcess(), other,
+            GetCurrentProcess(), &amp;result,
+            0, FALSE, DUPLICATE_SAME_ACCESS));
+    return wil::unique_handle(result);
+}
+</pre>
+<p>This helper function duplicates a raw <code>HANDLE</code> and returns it in a <code>wil::unique_handle</code>. The duplicate handle has its own lifetime separate from the original. The waiting thread operates on a copy of the handles, so that it is unaffected by changes to the original handles.</p>
+<pre>std::mutex desiredMutex;
+_Guarded_by_(desiredMutex) std::vector&lt;wil::unique_handle&gt; desiredHandles;
+_Guarded_by_(desiredMutex) std::vector&lt;std::function&lt;void()&gt;&gt; desiredActions;
+</pre>
+<p>The <code>desiredHandles</code> is a vector of handles we want to be waiting for, and the The <code>desiredActions</code> is a parallel vector of things to do for each of those handles.</p>
+<pre>// auto-reset, initially unsignaled
+wil::unique_handle changed(CreateEvent(nullptr, FALSE, FALSE, nullptr));
+
+void waiting_thread()
+{
+    while (true)
+    {
+        std::vector&lt;wil::unique_handle&gt; handles;
+        std::vector&lt;std::function&lt;void()&gt;&gt; actions;
+        {
+            std::lock_guard guard(desiredMutex);
+
+            handles.reserve(desiredHandles.size() + 1);
+            std::transform(desiredHandles.begin(), desiredHandles.end(),
+                std::back_inserter(handles),
+                [](auto&amp;&amp; h) { return duplicate_handle(h.get()); });
+            // Add the bonus "changed" handle
+            handles.emplace_back(duplicate_handle(changed.get()));
+
+            actions = desiredActions;
+        }
+
+        auto count = static_cast&lt;DWORD&gt;(handles.size());
+                        
+        auto result = WaitForMultipleObjects(count,
+                        handles.data()-&gt;addressof(), FALSE, INFINITE);
+        auto index = result - WAIT_OBJECT_0;
+        if (index == count - 1) {
+            // the list changed. Loop back to update.
+            continue;
+        } else if (index &lt; count - 1) {
+            actions[index]();
+        } else {
+            // deal with unexpected result
+            FAIL_FAST(); // (replace this with your favorite error recovery)
+        }
+    }
+}
+</pre>
+<p>The waiting thread makes a copy of the <code>desiredHandles</code> and <code>desiredActions</code>, and adds the <code>changed</code> handle to the end so we will wake up if somebody changes the list. We operate on the copy so that any changes to <code>desiredHandles</code> and <code>desiredActions</code> that occur while we are waiting won&#8217;t affect us. Note that the copy in <code>handles</code> is done via <code>Duplicate­Handle</code> so that it operates on a separate set of handles. That way, if another thread closes a handle in <code>desiredHandles</code>, it won&#8217;t affect us.</p>
+<pre>void change_handle_list()
+{
+    std::lock_guard guard(desiredMutex);
+    ⟦ make changes to desiredHandles and desiredActions ⟧
+    SetEvent(changed.get());
+}
+</pre>
+<p>Any time somebody wants to change the list of handles, they take the <code>desiredMutex</code> lock and can proceed to make whatever changes they want. These changes won&#8217;t affect the waiting thread because it is operating on duplicate handles. When finished, we set the <code>changed</code> event to wake up the waiting thread so it can pick up the new set of handles.</p>
+<p>Right now, the purpose of the <code>changed</code> event is to wake up the blocking call, but we could also use it as a way to know whether we should update our captured handles. This allows us to reuse the handle array if there were no changes.</p>
+<pre>void waiting_thread()
+{
+    <span>bool update = true;                        </span>
+    <span>std::vector&lt;wil::unique_handle&gt; handles;   </span>
+    <span>std::vector&lt;std::function&lt;void()&gt;&gt; actions;</span>
+
+    while (true)
+    {
+        <span>if (std::exchange(update, false))</span> {
+            std::lock_guard guard(desiredMutex);
+
+            <span>handles.clear();</span>
+            handles.reserve(desiredHandles.size() + 1);
+            std::transform(desiredHandles.begin(), desiredHandles.end(),
+                std::back_inserter(handles),
+                [](auto&amp;&amp; h) { return duplicate_handle(h.get()); });
+            // Add the bonus "changed" handle
+            handles.emplace_back(duplicate_handle(changed.get()));
+
+            actions = desiredActions;
+        }
+
+        auto count = static_cast&lt;DWORD&gt;(handles.size());
+                        
+        auto result = WaitForMultipleObjects(count,
+                        handles.data()-&gt;get(), FALSE, INFINITE);
+        auto index = result - WAIT_OBJECT_0;
+        if (index == count - 1) {
+            // the list changed. Loop back to update.
+            <span>update = true;</span>
+            continue;
+        } else if (index &lt; count - 1) {
+            actions[index]();
+        } else {
+            // deal with unexpected result
+            FAIL_FAST(); // (replace this with your favorite error recovery)
+        }
+    }
+}
+</pre>
+<p>In this design, changes to the handle list are asynchronous. They don&#8217;t take effect immediately, because the waiting thread might be busy running an action. Instead, they take effect when the waiting thread gets around to making another copy of the <code>desiredHandles</code> vector and call <code>Wait­For­Multiple­Objects</code> again. This could be a problem: You ask to remove a handle, and then clean up the things that the handle depended on. But before the worker thread can process the removal, the handle is signaled. The result is that the worker thread calls your callback after you thought had told it to stop!</p>
+<p>Next time, we&#8217;ll see what we can do to make the changes synchronous.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260409-00/?p=112220">How do you add or remove a handle from an active &lt;CODE&gt;Wait&shy;For&shy;Multiple&shy;Objects&lt;/CODE&gt;?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
