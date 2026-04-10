@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How do you add or remove a handle from an active Wait­For­Multiple­Objects?, part 2 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How do you add or remove a handle from an active Wait­For­Multiple­Objects?, part 2</h1>
+        <div class="meta">The Old New Thing 2026-04-10T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260410-00/?p=112223">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-24fdff52dba3f8cf.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Waiting for the waiting thread to acknowledge the change. The post How do you add or remove a handle from an active &lt;CODE&gt;Wait­For­Multiple­Objects&lt;/CODE&gt;?, part 2 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, we looked at <a title="How do you add or remove a handle from an active Wait­For­Multiple­Objects?" href="https://devblogs.microsoft.com/oldnewthing/20260409-00/?p=112220"> adding or removing a handle from an active <code>Wait­For­Multiple­Objects</code></a>, and we developed an asynchronous mechanism that requests that the changes be made soon. But asynchronous add/remove can be a problem bcause you might remove a handle, clean up the things that the handle was dependent upon, but then receive a notification that the handle you removed has been signaled, even though you already cleaned up the things the handle depended on.</p>
+<p>What we can do is wait for the waiting thread to acknowledge the operation.</p>
+<pre>_Guarded_by_(desiredMutex) DWORD desiredCounter = 1;
+DWORD activeCounter = 0;
+
+void wait_until_active(DWORD value)
+{
+    DWORD current = activeCounter;
+    while (static_cast&lt;int&gt;(current - value) &lt; 0) {
+        WaitOnAddress(&amp;activeCounter, &amp;current,
+                      sizeof(activeCounter), INFINITE);
+        current = activeCounter;
+    }
+}
+</pre>
+<p>The <code>wait_<wbr />until_<wbr />active</code> function waits until the value of <code>active­Counter</code> is at least as large as <code>value</code>. We do this by subtracting the two values, to avoid wraparound problems.¹ The comparison takes advantage of the guarantee in C++20 that conversion from an unsigned integer to a signed integer converts to the value that is numerically equal modulo 2ⁿ where <var>n</var> is the number of bits in the destination. (Prior to C++20, the result was implementation-defined, but in practice all modern implementations did what C++20 mandates.)²</p>
+<p>You can also use <code>std::<wbr />atomic</code>:</p>
+<pre>_Guarded_by_(desiredMutex) DWORD desiredCounter = 1;
+std::atomic&lt;DWORD&gt; activeCounter;
+
+void wait_until_active(DWORD value)
+{
+    DWORD current = activeCounter;
+    while (static_cast&lt;int&gt;(current - value) &lt; 0) {
+        activeCounter.wait(current);
+        current = activeCounter;
+    }
+}
+</pre>
+<p>As before, the background thread manipulates the <code>desiredHandles</code> and <code>desiredActions</code>, then signals the waiting thread to wake up and process the changes. But this time, the background thread blocks until the waiting thread acknowledges the changes.</p>
+<pre>// Warning: For expository purposes. Almost no error checking.
+void waiting_thread()
+{
+    bool update = true;
+    std::vector&lt;wil::unique_handle&gt; handles;
+    std::vector&lt;std::function&lt;void()&gt;&gt; actions;
+
+    while (true)
+    {
+        if (std::exchange(update, false)) {
+            std::lock_guard guard(desiredMutex);
+
+            handles.clear();
+            handles.reserve(desiredHandles.size() + 1);
+            std::transform(desiredHandles.begin(), desiredHandles.end(),
+                std::back_inserter(handles),
+                [](auto&amp;&amp; h) { return duplicate_handle(h.get()); });
+            // Add the bonus "changed" handle
+            handles.emplace_back(duplicate_handle(changed.get()));
+
+            actions = desiredActions;
+
+            <span>if (activeCounter != desiredCounter) {</span>
+            <span>    activeCounter = desiredCounter;   </span>
+            <span>    WakeByAddressAll(&amp;activeCounter); </span>
+            }
+        }
+
+        auto count = static_cast&lt;DWORD&gt;(handles.size());
+                        
+        auto result = WaitForMultipleObjects(count,
+                        handles.data()-&gt;get(), FALSE, INFINITE);
+        auto index = result - WAIT_OBJECT_0;
+        if (index == count - 1) {
+            // the list changed. Loop back to update.
+            update = true;
+            continue;
+        } else if (index &lt; count - 1) {
+            actions[index]();
+        } else {
+            // deal with unexpected result
+        }
+    }
+}
+
+void change_handle_list()
+{
+    <span>DWORD value;</span>
+    {
+        std::lock_guard guard(desiredMutex);
+        ⟦ make changes to desiredHandles and desiredActions ⟧
+        <span>value = ++desiredCounter;</span>
+        SetEvent(changed.get());
+    }
+    <span>wait_until_active(value);</span>
+}
+</pre>
+<p>The pattern is that after the background thread makes the desired changes, they increment the <code>desiredCounter</code> and signal the event. It&#8217;s okay if multiple threads make changes before the waiting thread wakes up. The changes simply accumulate, and the event just stays signaled. Each background thread then waits for the waiting thread to process the change.</p>
+<p>On the waiting side, we process changes as usual, but we also publish our current change counter if it has changed, to let the background threads know that we made some progress. Eventually, we will make enough progress that all of the pending changes have been processed, and the last ackground thread will be released from <code>wait_<wbr />until_<wbr />active</code>.</p>
+<p>¹ You&#8217;ll run into problems if the counter increments 2 billion times without the worker thread noticing. At a thousand increments per second, that&#8217;ll last you a month. I figure that if you have a worker thread that is unresponsible for that long, then you have bigger problems. But you can avoid even that problem by switching to a 64-bit integer, so that the overflow won&#8217;t happen before the sun is expected to turn into a red giant.</p>
+<p>² The holdouts would be compilers for systems that are not two&#8217;s-complement.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260410-00/?p=112223">How do you add or remove a handle from an active &lt;CODE&gt;Wait&shy;For&shy;Multiple&shy;Objects&lt;/CODE&gt;?, part 2</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
