@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Apache 2.4, ETag values, and (HTTP) response compression | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Apache 2.4, ETag values, and (HTTP) response compression</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-04-12T02:25:42Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/web/Apache24EtagAndSuffixes">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-71e4be2047be263b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">One of the things that Apache and other web servers have been able to do for a long time is to compress responses when the requesting agent indicates that it supports this. Accepting compressed responses is so common that not doing so is potentially an bad sign , although a distressing number of syndication feed fetchers don&#x27;t request (or accept) compressed…</div>
+        <div class="content">
+          <div class="wikitext"><p>One of the things that Apache and other web servers have been able
+to do for a long time is to compress responses when the requesting
+agent indicates that it supports this. Accepting compressed responses
+is so common that <a href="https://utcc.utoronto.ca/~cks/space/blog/web/FakeBrowsersAndHTTPHeaders">not doing so is potentially an bad sign</a>, although a distressing number of
+syndication feed fetchers don't request (or accept) compressed
+responses. Apache is sophisticated enough that it can compress
+output on the fly and do it for unpredictable sources of dynamic
+content, such as CGIs and Django web applications (and requests it
+acts as a reverse proxy for, as far as I know).</p>
+
+<p>Another thing that the web has is the <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/ETag">ETag header</a>.
+An ETag header is supposed to be a unique identifier for a specific
+version of a 'resource', ie a URL. The place I normally think of ETags
+being used is in <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Conditional_requests">conditional GETs</a>,
+but it also has a lesser appreciated (by me) role in <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching">HTTP caching</a>,
+and as I understand it, that creates a little problem.</p>
+
+<p>An opportunistic cache is allowed to use the same ETag and If-None-Match
+headers for <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching#etagif-none-match">cache validation</a>.
+When an ETag value is only used by the origin server for conditional
+GET, we generally would prefer that the ETag value not vary based
+on the compression. However, when an intermediate cache uses an
+ETag for validation, it's apparently more convenient if the ETag
+is specific to the compression. As a result, <a href="https://httpwg.org/specs/rfc9110.html">RFC 9110</a>'s specification for <a href="https://httpwg.org/specs/rfc9110.html#field.etag">ETag</a> specifically
+requires that the ETag vary based on the response compression, not
+just its contents.</p>
+
+<p>In Apache 2.2, Apache ignored this requirement (at least by default).
+Especially, it ignored this requirement if you provided the ETag
+in dynamically generated content, such as CGI output. Apache 2.2
+would give your ETag to everyone regardless of the compression it
+did, and then everyone would make the same If-None-Match query to
+you and you'd be happy because the ETag you (re)generated was
+matching their If-None-Match and so lots of people were making, for
+example, conditional syndication feed fetches.</p>
+
+<p>In Apache 2.4, Apache apparently decided that this was no good and
+it needed to do better. In ETag values you provide (and at least
+sometimes ETag values it generates), Apache 2.4 sticks on a suffix,
+such as '-gzip', to make them unique to the Apache-chosen compression.
+People who receive these altered ETag values then dutifully copy
+them into their If-None-Match header, which Apache 2.4 passes back
+unaltered to your CGI or other web application, and then if you're
+unaware of this you will compare their modified value to your
+unmodified value and conclude that almost no one is making valid
+conditional requests any more (for some reason, starting when you
+upgraded to Apache 2.4).</p>
+
+<p>This behavior is actually something you can change if you want to,
+through the mod_deflate directive <a href="https://httpd.apache.org/docs/current/mod/mod_deflate.html#deflatealteretag">DeflateAlterEtag</a>
+and the mod_brotli directive <a href="https://httpd.apache.org/docs/2.4/mod/mod_brotli.html#brotlialteretag">BrotliAlterEtag</a>.
+But it's more correct and probably better in the long run to adjust
+your CGI or web application code to deal with these altered
+If-None-Match values, although it would be nice if Apache did it
+for you somehow. Since I looked it up in relatively current Apache
+2.4 source code, the two ETag suffixes you're likely to see in the
+wild are '-gzip' and '-br'.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
