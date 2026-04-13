@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vim and &#x27;forward delete&#x27; (in modern terminal programs) | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Vim and &#x27;forward delete&#x27; (in modern terminal programs)</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-04-13T01:31:13Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/VimAndForwardDelete">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-29db0535c50883e0.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">On the Fediverse, I had a learning experience : Another what the heck moment in Fedora 43. In Gnome-terminal (only, not xterm), hitting &#x27;Delete&#x27; in vim insert mode no longer deletes characters to the left of the cursor, only characters to the right. Delete is generating ^? in both gnome-terminal and xterm, and Delete works to delete characters in vim in g-t…</div>
+        <div class="content">
+          <div class="wikitext"><p>On the Fediverse, <a href="https://mastodon.social/@cks/116389302982443408">I had a learning experience</a>:</p>
+
+<blockquote><p>Another what the heck moment in Fedora 43. In Gnome-terminal (only,
+not xterm), hitting 'Delete' in vim insert mode no longer deletes
+characters to the left of the cursor, only characters to the
+right. Delete is generating ^? in both gnome-terminal and xterm, and
+Delete works to delete characters in vim in g-t on the ':' command
+prompt.</p>
+
+<p>Whatever vim / gnome-terminal combined stupidity this is, I want it
+gone. Now.</p>
+</blockquote>
+
+<p>Actually I got the name of the key wrong. The key I was hitting is
+BackSpace (in X keysym terminology). I thought of it as Delete
+because that's what it generates, but the real Delete key is another
+key, and this turns out to be relevant. What I described happening
+is what I think is normally called as 'forward delete', as opposed
+to 'backward delete', the normal BackSpace behavior (and what I
+want).</p>
+
+<p>I will skip ahead to the fix: <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/XBackspaceShift">for historical reasons</a>,
+I had Gnome-terminal set to generate ASCII DEL for both the BackSpace
+and the Delete keys (it's in a per-profile 'Compatibility' tab).
+The modern proper setting for Delete is 'escape code'. Setting that
+cured the problem, but how we got here is the interesting bit.</p>
+
+<p>Unix has long had both a stty setting for 'what is your backspace
+character' and also a termcap/terminfo parameter for 'what does the
+backspace key generate' (in terminfo, this is 'kbs'). Things such
+as readline, vim and GNU Emacs can use those to determine the
+character sequence they should recognize as backspace, or they can
+ignore both settings and use hard-coded values. This has historically
+been important because <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/DeleteBackspaceSplit">there used to be a great split of what
+this key generated on serial terminals</a>, and
+<a href="https://utcc.utoronto.ca/~cks/space/blog/unix/XBackspaceShift">this split propagated into X and people's X configurations</a>.</p>
+
+<p>(Interestingly, terminfo databases aren't consistent across systems
+about what BackSpace is expected to generate in xterm. Linux and
+OpenBSD terminfo appears to expect it to generate ^?, but FreeBSD
+expects ^H. You can check with '<code>infocmp | fgrep kbs</code>'. Vim
+appears to take its setting from your backspace character from stty,
+not terminfo, which is the correct approach.)</p>
+
+<p>Unix has never had a stty setting for 'forward delete', but it did
+soon get a terminfo and termcap distinction between the 'backspace'
+and 'delete' keys (well, between what character sequences each
+sends). In terminfo, what the delete key sends is 'kdch1', and I
+don't know when it appeared; in termcap, it is 'kd', which appeared
+no latter than 4.3 BSD in 1985, per <a href="https://www.tuhs.org/cgi-bin/utree.pl?file=4.3BSD/usr/man/man5/termcap.5">the 4.3 BSD termcap(5) manual
+page</a>.
+If your program wants to support forward delete at all (<a href="https://vimhelp.org/insert.txt.html#i_DEL">which vim
+does</a>) and <a href="https://utcc.utoronto.ca/~cks/space/blog/tech/KeysAndCharacters">you can't
+see the physical keys being hit</a>, you
+have to use 'kdch1'. Well, sort of. You're theoretically supposed
+to use kdch1, but in practice kdch1 doesn't necessarily correspond
+to the reality of your terminal program and its current settings.</p>
+
+<p>(<a href="https://en.wikipedia.org/wiki/Termcap#History">Termcap</a> was
+invented first, in BSD Unix. <a href="https://en.wikipedia.org/wiki/Terminfo">Terminfo</a> came later and apparently
+was first generally available in System V Release 2, in 1984. It's
+possible that terminfo had 'kdch1' from the start, since I believe
+that by 1984 there were Unix machines with 'full' keyboards with
+both BackSpace and Delete. Plus the DEC VT-100 serial terminal also
+had both Backspace and Delete keys, and it was introduced in 1978.)</p>
+
+<p>Vim handles keyboard keys through an internal notion of terminal
+capabilities and key sequences, and for forward delete the internal
+capability is called <a href="https://vimhelp.org/term.txt.html#%27t_kD%27">t_kD</a>. Vim can get its
+t_kD value from a number of places; it can get the value from
+the regular terminfo kdch1 value, it can derive it from your regular
+backspace value (as is done by <a href="https://vimhelp.org/options.txt.html#%3Afixdel">:fixdel</a>), or <a href="https://vimhelp.org/term.txt.html#xterm-codes">it can ask
+your terminal program what the various physical keys generate</a> (this is controlled
+by the <a href="https://vimhelp.org/options.txt.html#%27xtermcodes%27">xtermcodes option</a>). When vim
+does the last, it will get whatever your terminal program is reporting
+about its current settings, not whatever official settings (for
+'kdch1' and other things) are published in the system's terminfo
+database. This is useful when these settings are controlled through
+preferences, instead of being fixed values.</p>
+
+<p>(Specifically, vim and other programs will use <a href="https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h4-Device-Control-functions:DCS-plus-q-Pt-ST.F95">xterm's XTGETTCAP
+request</a>
+to read out various live terminfo settings. This is why it matters
+that there is a terminfo thing for the delete key as separate from
+the backspace key.)</p>
+
+<p>Vim's <a href="https://vimhelp.org/term.txt.html#xterm-codes">xterm-codes</a>
+behavior officially happens on 'xterm patchlevel 141 or higher'.
+In practice a lot of other terminal emulators imitate xterm here,
+and in particular recent enough versions of gnome-terminal do. If
+you're curious to see what your terminal program is reporting for
+itself, you can start vim and use '<code>:echo v:termresponse</code>' (or
+you can run '<code>tput RV; cat >/dev/null</code>' at your shell command
+line, then Ctrl-C it once whatever has echoed). Currently xterm
+reports its patchlevel and gnome-terminal reports some sort of <a href="https://gitlab.gnome.org/GNOME/vte">VTE
+library</a> version, which on
+modern versions of Gnome-terminal is (much) larger than '141' (mine
+reports '8203'), and triggers vim's behavior of asking the terminal
+program for its actual keyboard mapping.</p>
+
+<p>(Technically 'RV' is <a href="https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h4-Functions-using-CSI-_-ordered-by-the-final-character-lparen-s-rparen:CSI-gt-Ps-c:Ps-=-0-or-omitted.232E">send device attributes</a>,
+not <a href="https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h4-Functions-using-CSI-_-ordered-by-the-final-character-lparen-s-rparen:CSI-gt-Ps-q:Ps-=-0.1F0B">XTVERSION</a>.
+You can find programs that query XTVERSION specifically, such as
+<a href="https://github.com/rmrfus/xtver">xtver</a>.)</p>
+
+<p>When Gnome-terminal reported its keyboard mapping to vim, it
+apparently reported that both my BackSpace and Delete keys generate
+ASCII DEL, which was true (at the time). When vim received this
+report, it set both <a href="https://vimhelp.org/term.txt.html#%27t_kb%27">t_kb</a> and <a href="https://vimhelp.org/term.txt.html#%27t_kD%27">t_kD</a> to ASCII DEL (this
+is visible with eg '<code>:set t_kb</code>'), and then apparently vim decides
+that the &lt;Del> version should take priority over the &lt;BS> version
+so that when I hit a key that generates ASCII DEL, vim will do forward
+delete instead of backward delete.</p>
+
+<p>(Actual xterm apparently reports something different to vim. Although
+both BackSpace and Delete generate ASCII DEL in my xterm setup, vim
+reports that t_kD is '<code>^[[3;*~</code>', the normal escape sequence
+for it that gnome-terminal will also generate when it's set that
+way. This means I have no access to forward delete in vim in xterm,
+but that's okay with me; I basically never use it.)</p>
+
+<p>Gnome-terminal support for xterm's XTGETTCAP stuff was apparently
+added in mid 2025 through VTE in <a href="https://gitlab.gnome.org/GNOME/vte/-/work_items/2884">this feature request</a> and <a href="https://gitlab.gnome.org/GNOME/vte/-/commit/2632de6d3532b8d725510009819a59df58efc99b">this
+commit</a>.
+Fedora 42 shipped with a version of gnome-terminal and VTE before
+this change, and the Fedora 43 versions are afterward, so now vim
+can actually find out what the current key mappings are and trigger
+this behavior.</p>
+
+<p>There are at least two ways to fix this through vim in your .vimrc,
+and also two ways that don't work. In working ways, if you unset
+<a href="https://vimhelp.org/term.txt.html#%27t_RV%27">t_RV</a> ('<code>set
+t_RV=</code>'), vim never makes the version query and never goes on to
+ask for keyboard stuff. If you disable <code>xtermcodes</code> ('<code>set
+noxtermcodes</code>'), vim will also never ask for the keyboard mapping,
+but now it knows the nominal xterm version number (which isn't
+necessarily very useful, given that different projects report wildly
+different numbers).</p>
+
+<p>The two ways that don't work in your .vimrc are unsetting t_kD
+and using '<a href="https://vimhelp.org/options.txt.html#%3Afixdel">:fixdel</a>', although both of them work after vim has
+finished starting. I assume that both of them don't work because
+their effects are being overridden when vim asks the terminal program
+for its key bindings. There may be vim magic that you can use to
+get around this, but it's better to change your (my) historical
+gnome-terminal profile settings so that all profiles have their
+'Delete key generates' setting in the Compatibility tab set to
+'Escape sequence'.</p>
+
+<p>(There is probably some way to set this preference for all profiles
+through the command line but I just did it by hand through the GUI.)</p>
+
+<p>PS: My view is that vim is the party with the bug. Given the behavior
+of <a href="https://vimhelp.org/options.txt.html#%3Afixdel">:fixdel</a>, I think that if vim detects that t_kb and
+t_kD are both set to ASCII DEL in the terminal response, it
+should either unset t_kD or make it Ctrl-H.</p>
+
+<p>PPS: Since I checked, urxvt (aka rxvt-unicode) does respond to the
+xterm RV sequence but reports a version number of '95' as of version
+9.31, which is far too low to trigger vim asking for termcap stuff
+(and I don't know if urxvt supports that). The Fedora 43 konsole
+reports a version number of 115 (for konsole 25.12.3), and I will
+leave it up to interested parties to investigate what other terminal
+programs report.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
