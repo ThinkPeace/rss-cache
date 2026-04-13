@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Common Package Specification | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Common Package Specification</h1>
+        <div class="meta">Andrew Nesbitt 2026-04-13T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/04/13/common-package-specification.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-8d5f87c344d90b6f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Not the cross-ecosystem format the name suggests.</div>
+        <div class="content">
+          <p>The <a href="https://cps-org.github.io/cps/">Common Package Specification</a> went stable in CMake 4.3 last year and the name caught my attention because it sounds like it might be addressing the cross-ecosystem dependency problem I’ve <a href="/2026/01/27/the-c-shaped-hole-in-package-management.html">written about before</a>. Reading the spec, the “common” turns out to mean common across build systems rather than common across language ecosystems: it’s a JSON format that CMake and Meson and autotools can all read to find out where an installed library lives and how to link against it, replacing the mix of <code class="language-plaintext highlighter-rouge">.pc</code> files and <code class="language-plaintext highlighter-rouge">*Config.cmake</code> scripts that currently fill that role.</p>
+
+<p>The schema is full of include paths, preprocessor defines, link flags, component types like <code class="language-plaintext highlighter-rouge">dylib</code> and <code class="language-plaintext highlighter-rouge">archive</code> and <code class="language-plaintext highlighter-rouge">interface</code> for header-only libraries, and feature strings like <code class="language-plaintext highlighter-rouge">c++11</code> and <code class="language-plaintext highlighter-rouge">gnu</code>, which makes sense given it came out of Kitware and the C++ tooling study group and is being driven by people building large C++ applications who are tired of every build system having its own incompatible way of describing the same installed library.</p>
+
+<p>Conan can already <a href="https://github.com/conan-io/conan/blob/develop/conan/cps/cps.py">generate CPS files</a> for everything in ConanCenter, and CMake’s <code class="language-plaintext highlighter-rouge">find_package()</code> reads them with fallback to the older formats, so libraries built through that toolchain will start leaving <code class="language-plaintext highlighter-rouge">.cps</code> files in install prefixes whether anyone outside the C++ world notices or not. Each one is a small structured record of an installed binary: its location on disk, its version, what other components it requires, what platform it was built for.</p>
+
+<p>For something like the <a href="https://github.com/ecosyste-ms/packages/issues/1261">binary dependency tracing</a> Vlad and I have been looking at, that’s a useful data source sitting alongside the symbol tables we’d be extracting anyway, particularly for the version field, which is the thing you can’t reliably recover from <code class="language-plaintext highlighter-rouge">nm</code> output and currently have to guess from filenames or distro package databases.</p>
+
+<p>The closer fit is native extension builds in language package managers. Ruby’s mkmf has <a href="https://github.com/ruby/ruby/blob/master/lib/mkmf.rb"><code class="language-plaintext highlighter-rouge">pkg_config()</code> baked into it</a> and the <a href="https://github.com/ruby-gnome/pkg-config">pkg-config gem</a> reimplementing the format in pure Ruby has tens of millions of downloads, while node-gyp users shell out to <code class="language-plaintext highlighter-rouge">pkg-config</code> from <code class="language-plaintext highlighter-rouge">binding.gyp</code> action blocks to find headers and libraries at install time. These are doing exactly what CPS is designed to replace, and a CPS reader for mkmf would be a small piece of code, but the libraries that gems actually build against (libxml2, libpq, libsqlite3, openssl) ship <code class="language-plaintext highlighter-rouge">.pc</code> files because pkg-config has been around since 2000 and don’t yet ship <code class="language-plaintext highlighter-rouge">.cps</code> files because almost nothing outside CMake produces them.</p>
+
+<p>There’s an <a href="https://github.com/cps-org/cps/issues/97">open proposal</a> to add a <code class="language-plaintext highlighter-rouge">package_url</code> field using purl identifiers so a CPS file could record which conan or vcpkg or distro package it came from, which would close a loop between the build-system world’s description format and the identifier scheme everything else has converged on.</p>
+
+<p>Python has been moving on the adjacent problems independently, with <a href="https://peps.python.org/pep-0770/">PEP 770</a> reserving <code class="language-plaintext highlighter-rouge">.dist-info/sboms/</code> inside wheels for CycloneDX or SPDX documents describing bundled libraries, and auditwheel <a href="https://github.com/pypa/auditwheel/blob/main/src/auditwheel/sboms.py">already implementing it</a> by querying <code class="language-plaintext highlighter-rouge">dpkg</code> or <code class="language-plaintext highlighter-rouge">rpm</code> or <code class="language-plaintext highlighter-rouge">apk</code> at repair time to find which system package each grafted <code class="language-plaintext highlighter-rouge">.so</code> came from before writing the result as purls. CPS wouldn’t help here. Wheel consumers never compile anything, so what they need is provenance for what got bundled, and Python correctly reached for SBOM formats. The numpy 2.2.6 wheel I pulled to check still doesn’t have an SBOM in it despite the spec being accepted a year ago, which mostly tells you how long the tail is on rebuilding the world, and is part of why reconstructing this data from binaries after the fact stays useful even as the metadata standards land.</p>
+
+<p><a href="https://peps.python.org/pep-0725/">PEP 725</a> declares <code class="language-plaintext highlighter-rouge">dep:generic/openssl</code> style requirements in <code class="language-plaintext highlighter-rouge">pyproject.toml</code> so build tools know what needs to be present before they start, using a purl-derived scheme that again has no relationship to CPS despite covering ground that pkg-config users would recognise.</p>
+
+<p>None of these efforts reference each other much, which is roughly what you’d expect when the C dependency problem gets solved piecewise by whichever community hits it hardest, but the pieces are at least using compatible identifiers now, and a CPS file with a purl in it is something you could trace through to a PEP 770 SBOM entry without anyone having planned for that to work.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
