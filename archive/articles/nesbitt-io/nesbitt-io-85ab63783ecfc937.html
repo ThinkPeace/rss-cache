@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Standing on the shoulders of Homebrew | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Standing on the shoulders of Homebrew</h1>
+        <div class="meta">Andrew Nesbitt 2026-04-14T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/04/14/standing-on-the-shoulders-of-homebrew.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-85ab63783ecfc937.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Rewriting the easy parts of Homebrew.</div>
+        <div class="content">
+          <p><a href="https://github.com/lucasgelfond/zerobrew">zerobrew</a> and <a href="https://github.com/justrach/nanobrew">nanobrew</a> have been doing the rounds as fast alternatives to Homebrew, one written in Rust with the tagline “uv-style architecture for Homebrew packages” and the other in Zig with a 1.2 MB static binary and a benchmark table comparing itself favourably against the first. Both are upfront, once you scroll past the speedup numbers, that they resolve dependencies against homebrew-core, download the bottles that Homebrew’s CI built and Homebrew’s bandwidth bill serves, and parse the cask definitions that Homebrew contributors maintain.</p>
+
+<p>They’re alternative clients for someone else’s registry, which is a perfectly reasonable thing to build, but the framing as a replacement glosses over what running a system package manager actually involves.</p>
+
+<p>nanobrew’s README has a “what doesn’t work yet” section listing Ruby <code class="language-plaintext highlighter-rouge">post_install</code> hooks, build-from-source with custom options, conditional blocks in Brewfiles, and any complex Ruby DSL, while zerobrew handles source builds by falling back to “Homebrew’s Ruby DSL”, which I read as shelling out to the thing it’s meant to be replacing.</p>
+
+<p>The parts of Homebrew they skip are the parts that are slow for a reason: evaluating arbitrary Ruby to discover what a package needs, running post-install hooks that touch the filesystem in package-specific ways, and handling the long tail of formulae that don’t reduce to “download this tarball and symlink it into a prefix”. Implementing only the bottle path and declaring the rest out of scope covers the easy 80% of packages and most of the benchmark wins.</p>
+
+<p>zerobrew’s table reports a 4.4x speedup installing ffmpeg from a warm cache, nanobrew gets the same operation down to 287 milliseconds, and I keep trying to picture the developer who installs ffmpeg, uninstalls it, and installs it again on the same machine often enough for warm-cache reinstall time to be the number they care about.</p>
+
+<p>A warm install is measuring how quickly you can clonefile a directory out of a content-addressable store, which is a fine thing to optimise but says almost nothing about the experience of setting up a new laptop or adding a tool you didn’t have yesterday. The cold-cache numbers are much closer together, occasionally slower than Homebrew when the bottle is large, because at that point everyone is waiting on the same CDN and there’s no clever data structure that makes bytes arrive faster.</p>
+
+<p>I wrote about <a href="/2025/12/26/how-uv-got-so-fast.html">why uv is fast</a> a few months ago. The language rewrite was the least interesting part of that story. uv is fast because PEP 658 finally let Python resolvers fetch package metadata without executing <code class="language-plaintext highlighter-rouge">setup.py</code>, and because uv dropped eggs and <code class="language-plaintext highlighter-rouge">pip.conf</code> and a dozen other legacy paths that pip still carries. Homebrew already shipped its equivalent of PEP 658 in the <code class="language-plaintext highlighter-rouge">formula.json</code> API, and that’s the thing that made zerobrew and nanobrew possible in the first place, neither of them is solving the metadata-without-Ruby-evaluation problem because Homebrew already solved it for them.</p>
+
+<p>zerobrew’s content-addressable store and APFS clonefile tricks would work equally well from Ruby, and nanobrew’s parallel downloads have been on by default in Homebrew since <a href="https://github.com/Homebrew/brew/pull/20975">4.7.0 last November</a>. The architectural choices are real improvements but they aren’t “we rewrote it in Zig” improvements, and a zero-startup-time binary matters a lot less when the operation behind it is a 40 MB download either way.</p>
+
+<p>Most of the work in a package manager is the long tail: formulae that want a specific libiconv on an old macOS release, casks with notarisation quirks, post-install scripts that edit config files in ways you can’t predict in advance. None of it benchmarks. Whether either project still has a maintainer paying attention a year from now, once those issues start piling up in the tracker, is an open question. Both also chose Apache-2.0 rather than inheriting Homebrew’s BSD-2-Clause, which is legally fine and suggests the authors see themselves as building independent projects rather than contributing to the ecosystem they depend on.</p>
+
+<p>The formula format is Turing-complete Ruby, which means the package definition and the client that interprets it are effectively the same artefact, and any move toward declarative package data has to either break the existing formulae or ship a Ruby evaluator as part of every client forever.</p>
+
+<p>The <a href="https://formulae.brew.sh/api/formula.json">formula API</a> currently lists 8,308 formulae in homebrew-core and the <a href="https://formulae.brew.sh/api/cask.json">cask API</a> another 7,617 casks, plus <a href="https://github.com/search?q=homebrew-+in%3Aname+language%3Aruby&amp;type=repositories">roughly 34,000 <code class="language-plaintext highlighter-rouge">homebrew-*</code> Ruby repositories on GitHub</a> that look like third-party taps, all written against an internal DSL that was never meant to be a stable interchange format. The fast clients get to sidestep that problem by declaring it out of scope, which is a freedom the project they depend on doesn’t have.</p>
+
+<p>The bottleneck isn’t Rust or Ruby, it’s the absence of a stable declarative package schema. Until that exists, every fast client is fast because Homebrew already did the slow work.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
