@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Tuesday Test | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The Tuesday Test</h1>
+        <div class="meta">Andrew Nesbitt 2026-04-15T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/04/15/the-tuesday-test.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-5ccc3e6ea95fee01.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Like the Turing test but with more tacos.</div>
+        <div class="content">
+          <p><a href="/2026/04/14/standing-on-the-shoulders-of-homebrew.html">Yesterday</a> I wrote about the fast Homebrew rewrites and ended on the line that the bottleneck for that whole class of project is not Rust or Ruby, it is the absence of a stable declarative package schema. Someone on Mastodon picked up that thread and asked the obvious follow-on: which package managers actually have one? Going through the list, the honest answer is hardly any of them, and there is a quick test that makes the answer easy to check.</p>
+
+<p>Ask this of any package manager: if I install this package on a Tuesday, could it do something different than if I install it on a Wednesday? If the answer is yes, the package manager is not really declarative, no matter what the manifest file looks like on the surface.</p>
+
+<p>Somewhere in the install pipeline there is a place where arbitrary code runs, and that code can read the clock, check an environment variable, look at the hostname, phone a server, or do anything else a program can do. The Tuesday test is a quick way to separate the declarative tools from the ones that have a programming language hiding underneath a declarative-looking file format.</p>
+
+<p>The test is not about whether the code is malicious, or whether it is a supply chain risk, or whether it could in principle do something terrible. Those are all separate questions with their own answers.</p>
+
+<p>It is also not about the registry changing under you between the two days: new versions, yanks and the like are all real concerns, but they are concerns about the data the package manager is fetching rather than about the package manager itself. Pretend the registry is frozen and the lockfile is pinned.</p>
+
+<p>The question here is narrower. Given the same manifest, the same lockfile and the same registry contents, is the install allowed to read anything the manifest does not declare as an input? The day of the week is the simplest example of such a hidden input, but the real point is that a package that passes the Tuesday test has no way to reach outside its declared inputs at all. A package that fails it can, and once it can, the manifest is no longer the whole story. Going through the list of well known package managers from <a href="/2026/01/03/the-package-management-landscape.html">the landscape post</a>, it turns out that almost none of them pass.</p>
+
+<h3 id="homebrew">Homebrew</h3>
+
+<p>Start with the one that started this. A <a href="https://docs.brew.sh/Formula-Cookbook">Homebrew formula</a> is a Ruby class with an <code class="language-plaintext highlighter-rouge">install</code> method and a <code class="language-plaintext highlighter-rouge">post_install</code> hook, and the entire class body is evaluated by the Homebrew client every time it touches the formula. Even the parts that look like data, such as <code class="language-plaintext highlighter-rouge">url</code>, <code class="language-plaintext highlighter-rouge">sha256</code>, <code class="language-plaintext highlighter-rouge">version</code>, and <code class="language-plaintext highlighter-rouge">depends_on</code>, are method calls on the formula class, evaluated in a Ruby context that can <code class="language-plaintext highlighter-rouge">require</code> anything, shell out to anything, and read the clock from any method.</p>
+
+<p>The <a href="https://docs.brew.sh/Cask-Cookbook">cask format</a> is a Ruby DSL with the same property. So is the <a href="https://docs.brew.sh/Manpage#bundle-subcommand"><code class="language-plaintext highlighter-rouge">Brewfile</code></a> consumed by <code class="language-plaintext highlighter-rouge">brew bundle</code>, which was invented as a Homebrew analogue of Bundler’s <code class="language-plaintext highlighter-rouge">Gemfile</code> and inherits the same “executable Ruby file posing as a manifest” shape: a Brewfile can call <code class="language-plaintext highlighter-rouge">brew</code>, <code class="language-plaintext highlighter-rouge">cask</code>, <code class="language-plaintext highlighter-rouge">tap</code>, <code class="language-plaintext highlighter-rouge">mas</code>, <code class="language-plaintext highlighter-rouge">vscode</code> and friends, but it can also <code class="language-plaintext highlighter-rouge">if Time.now.wday == 2</code> in between.</p>
+
+<p>Homebrew fails the Tuesday test by design, which is the whole reason the <a href="https://formulae.brew.sh/api/formula.json"><code class="language-plaintext highlighter-rouge">formula.json</code></a> API had to exist as a separate thing for fast clients to consume: there is no other way to extract package metadata without running the package definition. The JSON file is what passes the Tuesday test, and it only exists because the formula format does not.</p>
+
+<p>Generating it is not free either. Homebrew’s own <a href="https://github.com/Homebrew/brew/blob/master/Library/Homebrew/dev-cmd/generate-formula-api.rb"><code class="language-plaintext highlighter-rouge">brew generate-formula-api</code></a> command has to flip the <code class="language-plaintext highlighter-rouge">Formula</code> class into a special <code class="language-plaintext highlighter-rouge">generating_hash!</code> mode and wrap the run in a <a href="https://github.com/Homebrew/brew/blob/master/Library/Homebrew/simulate_system.rb"><code class="language-plaintext highlighter-rouge">SimulateSystem</code></a> block that lies to every formula about the host OS and architecture, so that calls which would normally branch on the real system instead return a stable answer. It is in-process monkey patching to stop the formula from noticing where it is, in order to coax a declarative-looking file out of a format that is anything but.</p>
+
+<h3 id="ruby">Ruby</h3>
+
+<p>The <a href="https://bundler.io/man/gemfile.5.html"><code class="language-plaintext highlighter-rouge">Gemfile</code></a> is a Ruby file. The first line is often <code class="language-plaintext highlighter-rouge">source "https://rubygems.org"</code>, which looks like configuration, but <code class="language-plaintext highlighter-rouge">source</code> is a method call on an implicit DSL object, and anything else you can write in Ruby is valid above, below, or inside it. You can open a socket in your Gemfile. You can check <code class="language-plaintext highlighter-rouge">Time.now.wday</code> and add a different gem on Tuesdays.</p>
+
+<p>The <a href="https://guides.rubygems.org/specification-reference/"><code class="language-plaintext highlighter-rouge">.gemspec</code></a> file that ships inside every gem is also Ruby, and it is evaluated every time someone installs the gem, which means a gem author can put arbitrary code in the specification itself and have it run on the installer’s machine before anything has been built. Native extensions run <a href="https://guides.rubygems.org/gems-with-extensions/"><code class="language-plaintext highlighter-rouge">extconf.rb</code></a>, which is yet more Ruby, and post-install messages are generated at install time.</p>
+
+<p>CocoaPods is the same story in a different namespace. The CocoaPods client is itself a Ruby program, a <a href="https://guides.cocoapods.org/syntax/podfile.html"><code class="language-plaintext highlighter-rouge">Podfile</code></a> is a direct descendant of a <code class="language-plaintext highlighter-rouge">Gemfile</code>, and a <a href="https://guides.cocoapods.org/syntax/podspec.html"><code class="language-plaintext highlighter-rouge">.podspec</code></a> is a direct descendant of a <code class="language-plaintext highlighter-rouge">.gemspec</code>, right down to the DSL, the block syntax, and the fact that both files are evaluated as Ruby every time you install. Everything said about Ruby above applies to CocoaPods without a single change.</p>
+
+<h3 id="python">Python</h3>
+
+<p>Python is the same story with different file names. A <a href="https://setuptools.pypa.io/en/latest/userguide/index.html"><code class="language-plaintext highlighter-rouge">setup.py</code></a> is a Python script that runs at install time, and <code class="language-plaintext highlighter-rouge">setup.py</code> is where Python packaging started, so an enormous amount of the existing ecosystem still goes through it.</p>
+
+<p>The move to <a href="https://packaging.python.org/en/latest/specifications/pyproject-toml/"><code class="language-plaintext highlighter-rouge">pyproject.toml</code></a> looks like a shift to a declarative manifest, and in the limited sense that the file itself is TOML it is, but the whole job of that TOML file is to nominate a program to run. The <code class="language-plaintext highlighter-rouge">[build-system]</code> table points at a <a href="https://peps.python.org/pep-0517/">build backend</a>, and the build backend is a Python package that executes arbitrary Python to produce a wheel. <a href="https://setuptools.pypa.io/">Setuptools</a>, <a href="https://hatch.pypa.io/latest/">Hatchling</a>, <a href="https://python-poetry.org/docs/pyproject/">Poetry-core</a>, <a href="https://backend.pdm-project.org/">PDM-backend</a>, <a href="https://flit.pypa.io/en/stable/">Flit</a>, <a href="https://www.maturin.rs/">Maturin</a> and <a href="https://scikit-build-core.readthedocs.io/">scikit-build-core</a> are all real programs, all capable of reading the date.</p>
+
+<p>Wheels themselves are the one part of the Python pipeline that does pass the test: <a href="https://peps.python.org/pep-0427/">PEP 427</a> deliberately has no pre or post install hooks, and installing a wheel is meant to be a pure file-unpacking step. If a wheel does not already exist for your platform, pip and uv and Poetry and pdm will transparently build one from the sdist by invoking the build backend, which puts you back in arbitrary-Python territory.</p>
+
+<h3 id="javascript">JavaScript</h3>
+
+<p>JavaScript is the canonical example people reach for, because <code class="language-plaintext highlighter-rouge">package.json</code> is famously JSON, which is as declarative a format as you can get, and yet npm install runs arbitrary code through the <code class="language-plaintext highlighter-rouge">preinstall</code>, <code class="language-plaintext highlighter-rouge">install</code>, and <code class="language-plaintext highlighter-rouge">postinstall</code> <a href="https://docs.npmjs.com/cli/v10/using-npm/scripts">lifecycle scripts</a>. Those scripts are shell commands that run in the package directory, and nothing stops them from checking <code class="language-plaintext highlighter-rouge">date +%u</code> and branching on the result.</p>
+
+<p>Yarn, pnpm, and Bun all inherit the same lifecycle script contract for compatibility with the existing ecosystem, though recent <a href="https://pnpm.io/settings">pnpm</a> and <a href="https://bun.com/docs/cli/install">Bun</a> releases have started refusing to run scripts for dependencies that are not on an explicit allowlist. The contract is still there, the defaults have just got more cautious.</p>
+
+<h3 id="deno-">Deno 🌮</h3>
+
+<p><a href="https://deno.com/">Deno</a> fetches and caches modules on demand, either at import time or up front with <code class="language-plaintext highlighter-rouge">deno install</code>, and no code the package author supplies runs against the installer’s machine before the module itself is imported. Deno 2 added first-class <code class="language-plaintext highlighter-rouge">package.json</code> and <code class="language-plaintext highlighter-rouge">node_modules</code> support on top of the existing <code class="language-plaintext highlighter-rouge">npm:</code> specifiers, but even then <a href="https://docs.deno.com/runtime/reference/cli/install/">it refuses to run the npm lifecycle scripts</a> by default and requires an explicit <code class="language-plaintext highlighter-rouge">--allow-scripts=&lt;pkg&gt;</code> opt-in for any package that wants them.</p>
+
+<h3 id="rust">Rust</h3>
+
+<p>Rust looks declarative at a glance. <code class="language-plaintext highlighter-rouge">Cargo.toml</code> is TOML, Cargo resolves everything from the lockfile, and the whole ecosystem leans heavily on the idea that a crate is a well defined thing.</p>
+
+<p>Then you notice <a href="https://doc.rust-lang.org/cargo/reference/build-scripts.html"><code class="language-plaintext highlighter-rouge">build.rs</code></a>, which is a Rust file that Cargo compiles and runs before building the crate proper, so it can generate source code, link against system libraries, probe the host, and, yes, check the date. <a href="https://doc.rust-lang.org/reference/procedural-macros.html">Procedural macros</a> are the same story from a different angle: they are Rust code that runs at compile time in the compiler’s own process, and they can do anything a Rust program can do. Both mechanisms are considered normal and widely used.</p>
+
+<h3 id="go-">Go 🌮</h3>
+
+<p><a href="https://go.dev/ref/mod">Go modules</a> come closer to passing than almost anything else in this list. The <code class="language-plaintext highlighter-rouge">go.mod</code> file is a small declarative format with no scripting in it, <code class="language-plaintext highlighter-rouge">go get</code> does not run post-install hooks, and the module proxy and checksum database make the fetch step reproducible and auditable in a way that most other ecosystems are not.</p>
+
+<p>The escape hatch is <a href="https://pkg.go.dev/cmd/cgo">cgo</a>, which invokes the system C compiler with arguments specified by <code class="language-plaintext highlighter-rouge">#cgo</code> directives in source files, and those directives can include whatever paths and flags the package author wants. The core dependency resolution and fetching pipeline is declarative. The build pipeline is not, as soon as C is involved.</p>
+
+<h3 id="jvm-languages">JVM languages</h3>
+
+<p>The JVM ecosystem is split between the declarative-looking and the openly imperative. Maven’s <a href="https://maven.apache.org/pom.html"><code class="language-plaintext highlighter-rouge">pom.xml</code></a> is XML and describes the project as data, but a pom can include plugin executions, and Maven plugins are Java code that runs during the build.</p>
+
+<p><a href="https://docs.gradle.org/current/userguide/userguide.html">Gradle</a> does not even pretend: <code class="language-plaintext highlighter-rouge">build.gradle</code> is a Groovy script, and <code class="language-plaintext highlighter-rouge">build.gradle.kts</code> is a Kotlin script, and both are full programming languages with access to the filesystem, the network, and the clock. <a href="https://www.scala-sbt.org/">sbt</a>’s build definition is Scala. <a href="https://leiningen.org/">Leiningen</a>’s <code class="language-plaintext highlighter-rouge">project.clj</code> is Clojure. <a href="https://mill-build.org/">Mill</a> is Scala again.</p>
+
+<p>The JVM world has spent twenty years treating the build file as a program, and the package management step is a side effect of running that program.</p>
+
+<h3 id="swift">Swift</h3>
+
+<p>Swift Package Manager is in the same category. <a href="https://developer.apple.com/documentation/packagedescription"><code class="language-plaintext highlighter-rouge">Package.swift</code></a> is a Swift file that is compiled and run to produce the package description, which means every resolve of a Swift package involves executing Swift code from the package author. Apple added a manifest API version comment at the top of the file so that the compiler knows which stable API to expose, but the underlying mechanism is still “run the author’s Swift program.”</p>
+
+<h3 id="zig">Zig</h3>
+
+<p>Zig is worth pulling out because it is a modern language that looked at all of the above and decided, deliberately, that the build file should be a real program. <a href="https://ziglang.org/learn/build-system/"><code class="language-plaintext highlighter-rouge">build.zig</code></a> is Zig source compiled and run by the Zig toolchain, and the package manager is a set of APIs exposed to that program. The rationale is that builds in C-adjacent languages are already programs in disguise (makefiles, shell, CMake), and making the language of the build the same as the language of the project is more honest than pretending otherwise. It is a defensible position, and it fails the test completely.</p>
+
+<h3 id="bazel-">Bazel 🌮</h3>
+
+<p>Bazel is the one entry on this list that tries to pass the Tuesday test at the language design level. <code class="language-plaintext highlighter-rouge">BUILD</code> files and <code class="language-plaintext highlighter-rouge">.bzl</code> extensions are written in <a href="https://bazel.build/rules/language">Starlark</a>, a dialect of Python that Google stripped back on purpose: no <code class="language-plaintext highlighter-rouge">while</code> loops, no recursion, no mutable global state, no way to read the clock, the filesystem outside declared inputs, or the network. Evaluation is guaranteed to terminate, and two evaluations of the same inputs are guaranteed to produce the same output. It is the only manifest language on this page that cannot observe what day it is even if the author wants it to.</p>
+
+<p>The execution side is hedged the same way. Actions run inside a sandbox with only their declared inputs visible, and Bazel’s remote execution and remote cache assume that identical inputs produce identical outputs, so any non-determinism shows up as a cache miss and gets investigated.</p>
+
+<p>The usual escape hatches are still there if you want them: <code class="language-plaintext highlighter-rouge">repository_rule</code> can call out to the host to fetch code, <code class="language-plaintext highlighter-rouge">genrule</code> runs shell, and custom toolchains can shell out to anything the sandbox allows, so a sufficiently motivated <code class="language-plaintext highlighter-rouge">BUILD</code> author can still reach the system <code class="language-plaintext highlighter-rouge">date</code> command. But the default posture is the opposite of everywhere else on this list, and the design is organised around passing the Tuesday test as an explicit goal.</p>
+
+<h3 id="haskell">Haskell</h3>
+
+<p>A Haskell package is described by a <code class="language-plaintext highlighter-rouge">.cabal</code> file, which is a custom declarative format, not Haskell source, so the metadata layer on its own passes the Tuesday test. Tools can parse a <code class="language-plaintext highlighter-rouge">.cabal</code> file and extract dependencies, versions and compiler flags without running any of the package author’s code.</p>
+
+<p>The escape hatch is the <code class="language-plaintext highlighter-rouge">build-type</code> field. <code class="language-plaintext highlighter-rouge">build-type: Simple</code> uses a stock Setup script and is fine. <code class="language-plaintext highlighter-rouge">build-type: Custom</code> (and the newer <code class="language-plaintext highlighter-rouge">Hooks</code>) tells Cabal to compile and run the package’s own <a href="https://cabal.readthedocs.io/en/stable/cabal-package.html"><code class="language-plaintext highlighter-rouge">Setup.hs</code></a>, which is a real Haskell program with <code class="language-plaintext highlighter-rouge">preBuild</code>, <code class="language-plaintext highlighter-rouge">postBuild</code>, <code class="language-plaintext highlighter-rouge">preInst</code> and <code class="language-plaintext highlighter-rouge">postInst</code> hooks that can do anything Haskell can do, including read the clock.</p>
+
+<p>Because <code class="language-plaintext highlighter-rouge">.cabal</code> is declarative metadata, it can also be mechanically translated into something else, which is a large part of why Haskell has such a big footprint in the Nix ecosystem. <a href="https://github.com/NixOS/cabal2nix"><code class="language-plaintext highlighter-rouge">cabal2nix</code></a> reads a <code class="language-plaintext highlighter-rouge">.cabal</code> file and emits a Nix expression, Nixpkgs ships a Haskell package set regenerated from Hackage and Stackage through that pipeline, and <a href="https://input-output-hk.github.io/haskell.nix/"><code class="language-plaintext highlighter-rouge">haskell.nix</code></a> is an alternative infrastructure built around the same idea.</p>
+
+<h3 id="everything-else-with-a-manifest-thats-a-program">Everything else with a manifest that’s a program</h3>
+
+<p>The rest of the list is short because the pattern is by now predictable.</p>
+
+<ul>
+  <li><strong>PHP / Composer:</strong> <code class="language-plaintext highlighter-rouge">composer.json</code> is JSON, but a <a href="https://getcomposer.org/doc/articles/scripts.md"><code class="language-plaintext highlighter-rouge">scripts</code> section</a> hooks events like <code class="language-plaintext highlighter-rouge">post-install-cmd</code> and <code class="language-plaintext highlighter-rouge">post-update-cmd</code> with shell commands or PHP callables.</li>
+  <li><strong>Elixir / Mix:</strong> <a href="https://hexdocs.pm/mix/Mix.html"><code class="language-plaintext highlighter-rouge">mix.exs</code></a> is Elixir.</li>
+  <li><strong>Dart / pub:</strong> <code class="language-plaintext highlighter-rouge">pubspec.yaml</code> is declarative, but pub supports <a href="https://dart.dev/tools/pub/hooks">hook scripts</a> for native and data assets, written in Dart and run at build time.</li>
+  <li><strong>Perl / CPAN:</strong> <a href="https://metacpan.org/pod/ExtUtils::MakeMaker"><code class="language-plaintext highlighter-rouge">Makefile.PL</code></a> and <a href="https://metacpan.org/pod/Module::Build"><code class="language-plaintext highlighter-rouge">Build.PL</code></a> are Perl programs, and have been since the nineties.</li>
+  <li><strong>Lua / LuaRocks:</strong> <a href="https://github.com/luarocks/luarocks/wiki/Rockspec-format">rockspecs</a> are Lua tables, but the build section can include a <code class="language-plaintext highlighter-rouge">build_command</code> that runs shell.</li>
+  <li><strong>Nim / Nimble:</strong> <a href="https://github.com/nim-lang/nimble#nimble-reference">nimble files</a> support <code class="language-plaintext highlighter-rouge">before install</code> and <code class="language-plaintext highlighter-rouge">after install</code> hooks written in NimScript.</li>
+  <li><strong>Julia / Pkg:</strong> packages run <a href="https://pkgdocs.julialang.org/v1/creating-packages/"><code class="language-plaintext highlighter-rouge">deps/build.jl</code></a> at install time, which is a Julia program.</li>
+  <li><strong>Raku / zef:</strong> runs Perl or Raku build scripts.</li>
+</ul>
+
+<h3 id="opam-and-portage">opam and Portage</h3>
+
+<p>OCaml’s <a href="https://opam.ocaml.org/doc/Manual.html#opam">opam</a> is unusually honest: the opam file is a declarative-looking S-expression format, but the <code class="language-plaintext highlighter-rouge">build</code> and <code class="language-plaintext highlighter-rouge">install</code> fields contain explicit lists of shell commands to run, and everyone knows what they are and where they live. The same is true, in a different flavour, of Gentoo’s Portage: an <a href="https://devmanual.gentoo.org/ebuild-writing/">ebuild</a> is a bash script that sources a set of library functions and defines phases like <code class="language-plaintext highlighter-rouge">src_compile</code> and <code class="language-plaintext highlighter-rouge">src_install</code>, so the package is a program and no one pretends otherwise.</p>
+
+<h3 id="system-package-managers">System package managers</h3>
+
+<p>System package managers all fail, and most of them fail in several places at once. Debian packages carry <a href="https://www.debian.org/doc/debian-policy/ch-maintainerscripts.html"><code class="language-plaintext highlighter-rouge">preinst</code>, <code class="language-plaintext highlighter-rouge">postinst</code>, <code class="language-plaintext highlighter-rouge">prerm</code>, and <code class="language-plaintext highlighter-rouge">postrm</code> maintainer scripts</a> that dpkg runs around the unpack step, and they are shell by default. RPM packages embed <a href="https://rpm-software-management.github.io/rpm/manual/spec.html"><code class="language-plaintext highlighter-rouge">%pre</code>, <code class="language-plaintext highlighter-rouge">%post</code>, <code class="language-plaintext highlighter-rouge">%preun</code>, and <code class="language-plaintext highlighter-rouge">%postun</code> scriptlets</a>, plus file triggers, which are shell scripts.</p>
+
+<p>Arch’s pacman runs <code class="language-plaintext highlighter-rouge">.INSTALL</code> scripts from inside the package tarball, which are again shell, and <a href="https://wiki.archlinux.org/title/PKGBUILD">PKGBUILDs</a> themselves are shell programs evaluated at build time. Alpine’s apk has pre and post install scripts, plus <a href="https://wiki.alpinelinux.org/wiki/APKBUILD_Reference">APKBUILDs</a> that are shell scripts.</p>
+
+<p><a href="https://guide.macports.org/chunked/reference.html">MacPorts Portfiles</a> are Tcl. <a href="https://docs.chocolatey.org/en-us/create/create-packages">Chocolatey packages</a> are PowerShell. Conda belongs on this list too, even though it is often filed next to Python: it is a cross-language binary package manager that happens to have grown up in the scientific Python community, and it ships explicit <a href="https://docs.conda.io/projects/conda-build/en/latest/resources/link-scripts.html"><code class="language-plaintext highlighter-rouge">pre-link</code> and <code class="language-plaintext highlighter-rouge">post-link</code></a> shell scripts that run when a package is linked into an environment.</p>
+
+<p>Every one of these can look at the clock and do one thing on Monday and a different thing on Tuesday without bending any rules, and Homebrew at the top of the post is the same shape as all of them.</p>
+
+<h3 id="nix-and-guix-">Nix and Guix 🌮</h3>
+
+<p><a href="https://nixos.org/">Nix</a> is the interesting case, because it is the one package manager on the list that has been designed from the start around the idea that the install step should not be allowed to notice what day it is. A Nix expression is a program in the Nix language, but it is a pure lazy functional language with no I/O primitives of the sort you would need to read a clock, so the evaluation step that produces a derivation cannot observe the day of the week at all.</p>
+
+<p>The derivation is then realised by running a builder inside a sandbox that has no network, a scrubbed environment, and its own view of the filesystem. The sandbox itself does not pin the clock, so a determined builder can still call <code class="language-plaintext highlighter-rouge">date</code> and get a real answer. In practice Nixpkgs and the wider <a href="https://reproducible-builds.org/">reproducible-builds.org</a> project paper over this with <a href="https://reproducible-builds.org/docs/source-date-epoch/"><code class="language-plaintext highlighter-rouge">SOURCE_DATE_EPOCH</code></a>, an environment variable that well-behaved build tools read instead of the real clock when stamping timestamps into their output, often set to the Unix epoch or the commit time of the source. The Tuesday test passes cleanly at the evaluation layer and passes in most cases at the realisation layer, with the remaining gaps treated as bugs rather than features.</p>
+
+<p><a href="https://guix.gnu.org/">Guix</a> tells the same story with different syntax. The package definitions are written in Guile Scheme, which is a full language in the way that the Nix language deliberately is not, but package records are a restricted form and the build is run inside the same kind of sandbox, inherited from the same <a href="https://edolstra.github.io/pubs/phd-thesis.pdf">derivation model</a> that Eelco Dolstra wrote up in his thesis. Guix ships with a <code class="language-plaintext highlighter-rouge">--check</code> mode that rebuilds a package and compares the output to the previous build, and the whole project treats a mismatch as something to fix. Guix passes the Tuesday test about as well as anything on this list does.</p>
+
+<hr />
+
+<p>The common thread in the failing cases is that building a package and installing a package are the same step. A gemspec is Ruby because gems get built on the installer’s machine from it. System package managers are the opposite shape of the same problem: installing a package means dropping files into a live filesystem and reconciling them with whatever was already there.</p>
+
+<p>Happy Taco Tuesday to Deno, Go, Bazel, Nix and Guix. 🌮</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
