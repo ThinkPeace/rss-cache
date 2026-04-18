@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gaussian distributed weights for LLMs | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Gaussian distributed weights for LLMs</h1>
+        <div class="meta">John D. Cook 2026-04-18T14:49:27Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/04/18/qlora/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-71dab1f78d38930f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The previous post looked at the FP4 4-bit floating point format. This post will look at another 4-bit floating point format, NF4, and higher precision analogs. NF4 and FP4 are common bitsandbytes 4-bit data types. If you download LLM weights from Hugging Face quantized to four bits, the weights might be in NF4 or FP4 […] The post Gaussian distributed weight…</div>
+        <div class="content">
+          <p>The <a href="https://www.johndcook.com/blog/2026/04/17/fp4/">previous post</a> looked at the <strong>FP4</strong> 4-bit floating point format. This post will look at another 4-bit floating point format, <strong>NF4</strong>, and higher precision analogs. NF4 and FP4 are common bitsandbytes 4-bit data types. If you download LLM weights from Hugging Face quantized to four bits, the weights might be in NF4 or FP4 format. Or maybe some other format: there&#8217;s a surprising amount of variety in how 4-bit numbers are implemented.</p>
+<h2>Why NF4</h2>
+<p>LLM parameters have a roughly Gaussian distribution, and so evenly spaced numeric values are not ideal for parameters. Instead, you&#8217;d like numbers that are closer together near 0. </p>
+<p>The FP4 floating point numbers, described in the previous post, are spaced 0.5 apart for small values, and the larger values are spaced 1 or 2 apart. That&#8217;s hardly a Gaussian distribution, but it&#8217;s closer to Gaussian than a uniform distribution would be. NF4 deliberately follows more of a Gaussian distribution.</p>
+<h2>QLoRA</h2>
+<p>The QLoRA formats [1], unlike FP4, are not analogs of IEEE numbers. The bits are not interpreted as sign, exponent, and mantissa, but rather as integers to be used as indexes. An NF<em>n</em> number is an index into a list of 2<sup><em>n</em></sup> real numbers with Gaussian spacing. To put it another way, the numbers represented by NF<em>n</em> have uniformly distributed <em>z</em>-scores. </p>
+<p>That makes sense at a high level, but the paper [1] is hard to follow in detail. It says</p>
+<blockquote><p>More formally, we estimate the 2<sup><em>k</em></sup> values <em>q</em><sub><em>i</em></sub> of the data type as follows:</p>
+<p><img decoding="async" class="aligncenter" src="https://www.johndcook.com/qlora.svg" alt="q_i = \frac{1}{2}\left(Q_X\left(\frac{i}{2^k + 1}\right) + Q_X\left(\frac{i+1}{2^k + 1} \right) \right)" width="293" height="48" /></p>
+<p>where <em>Q</em><sub><em>X</em></sub>(·) is the quantile function of the standard normal distribution <em>N</em>(0, 1).</p></blockquote>
+<p>The paper doesn&#8217;t give the range of <em>i</em> but it says there are 2<sup><em>k</em></sup> values, implying that <em>i</em> runs from 0 to 2<sup><em>k</em></sup> −1 or from 1 to 2<sup><em>k</em></sup>. Either way runs into infinite values since <em>Q</em>(0) = −∞ and <em>Q</em>(1) = ∞. We could avoid infinities by letting <em>i</em> run from 1 to 2<sup><em>n</em></sup> − 1.</p>
+<p>The next sentence is puzzling.</p>
+<blockquote><p>A problem for a symmetric k-bit quantization is that this approach does not have an exact representation of zero, which is an important property to quantize padding and other zero-valued elements with no error.</p></blockquote>
+<p>I understand the desire to represent 0 exactly, but the equation above has an exact representation of 0 when <em>i</em> = 2<sup><em>n</em> − 1</sup>. Perhaps the authors had in mind that <em>i</em> takes on the values ½, 1 + ½, 2 + ½, …, 2<sup><em>n</em></sup> − ½. This would be reasonable, but a highly unusual use of notation. It seems that the real problem is not the lack of a representation of 0 but an unused index, with <em>i</em> running from 1 to 2<sup><em>n</em></sup> − 1.</p>
+<p>To be fair, the first sentence quoted above says &#8220;we <em>estimate</em> the 2<sup><em>k</em></sup> values &hellip;&#8221; and so the equation above may not be intended as a definition but as motivation for the actual definition.</p>
+<h2>Reproducing NF4</h2>
+<p>The authors give a procedure for using 2<sup><em>n</em></sup> values of <em>i</em> and obtaining an exact representation of 0, and they give a list of NF4 values in Appendix E. I was not able to get the two to match. I implemented a few possible interpretations of the procedure described in the paper, and each approximates the list of values in the appendix, but not closely.</p>
+<p>The following code, written with the help of ChatGPT, reverse engineers the NF4 values to 8 decimal places, i.e. to the precision of a 32-bit floating point number.</p>
+<pre>
+from scipy.stats import norm
+
+Q = norm.ppf
+
+α  = 0.9677083
+Z  = Q(α)
+δ1 = (α - 0.5)/7
+δ2 = (α - 0.5)/8
+
+q = [0]*16
+for i in range(7):
+    q[i] = -Q(α - i*δ1)/Z
+for i in range(8):
+    q[i+8] = Q(0.5 + (i+1)*δ2)/Z
+    
+# Values given in Appendix E
+NF4 = [
+    -1.0,
+    -0.6961928009986877,
+    -0.5250730514526367,
+    -0.39491748809814453,
+    -0.28444138169288635,
+    -0.18477343022823334,
+    -0.09105003625154495,
+    0.0,
+    0.07958029955625534,
+    0.16093020141124725,
+    0.24611230194568634,
+    0.33791524171829224,
+    0.44070982933044434,
+    0.5626170039176941,
+    0.7229568362236023,
+    1.0
+]
+
+# Compare 
+for i in range(16):
+    print(i, NF4[i] - q[i])
+</pre>
+<p>The magic number α = 0.9677083 is a mystery. I asked ChatGPT to look into this further, and it said that bitsandbytes uses α = 929/960 = 0.9677083333333333. When I use this value for α the precision is about the same, which is fine. However, the values in the paper were given to 16 decimal places, so I thought it might be able to match the values to more precision.</p>
+<p>Quibbles over the exact values of NF4 aside, the NF4 format works well in practice. Models. quantized to 4 bits using NF4 perform better than models quantized to other 4-bit formats on some benchmarks.</p>
+<p>[1] QLoRA: Efficient Finetuning of Quantized LLMs by Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and Luke Zettlemoyer. <a href="https://arxiv.org/abs/2305.14314">https://arxiv.org/abs/2305.14314</a>.</p>The post <a href="https://www.johndcook.com/blog/2026/04/18/qlora/">Gaussian distributed weights for LLMs</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
