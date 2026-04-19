@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WorkOS FGA: The Authorization Layer for AI Agents | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>WorkOS FGA: The Authorization Layer for AI Agents</h1>
+        <div class="meta">Daring Fireball 2026-04-19T17:37:01Z</div>
+        <div class="links">
+          <a href="https://workos.com/blog/agents-need-authorization-not-just-authentication?utm_source=daringfireball&amp;utm_medium=newsletter&amp;utm_campaign=q22026">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/daringfireball-net/daringfireball-net-f109bfc8d7bf16d1.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">My thanks to WorkOS for sponsoring last week at DF. Every AI agent demo looks magical, but most hit a wall in enterprise deployment. It’s not model quality or latency. It’s authorization. Authentication proves an agent’s identity. Authorization defines its blast radius. The winners in enterprise AI won’t have the most features. They’ll be the ones enterpris…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>WorkOS FGA: The authorization layer for AI agents</h1>
+    <p>As agents move at machine speed, your authorization layer must keep up. Today, we’re introducing WorkOS Fine-Grained Authorization, built for AI agents.</p>
+    <p>Every major architectural shift exposes the limits of our access control models. Multi-tenant SaaS broke filesystem permissions. Microservices broke monolithic session management. Now, AI agents are breaking the authorization patterns we spent the last decade standardizing.</p>
+    <p>Agents are already operating inside enterprise infrastructure. They summarize documents, triage tickets, and manage cloud resources. Yet most authenticate using the same primitives as humans: an OAuth token, a session cookie, or a service account key. They inherit the user's full access or operate with broader privileges than any single user should possess.</p>
+    <h2>The Confused Deputy problem</h2>
+    <p>To understand the architectural risk, consider the "Confused Deputy" problem. In security theory, a deputy is a program with authority to act that is tricked by a lower-privileged user into misusing that authority.</p>
+    <p>Consider a Platform Engineering team that deploys a "Cluster Debug Agent" to troubleshoot Kubernetes deployments. The agent uses a service account with <pre>secrets:read</pre> access to verify configuration maps.</p>
+    <p>The trigger: A developer debugging a payment service crash needs to see production environment variables. They lack direct access to production secrets, which are restricted to SREs. They ask the agent: "Diff the production environment variables against staging so I can see what changed."</p>
+    <p>The action: The agent executes the query. It possesses the <pre>secrets:read</pre> permission, so the cluster control plane allows the request.</p>
+    <p>The result: The agent posts the diff to a shared Slack channel.</p>
+    <p>A production API key is effectively leaked to fifty people.</p>
+    <p>No misconfiguration occurred. The agent acted within its permissions (<pre>secrets:read</pre>) and the developer acted within theirs (<pre>chat:write</pre>). The system failed because it did not check the intersection of their privileges. The agent acted as a confused deputy and bypassed the IAM controls intended to restrict the developer.</p>
+    <p>This forces every team to answer a specific question: When an agent acts on behalf of a user, whose permissions apply?</p>
+    <h2>Agents are not users. They are not service accounts.</h2>
+    <p>The identity industry is currently defining where agents fit in the IAM stack.</p>
+    <p>Microsoft introduced <a href="https://learn.microsoft.com/en-us/entra/agent-id/identity-professional/microsoft-entra-agent-identities-for-ai-agents">Entra Agent ID</a> as a native identity class. NIST published a <a href="https://www.nccoe.nist.gov/sites/default/files/2026-02/accelerating-the-adoption-of-software-and-ai-agent-identity-and-authorization-concept-paper.pdf">concept paper</a> on agent identity in February 2026. The IETF is standardizing the <pre>/Agents</pre> <a href="https://datatracker.ietf.org/doc/draft-wahl-scim-agent-schema/">resource in SCIM</a>.</p>
+    <p>The consensus is that agents are a distinct identity class requiring purpose-built infrastructure. However, the industry focus remains on Authentication (proving identity). The unsolved engineering challenge is Authorization (enforcing capabilities).</p>
+    <h3>The intent gap</h3>
+    <p>Traditional service accounts are deterministic. A CI/CD runner has a fixed scope to pull code and push artifacts. You define the access once and it rarely changes because the runner never generates its own intent.</p>
+    <p>Agents differ in two fundamental ways.</p>
+    <p>First, they generate intent. A traditional OAuth client forwards a user's request. An agent reasons about a problem and decides which tools to invoke.</p>
+    <p>Second, their scope is non-deterministic. You cannot predict at design time what an agent will need. A coding agent might need read access to <pre>repo:backend</pre> today and write access to <pre>repo:frontend</pre> tomorrow.</p>
+    <p>Solving this with static roles forces a binary trade-off. You either block the agent from functioning or grant it broad admin access.</p>
+    <h2>The two modes of agent authorization</h2>
+    <p>Agent implementations typically fall into one of two patterns. Each introduces specific authorization requirements.</p>
+    <h3>1. On-Behalf-Of (OBO) agents</h3>
+    <p>These serve as extensions of a human user, like Claude Code or GitHub Copilot. They operate specifically within a user’s session.</p>
+    <p>The security requirement here is Scope Attenuation. The agent should access a subset of the user's permissions, never the full set. If a user asks an agent to refactor a specific file, it should not have access to sensitive configuration files in the parent directory.</p>
+    <p>Currently, most OBO agents inherit the user's full access token.</p>
+    <h4>The MCP gap</h4>
+    <p>The <a href="https://modelcontextprotocol.io/specification/draft/basic/authorization">Model Context Protocol (MCP)</a> is becoming the standard interface for these agents. However, it explicitly delegates authorization to the implementer.</p>
+    <p>MCP currently relies on OAuth 2.1 scopes like <pre>files:read</pre>. Scopes are coarse strings. <pre>files:read</pre> grants access to every file the user can see, from a README to a production <pre>.env</pre> file. The spec recommends "scope guidance" but leaves granular enforcement to the application logic.</p>
+    <p>Even as protocols adopt <a href="https://datatracker.ietf.org/doc/html/rfc9396">Rich Authorization Requests (RFC 9396)</a> to allow structured intent like <pre>{"file": "main.rs"}</pre>, this remains a data format. It acts as an envelope for the request but provides no logic to evaluate whether the request should be granted.</p>
+    <h4>The shared context trap</h4>
+    <p>Scope attenuation fails in shared contexts.</p>
+    <p>Consider a "Finance Assistant" agent added to a team Slack channel. The agent authenticates with the CFO’s credentials. A junior analyst asks about Q3 budget projections.</p>
+    <p>The agent checks its own permissions, confirms the CFO has access, and posts the data. The junior analyst now sees executive compensation data they are not authorized to view.</p>
+    <p>Traditional authorization checks happen at retrieval. Shared contexts require checking authorization at output by calculating the intersection of permissions across all audience members. Traditional RBAC cannot model this graph.</p>
+    <h3>2. Autonomous agents</h3>
+    <p>These operate without a user loop, such as a security bot rotating keys or a billing agent reconciling invoices.</p>
+    <p>Identity is largely solved here. Microsoft Entra Agent ID allows these agents to authenticate via the <pre>client_credentials</pre> flow with a distinct Client ID. This ensures audit logs attribute actions to <pre>Agent-007</pre> rather than a human user.</p>
+    <h4>The "God Mode" problem</h4>
+    <p>The authorization layer remains flawed. In a standard <pre>client_credentials</pre> flow, the resulting token often dictates broad access. To allow a billing agent to read invoices, you generally grant the <pre>Files.Read.All</pre> scope.</p>
+    <p>This results in a "God mode" agent. It can read invoices, but also employee contracts and patent drafts. You cannot easily scope a standard OAuth token to "Read only files in the Finance folder." This effectively grants root access to a probabilistic script.</p>
+    <h3>Why "flat" RBAC fails the agent test</h3>
+    <p>If agents require limited scope, the obvious question is: "Why not just create a specific role?" Why not create a <pre>Billing_Agent</pre> role and be done with it?</p>
+    <p>The failure lies in the geometry of the authorization model. Traditional Role-Based Access Control (RBAC) is flat. It maps a subject to a role, and a role to a set of global permissions (<pre>read:repos</pre>). This works for humans because human access usually correlates to job title, which is stable and broad.</p>
+    <p>Agent access correlates to tasks, which are transient and specific.</p>
+    <p>You do not want an agent to be an "Editor of Repositories." You want to enforce: "This agent can edit code on branch:feature-xyz in repository:api, and nothing else."</p>
+    <p>To express this in flat RBAC, you would need to create a unique role for every permutation of resource and permission:</p>
+    <ul>
+      <li>
+        <pre>Role: Editor_Repo_API_Branch_XYZ</pre>
+      </li>
+      <li>
+        <pre>Role: Viewer_Repo_Frontend_Branch_ABC</pre>
+      </li>
+    </ul>
+    <p>In an enterprise with thousands of repositories and ephemeral branches, this triggers a combinatorial explosion. You move from managing O(1) roles to O(N x M) roles. The friction of managing these static roles exceeds the velocity value of the agent itself.</p>
+    <h3>The fix: FGA = RBAC + hierarchy</h3>
+    <p>This is where Fine-Grained Authorization (FGA) comes in. It isn't a replacement for the concepts you know; it is a natural extension of RBAC.</p>
+    <p>To solve this, we do not need to abandon RBAC. We need to scope it. This is the definition of Fine-Grained Authorization (FGA).</p>
+    <p>FGA is not a replacement for the concepts you know; it is the application of RBAC to a resource hierarchy.</p>
+    <p>You keep the familiar mental model of roles (<pre>Editor</pre>, <pre>Viewer</pre>), but you attach them to specific nodes in the graph rather than the root.</p>
+    <ul>
+      <li>Vertical inheritance: An agent assigned <pre>Editor</pre>on<pre>Branch: feature-xyz</pre>automatically inherits access to every file and action inside that branch.</li>
+      <li>No lateral movement: Crucially, that permission does not bleed sideways to <pre>Branch: staging</pre>or upwards to<pre>Repository: API</pre>.</li>
+    </ul>
+    <p>In this model, the agent possesses full power where it is required and zero power everywhere else.</p>
+    <h3>Scaling the graph: Structural Resources vs. Asset Data</h3>
+    <p>A common concern when adopting a centralized authorization service is the overhead of state synchronization. If your application manages millions of individual assets, you might assume every single one needs to be mirrored into the FGA graph. In practice, you only sync the Structural Hierarchy, not the Asset Data.</p>
+    <p>Think of FGA as the skeleton of your permissions. You register the high-level containers that define your access boundaries: Organizations, Workspaces, and Projects. These are your Structural Resources. Your high-volume Asset Data, such as individual files within a folder or images in a project, stays in your primary application store.</p>
+    <p>When an agent requests access to a specific asset, your application logic performs a simple two-step check:</p>
+    <ul>
+      <li>Application logic: Identify which container (e.g., <pre>Folder: Q3-Financials</pre>) the asset belongs to.</li>
+      <li>FGA: Ask <pre>check(subject=Agent, role=viewer, resource=Folder:Q3-Financials)</pre>.</li>
+    </ul>
+    <p>By checking access against the parent container rather than the individual asset, you keep the authorization graph lean and maintain sub-50ms latency. You avoid the "double-write" consistency issues that plague massive data syncs, gaining granular security without the infrastructure cost of a full database mirror.</p>
+    <h2>How FGA solves the two agent modes</h2>
+    <p>Once you establish a hierarchical model, the authorization problems identified earlier (Scope Attenuation and God Mode) become solvable through standard architectural patterns.</p>
+    <h3>1. Solving OBO agents: The intersection check</h3>
+    <p>For On-Behalf-Of agents, the goal is to prevent the "Confused Deputy" problem. Even if the user has broad access, the agent should only have access to what is relevant for the current task.</p>
+    <p>FGA solves this by calculating the Intersection of permissions. You can define a policy that requires both the user and the agent to have access before granting a request.</p>
+    <p>This transforms the authorization check from a static role lookup into a dynamic validation. When an MCP server receives a tool invocation like <pre>read_file(path="/secrets.json")</pre>, it performs a real-time check against the FGA graph:</p>
+    <p>This allows the server to return a precise <pre>403 Forbidden</pre> for sensitive resources dynamically. It does not require the user to restrict the agent's broad OAuth token manually.</p>
+    <h4>FGA as the logic layer for MCP</h4>
+    <p>‍As protocols like MCP mature to support Rich Authorization Requests (RFC 9396), agents will pass structured intent objects instead of opaque strings. For example: <pre>{"file": "main.rs", "action": "edit"}</pre>.</p>
+    <p>It is important to remember that RAR is just a data format. It acts as an envelope for the request but provides no logic to decide if the request is valid. The RAR object does not understand that <pre>/backend</pre> belongs to <pre>Team A</pre>, or that the user is an <pre>Admin</pre> of <pre>Team A</pre>.</p>
+    <p>If you rely solely on RAR, developers must still write complex logic to traverse those relationships. FGA solves this by handling the hierarchy natively. It acts as the decision engine that validates the RAR envelope against the organization's actual permission graph.</p>
+    <h4>The memory leak: Securing long-term context</h4>
+    <p>As agents evolve from stateless scripts to persistent collaborators, they have begun to store "memory" in vector databases. This creates a new security shadow: if an agent summarizes a sensitive document into its long-term memory, that information can be "hallucinated" back to a different user who lacks access to the original source.</p>
+    <p>To prevent context leaks, developers should treat agent memory as a protected resource and apply the same FGA policies to an agent's "recollections" as they do to the source files:</p>
+    <ul>
+      <li>Metadata tagging: Every embedding written to a vector store should be tagged with its source <pre>resource_id</pre>.</li>
+      <li>Filtered retrieval: When the agent queries its memory, the application must augment the vector search with an FGA check. If the current user cannot access the source <pre>resource_id</pre>, the memory remains invisible to the agent.</li>
+      <li>Context sharding: High-security environments should use ephemeral memory shards that are flushed when an agent moves between different FGA project nodes.</li>
+    </ul>
+    <p>By anchoring embeddings to FGA resource IDs, you ensure that an agent’s internal context is as strictly governed as its real-time actions.</p>
+    <h3>2. Solving autonomous agents: The scoped role</h3>
+    <p>For autonomous agents, the goal is to prevent "God Mode" where a specific bot inadvertently gets root access to the entire tenant.</p>
+    <p>FGA acts as the constraint layer over the agent's broad identity.</p>
+    <ul>
+      <li>Identity: The Identity Provider (IdP) proves the agent is the "Billing Bot.”</li>
+      <li>Authorization (FGA): The application asks if the Billing Bot can read <pre>file:executive_comp.pdf</pre>.</li>
+      <li>The check: FGA sees the agent has the <pre>Viewer</pre>role on the<pre>Project:Finance</pre>node but not on the<pre>Project:HR</pre>node. Access Denied.</li>
+    </ul>
+    <p>In this model, the agent is its own subject. It receives roles directly on the resources it needs. When the agent is decommissioned, you simply remove its role assignment on that specific node. Access instantly disappears across the entire subtree.</p>
+    <p>The Identity Provider gives you the secure handle. WorkOS FGA gives you the grip. Without FGA, autonomous agents are effectively high-speed scripts with root access to the entire tenant.</p>
+    <h2>Agent enterprise governance</h2>
+    <p>In a traditional enterprise environment, access follows the employee lifecycle. When a user is onboarded via the Identity Provider (IdP), they get a set of roles. When they leave, their access is revoked.</p>
+    <p>Agents break this flow. Unlike humans who log out or change jobs, agents are persistent. Their tokens remain valid and their service accounts stay active indefinitely. Recent data shows that the average enterprise credential remains active for 47 days after it is no longer needed. When agent identities multiply, manual lifecycle management becomes impossible and creates a massive surface area for credential harvesting.</p>
+    <p>WorkOS FGA enables centralized governance over the entire agent lifecycle by bridging the gap between your IdP and your application’s internal resource hierarchy. Standard IdPs are excellent at managing groups but blind to your internal resources. FGA provides the "last mile" of authorization, ensuring agent access is governed by the same SSO and SCIM infrastructure used for human employees:</p>
+    <ul>
+      <li>Provisioning: An admin creates the agent in the IdP (or via a future SCIM <pre>/Agents</pre>endpoint) and assigns it to a functional group, such as<pre>Project-X-Automations</pre>.</li>
+      <li>Automated onboarding: WorkOS Directory Sync detects the new identity and its group memberships instantly, provisioning the agent within your application without manual intervention.</li>
+      <li>Scoped governance: Your application uses that group membership to assign a resource-scoped role in FGA, such as <pre>Editor</pre>on<pre>Project: X</pre>. The agent is immediately constrained to that specific project subtree.</li>
+      <li>Instant de-provisioning: When the agent is removed from the group or deactivated in the IdP, its role assignment in FGA is revoked across all services simultaneously.</li>
+    </ul>
+    <p>This architecture ensures that agent credentials never outlive their intent. By coordinating identity with hierarchical authorization, you provide the automated deprovisioning and audit trails that enterprise IT departments demand.</p>
+    <h2>What comes next</h2>
+    <p>We are at an inflection point. The infrastructure for agent identity is being built by Microsoft, Okta, and IETF working groups. Protocols like MCP are rethinking the interface for authorization from the ground up.</p>
+    <p>The missing piece is the authorization layer itself. It is not enough to ask if an agent can call an API. We must ask if an agent can perform a specific action on a specific resource based on the delegating user, organizational policies, and the resource hierarchy.</p>
+    <p>Several complex problems remain unsolved. These are the areas where we are investing next.</p>
+    <h3>User groups as authorization subjects</h3>
+    <p>Groups are becoming first-class subjects in FGA. You will be able to assign a role to an IdP group on a specific resource, such as the <pre>engineering</pre> group on <pre>workspace:platform</pre>. Every member, whether human or agent, will inherit the appropriate permissions automatically. When a principal joins or leaves a group in the IdP, their access updates in real time.</p>
+    <h3>FGA role assignments</h3>
+    <p>A major hurdle in enterprise governance is mapping flat IdP (ex: Okta, Entra) groups to nested resources. We are building FGA Role Assignments to bridge this gap natively. This feature allows you to define a mapping between an IdP group (e.g., "Project-X-Bots") and an FGA role on a specific resource subtree (e.g., <pre>Viewer</pre> on <pre>Folder: NA-Prospects</pre>). When a user or agent is added to that group in the IdP, SSO or Directory Sync automatically creates the corresponding role assignment in FGA. This eliminates the need for "glue code" to manage the relationship between your identity source and your resource graph.</p>
+    <h3>Agent-to-agent delegation</h3>
+    <p>When agents spawn sub-agents or delegate tasks, each link in the chain requires attenuated scope. A token passed to a sub-agent should carry less privilege than the original. FGA’s hierarchical model is a natural fit for this. Each delegation step constrains the sub-agent to a narrower sub-tree of resources. We are building first-class support for these delegation chains so that scope attenuation is enforced by the authorization system instead of custom application logic.</p>
+    <h3>SCIM provisioning for agents</h3>
+    <p>The IETF SCIM agent schema draft introduces <pre>/Agents</pre> as a resource type with ownership requirements and dormancy detection. As this standard matures, WorkOS Directory Sync will provision agents much like it provisions users today. IdP group memberships will map directly to FGA resource-scoped roles, automating the entire lifecycle.</p>
+    <h3>Global low-latency authorization</h3>
+    <p>Agents operate at machine speed and often across multiple regions. While we currently provide sub-50ms p95 access checks, we are moving toward edge caching and streaming updates to bring that closer to sub-10ms globally. This ensures that authorization decisions do not become a latency bottleneck for agentic performance.</p>
+    <p>The authorization complexity of agentic software is compounding quickly. If you are building software that agents will operate inside, the time to lay the foundation is now.</p>
+    <p>WorkOS FGA is available today. <a href="https://workos.com/docs/fga">Get started here</a>.</p>
+    <h2>The research frontier: Beyond static authorization</h2>
+    <p>The industry is at a crossroads. As of early 2026, the foundational elements of agent identity are beginning to coalesce, but several high-order authorization problems remain in the research phase. At WorkOS, we are paying close attention to these shifts. We view FGA as a living infrastructure that must evolve alongside the probabilistic nature of AI.</p>
+    <p>There are three specific domains where the gap between standard authorization and agentic reality is widest.</p>
+    <h3>1. Multi-hop delegation and provenance</h3>
+    <p>In advanced multi-agent systems, a primary agent often decomposes a request into sub-tasks and delegates them to specialized sub-agents. This creates a "Russian Nesting Doll" effect: each handoff crosses a trust boundary, yet cryptographic lineage is often lost by the third or fourth hop.</p>
+    <p>Current research into Authorization Provenance suggests that the "Who" is no longer a single subject, but a chain. If a Research Agent authorized for public data spawns a Code Agent authorized for private repos, the resulting access must be the intersection of every entity in that lineage. Closing this gap will require authorization engines that can verify a "chain of custody" for every tool call, ensuring that permissions aren't just checked, but traced back to their origin.</p>
+    <p>The IETF has been actively working on <a href="https://datatracker.ietf.org/doc/draft-li-oauth-delegated-authorization/">extending OAuth</a> to handle exactly this kind of "Russian Nesting Doll" delegation.</p>
+    <h3>2. Just-in-Time (JIT) agency</h3>
+    <p>Traditional service accounts rely on "standing privileges"—access that is always active. For a machine-speed agent, standing privileges are a massive liability. If an agent has a static API key with <pre>write</pre> access, a single successful prompt injection can result in instant, irreversible data exfiltration.</p>
+    <p>The concept of Just-in-Time Agency moves toward a model of Zero Standing Privileges. In this future, an agent possesses no authority until a specific task is triggered. The authorization engine then grants a temporary, short-lived role assignment that expires automatically when the transaction completes. This reduces the attack surface to the absolute minimum required for the work at hand, moving security from a static state to a transient one.</p>
+    <p>The concept of <a href="https://neuraltrust.ai/blog/owasp-top-10-for-agentic-applications-2026">Zero Standing Privileges (ZSP)</a> for agents is being championed by both NIST and the OWASP Top 10 for Agentic Applications.</p>
+    <h3>3. The semantic future: Intent-Based Access Control</h3>
+    <p>Unlike deterministic code, agents are probabilistic. Over a long-running session, an agent’s actions can "drift" away from the original user intent. An agent that starts by summarizing emails (low risk) might gradually drift into moving files to an external drive (high risk) based on subsequent, ambiguous instructions.</p>
+    <p>Emerging strategies for Semantic Inspection suggest that authorization should be anchored to the initial task session. If an agent attempts a tool call that is semantically unrelated to its original "root" authorization, the engine should flag this drift. This represents a shift from checking what an agent can do to understanding why it is doing it—creating a layer of contextual guardrails that can trigger a "Human-in-the-Loop" approval before a high-risk action occurs.</p>
+    <p>The most significant <a href="https://arxiv.org/html/2509.13597v1">research</a> in this area comes from the intersection of Large Language Model (LLM) observability and "Constitutional AI.”</p>
+    <p>The ultimate goal of agent authorization is to move beyond deterministic 'Can/Cannot' checks and into the realm of Intent Alignment. We are moving toward a world where policies are defined in natural language—'Don't share customer PII with unverified third parties'—and enforced by an authorization layer that understands the reasoning behind an agent's request.</p>
+    <p>At WorkOS, we believe FGA is the necessary anchor for this probabilistic future. You cannot rely on an LLM to police itself; you need a deterministic resource graph to provide the ground truth. By linking natural language intent to a fine-grained resource hierarchy, we create the first Semantic Guardrail that can stop an agent not just because it lacks a role, but because its current action deviates from its stated mission.</p>
+    <p>
+      <a href="https://workos.com">Open in ChatGPT</a>
+    </p>
+    <p>
+      <a href="https://workos.com">Open in Claude</a>
+    </p>
+    <p>
+      <a href="https://workos.com">Open in Perplexity</a>
+    </p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
