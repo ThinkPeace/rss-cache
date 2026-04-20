@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ignoring missing TLS &quot;Client Authentication&quot; usage in practice | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Ignoring missing TLS &quot;Client Authentication&quot; usage in practice</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-04-20T03:26:49Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/tech/TLSIgnoringMissingClientAuth">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-966e36671482feb3.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">One of the slow moving pieces of TLS news is that Google is effectively requiring everyone to stop issuing TLS certificates that can officially be used for &quot;Client Authentication&quot; (although the actual wording may have walked this back a bit ). Certificate Authorities can create new roots that can be used to issue TLS certificates that are officially usable…</div>
+        <div class="content">
+          <div class="wikitext"><p>One of the slow moving pieces of <a href="https://en.wikipedia.org/wiki/Transport_Layer_Security">TLS</a> news is
+that <a href="https://utcc.utoronto.ca/~cks/space/blog/tech/TLSLEDropsClientAuthentication">Google is effectively requiring everyone to stop issuing TLS
+certificates that can officially be used for "Client Authentication"</a> (although <a href="https://googlechrome.github.io/chromerootprogram/#23-dedicated-tls-server-authentication-pki-hierarchies">the actual wording may
+have walked this back a bit</a>).
+Certificate Authorities can create new roots that can be used to
+issue TLS certificates that are officially usable for client
+authentication, but <a href="https://letsencrypt.org/2025/05/14/ending-tls-client-authentication">Let's Encrypt isn't currently planning to do
+this</a>.
+This was announced last year and then slowed down a bit this year,
+but it's still happening.</p>
+
+<p>As part of the TLS handshake, a TLS client can optionally present
+a TLS certificate of its own to the TLS server. Officially, this
+TLS certificate and its entire certificate chain must be marked as
+being authorized for this purpose in an 'extended key usage (EKU)',
+just as TLS certificates used to identify servers must be marked
+as being authorized for this purpose. When people like Let's Encrypt
+talk about 'removing TLS Client Certificate support', what they're
+talking about is no longer issuing TLS certificates with this client
+authorization EKU.</p>
+
+<p>However, TLS certificates are TLS certificates, regardless of what
+EKUs they are or aren't marked with. As a result there's nothing
+that stops servers from validating a TLS certificate presented to
+them by a TLS client whether or not it has a client EKU. In particular,
+you can almost certainly simply collect the TLS certificate without
+validating it, then turn around and ask your TLS library to validate
+it as if it was a TLS server certificate (or in general, accept
+either a TLS client certificate or a TLS server certificate). I
+expect that more or less any TLS library will let you do this; <a href="https://pkg.go.dev/crypto/x509#VerifyOptions">Go
+certainly will</a>.</p>
+
+<p>Various protocols and systems that are used by various people want
+and require TLS clients to present TLS certificates that will be
+used to validate the TLS client, with these TLS certificates being
+<a href="https://utcc.utoronto.ca/~cks/space/blog/tech/TLSThreeWorlds">public ones obtained from trusted Certificate Authorities</a>. In theory these TLS certificates should have the
+'client authentication' EKU set. In practice, that relies on people
+being able to obtain such TLS certificates without difficulty. If
+it becomes difficult or impossible to obtain (public) TLS certificates
+with the client authentication EKU, the easiest thing for everyone
+involved to do is to change their server code so that it (also)
+accepts TLS certificates with the readily available 'server' EKU
+set, which Let's Encrypt and lots of other people will issue to
+people.</p>
+
+<p>(This is especially likely in FOSS projects, where the people running
+clients and servers don't particularly have any budget to go out
+and find someone who will sell them TLS client certificates.)</p>
+
+<p>I'm pretty certain that I've seen news flying by about at least one
+project that was starting to accept TLS server certificates from
+TLS clients, although I can't find it now in some Internet searches
+(and I foolishly didn't save a reference to it).  I expect more
+projects and systems to do it in the future. It's really the
+inevitable result of no one blinking on this. We'll know that the
+cookie has really crumbled when commercial service providers start
+accepting TLS server certificates from TLS clients for purposes
+such as authenticating inbound SMTP mail (assuming this hasn't
+already happened).</p>
+
+<p>All of this illustrates a fundamental issue with TLS security in
+practice, which I can summarize as <strong>the traffic is going to flow</strong>.
+No TLS security measure that prevents desired traffic from happening
+will survive in the real world. And generally the solution that
+will survive and thrive is whatever is easiest (here, using public
+TLS server certificates instead of trying to set up your own CA and
+certificate issuance infrastructure that will work across multiple
+organizations). Is this a good outcome for public TLS in general?
+Probably not. But it is what it is.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
