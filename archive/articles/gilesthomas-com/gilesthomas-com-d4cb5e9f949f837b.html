@@ -1,0 +1,1002 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Writing an LLM from scratch, part 32l -- Interventions: updated instruction fine-tuning results | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Writing an LLM from scratch, part 32l -- Interventions: updated instruction fine-tuning results</h1>
+        <div class="meta">Giles&#x27; blog 2026-04-20T20:00:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/04/llm-from-scratch-32l-interventions-instruction-fine-tuning-tests">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-d4cb5e9f949f837b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I&#x27;ve been working on a GPT-2-small-style LLM based on Sebastian Raschka &#x27;s book &quot; Build a Large Language Model (from Scratch) &quot;, and have tried a bunch of different things to see if I could get it to approach the quality of the original OpenAI GPT-2-small, measured in terms of loss on a held-back test dataset. After working through them, in my last post , I…</div>
+        <div class="content">
+          <p>I've been working on a GPT-2-small-style LLM based on
+<a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>",
+and have tried a bunch of different things to see if I could get it to approach
+the quality of the original OpenAI GPT-2-small, measured in terms of loss on a
+held-back test dataset.  After working through them, in my
+<a href="/2026/04/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation">last post</a>,
+I managed to train one that was almost (if not quite) there.</p>
+
+<p>Now, back before I started digging into these interventions, I was doing three evals
+for each model I built; a smoke test (to see if it could give a coherent completion
+to "Every effort moves you"), a test for that test set loss, and
+an instruction-following test that fine-tuned the model on the <a href="https://crfm.stanford.edu/2023/03/13/alpaca.html">Alpaca</a>
+dataset, got it to generate results for a test set of instructions, and then used
+an LLM as a judge to score them.</p>
+
+<p>The idea behind this was that the loss on the test set was an interesting technical measure
+of the quality of a model, but it didn't really tell us much about how useful it might
+be in reality.</p>
+
+<p>Unfortunately, in January, <a href="/2026/01/llm-from-scratch-30-digging-into-llm-as-a-judge">I realised that my methodology was bad</a>;
+because I was asking the LLM
+to score a model in isolation, the LLM's natural randomness would mean that results were
+not really comparable, at least for models that were reasonably close in quality.</p>
+
+<p>For example, if two models both replied to</p>
+
+<pre><code>Name the author of 'Pride and Prejudice'.
+</code></pre>
+
+<p>with:</p>
+
+<pre><code>The author of 'Pride and Prejudice' is Sarah Palin.
+</code></pre>
+
+<p>...then one run of the instruction-following test might "find the judge LLM in a good mood"
+and get, say, 5% -- after all, the model <em>tried</em> to answer, and actually used a real person's
+name, even if the answer was totally wrong.  But in another run, the judge might be in a
+"worse mood" and score it at 0%.</p>
+
+<p>My fix was to have two scripts:</p>
+
+<ul>
+<li>One that fine-tuned the model then got it to generate responses, then saved those responses in a file.</li>
+<li>One that took a bunch of files generated by the above, one for each of a set of different models, and presented them to the
+LLM together, so that it would (hopefully) be consistent in how it rated them relative to each other.</li>
+</ul>
+
+<p>The details are <a href="/2026/01/llm-from-scratch-30-digging-into-llm-as-a-judge">here</a>.</p>
+
+<p>Because doing it that way was significantly more work, I've not been doing these tests as part of the interventions mini-series.
+I felt it would make more sense to wait until I'd tried a bunch of interventions
+and got a number of models to try.</p>
+
+<p>Now I have those, so let's give it a go!</p>
+<h3 id="the-background-and-the-last-test">The background, and the last test</h3>
+
+<p>At the end of the previous round of IFT tests, I had this table.  It's sorted
+by the loss on the test set (shown to 3 decimal places), and has the score that
+the model got from an instruction fine-tuning run:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>IFT score</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231</td>
+  <td>39.64</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.500</td>
+  <td>16.66</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.674</td>
+  <td>16.5</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.725</td>
+  <td>11.59</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.730</td>
+  <td>11.23</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771</td>
+  <td>11.59</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.944</td>
+  <td>11.32</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.135</td>
+  <td>16.41</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.167</td>
+  <td>15.77</td>
+</tr>
+</tbody>
+</table>
+
+<p>There's a loose correlation where lower loss means a higher IFT score, with two
+weird exceptions: the two FineWeb-Edu training runs, where they got much higher results
+than you'd expect from the loss.</p>
+
+<p>My working hypothesis was that there were two components that led to a model getting a good
+score:</p>
+
+<ul>
+<li>Its raw intelligence: lower-loss models were smarter, so they were better at
+instruction-following after the fine-tune.</li>
+<li>Its knowledge.  All of the models -- mine and OpenAI's -- apart from the FineWeb-Edu ones were trained on
+what amounted to minimally-curated data from the Internet.  But FineWeb-Edu is
+meant to be "the most educational" subset of FineWeb, so it presumably is more
+dense in useful facts.</li>
+</ul>
+
+<p>So in those terms, the OpenAI models and Cloud FineWeb, 8x A100 40 GiB might be smart but not know very much, and the FineWeb-Edu ones
+might be dumb but knowledgeable.  The ones in between, by contrast, could be relatively dumb too, but
+also not know very much.</p>
+
+<p>There was one other oddity: the Cloud FineWeb, 8x A100 40 GiB
+model seemed surprisingly good on the IFT results when considering its loss -- but perhaps
+there was some kind of step function, where as soon as a model got better than (say) 3.7
+on the loss, it suddenly became smart in whatever way mattered.</p>
+
+<p>All very hand-wavy, of course, but it was a hypothesis of sorts.
+Would the new models fit that pattern?  It was time to find out.</p>
+
+<h3 id="the-initial-run-and-the-mystery">The initial run, and the mystery</h3>
+
+<p>I didn't think it was worth adding all 14 models that I've trained in my intervention-testing
+to that table, so I decided to just add four of them:</p>
+
+<ol>
+<li><code>8xa100m40-baseline</code>, the <a href="https://www.gilesthomas.com/2026/02/llm-from-scratch-32a-interventions-baseline-model">baseline cloud-trained model for all of the interventions</a>.</li>
+<li><code>1xrtx3090-baseline</code>, the locally-trained version of the same -- the first model from <a href="/2026/04/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation">this post</a>.</li>
+<li><code>8xa100m40-stacked-interventions-1</code>, <a href="/2026/04/llm-from-scratch-32j-interventions-trying-to-train-a-better-model-in-the-cloud">the best model we managed to get in the cloud</a>.</li>
+<li><code>1xrtx3090-stacked-interventions</code>, the best local model -- the second from <a href="/2026/04/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation">this post</a>.</li>
+</ol>
+
+<p>Now, I already had files containing responses from fine-tuned versions of the
+other models, so I just needed to run the first of my two fine-tuning scripts against
+all four of the new models.</p>
+
+<p>I did that, and then also tweaked the judge script so that instead of using GPT-5.1, it
+used GPT-5.4.  If you run the script multiple times, each time will normally give you different
+scores anyway; hopefully the ranking will remain roughly the same.  So given that I
+was going to have to re-run the script to get new aggregate results, and those would
+not really be comparable to the original ones anyway, this seemed like a reasonable
+price to pay for (hopefully) a smarter judge.</p>
+
+<p>I ran that once, and got some results that surprised me -- so much that I decided to
+do three runs and see if the results stood up.  They did; here's the new table,
+with scores for each run, the average, and the rank that each one got based on the average.</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>IFT score 1</th>
+  <th>IFT score 2</th>
+  <th>IFT score 3</th>
+  <th>IFT average</th>
+  <th>IFT rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>43.44</td>
+  <td>41.83</td>
+  <td>41.30</td>
+  <td>42.19</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>19.27</td>
+  <td>19.37</td>
+  <td>18.36</td>
+  <td>19.00</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>19.20</td>
+  <td>18.60</td>
+  <td>18.15</td>
+  <td>18.65</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>11.70</td>
+  <td>12.74</td>
+  <td>11.28</td>
+  <td>11.91</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td>18.25</td>
+  <td>18.40</td>
+  <td>17.83</td>
+  <td>18.16</td>
+  <td>4</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>13.59</td>
+  <td>13.93</td>
+  <td>12.56</td>
+  <td>13.36</td>
+  <td>10</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>17.72</td>
+  <td>17.33</td>
+  <td>16.26</td>
+  <td>17.10</td>
+  <td>6</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>14.87</td>
+  <td>15.05</td>
+  <td>13.68</td>
+  <td>14.53</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>12.65</td>
+  <td>13.34</td>
+  <td>12.55</td>
+  <td>12.85</td>
+  <td>11</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>14.39</td>
+  <td>14.72</td>
+  <td>12.87</td>
+  <td>13.99</td>
+  <td>9</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>12.66</td>
+  <td>13.06</td>
+  <td>11.67</td>
+  <td>12.46</td>
+  <td>12</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>17.64</td>
+  <td>16.93</td>
+  <td>16.29</td>
+  <td>16.95</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>17.94</td>
+  <td>18.92</td>
+  <td>17.05</td>
+  <td>17.97</td>
+  <td>5</td>
+</tr>
+</tbody>
+</table>
+
+<p>You can see that relative rankings are fairly consistent across the IFT runs.  But while in general
+the lower-loss runs get better IFT results, now there are even more exceptions to that
+trend than there were before.</p>
+
+<p>Let's look down the "IFT rank" column, which is based on the IFT average:</p>
+
+<ul>
+<li>The first surprise is <code>8xa100m40-stacked-interventions-1</code>.  It has the fourth-best
+loss, but it's the worst model out of all of them on the instruction fine-tuning
+test!  It was trained on exactly the same data as all of the others apart from
+the OpenAI ones and the FineWeb-Edu ones.  Even more perplexingly, it was as close
+a match to <code>1xrtx3090-stacked-interventions</code>  as I could make it, but got
+completely different results.  You might
+remember from <a href="/2026/04/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation">the post</a>
+that those two runs started with the same weights and had exactly the same
+training config; the only difference was that they were trained on different
+architectures, and one used DDP with a real global batch size of 96, while the
+other used gradient accumulation to get the same batch size.</li>
+<li><code>1xrtx3090-baseline</code> also does much worse than you'd expect from its loss numbers;
+it's only a tiny bit worse than Cloud FineWeb, 8x A100 40 GiB in loss terms, but
+much worse on the IFT test.  Again, this one is essentially a clone of another:
+<code>8xa100m40-baseline</code>, which was the same training run but using DDP rather than
+gradient accumulation.  The same problem -- one of a pair of closely-matched
+models has worse results on the IFT test.  But in this case, it's the gradient
+accumulation model that turned out bad.</li>
+</ul>
+
+<p>That's a really odd situation.  If the training runs using gradient accumulation rather than
+DDP had been consistently worse -- or vice versa -- then we could imagine some kind
+of connection.  But in the first case, GA beat DDP, but in the second, it was
+the other way around.</p>
+
+<p>Apart from that, we do still see that the two FineWeb-Edu models are doing much
+better than the others.  And the remaining models are all pretty close together, both
+in terms of loss and in terms of their ranking, apart from the Local FineWeb train,
+which is bad in both.</p>
+
+<p>It is, however, interesting that Local FineWeb-Edu extended train, which was trained
+on twice as much data as Local FineWeb-Edu train, is consistently worse in terms of
+the IFT numbers, though.  That wasn't the case in my tests previously.</p>
+
+<p>All of this puzzled me.  The "lots of knowledge makes a model better at this" idea
+seemed to be weakened by the relative ranks of the two FineWeb-Edu models (after all,
+if it was true, you'd expect the model trained on more data to be consistently better).
+And the "smart, low-loss models are better" side seemed to be contradicted by
+<code>8xa100m40-stacked-interventions-1</code> and <code>1xrtx3090-baseline</code>'s bad results.</p>
+
+<p>What might be going on here?</p>
+
+<h3 id="epochs-of-fine-tuning">Epochs of fine-tuning</h3>
+
+<p>Looking at the training code, one thing stood out to me.  The process was:</p>
+
+<ul>
+<li>Fine-tune the model for a maximum of 100 epochs over the training set.</li>
+<li>If loss on a held-back validation set went above the result for the previous
+epoch, we did an early exit and used the previous epoch's model for the generation
+of the responses.</li>
+</ul>
+
+<p>In practice, the early-exit code always cut in pretty quickly.
+I'd noticed that during my original generation of the results for the new models:</p>
+
+<ul>
+<li><code>8xa100m40-baseline</code> took 6 epochs until validation loss started rising.</li>
+<li><code>1xrtx3090-baseline</code> took 5</li>
+<li><code>8xa100m40-stacked-interventions-1</code> took 4</li>
+<li><code>1xrtx3090-stacked-interventions</code> took 5</li>
+</ul>
+
+<p>I decided to regenerate responses for all of the models, and then run the new
+responses past the LLM judge again.  But this time I would keep a record of how
+many epochs of training we got before the exit:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>IFT score</th>
+  <th>Epochs</th>
+  <th>IFT rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>39.14</td>
+  <td>2</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>24.93</td>
+  <td>2</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>16.97</td>
+  <td>4</td>
+  <td>5</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>10.40</td>
+  <td>4</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td>20.73</td>
+  <td>7</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>13.61</td>
+  <td>6</td>
+  <td>9</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>13.57</td>
+  <td>4</td>
+  <td>10</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>14.25</td>
+  <td>4</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>11.66</td>
+  <td>4</td>
+  <td>12</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>15.17</td>
+  <td>4</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>13.25</td>
+  <td>7</td>
+  <td>11</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>16.39</td>
+  <td>7</td>
+  <td>6</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>17.80</td>
+  <td>7</td>
+  <td>4</td>
+</tr>
+</tbody>
+</table>
+
+<p>It was getting even harder to see any useful pattern!  One thing that did
+stand out, though, was that the still oddly-high Cloud FineWeb, 8x A100 40 GiB
+model was being instruction-trained for seven epochs.  It was also rather noticeable
+that the two FineWeb-Edu models had the same "advantage", if that's what it was.  But
+the Local FineWeb train had seven
+epochs too, and got a poor score, the OpenAI models only got two each, and
+led the pack, and <code>1xrtx3090-baseline</code> got a pretty poor result given its six
+epochs of training.</p>
+
+<p>Still, what would happen if we got rid of that confounder?  I did yet another
+set of runs; this time, I changed the fine-tuning/generation script to always do
+four epochs -- no early exit.  I chose four because it was the modal number in the
+previous trains -- no strong reason for it beyond that.</p>
+
+<h4 id="training-for-four-epochs">Training for four epochs</h4>
+
+<p>Here's what came out at the end:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>IFT score</th>
+  <th>Epochs</th>
+  <th>IFT rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>43.99</td>
+  <td>4</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>25.70</td>
+  <td>4</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>14.46</td>
+  <td>4</td>
+  <td>4</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>10.07</td>
+  <td>4</td>
+  <td>11=</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td>13.51</td>
+  <td>4</td>
+  <td>5</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>10.65</td>
+  <td>4</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>12.55</td>
+  <td>4</td>
+  <td>6</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>11.41</td>
+  <td>4</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>9.48</td>
+  <td>4</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>10.07</td>
+  <td>4</td>
+  <td>11=</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>10.16</td>
+  <td>4</td>
+  <td>10</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>10.54</td>
+  <td>4</td>
+  <td>9</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>15.09</td>
+  <td>4</td>
+  <td>3</td>
+</tr>
+</tbody>
+</table>
+
+<p>Still no obvious pattern.</p>
+
+<h4 id="training-for-seven-epochs">Training for seven epochs</h4>
+
+<p>What if we try seven epochs of training for all of them, so that they all get as much
+"benefit" (if that's what it is) as the FineWeb-Edu models?</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>IFT score</th>
+  <th>Epochs</th>
+  <th>IFT rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>40.74</td>
+  <td>7</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>24.87</td>
+  <td>7</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>16.91</td>
+  <td>7</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>10.59</td>
+  <td>7</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td>15.94</td>
+  <td>7</td>
+  <td>5</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>13.68</td>
+  <td>7</td>
+  <td>9</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>14.82</td>
+  <td>7</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>10.82</td>
+  <td>7</td>
+  <td>11</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>10.70</td>
+  <td>7</td>
+  <td>12</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>13.81</td>
+  <td>7</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>13.09</td>
+  <td>7</td>
+  <td>10</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>16.27</td>
+  <td>7</td>
+  <td>4</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>15.54</td>
+  <td>7</td>
+  <td>6</td>
+</tr>
+</tbody>
+</table>
+
+<p>Just as confused as ever...</p>
+
+<h3 id="putting-it-all-together">Putting it all together</h3>
+
+<p>Here's a table with all of the ranks we got from these tests:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Initial rank</th>
+  <th>Updated script rank</th>
+  <th>4-epoch rank</th>
+  <th>7-epoch rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>1</td>
+  <td>1</td>
+  <td>1</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>2</td>
+  <td>2</td>
+  <td>2</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3</td>
+  <td>5</td>
+  <td>4</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>13</td>
+  <td>13</td>
+  <td>11=</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>4</td>
+  <td>3</td>
+  <td>5</td>
+  <td>5</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>10</td>
+  <td>9</td>
+  <td>8</td>
+  <td>9</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>6</td>
+  <td>10</td>
+  <td>6</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>8</td>
+  <td>8</td>
+  <td>7</td>
+  <td>11</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>11</td>
+  <td>12</td>
+  <td>13</td>
+  <td>12</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>9</td>
+  <td>7</td>
+  <td>11=</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>12</td>
+  <td>11</td>
+  <td>10</td>
+  <td>10</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>7</td>
+  <td>6</td>
+  <td>9</td>
+  <td>4</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>5</td>
+  <td>4</td>
+  <td>3</td>
+  <td>6</td>
+</tr>
+</tbody>
+</table>
+
+<p>It's hard to draw much sense out of this, but a few things are clear:</p>
+
+<ul>
+<li>Performance on this test is correlated with loss, but it's far from the only factor.</li>
+<li>The OpenAI weights consistently lead the pack.</li>
+<li>Of our own models, <code>1xrtx3090-stacked-interventions</code>, Cloud FineWeb, 8x A100 40 GiB,
+and Local FineWeb-Edu train do pretty well.</li>
+<li>Strangely, Local FineWeb-Edu extended train, which is just Local FineWeb-Edu train
+that has been trained on a further 3B tokens of the FineWeb-Edu dataset, is consistently
+worse than the model it was based on.</li>
+<li><code>8xa100m40-stacked-interventions-1</code> and <code>1xrtx3090-baseline</code> are consistently bad.  Cloud FineWeb, 8x A100 80 GiB is
+also not great.</li>
+</ul>
+
+<p>On the one hand, training different models for different numbers of epochs feels wrong
+for an evaluation like this, as they're being "treated differently".  On the other hand,
+if it's meant to be a good evaluation of model usefulness in the real world, then individual models would
+be fine-tuned for different amounts of time, depending on validation loss.  So perhaps
+it is better?</p>
+
+<p>But the differing results are still quite a puzzle.  I figured that a modern AI could
+easily build me a data exploration interface, specifically for the original results
+and seven-epoch ones, so I asked Claude and got <a href="/post-assets/llm-from-scratch-32l-interventions-instruction-fine-tuning-tests/ift-eval-explorer.html">this rather nice one</a>.</p>
+
+<p>After poring over that, though, I couldn't find a smoking gun -- for example, some
+kind of systematic error that <code>8xa100m40-stacked-interventions-1</code> was always making
+that pulled its score down.</p>
+
+<p>I think that the best -- albeit hand-wavy and incomplete -- mental model that I have right now is something like this.  If
+we consider the loss landscape that these models are all in, they've all been trained
+to try to get to a place with as low loss as we could manage.  When we do the instruction
+fine-tune on them, we're changing the landscape -- the objective of "be better at
+following instructions" is different to "be better at minimising loss".</p>
+
+<p>Now, those two landscapes could be completely different!  You can imagine a task that we
+might set instead of instruction-following that could be completely uncorrelated with
+loss minimisation, or even inversely correlated.</p>
+
+<p>But instruction-following is relatively close; it at least shares features like "generate
+coherent text".  So when we do the instruction fine-tuning, what we're trying to do is
+to move from the place where the model ended up after its pre-training, to a place where
+performance on the new goal -- instruction-following -- is best.</p>
+
+<p>Here's where I'm going to get more than a bit hand-wavy.  You can easily imagine that some
+places where the loss was low, there might be downhill slopes pointing towards good
+locations in the new instruction-following landscape.  With instruction fine-tuning,
+you'd be able to get a good IFT model.</p>
+
+<p>But other places with low loss might not have that advantage; maybe they're at or
+near a poor "local minimum" in the IFT landscape -- that is, a place where there is
+no downhill route to a better place.  So simple fine-tuning like this
+might never get a good result!</p>
+
+<p>With this mindset, we might say that the OpenAI weights are pretty well-positioned,
+not just in the loss landscape but also in the IFT landscape.  The FineWeb-Edu
+models happened to get lucky, and wind up in a place that (despite having poor loss),
+is well-positioned for the IFT objective.  And by contrast, <code>8xa100m40-stacked-interventions-1</code>
+and <code>1xrtx3090-baseline</code> were just unlucky: they got to a place where the loss
+landscape was not well-correlated with the IFT landscape.</p>
+
+<p>This seems plausible enough for me to
+use it as my working model for now, and see if I can work out some way to test it.
+Keeping track of the validation loss during the instruction fine-tuning process would
+certainly be a good start; unfortunately I only realised that after doing all
+of the tests above, and re-doing them would be quite a lot of work.</p>
+
+<p>One final thing is worth repeating.  Our two "unlucky" models,
+<code>8xa100m40-stacked-interventions-1</code> and <code>1xrtx3090-baseline</code>, each had a twin.
+The former was the DDP-trained counterpart of the gradient-accumulated
+<code>1xrtx3090-stacked-interventions</code>, while the latter was the gradient-accumulated counterpart
+of <code>8xa100m40-baseline</code>.  So while something odd clearly happened, it doesn't look like
+DDP or gradient accumulation by themselves are the culprit.</p>
+
+<p>I think that at this point, it's best for me to draw a line under this -- I have a
+bunch of other things I'd like to get to, and this is a bit of a side quest at
+this point.</p>
+
+<p>Still, I have one main takeaway from this: chasing lower loss is technically interesting but is not the only goal.
+In some cases, it seems likely that lower-loss models can be worse for actual use.</p>
+
+<p>Coming up next: I'm going to wrap up this "interventions" mini-series, and move
+on to the final steps in my LLM from scratch journey.  See you then!</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
