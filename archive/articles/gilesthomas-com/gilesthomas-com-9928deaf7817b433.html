@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Writing an LLM from scratch, part 32m -- Interventions: conclusion | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Writing an LLM from scratch, part 32m -- Interventions: conclusion</h1>
+        <div class="meta">Giles&#x27; blog 2026-04-21T20:00:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/04/llm-from-scratch-32m-interventions-conclusion">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-9928deaf7817b433.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Last November, when I finished the main body of &quot; Build a Large Language Model (from Scratch) &quot;, I set myself a number of follow-on goals . One was &quot;training the full GPT-2 base model myself&quot;. I&#x27;ve reached the end of that journey, with a model that is almost -- if not quite -- as good as GPT-2 small, trained in 44 hours on my own machine, so I thought it wo…</div>
+        <div class="content">
+          <p>Last November, when I finished the main body of
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>",
+I <a href="/2025/11/llm-from-scratch-27-whats-left-and-whats-next">set myself a number of follow-on goals</a>.
+One was "training the full GPT-2 base model myself".</p>
+
+<p>I've reached the end of that journey, with a model that is almost -- if not quite
+-- as good as GPT-2 small, trained in 44 hours on my own machine,
+so I thought it would be worth summarising
+how it went.</p>
+<p>In December, <a href="/2025/12/llm-from-scratch-28-training-a-base-model-from-scratch">I trained my first model</a>,
+taking two days,
+but was disappointed to see that it was worse in terms of loss, and in terms
+of how well it could be fine-tuned to follow instructions, than the original GPT-2 model.</p>
+
+<p>I expected that a chunk of that difference was likely to be due to the original model having
+been trained for longer, but also noticed that there were a number of changes -- interventions -- that
+I could make to the model and the training run, and I thought they might help.</p>
+
+<p>In January, I <a href="/2026/01/llm-from-scratch-29-ddp-training-a-base-model-in-the-cloud">got a DDP training system together</a>
+that would allow me to iterate on those interventions without having to wait for
+two days for each result.</p>
+
+<p>In February, I got started by <a href="/2026/02/llm-from-scratch-32a-interventions-baseline-model">training a baseline model in the cloud</a>,
+and
+I've since ground through all of the interventions, and come up with
+a set that lowered the loss nicely, both <a href="/2026/04/llm-from-scratch-32j-interventions-trying-to-train-a-better-model-in-the-cloud">in the cloud</a>,
+and <a href="/2026/04/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation">locally</a>.</p>
+
+<p>Along the way, I've learned about, or refined my knowledge of, a bunch of ML concepts.
+In increasing order of how they helped with the loss (with the first two actually making
+it slightly worse):</p>
+
+<ul>
+<li><a href="/2026/03/llm-from-scratch-32g-interventions-weight-tying">Weight tying</a>, which
+I found made the loss worse, but it was interesting how simple it was to implement.</li>
+<li>PyTorch's <a href="/2026/04/llm-from-scratch-32h-interventions-full-fat-float32">Automated Mixed Precision</a>,
+which also harmed the loss a tiny bit, but
+had the benefit of making training twice as fast, and 66% cheaper in the cloud
+-- well worth the loss penalty.</li>
+<li><a href="/2026/02/llm-from-scratch-32b-interventions-gradient-clipping">Gradient clipping</a> -- a cheap,
+but (somewhat to my surprise) not particularly effective intervention for this model.</li>
+<li><a href="/2026/02/llm-from-scratch-32d-interventions-adding-attention-bias">QKV bias</a> -- that is,
+adding bias to the attention weight matrices -- which also helped a tiny bit, though
+I later felt that this might have been in the noise.</li>
+<li><a href="/2026/03/llm-from-scratch-32f-interventions-weight-decay">Weight decay</a> -- more effective,
+and something
+that's simple enough to understand with simple gradient descent.  I still need to
+learn more about it in
+the context of optimisers, though -- particularly with AdamW.</li>
+<li><a href="/2026/02/llm-from-scratch-32c-interventions-removing-dropout">Dropout</a>, which
+seems to be less than useful for single-epoch training: removing it
+helped the model quite a lot.</li>
+<li><a href="/2026/03/llm-from-scratch-32e-interventions-learning-rate">The learning rate</a>,
+which I built up quite a lot of new knowledge about, and by both increasing it
+and scheduling it, I got the biggest bang for the buck.</li>
+</ul>
+
+<p>I've also learned how to <a href="/2026/01/custom-automodelforcausallm-frompretrained-models-on-hugging-face">upload my custom models to Hugging Face</a>,
+found out some <a href="/2026/04/llm-from-scratch-32i-interventions-what-is-in-the-noise">interesting things about how random noise affects training</a>,
+and come up with improvements in the setup I have for using an
+<a href="/2026/01/llm-from-scratch-30-digging-into-llm-as-a-judge">LLM as a judge for instruction fine-tuned models</a>.</p>
+
+<p>There was a bit of a mystery when I tried out the instruction fine-tuning tests,
+though.  Although two of my models were very close to GPT-2 small in terms of loss,
+<a href="/2026/04/llm-from-scratch-32l-interventions-instruction-fine-tuning-tests">I found</a>
+that while one of them had an instruction fine-tuning result that was likewise close
+to GPT-2 small, the other was <em>much</em> worse!  A mystery to dig into later, I think.</p>
+
+<p>But it was still very satisfying that my best model -- trained locally in 44 hours
+-- was almost as good as GPT-2 small, even if it did fall somewhat short.  So on that
+positive note, I'm going to wrap up this "Interventions" series-within-a-series, and move
+on to the two other things I wanted to do before wrapping up the "LLM from scratch" series
+as a whole:</p>
+
+<ol>
+<li>Going through the appendices in the book to see if there's anything I want
+to highlight there.</li>
+<li>The final test as to whether I've really understood everything: building my own
+LLM from scratch without reference to the book.  I want to do that in a different
+framework, not PyTorch, to minimise the risk of just regurgitating code --
+I asked people on X/Twitter which one I should use, and
+<a href="https://x.com/gpjt/status/1985434030880293004">the winner was JAX</a> -- so it should be interesting to see how that goes!</li>
+</ol>
+
+<p>The appendices first, I think -- I'll post about them shortly.  But I think the big
+one will be the JAX implementation -- really looking forward to that.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

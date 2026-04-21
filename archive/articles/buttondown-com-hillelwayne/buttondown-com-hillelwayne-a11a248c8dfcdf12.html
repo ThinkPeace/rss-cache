@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>People get confused when language implementations guarantees | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>People get confused when language implementations guarantees</h1>
+        <div class="meta">Computer Things </div>
+        <div class="links">
+          <a href="https://buttondown.com/hillelwayne/archive/people-get-confused-when-language-implementations/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/buttondown-com-hillelwayne/buttondown-com-hillelwayne-a11a248c8dfcdf12.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Take the following Python program: # x = 1, y = 2 x = 0 y = x print ([ x , y ]) It&#x27;ll print [0, 0] . If we swapped the two assignments, it&#x27;d instead print [0, 1] . Each assignment happens in a separate temporal step. Pretty much all imperative languages behave this way. Now take the following TLA+ snippet: \* x = 1, y = 2 /\ x&#x27; = 0 /\ y&#x27; = x /\ PrintT(&lt;&lt;x&#x27;,…</div>
+        <div class="content">
+          <p>Take the following Python program:</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># x = 1, y = 2</span>
+<span class="n">x</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">y</span> <span class="o">=</span> <span class="n">x</span>
+<span class="nb">print</span><span class="p">([</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">])</span>
+</code></pre></div>
+
+<p>It'll print <code>[0, 0]</code>. If we swapped the two assignments, it'd instead print <code>[0, 1]</code>. Each assignment happens in a separate temporal step. Pretty much all imperative languages behave this way.</p>
+<p>Now take the following TLA+ snippet:</p>
+<div class="codehilite"><pre><span></span><code>\* x = 1, y = 2
+/\ x&#39; = 0
+/\ y&#39; = x
+/\ PrintT(&lt;&lt;x&#39;, y&#39;&gt;&gt;)
+</code></pre></div>
+
+<p>This'll print <code>&lt;&lt;0, 1&gt;&gt;</code>. Unlike in imperative languages, TLA+ separates the notion of update and temporal step. We read <code>x' = 0</code> as "in the <em>next</em> state, <code>x</code> will be 0, but it still has the same value in the current state". So in every state <code>x</code> and <code>x'</code> are essentially separate variables. As a consequence of this, the order of statements don't matter in TLA+ semantics and swapping the two assignments doesn't change the printed output. The language is really clever like that! This means, among other things that there's basically no intrastep race conditions. One function can update a variable without affecting how any other function uses it.</p>
+<p>Okay so now beginners inevitably run into a problem with this:</p>
+<div class="codehilite"><pre><span></span><code>\* x = 1, y = 2
+/\ x&#39; = y&#39;
+/\ y&#39; = x
+/\ PrintT(&lt;&lt;x&#39;, y&#39;&gt;&gt;)
+</code></pre></div>
+
+<p>This'll crash because <code>y'</code> isn't defined yet. But if we swap the two assignments this works fine and prints <code>&lt;&lt;1, 1&gt;&gt;</code>. So clearly that whole thing about nonordering is a pack of bunk. </p>
+<p>Well, not exactly. TLA+ semantics still guarantee nonordering. The problem is that verifiers don't perfectly implement the TLA+ semantics. <code>y' &gt; 0</code> is a totally reasonable "assignment" but there's an infinite number of possible next states! So the main model checker (TLC) instead requires that <code>y' = some_value</code> comes before any other use of <code>y'</code>, which means ordering now matters.</p>
+<p>The bigger problem is with <code>PrintT</code>. The TLA+ semantics guarantee nonordering because the semantics don't allow for side effects. The model checker adds in effectful operators like <code>PrintT</code> and <code>Assert</code> and <code>IOExec</code>. This can cause a problem with guard statements. Theoretically speaking these two script blocks are equivalent:</p>
+<div class="codehilite"><pre><span></span><code>/\ x = 0 \* guard statement
+/\ P()
+/\ x&#39; = x + 1
+
+/\ x&#39; = x + 1
+/\ P()
+/\ x = 0 \* guard statement
+</code></pre></div>
+
+<p>When <code>x = 1</code>, these don't lead to a new state due to the guard clause. But the model checker evaluates each line one at a time, meaning in block 2 it will run <code>x' = x + 1</code> and <code>P()</code> before getting to <code>x = 0</code> and discarding the state. If <code>P</code> is a proper TLA+ operator, this isn't a problem, but if it's <code>PrintT</code> or <code>Assert</code> it will take its effect first, leading to weird ghost prints that don't correspond with any next states.</p>
+<p>This difference between "what TLA+ semantics guarantees" and "the specific ways TLC can break those guarantees" is a huge source of confusion for people! On top of that many of these operators, like <code>IOExec</code> and <code>TLCSet</code>, are meant as escape hatches. So if you need them you're already doing something pretty weird, and that makes it even more confusing. </p>
+<p>And on top of that is that there's no syntactic or visual distinguishing between a guarantee-breaking TLC operator and a regular safe TLA+ operator. In compiled languages you got pragmas and preprocessors, which let the compiler do things the language can't. But those usually have a visually distinct syntax, so you know from looking that here be dragons. </p>
+<p>I'm reminded of Neel Krishnaswami's incredible post <a href="https://semantic-domain.blogspot.com/2013/07/what-declarative-languages-are.html" target="_blank">What Declarative Languages Are</a><sup id="fnref:laurie"><a class="footnote-ref" href="#fn:laurie">1</a></sup>:</p>
+<blockquote>
+<p>This also lets us make the prediction that the least-loved features of any declarative language will be the ones that expose the operational model, and break the declarative semantics. So we can predict that people will dislike (a) backreferences in regular expressions, (b) ordered choice in grammars, (c) row IDs in query languages, (d) cut in Prolog, (e) constraint priorities in constraint languages. </p>
+</blockquote>
+<p>Prolog cuts have a visually distinct syntax, but a predicate that uses a cut isn't visually distinct from a <a href="https://www.metalevel.at/prolog/purity" target="_blank">logically pure</a> predicate. But that's also a little less tricky than what we got in TLA+, since the cut is still part of the language semantics.</p>
+<p>(Then again, different Prolog dialects have different ways of <a href="https://eu.swi-prolog.org/pldoc/man?section=printmsg" target="_blank">printing strings</a>, which add side effects to Prolog, and they're not visually distinct from other predicates. So the same problem!)</p>
+<p>I don't actually have any fix for this. I just find it a fascinating example of a <a href="https://en.wikipedia.org/wiki/Leaky_abstraction" target="_blank">leaky abstraction</a>. Maybe we could write a code highlighter that highlights all functions that transitively use a "weird" function or something.</p>
+<div class="footnote">
+<hr />
+<ol>
+<li id="fn:laurie">
+<p><a href="https://tratt.net/laurie/blog/2013/relative_and_absolute_levels.html" target="_blank">Obligatory response post</a>&#160;<a class="footnote-backref" href="#fnref:laurie" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
