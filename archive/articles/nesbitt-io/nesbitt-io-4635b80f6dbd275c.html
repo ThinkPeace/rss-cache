@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>brief | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>brief</h1>
+        <div class="meta">Andrew Nesbitt 2026-04-21T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/04/21/brief.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-4635b80f6dbd275c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A knowledge base of project conventions, exposed as a CLI.</div>
+        <div class="content">
+          <p>Anyone landing in an unfamiliar repo, whether that’s a new contributor, a security scanner, or an AI coding agent, has to answer the same handful of questions before doing anything useful: what language is this, how do I install dependencies, what’s the test command, which linter do I run before committing, and for a security review, which functions in this stack are the dangerous ones.</p>
+
+<p>The agent case just makes the cost of getting it wrong easiest to watch, because you can see Claude grep for <code class="language-plaintext highlighter-rouge">package.json</code>, read the Gemfile, try <code class="language-plaintext highlighter-rouge">npm test</code>, get told there’s no test script, try <code class="language-plaintext highlighter-rouge">yarn test</code>, discover it’s actually <code class="language-plaintext highlighter-rouge">pnpm</code>, and only then get to the work you asked for. The answers are identical for every Rails project or every Go module that has ever existed, and rediscovering them from scratch every time is wasted effort.</p>
+
+<p><a href="https://github.com/git-pkgs/brief">brief</a> is a knowledge base of 516 tools across 54 language ecosystems, with a single Go binary in front of it that does the lookup and prints JSON when piped or a human summary on a TTY. The dataset is the part that doesn’t exist anywhere else: invocation commands, config-file locations, and taxonomy for five hundred tools under one machine-readable schema. CI templates, devcontainer generators, and editor onboarding flows were the closest I found, each carrying a slice of it with no shared upstream. I think of the CLI as one view onto that data and expect there to be others.</p>
+
+<p>Point it at a directory, a git URL, or a registry coordinate like <code class="language-plaintext highlighter-rouge">gem:rails</code> or <code class="language-plaintext highlighter-rouge">npm:express</code> and it reports the toolchain across twenty categories, each with the command to run and the config files that drive it, plus whatever governance and community files (license with SPDX identifier, security policy, <code class="language-plaintext highlighter-rouge">CODEOWNERS</code>, <code class="language-plaintext highlighter-rouge">FUNDING.yml</code>, and so on) it finds in the usual places.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>brief <span class="nb">.</span>                       <span class="c"># local directory</span>
+brief gem:rails               <span class="c"># registry package, resolved to source repo</span>
+brief diff                    <span class="c"># only tools touched by changed files</span>
+brief missing                 <span class="c"># baseline categories with no tool configured</span>
+brief threat-model            <span class="c"># CWE/OWASP categories implied by the stack</span>
+brief sinks                   <span class="c"># dangerous functions in detected tools</span>
+</code></pre></div></div>
+
+<p>Checking all 516 definitions finishes in under 250ms, since anything that runs at the front of every session or pipeline step can’t afford to be the slow part; on this blog’s own repo it picks out Jekyll, Bundler, Rake, Dependabot and GitHub Actions in around 220ms, and on a Go project the output looks like:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ brief .
+Language:        Go
+Package Manager: Go Modules (go mod download)
+Test:            go test (go test ./...)
+Lint:            golangci-lint (golangci-lint run)  [.golangci.yml]
+Format:          gofmt (gofmt -w .)
+Build:           GoReleaser (goreleaser release --clean)
+Security:        govulncheck (govulncheck ./...)
+CI:              GitHub Actions  [.github/workflows/]
+</code></pre></div></div>
+
+<p>I run it myself as the first thing after cloning anything, and I have it wired into my global agent instructions so every Claude session opens with <code class="language-plaintext highlighter-rouge">brief .</code> before anything else. That onboards the agent to the repo in one tool call and saves the tokens it would otherwise burn on exploratory greps and wrong guesses. On a feature branch <code class="language-plaintext highlighter-rouge">brief diff</code> narrows the report to just the tools touched by the changed files, so whoever is reading it knows to run <code class="language-plaintext highlighter-rouge">golangci-lint</code> because a <code class="language-plaintext highlighter-rouge">.go</code> file changed without also being told about the Python linter in the monorepo’s other half.</p>
+
+<p>Because the JSON output follows a <a href="https://github.com/git-pkgs/brief#library-usage">published schema</a>, it also works as a building block for other tooling: <code class="language-plaintext highlighter-rouge">brief --json . | jq -r '.tools.test[0].command.run'</code> gives a polyglot CI job the project’s test command without anyone writing per-language cases, that lookup can drive a devcontainer or onboarding script, and the plan is to run it across every repo <a href="https://ecosyste.ms">ecosyste.ms</a> indexes so that stack metadata is available for every package.</p>
+
+<p>The detection rules are TOML rather than Go, which means adding a tool is a single file under <code class="language-plaintext highlighter-rouge">knowledge/</code> with no code changes: a name, a category, the files or dependency names that signal its presence, the command to run it, and optionally a set of <a href="https://github.com/ecosyste-ms/oss-taxonomy">oss-taxonomy</a> tags describing what kind of thing it is. That taxonomy is <a href="/2025/11/29/oss-taxonomy.html">a sibling project</a>: it builds the vocabulary for what a tool <em>is</em>; brief detects which tools a project <em>uses</em>.</p>
+
+<p>The dependency-name matching is driven by the same manifest parser as <a href="https://github.com/git-pkgs/git-pkgs">git-pkgs</a>, so a tool definition can say “present if <code class="language-plaintext highlighter-rouge">rspec-core</code> is in the bundle” and brief already knows how to read Gemfiles, <code class="language-plaintext highlighter-rouge">package.json</code>, <code class="language-plaintext highlighter-rouge">go.mod</code>, <code class="language-plaintext highlighter-rouge">Cargo.toml</code>, and the other supported lockfile formats without any of that being reimplemented.</p>
+
+<p>Those tags were originally there so the JSON output could say “web framework” rather than just “build tool”, but once a few hundred definitions carried them they mapped cleanly onto CWE and OWASP categories, and <code class="language-plaintext highlighter-rouge">brief threat-model</code> on a Rails project produces SQL injection, mass assignment, XSS, CSRF, and SSTI without scanning a line of code, because that’s what Rails and ActiveRecord are <em>for</em>. The definitions also carry the specific dangerous functions each tool exposes, around 700 across the dataset, which is a reasonable starting grep list for a security review of a stack you’ve never worked in:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ brief sinks .
+ActiveRecord:
+  Arel.sql            sql_injection      CWE-89
+  find_by_sql         sql_injection      CWE-89
+  where               sql_injection      CWE-89   string interpolation only
+Rails:
+  html_safe           xss                CWE-79
+  redirect_to         open_redirect      CWE-601  when target is from params
+  render inline:      ssti               CWE-1336
+Ruby:
+  eval                code_injection     CWE-95
+  Marshal.load        deserialization    CWE-502
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">brief missing</code> inverts the check and reports which of five baseline categories (test, lint, format, typecheck, docs) have no tool configured for the detected ecosystems, naming the canonical choice for each gap. The detection engine is also importable as a Go library if you’d rather not shell out.</p>
+
+<p>Tool definitions live in <a href="https://github.com/git-pkgs/brief/tree/main/knowledge">the <code class="language-plaintext highlighter-rouge">knowledge/</code> directory</a> and PRs adding new ones are the contributions I’m most interested in, particularly for ecosystems I don’t write every day. If you point it at a project and it gets something wrong, <a href="https://github.com/git-pkgs/brief/issues">open an issue</a> or find me on <a href="https://mastodon.social/@andrewnez">Mastodon</a>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">brew install git-pkgs/git-pkgs/brief</code> / <a href="https://github.com/git-pkgs/brief">github.com/git-pkgs/brief</a></p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
