@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Some general notes on network booting UEFI machines | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Some general notes on network booting UEFI machines</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-04-22T03:26:18Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/tech/UEFINetworkBootNotes">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-979d26839bcb5735.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">If you need to (re)install a large collection of servers or servers in inconvenient locations for physical access, booting them from the network in order to install them is something that you might be quite interested in. In the pre-UEFI PC &#x27;BIOS&#x27; era of MBR booting, this was often called PXE booting , but UEFI changes things around. UEFI firmware typically…</div>
+        <div class="content">
+          <div class="wikitext"><p>If you need to (re)install a large collection of servers or servers
+in inconvenient locations for physical access, booting them from
+the network in order to install them is something that you might
+be quite interested in. In the pre-UEFI PC 'BIOS' era of MBR booting,
+this was often called <a href="https://en.wikipedia.org/wiki/Preboot_Execution_Environment">PXE booting</a>, but
+UEFI changes things around.</p>
+
+<p><a href="https://utcc.utoronto.ca/~cks/space/blog/tech/UEFIAndBIOSAndOtherPCTerms">UEFI firmware</a> typically has built
+in support for networking, which is to say that there are <a href="https://uefi.org/specs/UEFI/2.11/29_Network_Protocols_ARP_and_DHCP.html">UEFI
+protocols (function calls) for doing common things with the network</a>
+(<a href="https://uefi.org/specs/UEFI/2.11/30_Network_Protocols_UDP_and_MTFTP.html">also</a>,
+<a href="https://uefi.org/specs/UEFI/2.11/Apx_E_Universal_Network_Driver_Interfaces.html">also</a>).
+In practice this means that bootloaders and other things don't have
+to embed their own code to deal with the network (or their own
+network card drivers); provided that they don't exit from the UEFI
+preboot environment, they can just use UEFI services. In typical
+Linux environments, this will handle everything up until the kernel
+starts with its initial ramdisk (GRUB will load the kernel and
+initramfs over the network using UEFI services).</p>
+
+<p>As covered in <a href="https://uefi.org/specs/UEFI/2.11/24_Network_Protocols_SNP_PXE_BIS.html#http-boot">UEFI HTTP Boot</a>,
+UEFI provides two ways to do network booting. Both ways start with
+the UEFI firmware doing DHCP to get an initial chunk of information,
+either by IPv4 or IPv6. In the standard and widely supported way,
+your DHCP server answers with (among other things) a next-server
+setting that points to a TFTP server and a 'filename' setting that
+is the initial EFI file to load and boot from that TFTP server. If
+you're using UEFI Secure Boot, this EFI file must be signed, so for
+x86 Linux with GRUB it's typically the (signed) shimx64.efi that
+you'd use locally (which will then boot 'grubx64.efi', which must
+really be the (signed) 'grubnetx64.efi'). My understanding is that
+this looks a lot like old fashioned PXE booting with minor differences
+in file names, configuration files, and so on.</p>
+
+<p>The other, modern option is to skip using TFTP and load the EFI
+boot file over HTTP, hence <a href="https://uefi.org/specs/UEFI/2.11/24_Network_Protocols_SNP_PXE_BIS.html#http-boot">UEFI HTTP Boot</a>; this was apparently
+added in UEFI 2.5, from 2015. The UEFI firmware signals that it's
+doing a HTTP boot instead of a TFTP boot by <a href="https://uefi.org/specs/UEFI/2.11/24_Network_Protocols_SNP_PXE_BIS.html#client-broadcast">setting special options
+in its DHCP request</a>;
+it requests a special architecture and puts special things in its
+DHCP 'vendor class identifier'. If your DHCP server and your overall
+environment supports this boot option, you'll reply with a DHCP
+'filename' option that is the URL of what to start booting from
+(often shimx64.efi again) and a special 'vendor class identifier'
+marker of your own to tell the UEFI firmware that this is a HTTP
+boot reply.</p>
+
+<p>(See <a href="https://unix.stackexchange.com/questions/751792/uefi-http-boot-clarity">here</a>,
+<a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/interactively_installing_rhel_over_the_network/preparing-to-install-from-the-network-using-http_rhel-installer">here</a>,
+and <a href="https://www.kraxel.org/blog/2021/09/vm-network-boot/">the end of here</a> for various
+DHCP server incantations using either the advertised client DHCP
+architecture or its vendor class identifier.)</p>
+
+<p>Although the UEFI standard's description of <a href="https://uefi.org/specs/UEFI/2.11/24_Network_Protocols_SNP_PXE_BIS.html#http-boot">UEFI HTTP Boot</a> is
+somewhat unclear, it clearly envisions that HTTP boot can be used
+to 'boot' not just EFI programs but also disk images and even ISOs.
+These will be set up by UEFI firmware as a (UEFI) RAM disk. How
+your system installer accesses this ISO RAM image after the installer's
+kernel has started and UEFI firmware services aren't available any
+more is up to it.</p>
+
+<p>UEFI HTTP booting has a variety of appealing features, like not
+using TFTP and supporting DNS (and everything that comes with that),
+and in modern UEFI firmware you apparently don't even need DHCP if
+you configure everything in the UEFI boot variables (<a href="https://uefi.org/specs/UEFI/2.11/10_Protocols_Device_Path_Protocol.html#ipv4-device-path">cf</a>,
+<a href="https://uefi.org/specs/UEFI/2.11/10_Protocols_Device_Path_Protocol.html#uniform-resource-identifiers-uri-device-path">also</a>).
+However, it has the potentially significant drawback of being modern,
+which means that older UEFI firmware (which <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/RetainingOldSystems2026">you may have on systems
+you're now retaining</a>) may
+either not support it at all or may have bugs and flaky behavior
+related to it. For that matter, even your modern UEFI firmware may
+not be entirely free of bugs, especially if you want to do more
+exotic things like directly boot an ISO image.</p>
+
+<p>If you're already going to get as much as possible of the installer
+from your HTTP server, my view is that you might as well enable
+UEFI HTTP booting in your DHCP server. It probably won't hurt and
+it may enable somewhat better network booting, especially across
+subnet boundaries. Although ideally you won't be loading very much
+via TFTP anyway.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
