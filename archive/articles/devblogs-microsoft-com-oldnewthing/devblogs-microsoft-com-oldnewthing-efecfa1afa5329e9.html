@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Another crash caused by uninstaller code injection into Explorer | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Another crash caused by uninstaller code injection into Explorer</h1>
+        <div class="meta">The Old New Thing 2026-04-23T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260423-00/?p=112261">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-efecfa1afa5329e9.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Inadvertently destroying a staircase while standing on it. The post Another crash caused by uninstaller code injection into Explorer appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Some time ago, I noted that <a title="Any sufficiently advanced uninstaller is indistinguishable from malware" href="https://devblogs.microsoft.com/oldnewthing/20230911-00/?p=108749"> any sufficiently advanced uninstaller is indistinguishable from malware</a>.¹</p>
+<p>During one of our regular debugging chats, a colleague of mine mentioned that he was looking at a mysterious spike in Explorer crashes. He showed me one of the dumps, and as soon as I saw the register dump, I said, &#8220;Oh, I bet it&#8217;s a buggy uninstaller.&#8221;</p>
+<p>The tell-tale sign: It&#8217;s a crash in 32-bit Explorer on a 64-bit system.</p>
+<p>The 32-bit version of Explorer exists for backward compatibility with 32-bit programs. This is not the copy of Explorer that is handling your taskbar or desktop or File Explorer windows. So if the 32-bit Explorer is running on a 64-bit system, it&#8217;s because some other program is using it to do some dirty work.</p>
+<p>But out of curiosity, I went to look at why this particular version of the buggy uninstaller was crashing.</p>
+<p>This particular uninstaller&#8217;s injected code had a loop where it tried to do some file operations, and if they failed, it paused for a little bit and then tried again. However, the author of the code failed to specify the correct calling convention on the functions, so instead of calling them with the <code>__stdcall</code> calling convention, it called them with the <code>__cdecl</code> calling convention. In the <code>__stdcall</code> calling convention, the callee pops the parameters from the stack, but in the <code>__cdecl</code> calling convention, the caller pops them.</p>
+<p>This calling convention mismatch means that each time the code calls a Windows function, the code pushes parameters onto the stack, the Windows function pops them, and then the calling code pops them <i>again</i>. Therefore, each time through the loop, the code eats away at its own stack.</p>
+<p>Apparently, this loop iterated a lot of times, because it had eaten up its entire stack, and the stack pointer had incremented all the way into its injected code. Each time through the loop, a little bit more of the injected code was being encroached by the stack, until the stack pointer found itself <i>inside the code being executed</i>.</p>
+<p>The code then crashed on an invalid instruction because the code no longer existed. It had been overwritten by stack data.</p>
+<p>This <a title="'Live Fast, Die Young, Leave a Good-Looking Corpse': Coined by a Chicago Writer" href="https://www.chicagomag.com/city-life/october-2012/live-fast-die-young-leave-a-good-looking-corpse-coined-by-a-chicago-writer/"> left an ugly corpse behind</a>, and so many of them that the Windows team thought that it was caused by a bug in Windows itself.</p>
+<p>¹ The title is a reference to <a href="https://en.wikipedia.org/wiki/Clarke%27s_three_laws"> Clarke&#8217;s Third Law</a>: Any sufficiently advanced technology is indistinguishable from magic.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260423-00/?p=112261">Another crash caused by uninstaller code injection into Explorer</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
