@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Configuring the ISC DHCP server to pick the right network boot option | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Configuring the ISC DHCP server to pick the right network boot option</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-04-24T03:53:11Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/ISCDHCPServerPickNetbootOption">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-92162048eaddd552.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">There are at least three ways that x86 machines can try to boot from the network; BIOS PXE boot, UEFI PXE boot, and UEFI HTTP boot . All of them start by the machine asking a DHCP server for what it should boot, and all of them require different answers from the DHCP server. If you want to support more than one network booting option, your DHCP server needs…</div>
+        <div class="content">
+          <div class="wikitext"><p>There are at least three ways that x86 machines can try to boot
+from the network; BIOS PXE boot, <a href="https://utcc.utoronto.ca/~cks/space/blog/tech/UEFINetworkBootNotes">UEFI PXE boot, and UEFI HTTP
+boot</a>. All of them start by the machine
+asking a DHCP server for what it should boot, and all of them require
+different answers from the DHCP server. If you want to support more
+than one network booting option, your DHCP server needs to give each
+sort of client the right answer for it, which generally means you have
+to tell the DHCP server how to tell the types of clients apart.</p>
+
+<p>(If you have all modern machines you can probably get away with
+only supporting UEFI PXE booting, which will simplify your life
+slightly.)</p>
+
+<p>The DHCP server we use is the standard and now old-fashioned ISC
+DHCP server. There are a variety of guides for how to configure
+your ISC DHCP server for multiple types of network booting, but for
+various reasons I'm writing my own. This one is actually tested in
+real use (I've booted machines all three ways from this configuration).</p>
+
+<p>When DHCP clients send out network booting requests, they include
+two important pieces of information, their "vendor class identifier"
+and their 'architecture'; these are DHCP option code 60 and DHCP
+option code 93 respectively. The vendor class identifier is a string
+and the architecture is a 16-bit integer. ISC DHCP has names for
+both options, <code>vendor-class-identifier</code> and <code>pxe-system-type</code>
+respectively (<a href="https://kb.isc.org/docs/isc-dhcp-44-manual-pages-dhcp-options">cf</a>),
+although the latter appears to be recent enough that a lot of
+Internet writeups think you have to define it yourself in your
+dhcpd.conf, eg:</p>
+
+<blockquote><pre>
+option pxe-arch code 93 = unsigned integer 16;
+</pre>
+</blockquote>
+
+<p>Since I didn't read up on all of this before this entry, my dhcpd.conf
+contains this <a href="https://utcc.utoronto.ca/~cks/space/blog/programming/ProgrammingViaSuperstition">superstition</a>
+and I haven't (yet) tested a version without it.</p>
+
+<p>If all you care about is UEFI x86 systems, you can use the vendor
+class identifier to tell apart UEFI PXE booting and UEFI HTTP
+booting. In PXE booting, it starts with 'PXEClient', and in HTTP
+booting, it starts with 'HTTPClient'. This results in a configuration
+snippet that looks like this:</p>
+
+<blockquote><pre>
+class "pxeclients" {
+  # TFTP
+  match if substring (option vendor-class-identifier, 0, 9) = "PXEClient";
+  next-server X.Y.Z.Q;
+  filename "/grub/shimx64.efi";
+}
+class "httpclients" {
+  match if substring (option vendor-class-identifier, 0, 10) = "HTTPClient";
+  # the v-c-i in the reply is required
+  option vendor-class-identifier "HTTPClient";
+  filename "http://X.Y.Z.Q/grub/shimx64.efi";
+}
+</pre>
+</blockquote>
+
+<p>If you also want to handle BIOS PXE systems, you need something
+more complicated, because both BIOS PXE and UEFI PXE have a vendor
+class identifier that starts with 'PXEClient'. You can be more
+precise by matching more of the vendor class identifier because it
+also includes an 'Arch:XXXXX' string (<a href="https://wiki.fogproject.org/wiki/index.php/BIOS_and_UEFI_Co-Existence">cf</a>),
+but I think it's simpler to switch to using the 'architecture'
+number (which is what the 'Arch:' part is telling you anyway). The
+official list of architecture types is IANA's <a href="https://www.iana.org/assignments/dhcpv6-parameters/dhcpv6-parameters.xhtml#processor-architecture">Processor Architecture
+Types</a>,
+and one thing to know when reading it is that 'x64' is 64-bit x86,
+not Itanium. In practice with x86, what you'll see is 0x00 (BIOS
+PXE), 0x07 (UEFI PXE), and 0x10 (UEFI HTTP). In your dhcpd.conf,
+this looks like:</p>
+
+<blockquote><pre>
+if (option pxe-arch = 00:10) {
+  # The v-c-i is required
+  option vendor-class-identifier "HTTPClient";
+  filename "http://X.Y.Z.Q/grub/shimx64.efi";
+} else if (option pxe-arch = 00:07) {
+  next-server X.Y.Z.Q;
+  filename "/grub/shimx64.efi";
+} else {
+  next-server X.Y.Z.Q;
+  filename "/pxe/lpxelinux.0";
+}
+</pre>
+</blockquote>
+
+<p>(Technically I should check pxe-arch for the last clause.)</p>
+
+<p>I believe you can use the official '<code>pxe-system-type</code>' here instead
+of my self-defined version, but I'm copying this example straight
+from my known-working dhcpd.conf. Also, as covered in <a href="https://kb.isc.org/docs/isc-dhcp-44-manual-pages-dhcp-eval">dhcp-eval</a>,
+possibly this would be more clearly written as a switch statement.
+I may experiment with both changes later, but this is what's working
+for me today.</p>
+
+<p>(See also <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/UbuntuServerISONetworkInstall">my entry on the various steps of a network install from
+an Ubuntu server ISO</a>, which
+discusses the shimx64.efi and lpxelinux.0 bits a bit more.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
