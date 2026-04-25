@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>You can parse an .env file as an .ini with PHP - but there&#x27;s a catch | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>You can parse an .env file as an .ini with PHP - but there&#x27;s a catch</h1>
+        <div class="meta">Terence Eden’s Blog 2026-04-25T11:34:15Z</div>
+        <div class="links">
+          <a href="https://shkspr.mobi/blog/2026/04/you-can-parse-an-env-file-as-an-ini-with-php-but-theres-a-catch/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/shkspr-mobi/shkspr-mobi-4a775714424118a6.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The humble .env file is a useful and low-tech way of storing persistent environment variables. Drop the file on your server and let your PHP scripts consume it with glee. But consume it how? There are lots of excellent parsing libraries for PHP. But isn&#x27;t there a simpler way? Yes! You can use PHP&#x27;s parse_ini_file() function and it works. But… .env and .ini…</div>
+        <div class="content">
+          <p>The humble <code>.env</code> file is a useful and low-tech way of storing persistent environment variables. Drop the file on your server and let your PHP scripts consume it with glee.</p>
+
+<p>But consume it <em>how</em>? There are lots of excellent parsing libraries for PHP. But isn't there a simpler way? Yes! You can use <a href="https://www.php.net/manual/en/function.parse-ini-file.php">PHP's <code>parse_ini_file()</code> function</a> and it works.</p>
+
+<p>But…</p>
+
+<p><code>.env</code> and <code>.ini</code> have subtly different behaviour which might cause you to swear at your computer.</p>
+
+<p>Let's take this example:</p>
+
+<pre><code class="language-env"># This is a comment
+USERNAME="edent"
+</code></pre>
+
+<p>Run <code>$env = parse_ini_file( ".env" );</code> and you'll get back an array setting the USERNAME to be "edent". Hurrah! Works perfectly. Ship it!</p>
+
+<p>But consider this:</p>
+
+<pre><code class="language-env"># This is a comment
+USERNAME="edent" # Don't use an @ symbol here.
+</code></pre>
+
+<p>It will happily tell you that the username is <code>"edent# Don"</code></p>
+
+<p>WTAF?</p>
+
+<p>Here's the thing. The comment character for <code>.ini</code> is <strong>not</strong> <code>#</code> - it's the semicolon <code>;</code></p>
+
+<p>Let me give you some other examples of things which will fuck up your parsing:</p>
+
+<pre><code class="language-env"># Documentation at https:/example.com/?doc=123
+DOCUMENTATION=123
+# Set the password
+PASSWORD=qwerty;789
+</code></pre>
+
+<p>That gets us back this PHP array:</p>
+
+<pre><code class="language-php">[
+  '# Documentation at https:/example.com/?doc' =&gt; '123',
+  'DOCUMENTATION' =&gt; '123',
+  'PASSWORD' =&gt; 'qwerty',
+];
+</code></pre>
+
+<p>When the <code>.ini</code> is parsed, it ignores every line which <em>doesn't have an <code>=</code> sign</em>. It also treats literal semicolons as the start of a new comment until they're wrapped in quotes.</p>
+
+<p>My code highlighter should show you how it is parsed:</p>
+
+<pre><code class="language-ini"># Documentation at https:/example.com/?doc=123
+DOCUMENTATION=123
+# Set the password
+PASSWORD=qwerty;789
+</code></pre>
+
+<p>It gets worse. Consider this:</p>
+
+<pre><code class="language-env"># Set the "official" name
+REALNAME="Arthur, King of the Britons"
+</code></pre>
+
+<p>That immediately fails with <code>PHP Warning:  syntax error, unexpected '"' in envtest on line 1</code></p>
+
+<p>You can use single quotes in pseudo-comments just fine, but if the ini parser sees a double quote without an equals then it throws a wobbly.</p>
+
+<p>I'm sure there are several other gotchas as well. For example, there are <a href="https://www.w3schools.com/php/func_filesystem_parse_ini_file.asp">certain reserved words and symbols you can't used as a key</a>.</p>
+
+<p>This will fail:</p>
+
+<pre><code class="language-env"># Can we fix it? Yes we can!
+FIX=true
+</code></pre>
+
+<p>It chokes on the exclamation point.</p>
+
+<h2 id="how-to-solve-it-the-stupid-way"><a href="https://shkspr.mobi/blog/2026/04/you-can-parse-an-env-file-as-an-ini-with-php-but-theres-a-catch/#how-to-solve-it-the-stupid-way">How to solve it (the stupid way)</a></h2>
+
+<p>The comments on an <code>.env</code> file start with a hash.</p>
+
+<p>The comments on an <code>.ini</code> file start with a semicolon.</p>
+
+<p>So, it is perfectly valid for a hybrid file to have its comments start with <code>#;</code></p>
+
+<p>Look, if it's stupid but it works…</p>
+
+<h2 id="what-have-we-learned-here-today"><a href="https://shkspr.mobi/blog/2026/04/you-can-parse-an-env-file-as-an-ini-with-php-but-theres-a-catch/#what-have-we-learned-here-today">What Have We Learned Here Today?</a></h2>
+
+<ul>
+<li>There's a right way and a wrong way to do <code>.env</code> parsing.</li>
+<li>The wrong way works, up until the point it doesn't.</li>
+<li>You should probably use a proper parser rather than hoping your <code>.env</code> looks enough like an <code>.ini</code> to pass muster.</li>
+</ul>
+
+<p>On next week's show - why you shouldn't store your passwords inside a JPEG!</p>
+<img src="https://shkspr.mobi/blog/wp-content/themes/edent-wordpress-theme/info/okgo.php?ID=68636&HTTP_REFERER=RSS" alt="" width="1" height="1" loading="eager">
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
