@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Closed-form solution to the nonlinear pendulum equation | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Closed-form solution to the nonlinear pendulum equation</h1>
+        <div class="meta">John D. Cook 2026-04-25T16:16:12Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/04/25/exact-solution-nonlinear-pendulum/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-f72390c1ea1e120f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The previous post looks at the nonlinear pendulum equation and what difference it makes to the solutions if you linearize the equation. If the initial displacement is small enough, you can simply replace sin θ with θ. If the initial displacement is larger, you can improve the accuracy quite a bit by solving the linearized […] The post Closed-form solution t…</div>
+        <div class="content">
+          <p>The <a href="https://www.johndcook.com/blog/2026/04/24/nonlinear-pendulum/">previous post</a> looks at the nonlinear pendulum equation and what difference it makes to the solutions if you linearize the equation.</p>
+<p>If the initial displacement is small enough, you can simply replace sin θ with θ. If the initial displacement is larger, you can improve the accuracy quite a bit by solving the linearized equation and then adjusting the period.</p>
+<p>You can also find an exact solution, but not in terms of elementary functions; you have to use Jacobi elliptic functions. These are functions somewhat analogous to trig functions, though it&#8217;s not helpful to try to pin down the analogies. For example, the Jacobi function sn is like the sine function in some ways but very different in others, depending on the range of arguments.</p>
+<p>We start with the differential equation</p>
+<p>θ″(<em>t</em>) + <em>c</em>² sin( θ(<em>t</em>) ) = 0</p>
+<p>where <em>c</em>² = <em>g</em>/<em>L</em>, i.e. the gravitational constant divided by pendulum length, and initial conditions θ(0) = θ<sub>0</sub> and θ′(0) = 0. We assume −π &lt; θ<sub>0</sub> &lt; π.</p>
+<p>Then the solution is</p>
+<p>θ(<em>t</em>) = 2 arcsin( <em>a</em> cd(<em>c</em><em>t</em> | <em>m</em> ) )</p>
+<p>where <em>a</em> = sin(θ<sub>0</sub>/2), <em>m</em> = <em>a</em>², and cd is one of the 12 Jacobi elliptic functions. Note that cd, like all the Jacobi functions, has an argument and a parameter. In the equation above the argument is <em>ct</em> and the parameter is <em>m</em>.</p>
+<p>The last plot in the previous post was misleading, showing roughly equal parts genuine difference and error from solving the differential equation numerically. Here&#8217;s the code that was used to solve the nonlinear equation.</p>
+<pre>from scipy.special import ellipj, ellipk
+from numpy import sin, cos, pi, linspace, arcsin
+from scipy.integrate import solve_ivp
+
+def exact_period(θ):
+    return 2*ellipk(sin(θ/2)**2)/pi
+
+def nonlinear_ode(t, z):
+    x, y = z
+    return [y, -sin(x)]    
+
+theta0 = pi/3
+b = 2*pi*exact_period(theta0)
+t = linspace(0, 2*b, 2000)
+
+sol = solve_ivp(nonlinear_ode, [0, 2*b], [theta0, 0], t_eval=t)
+</pre>
+<p>The solution is contained in <code>sol.y[0]</code>.</p>
+<p>Let&#8217;s compare the numerical solution to the exact solution.</p>
+<pre>def f(t, c, theta0):
+    a = sin(theta0/2)
+    m = a**2
+    sn, cn, dn, ph = ellipj(c*t, m)
+    return 2*arcsin(a*cn/dn)
+</pre>
+<p>There are a couple things to note about the code. First,SciPy doesn&#8217;t implement the cd function, but it can be computed as cn/dn. Second, the function <code>ellipj</code> returns four functions at once because it takes about as much time to calculate all four as it does to compute one of them.</p>
+<p>Here is a plot of the error in solving the differential equation.</p>
+<p><img fetchpriority="high" decoding="async" class="aligncenter size-medium" src="https://www.johndcook.com/nonlinpend4.png" width="480" height="360" /></p>
+<p>And here is the difference between the exact solution to the nonlinear pendulum equation and the stretched solution to the linear equation.</p>
+<p><img decoding="async" class="aligncenter size-medium" src="https://www.johndcook.com/nonlinpend5.png" width="480" height="360" /></p>The post <a href="https://www.johndcook.com/blog/2026/04/25/exact-solution-nonlinear-pendulum/">Closed-form solution to the nonlinear pendulum equation</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
