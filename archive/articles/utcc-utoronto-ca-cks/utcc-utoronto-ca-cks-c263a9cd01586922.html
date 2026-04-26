@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Understanding the Ubuntu server installer initramfs | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Understanding the Ubuntu server installer initramfs</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-04-26T02:48:10Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/UbuntuServerInstallerInitramfs">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-c263a9cd01586922.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I recently wrote about all of the various steps of a UEFI network install , where you have a whole collection of DHCP, GRUB fetching things via TFTP and HTTP, and so on, all to boot into your Ubuntu server install ISO image. Specifically, all of the GRUB stuff and much of the complicated DHCP stuff is there because we have to load the installer&#x27;s kernel and…</div>
+        <div class="content">
+          <div class="wikitext"><p>I recently wrote about <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/UbuntuServerISONetworkInstall">all of the various steps of a UEFI network
+install</a>, where you have a whole
+collection of DHCP, GRUB fetching things via TFTP and HTTP, and so
+on, all to boot into your Ubuntu server install ISO image. Specifically,
+all of the GRUB stuff and much of <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/ISCDHCPServerPickNetbootOption">the complicated DHCP stuff</a> is there because we have
+to load the installer's kernel and initial ramdisk. Our primary
+usage for UEFI network installs is to reinstall physical servers
+that are now in inconvenient locations, so eventually it occurred
+to me that if we already have running Linux systems, there are
+simpler ways to boot into a specific kernel and initramfs with
+specific command line arguments. One way is to add new GRUB boot
+entries, and another way is <a href="https://www.man7.org/linux/man-pages/man8/kexec.8.html"><code>kexec</code></a>.</p>
+
+<p>If we're already using a local kernel and initramfs, it might be
+convenient to get rid of the need for a DHCP server too, by copying
+the network parameters from the currently running server and embedding
+them in both the kernel boot parameters and, more importantly, the
+cloud-init files that the installer will use. To do this, we need
+to embed the cloud-init files in the initramfs (and then point to
+them with 'ds=nocloud;s=/whatever' in the kernel command lines).
+Well, that's the theory, but it turns out that this is not quite
+the practice.</p>
+
+<p>The problem is that contrary to what you (<a href="https://mastodon.social/@cks/116455061697342661">I</a>) might think, the
+Ubuntu server installer is not running from the initramfs. Instead,
+the initramfs constructs an in-memory root filesystem from various
+squashfs filesystem images that it gets from /casper on the installer
+ISO. As part of the initramfs boot, <a href="https://manpages.ubuntu.com/manpages/resolute/man7/casper.7.html">Casper</a> mounts
+the ISO image (either via NFS or via a HTTP copy), finds those files
+on it in /casper, and then uses these files to construct the root
+filesystem that will then have the ISO image (still) mounted in it
+when Casper pivots the system into running from it. This means that
+while it's readily possible to add files to the initramfs, your
+added files are immediately discarded when Casper pivots to its
+pre-built root filesystem. Since the squashfs filesystem images
+come from the ISO image, they're generic across your systems and
+you can't use them to embed per-system configurations.</p>
+
+<p>(In the process of this pivot, Casper will do things like switch
+to a standard systemd init environment.)</p>
+
+<p>To deal with Casper dropping the initramfs, we must arrange to copy
+our injected initramfs contents into the root filesystem that Casper
+builds before Casper pivots into it and discards the initramfs (as
+far as I know, there's no way to access the initramfs after this,
+especially with it pre-mounted so that your cloud-init file can be
+immediately read).  Sadly Casper makes this complicated and potentially
+specific to the Ubuntu server installer you're using.</p>
+
+<p>As part of the Casper initramfs process, Casper will run a collection
+of scripts from /scripts/casper-bottom, so ideally we can just add
+our own script to that and have it copy things from the initramfs
+to appropriate places in /root (the real root filesystem to be).
+Unfortunately, Casper doesn't scan this directory for scripts to
+run; instead what scripts to run (in what order) is handled by
+/scripts/casper-bottom/ORDER (this is the standard Casper way and
+is used for other Casper 'directories of scripts'). So we have to
+add our script and also replace the ORDER file from the ISO's initrd
+with one that includes our script.</p>
+
+<p>A Linux kernel initramfs is a collection of cpio archives, with the
+last archive (usually) compressed. You can put your own uncompressed
+cpio archive on the front, or (usually) compress your own cpio
+archive with the same compression method as the compressed archive
+and stick it on at the end. Files in later cpio archives overwrite
+files from earlier cpio archives, and since we need to overwrite
+/scripts/casper-bottom/ORDER, we have to put our cpio archive at
+the end. Starting no later than Ubuntu 22.04 LTS, the standard
+installers all have the last cpio archive compressed with zstd,
+so that's also what we need to compress our own cpio archive.</p>
+
+<p>(I believe there are potentially tricky issues with sticking
+compressed archives together this way, which I will leave to
+others to investigate. I made a 26.04 version work without
+problems but that could have been luck.)</p>
+
+<p>To make this less annoying, we can use two local cpio archives.
+One archive contains only our additions and changes to
+/scripts/casper-bottom; it's zstd compressed and goes on the end
+of the initramfs, and we can even prepare generic, amended initramfs
+images with this already pre-built. Then the only per-machine
+addition we need to build is our cloud-init configuration files,
+which can go into an uncompressed cpio archive that we put on the
+front of our initramfs (perhaps the prepared, modified initramfs).
+This will give us a full initramfs that we can use as kexec's
+'--initrd' argument (or set up in a GRUB entry).</p>
+
+<p>(This is not quite enough by itself to enable a DHCP-less network
+boot and install, because we also have to configure the system's
+IP address and other details in <a href="https://manpages.ubuntu.com/manpages/resolute/man7/casper.7.html">Casper</a> itself via the 'ip='
+command line argument; see <a href="https://manpages.ubuntu.com/manpages/resolute/man7/casper.7.html">casper(7)</a> for
+the format of that. With a proper ip= setting, Casper can find the
+ISO image and mount it, and with a proper cloud-init injected into
+the initramfs and then the installer root filesystem, the server
+installer will properly set up networking and keep it up so that
+you can go through <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/UbuntuServerISONetworkInstall">the normal over the network installer operation</a>.)</p>
+
+<p>PS: Apparently I will go through quite a lot to not have to maintain
+and update DHCP server entries, even through scripts that the future
+me might have fun writing.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
