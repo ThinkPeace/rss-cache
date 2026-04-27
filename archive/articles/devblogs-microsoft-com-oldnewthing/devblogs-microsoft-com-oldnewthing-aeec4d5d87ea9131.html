@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Looking at consequences of passing too few register parameters to a C function on various architectures | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Looking at consequences of passing too few register parameters to a C function on various architectures</h1>
+        <div class="meta">The Old New Thing 2026-04-27T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260427-00/?p=112271">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-aeec4d5d87ea9131.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">It&#x27;s bad news no matter how you slice it, but Itanium makes it even worse. The post Looking at consequences of passing too few register parameters to a C function on various architectures appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>In our exploration of calling conventions for various processors on Windows, we learned that in many cases, some of the parameters are passed in registers.</p>
+<p>Suppose that there is a function that takes two parameters, but you know that the function ignores the second parameter if the first parameter is positive. What happens if you call the function with just one parameter (say, passing zero). The function should ignore the second parameter, so why does it matter that you didn&#8217;t pass one?</p>
+<p>Even though the function doesn&#8217;t use the parameter, it still may decide to use the storage for that parameter as a conveniently provided scratch space. For example:</p>
+<pre>int blah(int a, int b)
+{
+    if (a &lt;= 0) {
+        int c = f1();
+        f2(a);
+        return c;
+    } else {
+        return f3(a, b);
+}
+</pre>
+<p>Is it okay to call <code>blah</code> with zero as its only parameter? You aren&#8217;t passing <code>b</code>, but the function doesn&#8217;t use <code>b</code>, so why does it matter?</p>
+<p>Formally, the C and C++ languages say that if you call a function with the wrong number of parameters, the behavior is undefined, so officially, you&#8217;ve broken the rules and anything can happen.</p>
+<p>But let&#8217;s look at what types of things could go wrong.</p>
+<p>If you pass too few parameters on the stack, and it is a callee-clean calling convention, then the callee will clean too many bytes off the stack, <a title="Another crash caused by uninstaller code injection into Explorer" href="https://devblogs.microsoft.com/oldnewthing/20260423-00/?p=112261"> resulting in stack imbalance</a> and likely memory corruption.</p>
+<p>Even if it&#8217;s not a callee-clean calling convention, the called function will think that the memory for the parameter is present, and it may use it as scratch space, resulting in memory corruption in the stack frame of the calling function.</p>
+<p>In our example above, the compiler might realize, &#8220;Hey, I don&#8217;t need to allocate new memory for the variable <code>c</code>. I can just reuse the memory that holds the now-dead variable <code>b</code>.&#8221; In other words, it rewrites the function as</p>
+<pre>int blah(int a, int b)
+{
+    if (a &lt;= 0) {
+        <span>b</span> = f1();
+        f2(a);
+        return c;
+    } else {
+        return f3(a, b);
+}
+</pre>
+<p>Even if you don&#8217;t reserve memory for the variable <code>b</code>, the compiler will assume that you did and overwrite whatever is at the location the reserved memory should have been.</p>
+<p>But what if the parameters are passed in registers, and you didn&#8217;t pass enough of them?</p>
+<p>On most processors, what happens is that the called function will try to use that register and read whatever uninitialized value happens to be lying in that register.</p>
+<p>Except on Itanium.</p>
+<p>One special Itanium quirk is the presence of <a title="The Itanium processor, part 1: Warming up" href="https://devblogs.microsoft.com/oldnewthing/20150727-00/?p=90821"> the &#8220;Not a Thing&#8221; (NaT) bit</a>, which is a bit attached to each general purpose register that indicates whether the register holds a valid value. The most common ways for a register to enter the NaT state are if it was <a title="The Itanium processor, part 7: Speculative loads" href="https://devblogs.microsoft.com/oldnewthing/20150804-00/?p=91181"> the result of a failed speculative load</a>, or if it was the result of a mathematical calculation where at least one of the inputs was itself NaT. Therefore, if your uninitialized output register happens to be a NaT left over from an earlier failed speculation, the called function might decide to spill the value onto the stack for safekeeping before using that register for something else.</p>
+<pre>extern bool is_valid(int);
+
+int blah2(int a, int b)
+{
+    if (is_valid(a)) {
+        return f3(a, &amp;b);
+    } else {
+        return 0;
+    }
+}
+</pre>
+<p>The compiler realizes that it needs to take the address of <code>b</code> if <code>a</code> is not valid, so it has to spill the value to memory (so that it can have an address). But <a title="Uninitialized garbage on ia64 can be deadly" href="https://devblogs.microsoft.com/oldnewthing/20040119-00/?p=41003"> writing a NaT to memory raises a &#8220;NaT consumption&#8221; exception</a>, so this function crashes even in the case where it never actually uses the <code>b</code> variable.</p>
+<p>But wait, there&#8217;s more.</p>
+<p>On Itanium, the function call mechanism is architectural rather than merely conventional. The calling function declares the number of output registers (registers that will be passed to the called function), and those registers are renumbered on entry to the called function so that they are visible starting at register <var>r32</var>. If a calling function says &#8220;I am passing 2 registers,&#8221; then the called function sees them as registers <var>r32</var> and <var>r33</var>. I covered the details <a title="The Itanium processor, part 3: The Windows calling convention, how parameters are passed" href="https://devblogs.microsoft.com/oldnewthing/20150729-00/?p=90801"> some time ago</a>, but <a title="The Itanium processor, part 4: The Windows calling convention, leaf functions" href="https://devblogs.microsoft.com/oldnewthing/20150730-00/?p=90791"> leaf functions are particularly interesting</a>.</p>
+<p>Leaf functions are functions that do not create a custom stack frame and simply make do with the architectural stack frame that the processor creates for them by default. And that default stack frame consists only of the inbound parameter registers. In the case of passing too few parameters to a function, that means that the default stack frame contains fewer registers than the function expects.</p>
+<p>Architecturally, the rule is that if you read from a stacked register that lies outside the current frame, the results are &#8220;undefined&#8221;. I couldn&#8217;t find a formal definition of &#8220;undefined&#8221; in the Itanium documentation (though it&#8217;s eminently likely that I simply missed it), but I assume it means &#8220;can produce any result, including an exception, that is not dependent upon information outside the current processor execution mode.&#8221;¹ In particular, it can raise a processor exception, say, because the value of that stacked register happens to contain a leftover NaT.</p>
+<p>The Itanium architecture takes an even stronger stance against writing a stack register that lies outside the current frame: It is required to raise an Illegal Operation fault.</p>
+<p>I can imagine it being weird seeing an exception come out of a register-to-register move instruction.</p>
+<p>So there you go, another case where the Itanium architecture more strictly enforces a programming rule, in this case, making sure that you pass the correct number of parameters to a function.</p>
+<p>¹ This means that, for example, an &#8220;undefined&#8221; result in user-mode code cannot be dependent upon information available only to kernel mode.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260427-00/?p=112271">Looking at consequences of passing too few register parameters to a C function on various architectures</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
