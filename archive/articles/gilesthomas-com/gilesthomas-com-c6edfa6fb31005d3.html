@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>10Gb Ethernet: what I had to (re)learn | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>10Gb Ethernet: what I had to (re)learn</h1>
+        <div class="meta">Giles&#x27; blog 2026-04-28T18:45:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/04/10g-ethernet-what-i-relearned">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-c6edfa6fb31005d3.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">My ISP recently started offering a 10Gb option, and my &quot;shiny new thing!&quot; Pavlovian response immediately kicked in. So of course, I had to upgrade the wired networking in my home -- which meant I had to learn a few things to get it all working, and relearn a bunch of stuff I&#x27;d forgotten over the years. Wired networking for home and small offices hasn&#x27;t real…</div>
+        <div class="content">
+          <p>My ISP recently started offering a 10Gb option, and my "shiny new thing!" Pavlovian
+response immediately kicked in.  So of course, I
+had to upgrade the wired networking in my home -- which meant I had to learn a few things to get
+it all working, and relearn a bunch of stuff I'd forgotten over the years.</p>
+
+<p>Wired networking for home and small offices hasn't really moved forward that much in the last 20-odd years.
+Back in 2006, gigabit Ethernet was standard for businesses, and most home users moved
+to it not long after.  Perhaps due to the rise of WiFi for most "last few metres" connections,
+it's pretty much stagnated there, perhaps with a bit of a push towards 2.5Gb/s more
+recently.</p>
+
+<p>But with faster ISP connections arriving, I think things are starting to become
+a bit more interesting.  Even the fastest WiFi 7 connections are only able to get up
+to around 6Gb/s to a single device -- and that's in an ideal "super-fast machine sitting right next
+to the AP in a shielded lab" setup.</p>
+
+<p>Here's what I had to drag up from my memory, and the new stuff I had to learn, in
+order to get this all working.  I'll write about the background in this post, and
+then tomorrow I'll post about what I actually put in place.</p>
+<h3 id="a-bit-of-history">A bit of history</h3>
+
+<p>Let's start with a bit of the backstory.  Bear with me, it's not just self-indulgent
+reminiscing!</p>
+
+<p>When I first started using networked computers, back in the early 90s, the most popular
+standard was <a href="https://en.wikipedia.org/wiki/10BASE2">10BASE2</a>.  We had this in the first
+office that I worked in, and in the university computer labs.  In the back of your
+computer, you'd have a T-shaped connector like this:</p>
+
+<p><img src="/post-assets/10g-ethernet-what-i-relearned/BNC_Tee_connector,_with_Ethernet_cable_connected-92166.jpg" alt="BNC Tee connector, with Ethernet cable connected" title="BNC Tee connector, with Ethernet cable connected" />
+<small>© Raimond Spekking / <a href="https://creativecommons.org/licenses/by-sa/4.0/deed">CC BY-SA 4.0</a> (via <a href="https://commons.wikimedia.org/wiki/File:BNC_Tee_connector,_with_Ethernet_cable_connected-92166.jpg">Wikimedia Commons</a>)</small></p>
+
+<p>The end facing the camera in that photo was the bit that went into your computer.
+Computers were daisy-chained together; you might have a server connected to workstation
+one, workstation one to workstation two, and so on, until you reached the last workstation.
+You'd have to cap the unused end of the T connectors at each end of the chain with a special terminator.</p>
+
+<p>Essentially it was a single coaxial cable, so every computer saw every
+bit that was sent along the bus.  In turn, that meant that everyone was sharing the same bandwidth, a meagre
+10Mb/s.  The cool thing about Ethernet (compared to older networking technologies) was
+that the computers shared it without any need for coordination -- if two of them started
+"speaking" at the same time, they'd notice, and stop.  They would then start again after
+a random back-off, so one of them would randomly wait for less time than the other and
+start first.  The other would notice that "the line was busy" and would wait again for another
+chance.</p>
+
+<p>Of course, this limited the number of computers you could have on one network, as past
+around 20 or so, they'd spend all of their time interrupting each other and never actually
+be able to send anything -- and anyway, sharing 10Mb/s across a large number of computers
+would be an issue.  On top of that, there was a hard cap of 30 machines per network.
+You'd use more specialised networking equipment to link
+different networks together -- bridges, switches and routers.  More about switches later.</p>
+
+<p>By the time we started setting up networking in a house that I shared with friends,
+in around 1996 or so <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>, the most popular option had changed: now people were using
+10BASE-T.  Still 10Mb/s, but using the RJ45 connectors and twisted-pair cables that we've come to know and love.
+All of the computers would have a single cable going to a hub, in a star topology.
+You might link multiple hubs together to build larger networks.</p>
+
+<p>However, these
+hubs were still little more than a convenient form factor to electrically link all
+of the wires together into a single bus.  You still had the problem that every computer could see
+every bit on the bus, and the same bandwidth-sharing and limits with the number of computers that you
+could handle as a result.</p>
+
+<p>Over the years after that, things moved on.  Switches had been relatively expensive
+things; they would be used to interlink hubs, or 10BASE2 networks.  They would learn (from seeing the
+source MAC address on incoming packets) which machines were sending to each of their ports,
+and use that to know where to send packets that came in on other ports.  If, say, a switch
+learned that addresses A, B, and C were on port 1, then if a packet for one of those machines
+came in on port 2, it would know it could just send it out on port 1 and not on the others.
+That helped to address the bandwidth-sharing and the problems with collisions.</p>
+
+<p>Prices for switches got lower and lower, and eventually -- I think sometime between 2005 and
+2010 -- they became so cheap that
+there was little point in bothering with hubs -- you'd just connect every computer
+directly to a switch.  That meant that any two computers on the same switch
+could talk to each other at the full network speed, as packets would just be
+switched from port to port <sup class="footnote-ref" id="fnref-2"><a href="#fn-2">2</a></sup>.  The connections between switches were still a bottleneck, of course,
+but that was much less of a problem.</p>
+
+<p>At the same time, speeds increased, from 10Mb/s
+to 100Mb and then finally to 1Gb/s, which was standard for business machines by 2005 or so --
+I remember that when we bought our first computers for Resolver Systems back then, that's what they
+came with by default.</p>
+
+<p>Home computers weren't far behind -- and that's where we've been ever since. <sup class="footnote-ref" id="fnref-3"><a href="#fn-3">3</a></sup></p>
+
+<h3 id="isps-and-larger-networks-the-move-to-sfp">ISPs and larger networks: the move to SFP</h3>
+
+<p>Back to that bottleneck between the switches.  Even back in the days of 10Mb/s
+networks, if you were managing a larger network, you would want a faster network to interlink them -- so, for example, if
+two computers on the same switch both wanted to access some external resource, they
+wouldn't be competing for the same 10Mb/s uplink.  Once you went past small office-sized
+networks, that kind of thing started becoming important.  ISPs and datacenters, of course,
+had the same problem in spades.</p>
+
+<p>What you would need was an uplink on the switch that could run at a faster data rate.
+So even when 1Gb/s Ethernet was too expensive for the connections to the computers themselves,
+you might have a switch with a 1Gb/s uplink to connect it to the larger network,
+and a bunch of 100Mb/s ports for the local stuff.</p>
+
+<p>Additionally, for larger networks you would have another problem -- physical
+distance.  All of these RJ45-based networking technologies had a maximum cable length
+of 100m.  You could extend that by putting a repeater (or even just a switch) every 100m or so as a "signal booster" --
+but if, for example, you wanted to link two buildings, that could be tricky.  You'd
+need to run both the data cable and power, and you'd need to have some way of getting
+access to the repeaters if they went wrong.</p>
+
+<p>Ethernet over fibre optic connections had been a standard thing for years, though, and
+it had much better range -- for single-mode, many kilometers.  So while it was too fiddly for LANs,
+it made great sense as a backbone technology.</p>
+
+<p>What that meant, though, was that in order to set up some particular network topology,
+you might wind up having to get a whole bunch of different switches.  For short connections
+between two of them, you might use an RJ45 uplink connection, while for longer ones you
+might want fibre.  More complex topologies might need some entirely different mix of
+ports.</p>
+
+<p>To make this worse, there were a bunch of different fibre optic standards -- multi-mode
+and single mode fibres, different connectors, and so on.</p>
+
+<p>Rather than manufacturing a large range of different kinds of switches with all of the
+combinations that people needed, manufacturers
+separated out the physical layer of the transport from the switching hardware.  A switch,
+instead of having specific RJ45 or fibre connectors for its ports, would have Small
+Form-factor Pluggable (SFP) "cages", essentially a new kind of socket.  These allow people to mix and match different kinds of
+transceiver modules, which would slot into the cage to provide an actual usable interface  -- one for RJ45 for gigabit Ethernet, or one for the particular
+kind of fibre connection they were using -- whatever configuration worked best for them.</p>
+
+<p>A typical switch for a larger network might have one or two of those for backbone
+connections, and then RJ45s for local connections.  Over time, gigabit backbones
+were no longer enough, and SFP was followed by SFP+, which could handle 10Gb/s.
+Since then, there have been extensions for even faster speeds, way up to hundreds of
+Gb/s.</p>
+
+<p>Back in the day, this stuff was only important to network admins for medium-sized networks and larger,
+of course.  But now, 10Gb Ethernet means that we've now hit the point where it matters
+even for home users, and that's because of thermals.</p>
+
+<h3 id="10gbase-t-is-so-hot-right-now">10GBASE-T is so hot (right now)</h3>
+
+<p>Here's the problem.  Somewhat loosely speaking, the faster a network connection on a particular
+kind of wiring, the hotter it runs.  Over an RJ45/twisted pair connection, 10Mb/s Ethernet basically shed no heat, 100Mb/s
+a little more, even gigabit Ethernet just left your switches somewhat warm.
+The jump up to 10Gb over RJ45, called 10GBASE-T, makes things decidedly toasty --
+you'll see just how toasty in tomorrow's post.</p>
+
+<p>There's also the issue of cabling.  Because network speeds have been stable
+for some time -- Gigabit Ethernet being the standard for ~20 years --
+most buildings with structured cabling (the kind of thing where there are RJ45 sockets
+in the walls wired together) will have the standard for that -- CAT-5E.  Unfortunately 10Gb/s Ethernet
+won't officially work over it -- you might be lucky, especially with short cables,
+but in general it won't work, or if it does it won't be reliable.</p>
+
+<p>CAT-6 cabling helps -- it can handle 10Gb/s over runs up to about 55 metres.  And
+the ideal is CAT-6A, which can handle 10Gb/s over the same 100 metre cable lengths
+that you'd expect for the older, slower setups.</p>
+
+<p>What this meant was that an interim standard was created.  10GBASE-T is hot and needs
+cables that people don't necessarily have, especially when you're talking about what's
+installed in the walls of their building.  But if you run it a bit slower, you can
+do so over older cables and without melting them.</p>
+
+<p>That's why I didn't mention 2.5Gb/s Ethernet earlier (or indeed the rarer 5Gb/s).
+They were introduced as slowed-down versions of 10Gb/s to get it to work on existing
+infrastructure without major upgrades.  And that's great, right up until the point
+your ISP emails you to say that they're offering 10Gb/s to your home now...</p>
+
+<p>So, what can you do to run 10Gb/s without melting things?</p>
+
+<h3 id="sfp-dac-fibre">SFP+, DAC, fibre</h3>
+
+<p>Let's think about what an SFP or SFP+ module actually is.  It slots into a cage on a
+switch.  On one side, there's an electrical connection to the switch hardware, which
+is carrying the signal -- incoming and outgoing -- using a particular protocol <sup class="footnote-ref" id="fnref-4"><a href="#fn-4">4</a></sup>.
+The module does its magic, and on the other side we have -- say -- 10GBASE-T to an RJ45
+socket, or a blinking laser with an appropriate interface for optical fibre.</p>
+
+<p>What would happen if you just had a dumb electrical cable to connect an SFP+ cage on
+one switch to another on another switch?  That actually works pretty well!  It's called a
+passive Direct Attach Copper (DAC) cable.  The interfacing is a little more complicated
+than just a completely dumb wire -- the switch
+will want to query the module in the cage to find out some details about it, so you need
+a tiny bit of electronics -- but it's still really simple.</p>
+
+<p>On top of that, if you add a bit of amplification to the DAC, then you get an active
+DAC, which can double that kind of length (though these are relatively rare).</p>
+
+<p>The neat thing about DACs is that they run <em>much</em> cooler than 10GBASE-T, using about
+a third of the power.  Of course,
+they lose out in terms of range.  But for simple stuff within one room, and especially
+between switches in a rack, they work really well.</p>
+
+<p>The next step on top of DACs is that you can convert the underlying SFP(+) protocol
+directly to light, and send it down an optical fibre -- normally called an Active Optical
+Cable, or an AOC for short
+(though I've seen the rather confusing terminology "optical DAC" in various places).
+With that, you can normally get up to 100m.  These are cheap and easy to use (because
+they're all-in-one units, so you don't have any fiddly alignment of the fibre to do),
+so they're the best option once you pass passive-DAC distances.</p>
+
+<p>After that, though, you really need to switch to the official standards, and go to
+more traditional fibre-optic setups.  I've done much less research into those, so
+won't try to explain them.  Either way, for the home, anything above this level is
+probably overkill right now...</p>
+
+<h3 id="wrapping-up">Wrapping up</h3>
+
+<p>So: moving from the 2.5Gb/s networks that work smoothly with the same infrastructure
+we've been using for the last 20 years or so to 10Gb/s is a tricky step change.  Suddenly,
+things that didn't matter -- thermal management, cable lengths, and so on -- become
+important.  And there are solutions, but you need to start actually understanding things
+again rather than just plugging stuff in and assuming it will work.</p>
+
+<p>Fun!  Time to put it into practice :-)  In my
+next post, I'll show exactly the changes I had to make to get my existing 2.5Gb/s
+network ported over to 10Gb/s -- the hardware I wound up buying, how well it works,
+and (importantly) how hot it all runs.</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>To share our blazingly fast bonded dual ISDN Internet connection -- 128Kb/s.&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-2">
+<p>I remember feeling a little sad when that happened, because it meant that what
+I felt was coolest about Ethernet -- the back-off-and-retry thing -- was no longer
+all that important.  And when the connections went full duplex (a single
+switch port could both send and receive at the same time over the same cable) it was finished.&#160;<a href="#fnref-2" class="footnoteBackLink" title="Jump back to footnote 2 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-3">
+<p>If you're thinking "what about 2.5Gb/s?", I'll come back to that -- it's an
+interesting case.&#160;<a href="#fnref-3" class="footnoteBackLink" title="Jump back to footnote 3 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-4">
+<p>SFF-8472 for SFP, then there's SFF-8431 and SFF-8432 for SFP+.&#160;<a href="#fnref-4" class="footnoteBackLink" title="Jump back to footnote 4 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
