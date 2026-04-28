@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Don&#x27;t use localhost:3000, use your own custom domain | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Don&#x27;t use localhost:3000, use your own custom domain</h1>
+        <div class="meta">iDiallo.com 2026-04-27T23:17:54Z</div>
+        <div class="links">
+          <a href="https://idiallo.com/blog/say-no-to-localhost3000-use-custom-domains?src=feed">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/idiallo-com/idiallo-com-efbe01cd8eaf839f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">After presenting a demo of how an internal tool works, I was flooded with questions. Not about the tool, but about why I had bought a domain just to run the demo. &quot;Why didn&#x27;t you use the staging server?&quot; they asked. I was confused. I didn&#x27;t buy a domain. I was running it locally. But instead of the URL being localhost:3002 , it was a fully formed domain. ww…</div>
+        <div class="content">
+          <p>After presenting a demo of how an internal tool works, I was flooded with questions. Not about the tool, but about why I had bought a domain just to run the demo. "Why didn't you use the staging server?" they asked.</p>
+			<p>I was confused. I didn't buy a domain. I was running it locally. </p>
+
+<p>But instead of the URL being <code>localhost:3002</code>, it was a fully formed domain. <code>www.internaltool.com</code>. In fact, some people told me that they couldn't access the website on their devices. They thought I had to whitelist their IP to grant them access. To feel young again...</p>
+
+<p>Setting up a custom domain locally was common practice when I started web programming. But with the advent of Node.js (and rails?), everyone has resorted to just pointing to <code>localhost</code> with an incrementing port number. The main reason is that the webserver is often bundled into the application itself. It’s easy to just run <code>npm start</code> and call it a day.</p>
+
+<p>However, if you have multiple long-term projects running locally, especially if they need to communicate with one another, then managing a mental map of ports like <code>3000</code>, <code>8080</code>, and <code>5173</code> quickly gets tiring. This is where my old school approach shines.</p>
+
+<p>By combining the system hosts file with a reverse proxy like Nginx, you can run different projects locally with actual domain names. I usually end up with <code>dev.domain.com</code> for active development, <code>qa.domain.com</code> for a stable local build, and the actual production URL for the live site.</p>
+
+<p>Here is how to set it up.</p>
+
+<h3>Step 1: The Hosts File</h3>
+
+<p>First, we need to tell your computer where to find these domains.</p>
+
+<p>Think of <code>/etc/hosts</code> as your computer's personal contact list. When you type a URL, your computer looks here first. By adding an entry, you are telling your computer: "Don't bother checking the internet when I ask for myproject.com, I am actually talking about this machine." It creates a manual override that maps a friendly name directly to your machine's IP address.</p>
+
+<p>You can edit the file here:</p>
+
+<p><strong>Linux/macOS:</strong> <code>/etc/hosts</code> <br/>
+<strong>Windows:</strong> <code>C:\Windows\System32\Drivers\etc\hosts</code></p>
+
+<p>Open the file in your editor. In this file, right after the block of entries for Adobe (active.adobe.com...), add this line:</p>
+
+<pre><code class="code-lang-default">127.0.0.1 myproject.com
+127.0.0.1 dev.myproject.com
+</code></pre>
+
+<p>Now, when you access those domains in your browser, they don't point to the wider internet, but directly to your own machine.</p>
+
+<h3>Step 2: Nginx Configuration</h3>
+
+<p>Now that the domain is pointed to your own machine, we want to redirect it to the right application. If your app runs on port <code>3000</code>, navigating to <code>myproject.com</code> will default to port <code>80</code> and fail. This is where Nginx comes in. It listens on port <code>80</code> and forwards the traffic to the specific port your app is running on.</p>
+
+<p>Here is a simplified Nginx config to make it work:</p>
+
+<pre><code class="code-lang-default">server {
+    listen 80;
+    server_name myproject.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+    }
+}
+
+server {
+    listen 80;
+    server_name dev.myproject.com;
+
+    location / {
+        proxy_pass http://localhost:3001;
+        proxy_set_header Host $host;
+    }
+}
+</code></pre>
+
+<p>Restart Nginx, and voilà! You have clean, professional URLs for your local environment.</p>
+
+<h3>A Note for WSL2 Users</h3>
+
+<p>If you are running your services inside Windows Subsystem for Linux (WSL2), networking is handled a little differently because the Linux instance has its own virtual IP. You can get your instance's IP address with this command:</p>
+
+<pre><code class="code-lang-default">wsl hostname -I
+# Output: 172.x.x.x
+</code></pre>
+
+<p>You would use that IP address in your Windows hosts file instead of <code>127.0.0.1</code>.</p>
+
+<h3>Conclusion</h3>
+
+<p>After that demo, some people were disappointed to learn the <code>/etc/hosts</code> trick. They thought I was so committed that I had bought a domain name just to give them the raw deal with my demo. Someone mused about a shirt with the words "real men don't use localhost:3000". That could have started a whole new motivational speaking career for me. A custom domain just looks very professional and is practical for separating environments. It just feels cooler than staring at <code>localhost:3000</code> all day. That's how you separate yourself from vibe-coders.</p>
+
+<p>Anyway, back to earth. I feel like this is a lost skill and I'm keeping it alive by sharing it. That's how you run a custom URL locally.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
