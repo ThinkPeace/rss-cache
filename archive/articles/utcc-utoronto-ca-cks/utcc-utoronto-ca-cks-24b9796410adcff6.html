@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The easy way to switch my libvirt-based virtual machines to UEFI | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The easy way to switch my libvirt-based virtual machines to UEFI</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-04-28T03:27:47Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/LibvirtSwitchingToUEFI-2">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-24b9796410adcff6.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I mentioned before that I&#x27;ve been switching some libvirt-based virtual machines to UEFI . I&#x27;ve recently had to do some more things there, which has led me to discover what&#x27;s important about the XML parts of your libvirt machine definitions for this. Or at least, what&#x27;s important if you use virt-manager to change things. (There&#x27;s a long story that boils down…</div>
+        <div class="content">
+          <div class="wikitext"><p>I mentioned before that <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/LibvirtSwitchingToUEFI">I've been switching some libvirt-based
+virtual machines to UEFI</a>. I've recently
+had to do some more things there, which has led me to discover
+what's important about the XML parts of your libvirt machine
+definitions for this. Or at least, what's important if you use
+virt-manager to change things.</p>
+
+<p>(There's a long story that boils down to libvirt external snapshots
+not playing well with virtual CD-ROMs, BIOS PXE booting being
+annoying, and UEFI Secure Boot causing the Ubuntu 26.04 GRUB to
+refuse to touch the Ubuntu 22.04 installer kernel.)</p>
+
+<p>As mentioned in <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/LibvirtSwitchingToUEFI">the previous entry</a>, what
+determines whether the machine boots into UEFI or BIOS is whether
+or not <a href="https://libvirt.org/formatdomain.html#guest-firmware">the <code>&lt;os></code> XML node</a> has a
+"<code>firmware='efi'</code>" attribute set on it. Once you have UEFI
+firmware, the &lt;os> XML node can have a '<code>&lt;firmware></code>' node
+with some '<code>&lt;feature></code>' nodes that tell it what to do about
+Secure Boot:</p>
+
+
+<pre>
+ &lt;os firmware='efi'>
+   &lt;type arch='x86_64' machine='pc-q35-9.2'>hvm&lt;/type>
+   &lt;firmware>
+     &lt;feature enabled='yes' name='enrolled-keys'/>
+     &lt;feature enabled='yes' name='secure-boot'/>
+   &lt;/firmware>
+ &lt;/os>
+</pre>
+
+<p>By itself this isn't a fully specified UEFI set of attributes,
+because you need &lt;loader> and &lt;nvram> elements as well, and these
+vary based on your secure-boot and enrolled-keys settings.</p>
+
+<p>Conveniently for me, if you edit your XML in virt-manager, don't
+have (or remove) the &lt;loader> and &lt;nvram> elements, and then pick
+the 'Apply' button, virt-manager will pick appropriate values for
+you based on your settings for Secure Boot (or the lack of it).
+This can be used when you're turning off Secure Boot (or turning
+it on), or when you're moving from BIOS to UEFI.</p>
+
+<p>(This might also happen if you use 'virsh edit', but I haven't
+tested that. But I suspect it's virt-manager doing some convenient
+magic for you.)</p>
+
+<p>So the easy way to convert a machine from BIOS booting to UEFI,
+with or without secure boot, is to add "<code>firmware='efi'</code>" to the
+&lt;os> attribute and past in an appropriate &lt;firmware> block. The
+block above is for full Secure Boot. For full lack of Secure Boot,
+I want:</p>
+
+<pre>
+   &lt;firmware>
+     &lt;feature enabled='no' name='enrolled-keys'/>
+     &lt;feature enabled='no' name='secure-boot'/>
+   &lt;/firmware>
+</pre>
+
+<p>Apparently if you flip around between Secure Boot and non-Secure
+Boot, you may want to reset your NVRAM file. One way to do this is
+to remove the relevant NVRAM file that I will find in
+/var/lib/libvirt/qemu/nvram/. Another way is to use --reset-nvram
+with 'virsh start', eg 'virsh start foo --reset-nvram'. You can
+also use --reset-nvram with 'virsh snapshot-revert', and I may be
+doing that someday.</p>
+
+<p>(You don't need to reset the NVRAM file when going from BIOS to
+UEFI because BIOS doesn't have a NVRAM file. If you go from UEFI
+to BIOS and then back to UEFI, probably you want to reset your
+NVRAM, but also maybe you want two separate VMs instead of switching
+between BIOS and UEFI all the time.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
