@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Thoughts on WebAssembly as a stack machine | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Thoughts on WebAssembly as a stack machine</h1>
+        <div class="meta">Eli Bendersky&#x27;s website 2026-04-30T02:28:00Z</div>
+        <div class="links">
+          <a href="https://eli.thegreenplace.net/2026/thoughts-on-webassembly-as-a-stack-machine/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/eli-thegreenplace-net/eli-thegreenplace-net-cfa0fd3944d4eff0.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">This week the article Wasm is not quite a stack machine has been making the rounds and has caught my eye. The post claims that WASM is not a pure stack machine because it has locals and is missing some stack manipulation operations like dup and swap . While I don&#x27;t …</div>
+        <div class="content">
+          <p>This week the article <a class="reference external" href="https://purplesyringa.moe/blog/wasm-is-not-quite-a-stack-machine/">Wasm is not quite a stack machine</a> has been
+making the rounds and has caught my eye. The post claims that WASM is not a pure
+stack machine because it has locals and is missing some stack manipulation
+operations like <tt class="docutils literal">dup</tt> and <tt class="docutils literal">swap</tt>.</p>
+<p>While I don't necessarily disagree, IMHO it's a bit of a semantic
+discussion because - to the best of my knowledge - there is no <em>formal</em>
+definition of what is a stack machine. Wikipedia, for example,
+says:</p>
+<blockquote>
+[...], a stack machine is a computer processor or a process virtual machine in
+which the primary interaction is moving short-lived temporary values to and
+from a push-down stack.</blockquote>
+<p>WASM certainly fits this definition; the <em>primary</em> interaction is through the
+stack, though WASM is augmented with an infinite register file (locals).
+The more purist stack machines like Forth are only limited to the stack and a
+memory (pointers into which are managed on the stack); WASM has these too, plus
+the registers.</p>
+<p>Speaking of Forth, the mention of <tt class="docutils literal">dup</tt> reminded me of my own impressions
+of programming in that language, documented in my post about
+<a class="reference external" href="https://eli.thegreenplace.net/2025/implementing-forth-in-go-and-c/">implementing Forth in Go and C</a>. There,
+I highlighted the following essential library function for Forth; it adds an
+addend to a value stored in memory.</p>
+<div class="highlight"><pre><span></span><span class="kn">:</span><span class="w"> </span><span class="nc">+!</span><span class="w">        </span><span class="c1">( addend addr -- )</span><span class="w"></span>
+<span class="w">  </span><span class="k">tuck</span><span class="w">      </span><span class="c1">( addr addend addr )</span><span class="w"></span>
+<span class="w">  </span><span class="k">@</span><span class="w">         </span><span class="c1">( addr addend value-at-addr )</span><span class="w"></span>
+<span class="w">  </span><span class="k">+</span><span class="w">         </span><span class="c1">( addr updated-value )</span><span class="w"></span>
+<span class="w">  </span><span class="k">swap</span><span class="w">      </span><span class="c1">( updated-value addr )</span><span class="w"></span>
+<span class="w">  </span><span class="k">!</span><span class="w"> </span><span class="k">;</span><span class="w"></span>
+</pre></div>
+<p>And lamented how difficult it is to understand such code without the
+detailed stack view in comments alongside it.</p>
+<p>I find it much simpler to reason about this WASM code:</p>
+<div class="highlight"><pre><span></span><span class="p">(</span><span class="k">func</span> <span class="p">(</span><span class="k">export</span> <span class="s2">&quot;add_to_byte&quot;</span><span class="p">)</span> <span class="p">(</span><span class="k">param</span> <span class="nv">$addr</span> <span class="kt">i32</span><span class="p">)</span> <span class="p">(</span><span class="k">param</span> <span class="nv">$delta</span> <span class="kt">i32</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">i32.store8</span>
+        <span class="p">(</span><span class="nb">local.get</span> <span class="nv">$addr</span><span class="p">)</span>
+        <span class="p">(</span><span class="nb">i32.add</span>
+            <span class="p">(</span><span class="nb">i32.load8_u</span> <span class="p">(</span><span class="nb">local.get</span> <span class="nv">$addr</span><span class="p">))</span>
+            <span class="p">(</span><span class="nb">local.get</span> <span class="nv">$delta</span><span class="p">)))</span>
+<span class="p">)</span>
+</pre></div>
+<p>You may say this is cheating because folded WASM instructions help readability
+and they're just syntactic sugar; OK, here's the linear code:</p>
+<div class="highlight"><pre><span></span><span class="nb">local.get</span> <span class="nv">$addr</span>
+<span class="nb">local.get</span> <span class="nv">$addr</span>
+<span class="nb">i32.load8_u</span>
+<span class="nb">local.get</span> <span class="nv">$delta</span>
+<span class="nb">i32.add</span>
+<span class="nb">i32.store8</span>
+</pre></div>
+<p>It's still very readable, because - while the stack is used for all the
+calculations and actual commands - some of the data lives in named &quot;registers&quot;
+instead of on the stack. So we don't need all those tuck-swap contortions to get
+things into the right order.</p>
+<p>One might worry about the duplicated <tt class="docutils literal">local.get $addr</tt>; wouldn't a real <tt class="docutils literal">dup</tt>
+be better? Well, not in terms of readability, as we've already discussed. How
+about performance? Since the stack VM is just an abstraction and the underlying
+CPUs executing this code are register machines anyway, the answer is no - it
+doesn't matter at all.</p>
+<p>Modern compiler engineers were forged in the fires of C and its descendants;
+arbitrary control flow, arbitrary register and memory access, anything goes.
+Compilers are quite sophisticated. Let's see how <tt class="docutils literal">wasmtime</tt> compiles our
+<tt class="docutils literal">add_to_byte</tt> to native code (using <tt class="docutils literal">wasmtime explore</tt> with its
+default <tt class="docutils literal"><span class="pre">opt-level=2</span></tt>); comments are added by me:</p>
+<div class="highlight"><pre><span></span><span class="c1">// Prologue</span>
+<span class="n">push</span><span class="w"> </span><span class="n">rbp</span><span class="w"></span>
+<span class="n">mov</span><span class="w"> </span><span class="n">rbp</span><span class="p">,</span><span class="w"> </span><span class="n">rsp</span><span class="w"></span>
+
+<span class="c1">// wasmtime&#39;s VM context pointer lives in rdi; 0x38 is likely its offset</span>
+<span class="c1">// to the default linear memory. Therefore, r10 will hold the base address</span>
+<span class="c1">// of the linear memory buffer</span>
+<span class="n">mov</span><span class="w"> </span><span class="n">r10</span><span class="p">,</span><span class="w"> </span><span class="n">qword</span><span class="w"> </span><span class="n">ptr</span><span class="w"> </span><span class="p">[</span><span class="n">rdi</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mh">0x38</span><span class="p">]</span><span class="w"></span>
+
+<span class="c1">// The first parameter ($addr) is in edx; since WASM values are i32, it&#39;s</span>
+<span class="c1">// zero-extended into the 64-bit r11 by copying into r11d</span>
+<span class="n">mov</span><span class="w"> </span><span class="n">r11d</span><span class="p">,</span><span class="w"> </span><span class="n">edx</span><span class="w"></span>
+
+<span class="c1">// r10+r11 is memory[$addr]; this loads the current value into rsi</span>
+<span class="c1">// (zero-extending from 8 bits)</span>
+<span class="n">movzx</span><span class="w"> </span><span class="n">rsi</span><span class="p">,</span><span class="w"> </span><span class="n">byte</span><span class="w"> </span><span class="n">ptr</span><span class="w"> </span><span class="p">[</span><span class="n">r10</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">r11</span><span class="p">]</span><span class="w"></span>
+
+<span class="c1">// ecx is the first parameter ($delta); this adds the addend to the</span>
+<span class="c1">// current value</span>
+<span class="n">add</span><span class="w"> </span><span class="n">esi</span><span class="p">,</span><span class="w"> </span><span class="n">ecx</span><span class="w"></span>
+
+<span class="c1">// Store cur_value+addend back into memory[$addr]</span>
+<span class="n">mov</span><span class="w"> </span><span class="n">byte</span><span class="w"> </span><span class="n">ptr</span><span class="w"> </span><span class="p">[</span><span class="n">r10</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">r11</span><span class="p">],</span><span class="w"> </span><span class="n">sil</span><span class="w"></span>
+
+<span class="c1">// Epilogue</span>
+<span class="n">mov</span><span class="w"> </span><span class="n">rsp</span><span class="p">,</span><span class="w"> </span><span class="n">rbp</span><span class="w"></span>
+<span class="n">pop</span><span class="w"> </span><span class="n">rbp</span><span class="w"></span>
+<span class="n">ret</span><span class="w"></span>
+</pre></div>
+<p>This is pretty much the code we'd expect to be emitted for the C statement
+<tt class="docutils literal">mem[addr] += addend</tt>, or if we were writing x86-64 assembly by hand. The
+compiler had no difficulty figuring out that two consecutive loads from
+the same WASM local produce the same value and do not - in fact - have to be
+duplicated. The WASM model makes it rather easy, because you can't alias locals;
+as long as there are no intervening writes into the same local, multiple reads
+are known to produce the same value (redundant load elimination).</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
