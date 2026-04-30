@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Developing a cross-process reader/writer lock with limited readers, part 3: Fairness | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Developing a cross-process reader/writer lock with limited readers, part 3: Fairness</h1>
+        <div class="meta">The Old New Thing 2026-04-30T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260430-00/?p=112288">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-3ae23c783d01492d.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Let the exclusive acquisition have a fair chance against shared acquisitions. The post Developing a cross-process reader/writer lock with limited readers, part 3: Fairness appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>We&#8217;ve been building a cross-process reader/writer lock with a cap on the number of readers, we concluded our investigation last time by noting <a title="Developing a cross-process reader/writer lock with limited readers, part 2: Taking turns when being grabby" href="https://devblogs.microsoft.com/oldnewthing/20260429-00/?p=112286"> that throughput of exclusive accesses was poor</a>. What&#8217;s going on?</p>
+<p>The problem is that exclusive acquisitions are working to claim semaphore tokens one at a time, so it can lose out to shared acquisitions that are requested even after the exclusive acquisition had started, effectively letting shared acquisitions &#8220;jump ahead of the exclusive acquisition&#8221;, and thereby starving out exclusive acquisitions.</p>
+<table class="cp3" border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th rowspan="2">Token count</th>
+<th rowspan="2">Exclusive<br />
+acquirer</th>
+<th colspan="4">Shared acquirers</th>
+</tr>
+<tr>
+<th>A</th>
+<th>B</th>
+<th>C</th>
+<th>D</th>
+</tr>
+<tr>
+<td>5</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>4</td>
+<td> </td>
+<td>Acq</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>3</td>
+<td> </td>
+<td> </td>
+<td>Acq</td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>2</td>
+<td>1st Acq</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>1</td>
+<td>2nd Acq</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>0</td>
+<td>3rd Acq</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>0</td>
+<td>4th Acq (blocks)</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>0</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td>Acq (blocks)</td>
+<td> </td>
+</tr>
+<tr>
+<td>0</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td>Acq (blocks)</td>
+</tr>
+<tr>
+<td>1</td>
+<td> </td>
+<td>Rel</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>0</td>
+<td>4th Acq</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>0</td>
+<td>5th Acq (blocks)</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>1</td>
+<td> </td>
+<td> </td>
+<td>Rel</td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td>0</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td>Acq</td>
+<td> </td>
+</tr>
+<tr>
+<td>1</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td>Rel</td>
+<td> </td>
+</tr>
+<tr>
+<td>0</td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td>Acq</td>
+</tr>
+</tbody>
+</table>
+<p>Let&#8217;s say that we have capped the number of shared acquisitions to five. In the above scenario, we have an exclusive acquiring thread and four shared acquiring threads. The first two shared acquiring threads (call them A and B) succeed at their shared acquisitions, and then the exclusive acquiring thread tries to enter exclusively. The exclusive acquiring thread needs five tokens, and it quickly gets three of them before blocking when it tries to get the fourth.</p>
+<p>While the exclusive acquiring thread is waiting to get its fourth token, two other shared acquiring threads (call them C and D) try to enter in shared mode. They too block.</p>
+<p>One of the original shared acquiring threads releases its shared lock, which release a token, and that token is quickly snapped up by the exclusive acquiring thread, thanks to the &#8220;mostly FIFO&#8221; policy for synchronization objects. (Let&#8217;s assume for the purpose of this discussion that none of the things that violate FIFO-ness has occurred.) The exclusive acquiring thread now waits to claim its fifth token.</p>
+<p>When the second of the original shared acquiring threads releases its token, it is given to thread C, even though thread C started its shared acquisition <i>after</i> the exclusive acquiring thread tried to acquire exclusively.</p>
+<p>And then when thread C releases its token, that token is given to thread D, since its request for the token precedes the exclusive thread&#8217;s request for the fifth token. The exclusive acquiring thread has once again gotten boxed out.</p>
+<p>To fix this, we can make <i>all</i> acquisitions claim the shared mutex. The shared mutex then does the work of enforcing &#8220;mostly FIFO&#8221; acquisition behavior across all acquisitions.</p>
+<p>Since we&#8217;re going to be doing combined timeouts, I&#8217;ll refactor the timeout management into a helper class.</p>
+<pre>struct TimeoutTracker
+{
+    explicit TimeoutTracker(DWORD timeout)
+        : m_timeout(timeout) {}
+
+    DWORD m_start = GetTickCount();
+
+    bool Wait(HANDLE h)
+    {
+        DWORD elapsed = GetTickCount() - m_start;
+        if (elapsed &gt; m_timeout) return false;
+        return WaitForSingleObject(h, m_timeout - elapsed)
+                    == WAIT_OBJECT_0;
+    }
+};
+</pre>
+<p>We can use this helper class to manage our timeouts.</p>
+<pre>HANDLE sharedSemaphore;
+HANDLE sharedMutex;
+
+void AcquireShared()
+{
+    <span>WaitForSingleObject(sharedMutex, INFINITE);</span>
+
+    WaitForSingleObject(sharedSemaphore, INFINITE);
+
+    <span>ReleaseMutex(sharedMutex);</span>
+}
+
+bool AcquireSharedWithTimeout(DWORD timeout)
+{
+    <span>TimeoutTracker tracker(timeout);         </span>
+    <span>bool result = tracker.Wait(hSharedMutex);</span>
+    <span>if (!result) return false;               </span>
+    <span>result = tracker.Wait(sharedSemaphore);  </span>
+    <span>ReleaseMutex(sharedMutex);               </span>
+    <span>return result;                           </span>
+}
+
+// no change to AcquireExclusive
+void AcquireExclusive()
+{
+    WaitForSingleObject(sharedMutex, INFINITE);
+
+    for (unsigned i = 0; i &lt; MAX_SHARED; i++) {
+        WaitForSingleObject(sharedSemaphore, INFINITE);
+    }
+
+    ReleaseMutex(sharedMutex);
+}
+
+// no functional change, but using the new helper class
+bool AcquireExclusiveWithTimeout(DWORD timeout)
+{
+    <span>TimeoutTracker tracker(timeout);        </span>
+    <span>bool result = tracker.Wait(sharedMutex);</span>
+    <span>if (!result) return false;              </span>
+
+    for (unsigned i = 0; i &lt; MAX_SHARED; i++) {
+        <span>if (!tracker.Wait(sharedSemaphore)) {</span>
+            // Restore the tokens we already claimed.
+            if (i &gt; 0) {
+                ReleaseSemaphore(sharedSemaphore, i, nullptr);
+            }
+            ReleaseMutex(sharedMutex);
+            return false;
+        }
+    }
+    ReleaseMutex(sharedMutex);
+    return true;
+}
+</pre>
+<p>(Yes, I&#8217;m not using RAII. I&#8217;ve made that choice for expository purposes, since it lets you see exactly when each synchronization object is acquired and released.)</p>
+<p>Are we done?</p>
+<p>No, we&#8217;re not done.</p>
+<p>There is still a serious problem that needs to be fixed. We&#8217;ll look at it next time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260430-00/?p=112288">Developing a cross-process reader/writer lock with limited readers, part 3: Fairness</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
