@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Patching and forking in package managers | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Patching and forking in package managers</h1>
+        <div class="meta">Andrew Nesbitt 2026-05-01T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/05/01/patching-and-forking-in-package-managers.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-056bcd1b68a0193e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">What to do when upstream ghosts you</div>
+        <div class="content">
+          <p>When a dependency has a known vulnerability and no maintainer to release a fix, you have to fix it yourself. Clone the source, apply the patch, get the patched version back into your dependency tree. The volume of reported CVEs is going to rise, and many will land in packages where nobody is around to cut a release.</p>
+
+<p>System package managers handled this a long time ago. Debian’s <code class="language-plaintext highlighter-rouge">debian/patches/</code> with quilt and DEP-3 headers, RPM’s <code class="language-plaintext highlighter-rouge">Patch0:</code> directives in spec files, Gentoo’s <code class="language-plaintext highlighter-rouge">/etc/portage/patches/</code>, Nix’s <code class="language-plaintext highlighter-rouge">patches</code> attribute in derivations, Homebrew’s <code class="language-plaintext highlighter-rouge">patch do ... end</code> blocks in formulae. Distribution maintainers are expected to carry deltas against upstream, and the tooling is designed around that assumption.</p>
+
+<p>Language package managers were designed around a different assumption: the registry version is authoritative, the user picks which version they want, and nobody modifies what’s inside. When upstream can’t or won’t release a fix, users hit tooling that wasn’t built for the situation they’re in.</p>
+
+<p>What you need depends on the situation. Redirecting a dependency to a fork you control is the most common workaround. Overriding what the resolver picks for a transitive dependency buried in your tree requires different tooling. Patching a package in place without maintaining a fork is the lightest option when it’s available. And sometimes you need to substitute one package for another entirely.</p>
+
+<h3 id="redirecting-to-a-fork">Redirecting to a fork</h3>
+
+<p>Nearly every language package manager can point a dependency at a git repository or local path instead of the registry. Cargo uses a <a href="https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html"><code class="language-plaintext highlighter-rouge">[patch]</code></a> section in <code class="language-plaintext highlighter-rouge">Cargo.toml</code>:</p>
+
+<div class="language-toml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">[</span><span class="n">patch</span><span class="k">.</span><span class="n">crates-io</span><span class="k">]</span>
+<span class="n">serde</span> <span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">git</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">"https://github.com/yourfork/serde.git"</span><span class="p">,</span><span class="w"> </span><span class="n">branch</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">"fix-cve"</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div></div>
+
+<p>Go modules have the <a href="https://go.dev/ref/mod#go-mod-file-replace"><code class="language-plaintext highlighter-rouge">replace</code></a> directive:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>replace github.com/original/pkg =&gt; github.com/yourfork/pkg v1.4.1-fixed
+</code></pre></div></div>
+
+<p>Bundler takes <a href="https://bundler.io/guides/git.html"><code class="language-plaintext highlighter-rouge">:git</code> or <code class="language-plaintext highlighter-rouge">:path</code></a> on any gem:</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">gem</span> <span class="s1">'httpclient'</span><span class="p">,</span> <span class="ss">git: </span><span class="s1">'https://github.com/yourfork/httpclient.git'</span><span class="p">,</span> <span class="ss">branch: </span><span class="s1">'fix-ssl'</span>
+</code></pre></div></div>
+
+<p>The rest of the field:</p>
+
+<ul>
+  <li><a href="https://docs.npmjs.com/cli/v10/configuring-npm/package-json#git-urls-as-dependencies">npm</a>, pnpm, Yarn, and Bun accept git URLs and the <code class="language-plaintext highlighter-rouge">npm:</code> aliasing protocol in <code class="language-plaintext highlighter-rouge">package.json</code>.</li>
+  <li><a href="https://pip.pypa.io/en/stable/topics/vcs-support/">pip</a>, <a href="https://python-poetry.org/docs/dependency-specification/#git-dependencies">Poetry</a>, and <a href="https://docs.astral.sh/uv/concepts/projects/dependencies/#dependency-sources">uv</a> support VCS URLs in their respective Python config formats.</li>
+  <li><a href="https://hexdocs.pm/mix/Mix.Tasks.Deps.html">Mix</a> and <a href="https://dart.dev/tools/pub/dependencies">Pub</a> take git and path options on dependency entries.</li>
+  <li><a href="https://getcomposer.org/doc/05-repositories.md#vcs">Composer</a> adds a VCS repository that shadows the Packagist version.</li>
+  <li><a href="https://github.com/swiftlang/swift-evolution/blob/main/proposals/0219-package-manager-dependency-mirroring.md">Swift PM</a> has dependency mirroring via CLI config.</li>
+  <li><a href="https://docs.gradle.org/current/userguide/composite_builds.html">Gradle</a> has composite builds. Maven uses the local repository. <a href="https://learn.microsoft.com/en-us/nuget/hosting-packages/local-feeds">NuGet</a> supports local package feeds.</li>
+  <li><a href="https://docs.haskellstack.org/en/stable/configure/yaml/project/#extra-deps">Stack</a> and <a href="https://cabal.readthedocs.io/en/latest/cabal-project-description-file.html#taking-a-dependency-from-a-source-code-repository">Cabal</a> take git dependencies in their project config files.</li>
+</ul>
+
+<p>Go’s <a href="https://github.com/rogpeppe/gohack">gohack</a> automates the manual part of this workflow: it checks out a module’s source to a local directory and adds the <code class="language-plaintext highlighter-rouge">replace</code> directive to <code class="language-plaintext highlighter-rouge">go.mod</code> in one command, so you can start editing immediately without setting up a fork repo.</p>
+
+<h3 id="overriding-transitive-dependencies">Overriding transitive dependencies</h3>
+
+<p>Redirecting a direct dependency is straightforward. The harder case is when the vulnerable package is transitive, pulled in by a dependency of a dependency rather than anything in your manifest.</p>
+
+<p>byroot described this well in <a href="https://byroot.github.io/ruby/bundler/2026/04/20/bundle-features.html">a recent post about Bundler</a>. He wanted to upgrade the <code class="language-plaintext highlighter-rouge">openssl</code> gem, but <code class="language-plaintext highlighter-rouge">web-push</code> pinned it to <code class="language-plaintext highlighter-rouge">~&gt; 2.2</code>. Upgrading <code class="language-plaintext highlighter-rouge">web-push</code> required a new version of <code class="language-plaintext highlighter-rouge">jwt</code>, which four other gems pinned to <code class="language-plaintext highlighter-rouge">~&gt; 2.0</code>. None of those gems had seen a release in years. The dependency tree was stuck on pessimistic version constraints written by maintainers who were no longer around to relax them.</p>
+
+<p>His proposed fix: a <code class="language-plaintext highlighter-rouge">force: true</code> option that tells Bundler to override any upstream constraint:</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">gem</span> <span class="s1">'openssl'</span><span class="p">,</span> <span class="s1">'&gt;= 3.0'</span><span class="p">,</span> <span class="ss">force: </span><span class="kp">true</span>
+</code></pre></div></div>
+
+<p>Bundler doesn’t support this. The workaround is pointing each blocking dependency at a git repo with relaxed constraints, which means maintaining multiple forks to fix what is really a version-bounds problem.</p>
+
+<p>Cargo’s <a href="https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html"><code class="language-plaintext highlighter-rouge">[patch]</code></a> handles this case because a patch entry replaces the dependency everywhere in the tree, direct or transitive. The patched version must be semver-compatible with the original, so it won’t help if you need to cross a major version boundary. Go’s <a href="https://go.dev/ref/mod#go-mod-file-replace"><code class="language-plaintext highlighter-rouge">replace</code></a> works the same way but has no such constraint. Go also has <a href="https://go.dev/ref/mod#go-mod-file-exclude"><code class="language-plaintext highlighter-rouge">exclude</code></a> to block specific versions and force the resolver to pick the next valid one.</p>
+
+<p>npm has <a href="https://docs.npmjs.com/cli/v10/configuring-npm/package-json#overrides"><code class="language-plaintext highlighter-rouge">overrides</code></a> in <code class="language-plaintext highlighter-rouge">package.json</code>:</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"overrides"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="nl">"lodash"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4.17.21"</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p>Nested objects scope the override to a specific path through the tree. The other JavaScript package managers have the same capability:</p>
+
+<ul>
+  <li><a href="https://pnpm.io/settings#overrides">pnpm</a> has <code class="language-plaintext highlighter-rouge">pnpm.overrides</code> with a <code class="language-plaintext highlighter-rouge">parent&gt;child</code> scoping syntax, and supports the <code class="language-plaintext highlighter-rouge">npm:</code> protocol inside overrides to substitute one package for another as part of the override.</li>
+  <li><a href="https://yarnpkg.com/configuration/manifest#resolutions">Yarn</a> has had <code class="language-plaintext highlighter-rouge">resolutions</code> since v1.</li>
+  <li>Bun reads both <code class="language-plaintext highlighter-rouge">overrides</code> and <code class="language-plaintext highlighter-rouge">resolutions</code>.</li>
+</ul>
+
+<p>Other ecosystems with built-in override mechanisms:</p>
+
+<ul>
+  <li><a href="https://hexdocs.pm/mix/Mix.Tasks.Deps.html">Mix</a> uses <code class="language-plaintext highlighter-rouge">override: true</code> on dependency entries to force the top-level version constraint.</li>
+  <li><a href="https://dart.dev/tools/pub/dependencies#dependency-overrides">Pub</a> <code class="language-plaintext highlighter-rouge">dependency_overrides</code> replaces all references to a package throughout the tree.</li>
+  <li><a href="https://docs.gradle.org/current/userguide/resolution_rules.html">Gradle</a> has <code class="language-plaintext highlighter-rouge">strictly</code> constraints and <code class="language-plaintext highlighter-rouge">resolutionStrategy.force</code>.</li>
+  <li><a href="https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html#dependency-management">Maven</a> <code class="language-plaintext highlighter-rouge">dependencyManagement</code> controls versions for both direct and transitive dependencies.</li>
+  <li><a href="https://learn.microsoft.com/en-us/nuget/consume-packages/central-package-management">NuGet</a> Central Package Management with transitive pinning does the same.</li>
+</ul>
+
+<p>Haskell takes a different angle with <a href="https://cabal.readthedocs.io/en/latest/cabal-project-description.html#cfg-field-allow-newer"><code class="language-plaintext highlighter-rouge">allow-newer</code></a>, which relaxes upper version bounds rather than forcing a specific version:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>allow-newer: my-package:aeson, my-package:text
+</code></pre></div></div>
+
+<p>When a package declares it needs <code class="language-plaintext highlighter-rouge">base &lt; 4.19</code> and you’re on 4.20, <code class="language-plaintext highlighter-rouge">allow-newer</code> tells the resolver to ignore the upper bound and try it anyway.</p>
+
+<p>uv added <a href="https://docs.astral.sh/uv/concepts/projects/dependencies/#dependency-overrides"><code class="language-plaintext highlighter-rouge">override-dependencies</code></a> in <code class="language-plaintext highlighter-rouge">pyproject.toml</code>:</p>
+
+<div class="language-toml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">[</span><span class="n">tool</span><span class="k">.</span><span class="n">uv</span><span class="k">]</span>
+<span class="n">override-dependencies</span> <span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s">"werkzeug==2.3.0"</span><span class="p">]</span>
+</code></pre></div></div>
+
+<p>pip has no override mechanism. Constraint files add bounds but can’t contradict what packages declare. Poetry had a <a href="https://github.com/python-poetry/poetry/issues/4991">feature request</a> for overrides in 2022, closed as not planned.</p>
+
+<h3 id="applying-patches">Applying patches</h3>
+
+<p>Applying a diff to a package as it comes off the registry is the lightest-weight fix. You keep the original package, the original version in your lockfile, and layer a change on top. When upstream publishes a proper fix, you drop the patch and update normally. System package managers all work this way. Among language package managers, three have it built in.</p>
+
+<p><a href="https://pnpm.io/cli/patch">pnpm</a>: run <code class="language-plaintext highlighter-rouge">pnpm patch &lt;package&gt;</code>, edit the extracted source, run <code class="language-plaintext highlighter-rouge">pnpm patch-commit &lt;path&gt;</code>. A <code class="language-plaintext highlighter-rouge">.patch</code> file is saved to the project and recorded in <code class="language-plaintext highlighter-rouge">package.json</code> under <code class="language-plaintext highlighter-rouge">patchedDependencies</code>. Patches are reapplied on every install.</p>
+
+<p><a href="https://yarnpkg.com/cli/patch">Yarn Berry</a>: <code class="language-plaintext highlighter-rouge">yarn patch</code> with the same workflow. Patches integrate with the <code class="language-plaintext highlighter-rouge">patch:</code> protocol in the lockfile and go through Yarn’s checksum verification.</p>
+
+<p><a href="https://bun.sh/docs/install/patch">Bun</a>: <code class="language-plaintext highlighter-rouge">bun patch &lt;package&gt;</code>, edit in <code class="language-plaintext highlighter-rouge">node_modules/</code>, <code class="language-plaintext highlighter-rouge">bun patch --commit &lt;package&gt;</code>.</p>
+
+<p>For npm and Yarn Classic, the third-party <a href="https://github.com/ds300/patch-package">patch-package</a> library fills the gap. Modify the package in <code class="language-plaintext highlighter-rouge">node_modules/</code>, run <code class="language-plaintext highlighter-rouge">npx patch-package &lt;pkg&gt;</code>, and wire up a <code class="language-plaintext highlighter-rouge">postinstall</code> script to reapply on install.</p>
+
+<p>Composer has <a href="https://github.com/cweagans/composer-patches">cweagans/composer-patches</a>, whose 2.0 release added a <code class="language-plaintext highlighter-rouge">patches.lock.json</code> for reproducibility. Patches can be local files or remote URLs and are applied during <code class="language-plaintext highlighter-rouge">composer install</code>. <a href="https://github.com/vaimo/composer-patches">vaimo/composer-patches</a> is an alternative that adds per-package patch definitions (so libraries can ship patches for their own dependencies) and more control over patch application order and depth.</p>
+
+<p>Cargo has the third-party <a href="https://crates.io/crates/cargo-patch">cargo-patch</a> crate, which downloads crate source, applies <code class="language-plaintext highlighter-rouge">.patch</code> files, and writes the result to a directory for use with a <code class="language-plaintext highlighter-rouge">[patch.crates-io]</code> entry pointing at the patched output. <a href="https://github.com/mokeyish/cargo-patch-crate">patch-crate</a> takes a workflow closer to patch-package: edit the crate source in place and generate the diff automatically.</p>
+
+<p>Maven once had an <a href="https://maven.apache.org/plugins/maven-patch-plugin/">official patch plugin</a> that applied diffs using GNU <code class="language-plaintext highlighter-rouge">patch</code> under the hood, but it’s been retired.</p>
+
+<p>Beyond those, the remaining language ecosystems expect you to fork. Bundler, Go, uv, Poetry, Mix, Swift PM, NuGet, Stack, and Cabal have no patch-file mechanism, built-in or third-party. pip has <a href="https://pypi.org/project/patch-package/">patch-package</a>, Pub has <a href="https://pub.dev/packages/patch_package">patch_package</a>, and Gradle has <a href="https://github.com/brambolt/gradle-patching">brambolt/gradle-patching</a>, but none are widely adopted.</p>
+
+<h3 id="substituting-packages">Substituting packages</h3>
+
+<p>byroot’s other proposal for Bundler was the ability to install one gem as a drop-in replacement for another:</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">gem</span> <span class="s2">"byroot-httpclient"</span><span class="p">,</span> <span class="ss">as: </span><span class="s2">"httpclient"</span>
+</code></pre></div></div>
+
+<p>The context was the <code class="language-plaintext highlighter-rouge">httpclient</code> gem, which went unreleased from 2016 until 2025 while its vendored SSL root certificates expired and broke users. Everyone who needed a working version had to maintain their own fork. If someone publishes a maintained fork under a new name, you need it to satisfy the dependency constraints that other packages declare on the original.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">npm:</code> protocol does this in the JavaScript ecosystem:</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"dependencies"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="nl">"original-name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"npm:@yourorg/forked-name@^2.0.0"</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p>pnpm, Yarn, and Bun support it too. Other ecosystems with substitution mechanisms:</p>
+
+<ul>
+  <li><a href="https://getcomposer.org/doc/04-schema.md#replace">Composer</a> <code class="language-plaintext highlighter-rouge">replace</code> declares that your package provides the same thing as another, preventing both from being installed.</li>
+  <li><a href="https://docs.gradle.org/current/userguide/resolution_rules.html#sec:dependency_substitution_rules">Gradle</a> <code class="language-plaintext highlighter-rouge">dependencySubstitution</code> rules can swap any module for another at resolution time.</li>
+  <li>ManageIQ’s <a href="https://github.com/ManageIQ/bundler-inject">bundler-inject</a> plugin adds an <code class="language-plaintext highlighter-rouge">override_gem</code> command that redirects gems to forks or local paths via <code class="language-plaintext highlighter-rouge">bundler.d/*.rb</code> files without touching the Gemfile itself, the closest thing in the Ruby ecosystem to a built-in substitution mechanism.</li>
+</ul>
+
+<hr />
+
+<p>byroot’s broader argument is about control: the application developer’s manifest is their domain, and they should be able to override any upstream constraint in it, especially when the person who wrote that constraint is no longer around. Without override and substitution capabilities, the alternative is maintaining forks for what could be a two-line fix, and maintaining them indefinitely if upstream never comes back.</p>
+
+<p>Both approaches bring their own maintenance burden. A fork needs to stay in sync with upstream changes unrelated to the vulnerability. GitHub forks have issues, Actions, Dependabot, and security features all disabled by default, so a fork needs manual setup before it works as a proper maintained project. For a two-line security fix, that’s a lot of infrastructure to carry.</p>
+
+<p>Patches are lighter, but they change what the lockfile entry means: you’re running code that doesn’t match the version recorded in the lock, and tools that audit dependencies against the lockfile won’t see the patch. SBOMs generated from the lockfile will list the unpatched version. Under the EU Cyber Resilience Act, which requires accurate dependency inventories for products with digital elements, that gap between what you’re running and what your tooling reports becomes a compliance problem.</p>
+
+<p>Vendoring the source into your repository sidesteps the package manager entirely, but trades one set of problems for another: you’re now responsible for the entire package, not just the patch.</p>
+
+<p>System package managers were designed around the assumption that carrying patches is part of the job. Language package managers were designed around the assumption that it shouldn’t be. As AI tooling makes vulnerability discovery faster, the number of dead packages with known CVEs will grow.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
