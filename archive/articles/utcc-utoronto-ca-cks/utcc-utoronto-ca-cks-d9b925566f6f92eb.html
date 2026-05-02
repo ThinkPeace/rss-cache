@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How backups work depends on the goals of the people setting them up | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How backups work depends on the goals of the people setting them up</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-02T20:12:58Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/BackupsDependOnGoals">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-d9b925566f6f92eb.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">One of the recent commotions in my corner of the tech sphere was over an incident where a piece of software deleted a company&#x27;s production database and all of its backups. The software got all of the backups too because, I&#x27;ll quote: [Their SaaS provider] stores volume-level backups in the same volume — a fact buried in their own documentation that says &quot;wip…</div>
+        <div class="content">
+          <div class="wikitext"><p>One of the recent commotions in my corner of the tech sphere was
+over an incident where a piece of software deleted a company's
+production database and all of its backups. The software got all
+of the backups too because, I'll quote:</p>
+
+<blockquote><p>[Their SaaS provider] stores volume-level backups in the same volume
+— a fact buried in their own documentation that says "wiping a
+volume deletes all backups" — [...]</p>
+</blockquote>
+
+<p>A lot of people were horrified, but <a href="https://mastodon.social/@cks/116480166024704842">I had some sympathies with
+the SaaS provider</a>.
+An important thing about backups is <strong>how backups work depends on
+what you're trying to recover from</strong>, and for certain sorts of
+disasters and recoveries, this decision is perfectly sensible. For
+a SaaS company, they also depend on customer support needs and what
+customers are going to want, and the decision can also make sense
+from that perspective.</p>
+
+<p>In this case, the obvious question is whether the SaaS provider is
+trying to protect customers from loss of data in the volume or from
+deliberate deletion of the volume. If what you're protecting people
+from is an accidental 'DROP TABLE' or an accidental 'rm' (or an
+accidental overwrite of something important), then in volume backups
+such as ZFS snapshots make perfect sense. We use ZFS snapshots
+ourselves for this purpose on some filesystems (although they're
+not our only form of backups). As a bonus, restores are much faster
+than external backups.  However, backups tied directly to the volume
+aren't a good ideal if what you're protecting people against is
+deletion of the volume itself.</p>
+
+<p>(The SaaS provider itself might be concerned about loss of the volume
+from things other than deliberate deletion, but this isn't a concern
+customers want to have; they want to pretend that the SaaS provider has
+100% reliable handling of volumes until they delete them. Of course,
+this can lead to unpleasant customer surprises if something goes wrong,
+which is why wise customers have completely external backups so they
+don't have to trust the SaaS provider and the SaaS provider's cloud
+vendor. The people this happened to were not wise customers, but if
+you've heard of this incident, you already knew that.)</p>
+
+<p>If a SaaS provider wants to potentially protect people from deliberate
+deletion of a volume, there are a bunch of tradeoffs. For example,
+you're probably charging people for out of volume backups in some
+way, which means that if people really want to delete an unused
+volume, they also want to delete its backups so they're not being
+charged for those either. If you surface an option for 'also delete
+backups of this volume' so that people deleting volumes can handle
+the situation right away and aren't surprised by charges later,
+what you're surfacing is an easy total data loss option; people will
+reflexively say "yes" and wipe out their backups too.</p>
+
+<p>(After all, typically people who delete volumes think they're doing
+the right thing at the time. Software agents don't think but they're
+generally going to behave in the same way.)</p>
+
+<p>The harder you make it to delete volume backups, the more you're
+going to annoy some of your customers who really do want to delete
+their volume backups (or perhaps many of your customers, since you'd
+hope that almost all volume deletions are customers making the right
+choice and they probably don't want the backups either). At a certain
+point, a SaaS provider might take a rational look at their data on
+what people are deleting and what they're recovering from (and
+customer support calls), and conclude that hard to delete volume
+backups aren't worth it because customers don't use the extra
+resilience and are annoyed by the side effects of it. Perhaps you
+can design both your systems and your charging to get around this,
+but it's more product development work and if you're a SaaS company,
+you have a lot of other product development work you could be doing
+and that other work may have much higher value to your company.</p>
+
+<p>(Convenient, easily accessible in volume backups may also have
+side effects. The space consumption side effects of ZFS backups
+are why we don't use them pervasively for all of our <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/ZFSFileserverSetupIII">fileserver</a> ZFS filesystems.)</p>
+
+<p>Locally we use external backups, but this is because we're operating
+physical storage and so we have to be concerned about all sorts of
+catastrophic things happening to it. Our external backups are slower
+to restore from for in-volume damage like deleted files, but we
+have to make that tradeoff because we absolutely have to be able
+to recover from a total loss of a ZFS filesystem, ZFS pool, or an
+entire fileserver (or <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/DisasterViewReflections">our entire machine room</a>).</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
