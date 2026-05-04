@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Package Manager CWEs | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Package Manager CWEs</h1>
+        <div class="meta">Andrew Nesbitt 2026-05-04T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/05/04/package-manager-cwes.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-70b5447fa5ad10ec.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Recurring weakness classes in package managers</div>
+        <div class="content">
+          <p>I went through every public CVE and security advisory I could find that was filed against a package manager itself. Clients and registries both: language package managers, system package managers, self-hosted registry servers, the lot.</p>
+
+<p>The same dozen or so failure modes appear independently in tool after tool, often years apart, because the people building package manager number nineteen don’t always know what bit package managers one through eighteen. If you’re building or maintaining one of these things, this is the list of places to look. I’ve deliberately not organised it by tool. Most of these were fixed quickly, several were found by the projects themselves, and which project hit which bug matters much less than the pattern.</p>
+
+<p>One caveat. CVE counts measure what got reported and assigned an ID, which is a different thing from risk. Some projects run bug bounties and file a CVE for every ANSI escape. Others fix things in a point release with a changelog line. And the design-level weaknesses where most real-world compromise actually happens (install scripts running as the user, trust carrying across maintainer changes, first-come namespaces) are out of scope here precisely because they never get CVEs. That’s a separate post.</p>
+
+<h2 id="client">Client</h2>
+
+<h3 id="archive-extraction-writes-outside-the-target-directory">Archive extraction writes outside the target directory</h3>
+
+<p>CWE-22 (path traversal), with CWE-59 (link following) for the symlink variants. The single most common entry in the dataset by raw count, and it has been recurring for twenty years. A package archive contains a path with <code class="language-plaintext highlighter-rouge">../</code> in it, or a symlink pointing outside the extraction root, or a Windows-style backslash separator that the path-sanitising code doesn’t recognise, and the installer writes a file wherever the archive author wanted.</p>
+
+<p>The 2018 <a href="https://security.snyk.io/research/zip-slip-vulnerability">Zip Slip</a> research found this across most ecosystems at once, but it had been hitting them individually long before (<a href="https://nvd.nist.gov/vuln/detail/CVE-2007-0469">CVE-2007-0469</a> is the earliest I found in a language package manager) and has kept hitting them since (<a href="https://github.com/advisories/GHSA-2599-h6xx-hpxp">CVE-2026-34591</a>, <a href="https://github.com/helm/helm/security/advisories/GHSA-hr2v-4r36-88hr">CVE-2026-35206</a>). Fixing the <code class="language-plaintext highlighter-rouge">..</code> case doesn’t fix the symlink case, fixing the symlink case for tar doesn’t fix it for zip, and fixing it for forward slashes doesn’t fix it for backslashes on Windows. Several tools have three or four CVEs in this category because each fix was partial.</p>
+
+<p>The pattern extends beyond the archive itself. A <code class="language-plaintext highlighter-rouge">bin</code> field in a manifest that points at <code class="language-plaintext highlighter-rouge">../../../usr/local/bin/something</code> (<a href="https://github.com/advisories/GHSA-m6cx-g6qm-p2cx">CVE-2019-16775</a>), a <code class="language-plaintext highlighter-rouge">Content-Disposition</code> header on a download with <code class="language-plaintext highlighter-rouge">../</code> in the filename (<a href="https://github.com/advisories/GHSA-gpvv-69j7-gwj8">CVE-2019-20916</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2019-9686">CVE-2019-9686</a>), a chart name or version string with path segments in it (<a href="https://github.com/gradle/gradle/security/advisories/GHSA-2h6c-rv6q-494v">CVE-2023-35946</a>). Anywhere a string from a package ends up in a filesystem path.</p>
+
+<p>If you’re building one: extract into a directory and refuse to create anything whose resolved path isn’t under it. Resolve symlinks before checking. Treat every separator the target OS treats as a separator. Apply the same check to every field that becomes a path, not just archive entries.</p>
+
+<h3 id="argument-injection-into-git-hg-svn-and-friends">Argument injection into git, hg, svn, and friends</h3>
+
+<p>CWE-88 (argument injection). Nearly every package manager can install from a VCS URL, and nearly every one of them has at some point passed a user-controlled string into <code class="language-plaintext highlighter-rouge">git clone</code> or <code class="language-plaintext highlighter-rouge">hg clone</code> in a way that let it be interpreted as an option rather than an argument. A ref of <code class="language-plaintext highlighter-rouge">--upload-pack=payload</code>, a URL starting with a dash, a branch name with shell metacharacters in it.</p>
+
+<p>Examples: <a href="https://github.com/composer/composer/security/advisories/GHSA-h5h8-pc6h-jvvx">CVE-2021-29472</a>, <a href="https://github.com/advisories/GHSA-9xgj-fcgf-x6mw">CVE-2022-36069</a>, <a href="https://github.com/advisories/GHSA-fj7f-vq84-fh43">CVE-2021-43809</a>, <a href="https://github.com/advisories/GHSA-mq26-g339-26xf">CVE-2023-5752</a>, <a href="https://github.com/advisories/GHSA-7627-mp87-jf6q">CVE-2022-24440</a>. One tool has six separate CVEs in this category across git, hg, and Perforce drivers.</p>
+
+<p>The fix is the <code class="language-plaintext highlighter-rouge">--</code> separator and an allowlist of which options you actually pass, but the bug keeps reappearing because each VCS backend is written separately and the lesson from the git driver doesn’t transfer to the p4 driver three years later.</p>
+
+<p>A related but distinct cluster is compiler flag injection: a package smuggling <code class="language-plaintext highlighter-rouge">-fplugin=</code> or arbitrary <code class="language-plaintext highlighter-rouge">LDFLAGS</code> through to the C compiler at build time. This is mostly a Go pattern (<a href="https://nvd.nist.gov/vuln/detail/CVE-2018-6574">CVE-2018-6574</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2023-29404">CVE-2023-29404</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2023-39323">CVE-2023-39323</a>) because of how cgo works, but the shape is the same: untrusted strings reaching a subprocess that treats some strings as instructions.</p>
+
+<h3 id="integrity-checks-that-fail-open">Integrity checks that fail open</h3>
+
+<p>CWE-345 (insufficient verification of data authenticity) and CWE-347 (improper verification of cryptographic signature). A missing signature file causes verification to be skipped, or an error from the checker gets treated as success. In other cases the hash is checked on the way into the cache but not on the way out, or dependency verification is on and one code path bypasses it.</p>
+
+<p><a href="https://www.debian.org/security/2016/dsa-3733">CVE-2016-1252</a> is the canonical example: a clearsigned file parser that under specific conditions let unsigned content through as if it had been signed. <a href="https://github.com/gradle/gradle/security/advisories/GHSA-j6wc-xfg8-jx2j">CVE-2022-31156</a> silently skipped verification when the signature check couldn’t run. <a href="https://nvd.nist.gov/vuln/detail/CVE-2012-6088">CVE-2012-6088</a> treated an unparseable signature as a valid one. <a href="https://github.com/helm/helm/security/advisories/GHSA-q5jf-9vfq-h4h7">CVE-2026-35205</a> passed plugin verification when the provenance file simply wasn’t there.</p>
+
+<p>The early-2010s version of this was simpler: no TLS, or TLS without certificate checks, or following an HTTPS-to-HTTP redirect (<a href="https://github.com/advisories/GHSA-228f-g3h7-3fj3">CVE-2012-2125</a>, <a href="https://github.com/advisories/GHSA-g3p5-fjj9-h8gj">CVE-2013-1629</a>, <a href="https://maven.apache.org/security.html">CVE-2013-0253</a>). That’s mostly fixed now, though <a href="https://blog.rust-lang.org/2023/01/10/cve-2022-46176.html">CVE-2022-46176</a> (no SSH host key verification on git index clones) shows the equivalent gap can survive on less-examined transports.</p>
+
+<p>If you have a verification step, write the test where the signature is absent, malformed, and valid-but-for-different-content, and make sure all three refuse to install.</p>
+
+<h3 id="credentials-sent-to-the-wrong-place">Credentials sent to the wrong place</h3>
+
+<p>CWE-522 (insufficiently protected credentials). An auth token scoped to one registry gets sent to another, usually via a redirect, a mirror, or a dependency hosted somewhere else. <a href="https://github.com/advisories/GHSA-m5h6-hr3q-22h5">CVE-2016-3956</a> sent the bearer token with every request regardless of host. <a href="https://github.com/gradle/gradle/security/advisories/GHSA-4cwg-f7qc-6r95">CVE-2019-15052</a> followed a redirect and re-sent credentials to the new host. <a href="https://github.com/helm/helm/security/advisories/GHSA-56hp-xqp3-w2jf">CVE-2021-32690</a> sent repository credentials to whatever domain a chart’s dependencies pointed at. <a href="https://github.com/dart-lang/sdk/security/advisories/GHSA-r32f-vhjp-qhj7">CVE-2021-22568</a> sent the official-registry OAuth token to any third-party server you published to.</p>
+
+<p>The other half of this category is credentials ending up in logs or published artifacts: passwords embedded in URLs written to the build log (<a href="https://github.com/advisories/GHSA-93f3-23rq-pjfp">CVE-2020-15095</a>), signing passphrases at debug level (<a href="https://github.com/gradle/gradle/security/advisories/GHSA-ww7h-4fx5-8c2j">CVE-2020-13165</a>), workspace ignore files not honoured so secrets get packed into the published tarball (<a href="https://github.com/advisories/GHSA-hj9c-8jmm-8c52">CVE-2022-29244</a>).</p>
+
+<p>Credentials should be bound to an origin and stripped on cross-origin redirect, same as a browser would. And anything that builds a publishable artifact needs a test that <code class="language-plaintext highlighter-rouge">.env</code> doesn’t end up inside it.</p>
+
+<h3 id="picking-the-wrong-source">Picking the wrong source</h3>
+
+<p>CWE-427 (uncontrolled search path element) at the resolver level, also filed as CWE-829 (inclusion of functionality from untrusted control sphere). The dependency confusion family. A private package name also exists on the public registry, the resolver consults both, and “highest version wins” means the public one gets installed. Or a secondary source in the manifest is allowed to satisfy any dependency, not just the ones it was added for.</p>
+
+<p>This was reported against individual tools years before it had a name: <a href="https://github.com/advisories/GHSA-49jx-9cmc-xjxm">CVE-2013-0334</a> and <a href="https://github.com/advisories/GHSA-jvgm-pfqv-887x">CVE-2016-7954</a> are the same bug Alex Birsan made famous in 2021. <a href="https://github.com/advisories/GHSA-fp4w-jxhp-m23p">CVE-2020-36327</a> and <a href="https://nvd.nist.gov/vuln/detail/CVE-2018-20225">CVE-2018-20225</a> are the post-2021 filings, the second disputed by maintainers as documented behaviour. <a href="https://github.com/pypa/pipenv/security/advisories/GHSA-qc9x-gjcv-465w">CVE-2022-21668</a> is the nastier variant where an <code class="language-plaintext highlighter-rouge">--index-url</code> hidden in a requirements file comment redirects every subsequent install to an attacker’s index.</p>
+
+<p>There’s a less obvious version where the resolver falls through to the next configured source when one errors or can’t be reached (<a href="https://github.com/gradle/gradle/security/advisories/GHSA-mqwm-5m85-gmcv">CVE-2026-22865</a>), and a version where something that isn’t a release gets treated as one (<a href="https://nvd.nist.gov/vuln/detail/CVE-2022-23773">CVE-2022-23773</a>, branch names that look like version tags).</p>
+
+<p>Every dependency should resolve from exactly one source, and that source should be pinned in the lockfile. If a source is unreachable, fail rather than try the next one.</p>
+
+<h3 id="local-files-and-directories-trusted-as-config">Local files and directories trusted as config</h3>
+
+<p>CWE-426 (untrusted search path) and CWE-427 again. Running the package manager inside an untrusted directory (a fresh clone, a downloaded tarball, a mounted volume) and having it pick up an executable, a config file, or a search path from that directory. <a href="https://github.com/advisories/GHSA-mpwj-fcr6-x34c">CVE-2021-4435</a> and <a href="https://nvd.nist.gov/vuln/detail/CVE-2021-3115">CVE-2021-3115</a> ran binaries found in the current directory. <a href="https://nvd.nist.gov/vuln/detail/CVE-2023-39320">CVE-2023-39320</a> let a <code class="language-plaintext highlighter-rouge">toolchain</code> directive in the module file point at a binary inside the module. <a href="https://github.com/composer/composer/security/advisories/GHSA-7c6p-848j-wh5h">CVE-2024-24821</a> loaded a PHP file from the project’s <code class="language-plaintext highlighter-rouge">vendor/</code> directory into the package manager’s own process.</p>
+
+<p>This overlaps with the “code runs earlier than you expect” problem. The user’s mental model is often that <code class="language-plaintext highlighter-rouge">install</code> runs code but <code class="language-plaintext highlighter-rouge">status</code> or <code class="language-plaintext highlighter-rouge">lock</code> or <code class="language-plaintext highlighter-rouge">audit</code> doesn’t, and the CVEs land where that model is wrong.</p>
+
+<h3 id="shared-filesystem-locations-other-users-can-write-to">Shared filesystem locations other users can write to</h3>
+
+<p>CWE-377 (insecure temporary file) and CWE-276 (incorrect default permissions). Predictable paths under <code class="language-plaintext highlighter-rouge">/tmp</code>, world-writable cache or install directories, files extracted with the archive’s mode bits instead of the user’s umask. Another local user plants a file before you get there, or modifies one after you’ve put it down.</p>
+
+<p><a href="https://github.com/advisories/GHSA-g98m-96g9-wfjq">CVE-2019-3881</a>, <a href="https://github.com/gradle/gradle/security/advisories/GHSA-89qm-pxvm-p336">CVE-2021-29428</a>, and <a href="https://github.com/rust-lang/cargo/security/advisories/GHSA-j3xp-wfr4-hx87">CVE-2023-38497</a> are examples from language package managers. The system package managers have a much longer history here because they run as root: a symlink or hardlink swap between “installer creates the file” and “installer sets its permissions” gives privilege escalation, and the same tool can accumulate several of these over a decade as each fix turns out to be incomplete (<a href="https://nvd.nist.gov/vuln/detail/CVE-2017-7500">CVE-2017-7500</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2021-35937">CVE-2021-35937</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2021-35939">CVE-2021-35939</a>).</p>
+
+<p>Use per-process temp directories from <code class="language-plaintext highlighter-rouge">mkdtemp</code>, set permissions at creation time not after, and on the system-package-manager side use fd-relative operations rather than path-based ones so the thing you checked is the thing you modify.</p>
+
+<h3 id="unsafe-deserialisation-of-manifests">Unsafe deserialisation of manifests</h3>
+
+<p>CWE-502 (deserialisation of untrusted data). Package metadata parsed with a YAML or marshalling library that can instantiate arbitrary objects. <a href="https://github.com/advisories/GHSA-mqwr-4qf2-2hcv">CVE-2017-0903</a> is the well-known one: a gemspec is YAML, the YAML loader was the unsafe variant, and a crafted gem got code execution at parse time before any signature check could run. <a href="https://github.com/conda/conda-build/security/advisories/GHSA-6cc8-c3c9-3rgr">CVE-2025-32798</a> is the same shape with recipe selectors evaluated as Python.</p>
+
+<p>The XML twin is CWE-611 (XML external entity reference). Java-ecosystem manifests are XML, the platform’s default parser resolves external entities, and a <code class="language-plaintext highlighter-rouge">&lt;!DOCTYPE&gt;</code> in a POM or ivy.xml reads local files off the machine doing the resolve. <a href="https://nvd.nist.gov/vuln/detail/CVE-2022-46751">CVE-2022-46751</a> and <a href="https://github.com/gradle/gradle/security/advisories/GHSA-mrff-q8qj-xvg8">CVE-2023-42445</a> are the same parser-left-on-default bug a year apart in two tools that read the same file format.</p>
+
+<p>Both halves of this category are small in count but high in severity, because they mean code execution or file disclosure from metadata alone, before the user has agreed to install anything. Use the safe-load variant of whatever parser you have, and turn off DTDs and external entities if it’s XML.</p>
+
+<h3 id="resource-exhaustion-from-crafted-packages">Resource exhaustion from crafted packages</h3>
+
+<p>CWE-400 (uncontrolled resource consumption) and CWE-1333 (inefficient regular expression complexity). A compressed archive that expands to fill the disk (<a href="https://github.com/rust-lang/cargo/security/advisories/GHSA-2hvr-h6gw-qrxp">CVE-2022-36114</a>), or a version string or git URL that hits exponential backtracking in a regex (<a href="https://github.com/advisories/GHSA-9j7m-rjqx-48vh">CVE-2013-4287</a>, <a href="https://github.com/advisories/GHSA-9xhp-f235-5v37">CVE-2025-8262</a>). <a href="https://github.com/helm/helm/security/advisories/GHSA-9h84-qmv7-982p">CVE-2025-55199</a> is a JSON Schema whose <code class="language-plaintext highlighter-rouge">$ref</code> chain is deep enough to exhaust memory, and <a href="https://github.com/advisories/GHSA-74pv-v9gh-h25p">CVE-2018-1000075</a> is a tar header with a negative size that loops forever.</p>
+
+<p>Mostly a nuisance on a developer machine, more interesting on a shared CI runner or anything that processes packages automatically. Worth capping extracted size and recursion depth, and linting the regexes that touch package metadata.</p>
+
+<h3 id="terminal-escape-sequences-in-metadata">Terminal escape sequences in metadata</h3>
+
+<p>CWE-150 (improper neutralisation of escape sequences). Package name, description, or error text from the registry is printed straight to the terminal, ANSI escapes and all. Lets a malicious package rewrite earlier output, hide what was actually installed, or in some terminal emulators do worse. There are at least nine CVEs for this across four ecosystems (<a href="https://github.com/advisories/GHSA-7gcp-2gmq-w3xh">CVE-2017-0899</a>, <a href="https://github.com/helm/helm/security/advisories/GHSA-c38g-469g-cmgx">CVE-2021-21303</a>, <a href="https://github.com/composer/composer/security/advisories/GHSA-59pp-r3rg-353g">CVE-2025-67746</a>), plus an HTML-output variant where build-timing reports rendered attacker-controlled feature names without escaping (<a href="https://github.com/rust-lang/cargo/security/advisories/GHSA-wrrj-h57r-vx9p">CVE-2023-40030</a>).</p>
+
+<p>Strip control characters from anything that came from a package before it goes to stdout.</p>
+
+<h3 id="lockfiles-and-caches-that-dont-actually-pin">Lockfiles and caches that don’t actually pin</h3>
+
+<p>No clean CWE; usually filed under CWE-345. The lockfile exists, the user believes installs are reproducible, and some code path ignores it. <a href="https://nvd.nist.gov/vuln/detail/CVE-2021-43616">CVE-2021-43616</a> installed even when the lockfile didn’t match the manifest. <a href="https://github.com/advisories/GHSA-7vhp-vf5g-r2fw">CVE-2025-69263</a> allowed remote dynamic dependencies through a frozen lockfile. <a href="https://github.com/advisories/GHSA-hjxc-462x-x77j">CVE-2019-15608</a> checked a hash on the way into the cache but not on the way out.</p>
+
+<p>A more recent variant is the parser differential: two tools, or a tool and an auditor, disagree on what’s inside the same archive. <a href="https://github.com/advisories/GHSA-5r98-f33j-g8h7">CVE-2023-37478</a> is a tarball that one installer reads differently from others while matching the same lockfile hash. <a href="https://github.com/advisories/GHSA-58qw-9mgm-455v">CVE-2026-3219</a> is a file that’s both a tar and a zip depending on which end you read from. The package the security scanner saw isn’t the package that got installed.</p>
+
+<h3 id="build-sandbox-escape">Build sandbox escape</h3>
+
+<p>CWE-693 (protection mechanism failure). For the minority of tools that try to isolate package builds from the host, the bugs are in the isolation. Passing file descriptors between builds over Unix sockets (<a href="https://github.com/NixOS/nix/security/advisories/GHSA-2ffj-w4mj-pg37">CVE-2024-27297</a>), privilege dropping that didn’t actually drop on one platform (<a href="https://github.com/NixOS/nix/security/advisories/GHSA-qc7j-jgf3-qmhg">CVE-2025-53819</a>), built-in fetchers that run outside the sandbox the build runs in. The <a href="https://brew.sh/2024/07/30/homebrew-security-audit/">Homebrew audit</a> found several in that sandbox too.</p>
+
+<p>This category is small only because most package managers don’t sandbox builds at all. That moves the risk out of the CVE record and into the design, where it’s larger but unnumbered.</p>
+
+<h3 id="memory-corruption-in-archive-parsers">Memory corruption in archive parsers</h3>
+
+<p>CWE-787 (out-of-bounds write) and friends. Specific to tools written in C with their own ar, tar, cpio, or header parsers. Integer overflows on length fields, off-by-one on magic strings, format string bugs in error paths (<a href="https://nvd.nist.gov/vuln/detail/CVE-2020-27350">CVE-2020-27350</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2014-8118">CVE-2014-8118</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2015-0860">CVE-2015-0860</a>). About a dozen of these across the system package managers.</p>
+
+<p>Not much to say beyond the obvious: if you can use a memory-safe language or a well-fuzzed library for the archive layer, do.</p>
+
+<h2 id="registry">Registry</h2>
+
+<p>The disclosure record on the registry side is lopsided. Self-hosted registry servers (Nexus, Artifactory, Harbor, Verdaccio, NuGet Gallery) are shipped software, so their bugs get CVE IDs. The big hosted registries are services, so their bugs mostly get a blog post if anything. I’ve leaned on incident writeups, audit reports, and HackerOne disclosures alongside the CVE record here.</p>
+
+<h3 id="publishing-or-replacing-someone-elses-package">Publishing or replacing someone else’s package</h3>
+
+<p>CWE-285 (improper authorisation) and CWE-863 (incorrect authorisation). The registry-side bug that matters most, because it turns directly into a supply-chain compromise without anyone’s account being touched. <a href="https://github.com/rubygems/rubygems.org/security/advisories/GHSA-hccv-rwq6-vh79">CVE-2022-29176</a> was a name-parsing edge case that let you yank and replace any package whose name contained a dash, and <a href="https://github.com/rubygems/rubygems.org/security/advisories/GHSA-2jmx-8mh8-pm8w">CVE-2022-29218</a> let you overwrite the platform-specific variant of someone else’s release in the CDN by exploiting upload ordering. In <a href="https://github.com/CocoaPods/CocoaPods/security/advisories/GHSA-j483-qm5c-7hqx">CVE-2024-38368</a> a migration had left an orphaned-ownership API in place for a decade and anyone could claim 1,800 packages. One registry had a microservice authorisation gap that let anyone publish a new version of any package, <a href="https://github.blog/security/supply-chain-security/githubs-commitment-to-npm-ecosystem-security/">reported</a> and fixed without a CVE.</p>
+
+<p>The self-hosted registries have a parallel set where the role check tests the wrong object: a maintainer can edit project metadata reserved for admins (<a href="https://nvd.nist.gov/vuln/detail/CVE-2024-22278">CVE-2024-22278</a>), self-registration accepts an <code class="language-plaintext highlighter-rouge">admin: true</code> field from the request body (<a href="https://nvd.nist.gov/vuln/detail/CVE-2019-16097">CVE-2019-16097</a>), a low-privilege user can reach an endpoint that confers admin (<a href="https://nvd.nist.gov/vuln/detail/CVE-2024-4142">CVE-2024-4142</a>).</p>
+
+<p>The publish, yank, and transfer-ownership endpoints are the ones to threat-model hardest. Every input to “which package is this acting on” is attacker-controlled.</p>
+
+<h3 id="account-takeover-via-the-recovery-path">Account takeover via the recovery path</h3>
+
+<p>CWE-287 (improper authentication), but the practical version is rarely a bug in the login form. It’s that the maintainer’s email domain expired, someone registered it, requested a password reset, and published. This has happened on at least three major registries (<a href="https://python-security.readthedocs.io/pypi-vuln/index-2022-05-24-ctx-domain-takeover.html">the <code class="language-plaintext highlighter-rouge">ctx</code> incident</a> is the documented one) and is listed as an open threat in <a href="https://docs.npmjs.com/threats-and-mitigations">npm’s own model</a>. The credential-stuffing variant has also worked: a <a href="https://github.com/ChALkeR/notes/blob/master/Gathering-weak-npm-credentials.md">2017 sweep</a> found reused passwords gave publish access to about 14% of one registry by download weight, and a <a href="https://blog.packagist.com/packagist-org-maintainer-account-takeover/">2023 incident</a> hijacked fourteen packages the same way.</p>
+
+<p>The actual code bugs in this category are about token hygiene. One registry was generating tokens with a non-cryptographic RNG and storing them unhashed (<a href="https://blog.rust-lang.org/2020/07/14/crates-io-security-advisory.html">2020 crates.io advisory</a>). <a href="https://nvd.nist.gov/vuln/detail/CVE-2019-9733">CVE-2019-9733</a> let an <code class="language-plaintext highlighter-rouge">X-Forwarded-For: 127.0.0.1</code> header bypass a localhost-only admin account check. <a href="https://github.com/CocoaPods/CocoaPods/security/advisories/GHSA-52gf-m7v9-m333">CVE-2024-38367</a> was a session-validation link that an attacker could get clicked zero-touch by the victim’s mail scanner, and <a href="https://github.com/goharbor/harbor/security/advisories/GHSA-5757-v49g-f6r7">CVE-2024-22244</a> a loose OAuth <code class="language-plaintext highlighter-rouge">redirect_uri</code> check that sent the authorisation code to whatever host the attacker put in the link.</p>
+
+<p>Registries are in a position to detect the domain-expiry case before an attacker does, and several now do. Mandatory 2FA on publish closes most of the rest, as long as the API tokens that bypass 2FA are actually scoped.</p>
+
+<h3 id="stored-xss-in-rendered-package-pages">Stored XSS in rendered package pages</h3>
+
+<p>CWE-79 (cross-site scripting). The registry renders a README, a description, a homepage link, or a profile field that came from a package upload, and the sanitiser misses something. <code class="language-plaintext highlighter-rouge">javascript:</code> URIs in markdown autolinks (<a href="https://nvd.nist.gov/vuln/detail/CVE-2024-37304">CVE-2024-37304</a>), HTML attribute handling in rendered descriptions (<a href="https://github.com/NuGet/NuGetGallery/security/advisories/GHSA-hq63-27r7-2j64">CVE-2024-47604</a>), README content not sanitised before rendering (<a href="https://github.com/verdaccio/verdaccio/security/advisories/GHSA-78j5-gcmf-vqc8">GHSA-78j5-gcmf-vqc8</a>). The self-hosted registries have a long tail of these.</p>
+
+<p>On a registry this is higher stakes than the average web XSS, because the victim is logged in as someone with publish rights and the page they’re viewing was put there by someone who wants those rights. Render package-supplied content with a real sanitiser and a CSP that assumes the sanitiser will eventually miss one.</p>
+
+<h3 id="server-side-code-execution-from-package-metadata">Server-side code execution from package metadata</h3>
+
+<p>CWE-94 (code injection), and often literally the same bug as the client. Registries parse manifests and clone repositories using the same code the client uses, so a YAML deserialisation bug in the gem library is <a href="https://hackerone.com/reports/274990">RCE on the registry</a> as well as on developer machines, and an argument injection in the Composer hg driver is <a href="https://blog.packagist.com/composer-command-injection-vulnerability/">command execution on packagist.org</a> as well as locally. <a href="https://github.com/CocoaPods/CocoaPods/security/advisories/GHSA-x2x4-g675-qg7c">CVE-2024-38366</a> is a registry shelling out during email validation. The 2021 <a href="https://blog.cocoapods.org/CocoaPods-Trunk-RCE/">CocoaPods trunk RCE</a> is <code class="language-plaintext highlighter-rouge">git ls-remote</code> argument injection again, server-side.</p>
+
+<p>If you maintain both a client and a registry, every client-side parsing or VCS bug above is worth checking on the server too. The registry is the higher-value target and it processes the same untrusted input.</p>
+
+<h3 id="ssrf-via-repository-urls-and-webhooks">SSRF via repository URLs and webhooks</h3>
+
+<p>CWE-918 (server-side request forgery). The registry fetches a URL the user provided, and that URL points at the metadata service, an internal admin port, or another tenant’s endpoint. A “test webhook” button that lets a project admin port-scan the internal network (<a href="https://nvd.nist.gov/vuln/detail/CVE-2020-13788">CVE-2020-13788</a>), a remote-repository configuration that the server fetches on the user’s behalf (<a href="https://nvd.nist.gov/vuln/detail/CVE-2022-27907">CVE-2022-27907</a>), an XXE in an uploaded XML config that reaches internal hosts (<a href="https://nvd.nist.gov/vuln/detail/CVE-2020-29436">CVE-2020-29436</a>). The self-hosted registries cluster here because they’re the ones running inside corporate networks where SSRF reaches something interesting.</p>
+
+<p>Outbound fetches from user-supplied URLs need an allowlist, a DNS-rebinding check, and a block on private address ranges.</p>
+
+<h3 id="idor-on-admin-and-settings-endpoints">IDOR on admin and settings endpoints</h3>
+
+<p>CWE-639 (insecure direct object reference). The request says which project, package, webhook, or robot account to act on, and the server checks that you’re allowed to perform the action but not that you own the object. One self-hosted registry had five of these reported in a single batch covering webhook policies, robot accounts, tag-immutability rules, retention policies, and job logs (<a href="https://nvd.nist.gov/vuln/detail/CVE-2022-31666">CVE-2022-31666</a> through CVE-2022-31671). Others have leaked the full repository list to any authenticated user (<a href="https://nvd.nist.gov/vuln/detail/CVE-2021-46270">CVE-2021-46270</a>) or the system proxy config (<a href="https://nvd.nist.gov/vuln/detail/CVE-2024-3505">CVE-2024-3505</a>).</p>
+
+<p>These concentrate in the multi-tenant self-hosted registries where one server holds many organisations’ packages. Every handler that takes an object ID needs to check ownership, including the read-only ones.</p>
+
+<h3 id="tokens-that-grant-more-than-they-say">Tokens that grant more than they say</h3>
+
+<p>CWE-863 again. An “upload-only” API token that turns out to be session-equivalent if sent as a header (<a href="https://python-security.readthedocs.io/pypi-vuln/index-2020-01-05-authentication_method_flaws.html">PyPI 2020 disclosure</a>). A read-only key that can be exchanged for a full-scope OAuth token (<a href="https://nvd.nist.gov/vuln/detail/CVE-2026-21621">CVE-2026-21621</a>). Automation tokens that bypass 2FA by design and can’t be narrowed to a single package.</p>
+
+<p>Publish tokens are what attackers exfiltrate from CI, so the scope printed on the token needs to be the scope the server enforces, and there should be no exchange path from a narrow token to a wide one.</p>
+
+<h3 id="the-registry-and-the-client-disagree">The registry and the client disagree</h3>
+
+<p>No clean CWE. The registry stores and displays one set of metadata, the client installs based on another, and an attacker arranges for them to differ. The 2023 <a href="https://blog.vlt.sh/blog/the-massive-hole-in-the-npm-ecosystem">npm manifest confusion</a> report is the named example: the publish API accepted a manifest independently of the <code class="language-plaintext highlighter-rouge">package.json</code> inside the tarball, so the website, audit tools, and <code class="language-plaintext highlighter-rouge">npm install</code> could each see a different dependency list. The Go proxy variant is temporal rather than spatial: the proxy <a href="https://socket.dev/blog/malicious-package-exploits-go-module-proxy-caching-for-persistence">caches the first version of a module path it sees</a> and keeps serving it after the source repository has been cleaned up.</p>
+
+<p>This one is about having a single source of truth for what a package contains and making sure every consumer reads from it.</p>
+
+<hr />
+
+<p>Across roughly two hundred advisories that’s more or less the full set of shapes. Twelve patterns on the client, eight on the registry, and almost every tool in the survey has entries under at least half of them. The cheapest thing a package manager project can do for its own security is subscribe to the advisory feeds of five or six others, because the bug filed against someone else’s tar extractor this month is a decent description of the bug in yours.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
