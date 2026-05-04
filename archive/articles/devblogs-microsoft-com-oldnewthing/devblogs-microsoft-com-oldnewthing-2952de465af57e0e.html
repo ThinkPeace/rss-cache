@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How do I inform Windows that I’m writing a binary file? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How do I inform Windows that I’m writing a binary file?</h1>
+        <div class="meta">The Old New Thing 2026-05-04T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260504-00/?p=112296">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-2952de465af57e0e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">You don&#x27;t. All files are binary at the file system level. The post How do I inform Windows that I’m writing a binary file? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>A customer wanted to know how to inform Windows that they were opening a file in text mode, as opposed to binary mode. That way, Windows can perform text conversions as necessary, like adding carriage returns before linefeeds, or converting ASCII to Unicode.</p>
+<p>Windows doesn&#8217;t know whether your file is binary or text. As far as Windows is concerned, it&#8217;s just a bunch of bytes, and it&#8217;s up to you to interpret it. So in a sense, all files are binary files. If you want to insert carriage returns before linefeeds, you will have to do it yourself.</p>
+<p>Now, it is often the case that you are using a higher level library, like the C runtime, in which case you can ask the library to do it for you, such as opening the file in <tt>"w"</tt> mode to indicate that the runtime should treat the file as a text file, or in <tt>"wb"</tt> to open as a binary file. But this work happens in the runtime library, not in Windows itself. The runtime library performs the necessary transformations and passes binary data to Windows. There are no further transformations once the data hits <code>Write­File</code>.</p>
+<p>&#8220;But wait, there&#8217;s an old MS-DOS ioctl <a href="https://www.ctyme.com/intr/rb-2821.htm">AH=4401h (Set device information)</a> where you pass flags in DX, and <a href="https://www.ctyme.com/intr/rb-2820.htm"> bit 5 is the raw (binary) mode bit</a>. So what&#8217;s the Windows version of this ioctl?&#8221;</p>
+<p>If you look more closely, that MS-DOS ioctl applies only to character devices. <a href="https://github.com/microsoft/MS-DOS/blob/2d04cacc5322951f187bb17e017c12920ac8ebe2/v2.0/source/XENIX2.ASM#L470"> If you try to use it on a disk file, you get <code>ERROR_<wbr />INVALID_<wbr />FUNCTION</code></a>.</p>
+<pre>ioctl_check_permissions:
+        CMP     AL,2
+        JAE     ioctl_control_string
+        CMP     AL,0
+        MOV     AL,BYTE PTR ES:[DI+sf_fcb+fcb_devid]
+        JZ      ioctl_read              ; read the byte
+        OR      DH,DH
+        JZ      ioctl_check_device      ; can I set with this data?
+        error   error_invalid_data      ; no DH &lt;&gt; 0
+
+ioctl_check_device:
+        TEST    AL,devid_ISDEV          ; can I set this handle?
+        <span>JZ      ioctl_bad_fun           ; no, it is a file.</span>
+
+...
+
+ioctl_bad_fun:
+        error   error_invalid_function
+</pre>
+<p>This IOCTL can be used to tell the console things like whether to perform line buffering on input. The Win32 equivalent is <code>Set­Console­Mode</code>, roughly corresponding to the Unix <tt>stty</tt>.</p>
+<p>If you want to perform content transformations on files, you&#8217;ll have to do it yourself, or ask someone else (like the runtime library) to do it for you.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260504-00/?p=112296">How do I inform Windows that I&#8217;m writing a binary file?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
