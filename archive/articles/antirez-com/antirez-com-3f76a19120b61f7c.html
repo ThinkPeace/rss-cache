@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Redis array type: short story of a long development | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Redis array type: short story of a long development</h1>
+        <div class="meta">&lt;antirez&gt; 2026-05-04T14:21:45Z</div>
+        <div class="links">
+          <a href="http://antirez.com/news/164">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/antirez-com/antirez-com-3f76a19120b61f7c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I started working on the new Array data type for Redis in the first days of January. The PR landed the repository only now, so this code was cooked for four months. I worked at the implementation kinda part time (kinda because many weeks were actually full time, sometimes to detach yourself from the keyboard is complicated), and even before LLMs the impleme…</div>
+        <div class="content">
+          I started working on the new Array data type for Redis in the first days of January. The PR landed the repository only now, so this code was cooked for four months. I worked at the implementation kinda part time (kinda because many weeks were actually full time, sometimes to detach yourself from the keyboard is complicated), and even before LLMs the implementation was likely something I could do in four months. What changed is that in the same time span, I was able to do a lot more. This is the short story of what happened.
+<br>
+<br>In the first month I just wrote the specification document. The rationale for the new data type, the C structures, the sparse representation used, the exact semantics of the array cursor for ring buffer and ARINSERT. I started writing for days a long specification by hand, then I paired with Opus initially, then GPT 5.3 was released and I switched all the design and development with Codex. Since then I use only GPT 5.x for system programming tasks. Thanks to AI, the specification evolved a lot, via back and forth of feedback, intellectual challenges about what was the best design, what was the right compromise, what was too engineered and what not.
+<br>
+<br>Starting from the second month, I started the implementation using automatic programming, constantly reviewing the developed code. Then I realized that the level of indirection I picked was wrong. I really wanted people to be able to do ARSET myarray 293842948324 foo and everything to still work without huge allocations. The two levels of directory + slices (sparse and dense) I had were not enough. Because I had AI, I took no compromises, and I decided to go the extra mile. Once certain conditions are reached, the data structure internally changes shape, and becomes a super directory of sliced dense directories, that also point to the actual array slices (4096 elements per slice, by default). This design provided still the internal "is actually an array" representation I wanted, and the memory characteristics I seeked, while being able, for ARSCAN, and ARPOP, to scan the existing arrays taking a time proportional to the existing elements and not to the range span.
+<br>
+<br>Then, it was time to read all the code, line by line. Everything was working, and this type has massive testing, thanks, again to AI, but still things that superficially work do not mean they are optimal. I found many small inefficiencies or design errors that I didn't want, so I started a process of manual and AI-assisted rewrite of many modules. When this stage was done, I started, during the third month, to stress test the implementation in many different ways. I started to be confident that it was really solid, useful, well designed.
+<br>
+<br>Then… it happened. While modeling different use cases to see if the data structure was comfortable to use, I started to put markdown files into Redis arrays. Because files are a very good match for it. At this point, as I was working for other goals to agents, I realized that I could have the skills markdown files centralized knowledge base that I needed, so from a need of mine I decided to implement ARGREP. But I wanted regular expressions, too. What library to pick?
+<br>
+<br>I ended up picking TRE (thanks Ville Laurikari!), because when you have regexp in Redis, you want to be sure that there are no pathological patterns in time or space. But TRE was very inefficient in a specific and extremely useful case, that is matching foo|bar|zap. So with the help of GPT I optimized it, fixed a few potential security issues, and extended the test. I had everything in place.
+<br>You know what was the biggest realization of all that? For high quality system programming tasks you have to still be fully involved, but I ventured to a level of complexity that I would have otherwise skipped. AI provided the safety net for two things: certain massive tasks that are very tiring (like the 32 bit support that was added and tested later), and at the same time the virtual work force required to make sure there are no obvious bugs in complicated algorithms. To write the initial huge specification was the key to the successive work, as it was the key to review each single line of sparsearray.c and t_array.c and modifying everything was not a good fit.
+<br>
+<br>I didn't spend any word on the use cases as I tried to document the PR itself with a message where they are detailed: https://github.com/redis/redis/pull/15162 so it was not really useful to repeat myself here. Enough to say that I really believe it is about time for Redis to have a data type where the numerical index is part of the semantics.
+<br>
+<br>I hope the Array PR will be accepted soon, and that we can benefit from the new use cases it opens. Of course, feedback is welcomed. Thank you.
+<a href="http://antirez.com/news/164">Comments</a>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
