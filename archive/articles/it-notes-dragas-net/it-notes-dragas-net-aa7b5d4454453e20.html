@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Monitor your devices with LibreNMS on FreeBSD | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Monitor your devices with LibreNMS on FreeBSD</h1>
+        <div class="meta">IT Notes 2026-05-07T10:45:00Z</div>
+        <div class="links">
+          <a href="https://it-notes.dragas.net/2026/05/07/monitor-your-services-with-librenms-on-freebsd/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/it-notes-dragas-net/it-notes-dragas-net-aa7b5d4454453e20.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">LibreNMS has been a faithful companion for years now. It quietly handles the monitoring of my servers, devices, and services without demanding much in return - exactly what you want from a tool whose job is to watch over everything else. It&#x27;s a solid alternative to heavier solutions like Zabbix, and it gives you alerts, data, and graphs on virtually anythin…</div>
+        <div class="content">
+          <p><img src="https://it-notes.dragas.net/featured/watchdog.webp" alt="Monitor your devices with LibreNMS on FreeBSD"></p><p><a href="https://www.librenms.org">LibreNMS</a> has been a faithful companion for years now. It quietly handles the monitoring of my servers, devices, and services without demanding much in return - exactly what you want from a tool whose job is to watch over everything else. It's a solid alternative to heavier solutions like Zabbix, and it gives you alerts, data, and graphs on virtually anything reachable over SNMP.</p>
+<p>I usually install it on a host that is <em>not</em> reachable from the outside, then let it poll all the devices through a VPN: a single observation point, clean perimeter. The ability to create multiple dashboards - and to filter them by user - has also let me give clients a transparent window onto their own servers. Transparency, in my experience, is always the better long-term bet.</p>
+<p>Together with <a href="https://it-notes.dragas.net/2024/07/22/install-uptime-kuma-freebsd-jail/">Uptime-Kuma</a> (and the good old Nagios/Munin pair), LibreNMS lives in a FreeBSD jail on my monitoring servers and just does its job.</p>
+<p>This post walks through a plain installation of LibreNMS on FreeBSD: package-based, no reverse proxy, no HTTPS, no fancy hardening. The goal is to get to a working setup you can build on top of.</p>
+<h2>Assumptions</h2>
+<ul>
+<li>FreeBSD 15.0-RELEASE, in a jail or on a dedicated VM/host</li>
+<li>nginx + php-fpm + MySQL 8.4</li>
+<li>LibreNMS installed from the official package — not via <code>git clone</code></li>
+</ul>
+<p>One note before we start: in this guide I use plain HTTP just to reach the first-time setup. If your LibreNMS instance won't stay confined to a private network or behind a VPN, configuring HTTPS is mandatory, not optional.</p>
+<h2>Installation</h2>
+<pre class="highlight"><code class="language-sh">pkg install librenms mysql84-server python3 nginx
+</code></pre>
+
+<p>LibreNMS currently depends on PHP 8.4. If you want to speed PHP up, install OPcache too:</p>
+<pre class="highlight"><code class="language-sh">pkg install php84-opcache
+</code></pre>
+
+<h2>MySQL</h2>
+<p>Two settings need to be in place <em>before</em> MySQL starts for the first time. After the first start they cannot be changed without reinitializing the data directory, so it's worth getting them right now.</p>
+<pre class="highlight"><code class="language-sh">cd /usr/local/etc/mysql
+cp my.cnf.sample my.cnf
+</code></pre>
+
+<p>In the <code>[mysqld]</code> section, add:</p>
+<pre class="highlight"><code>innodb_file_per_table=1
+lower_case_table_names=0
+</code></pre>
+
+<p>Now start MySQL:</p>
+<pre class="highlight"><code class="language-sh">service mysql-server enable
+service mysql-server start
+</code></pre>
+
+<p>On a fresh FreeBSD install, the local <code>root</code> user can connect to MySQL without a password from the command line. Connect and create the database and user. I'm using <code>password</code> here as a placeholder - don't.</p>
+<pre class="highlight"><code class="language-sh">mysql
+</code></pre>
+
+<pre class="highlight"><code class="language-sql">CREATE DATABASE librenms CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'librenms'@'localhost' IDENTIFIED BY 'password';
+GRANT ALL PRIVILEGES ON librenms.* TO 'librenms'@'localhost';
+exit
+</code></pre>
+
+<h2>php-fpm</h2>
+<p>Edit <code>/usr/local/etc/php-fpm.d/www.conf</code> and adjust the listen directives:</p>
+<pre class="highlight"><code>listen = /var/run/php-fpm-librenms.sock
+listen.owner = www
+listen.group = www
+listen.mode = 0660
+</code></pre>
+
+<p>Then create <code>php.ini</code> from the production sample:</p>
+<pre class="highlight"><code class="language-sh">cd /usr/local/etc
+cp php.ini-production php.ini
+</code></pre>
+
+<p>And set the timezone in <code>php.ini</code>:</p>
+<pre class="highlight"><code>date.timezone = Europe/Rome
+</code></pre>
+
+<h2>nginx</h2>
+<p>Since this jail (or host) is dedicated to LibreNMS, we can rewrite the <code>server</code> block in <code>/usr/local/etc/nginx/nginx.conf</code> directly:</p>
+<pre class="highlight"><code class="language-nginx">server {
+    listen      80;
+    #server_name yourServerName
+    root        /usr/local/www/librenms/html;
+    index       index.php;
+
+    charset utf-8;
+    gzip on;
+    gzip_types text/css application/javascript text/javascript application/x-javascript image/svg+xml text/plain text/xsd text/xsl text/xml image/x-icon;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location /api/v0 {
+        try_files $uri $uri/ /api_v0.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_split_path_info ^(.+\.php)(/.*)$;
+        set $path_info $fastcgi_path_info;
+        try_files $fastcgi_script_name =404;
+        include fastcgi_params;
+        fastcgi_param SERVER_SOFTWARE &quot;&quot;;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $path_info;
+        fastcgi_index index.php;
+        fastcgi_pass unix:/var/run/php-fpm-librenms.sock;
+        fastcgi_buffers 256 4k;
+        fastcgi_intercept_errors on;
+        fastcgi_read_timeout 14400;
+    }
+
+    location ~ /\.(?!well-known).* {
+        deny all;
+    }
+}
+</code></pre>
+
+<p>Now start nginx and php-fpm:</p>
+<pre class="highlight"><code class="language-sh">service nginx enable
+service nginx start
+
+service php_fpm enable
+service php_fpm start
+</code></pre>
+
+<h2>LibreNMS configuration</h2>
+<p>Copy the default config:</p>
+<pre class="highlight"><code class="language-sh">cp /usr/local/www/librenms/config.php.default /usr/local/www/librenms/config.php
+</code></pre>
+
+<p>Because we installed from the package, this file already has the right commands and paths for FreeBSD - no need to hunt down <code>mtr</code>, <code>fping</code>, <code>snmpwalk</code> and friends one by one.</p>
+<p>Create the directory for RRD graphs and set ownership:</p>
+<pre class="highlight"><code class="language-sh">mkdir -p /var/db/librenms/rrd
+chown -R www:www /var/db/librenms
+chmod 775 /var/db/librenms/rrd
+</code></pre>
+
+<p>Then the <code>.env</code> file:</p>
+<pre class="highlight"><code class="language-sh">cd /usr/local/www/librenms
+cp .env.example .env
+chown www .env
+</code></pre>
+
+<p>Edit <code>.env</code> and set at least:</p>
+<ul>
+<li><code>DB_DATABASE</code> - <code>librenms</code></li>
+<li><code>DB_USERNAME</code> - <code>librenms</code></li>
+<li><code>DB_PASSWORD</code> - the one you actually used (not <code>password</code>, please)</li>
+</ul>
+<p>Then add this line, which tells LibreNMS we still need to run the web installer:</p>
+<pre class="highlight"><code>INSTALL=true
+</code></pre>
+
+<p>A note on permissions. The official LibreNMS documentation suggests <code>chown -R www:www</code> over the entire application tree, but on FreeBSD the package already lays down sane ownership, with <code>storage/</code> and <code>bootstrap/cache/</code> writable by <code>www</code>. There's no reason to widen the rest of the codebase. If <code>validate.php</code> complains later about something write-related, the first place to check is:</p>
+<pre class="highlight"><code class="language-sh">ls -la /usr/local/www/librenms/storage /usr/local/www/librenms/bootstrap/cache
+</code></pre>
+
+<p>Now generate the app key as <code>www</code>, since the file is owned by <code>www</code>:</p>
+<pre class="highlight"><code class="language-sh">su -m www -c &quot;php artisan key:generate&quot;
+</code></pre>
+
+<p>And tighten <code>.env</code>:</p>
+<pre class="highlight"><code class="language-sh">chmod 600 .env
+</code></pre>
+
+<p>Refresh the configuration cache:</p>
+<pre class="highlight"><code class="language-sh">su -m www -c &quot;lnms config:clear&quot;
+su -m www -c &quot;lnms config:cache&quot;
+</code></pre>
+
+<h2>Web installer</h2>
+<p>Open <code>http://host/install</code> and follow the steps. The validation process may fail. Refreshing the cache picks up the values written to <code>config.php</code> during the install:</p>
+<pre class="highlight"><code class="language-sh">su -m www -c &quot;lnms config:clear&quot;
+su -m www -c &quot;lnms config:cache&quot;
+</code></pre>
+
+<p>When the web installer is done, edit .env again and remove the INSTALL=true line if it's still there. Leaving it in place re-exposes the installer to anyone who can reach the URL.</p>
+<h2>Polling service</h2>
+<p>LibreNMS needs something to actually run the polls. On FreeBSD, the package ships an rc service that runs the LibreNMS dispatcher, so there's no need to manage cron entries by hand the way most Linux guides assume.</p>
+<pre class="highlight"><code class="language-sh">service librenms enable
+service librenms start
+</code></pre>
+
+<h2>Validate</h2>
+<pre class="highlight"><code class="language-sh">cd /usr/local/www/librenms
+su -m www -c './validate.php'
+</code></pre>
+
+<p>You may see a couple of complaints right after starting the service - usually scheduler-related and self-resolving within a few minutes. Re-run <code>validate.php</code> once the dispatcher has had time to settle. Anything still red after that is worth investigating.</p>
+<h2>Next steps</h2>
+<p>At this point you can log into the web interface and start adding devices, configuring SNMP, and building dashboards. For that, the <a href="https://docs.librenms.org/">official LibreNMS documentation</a> is excellent, and there's no point in me paraphrasing it here.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
