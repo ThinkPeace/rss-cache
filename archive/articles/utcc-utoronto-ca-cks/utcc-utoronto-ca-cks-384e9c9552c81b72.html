@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Detecting (or not) the use of -l and -c together in Bourne shells | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Detecting (or not) the use of -l and -c together in Bourne shells</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-08T03:31:17Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/BourneShellLoginWithCommand">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-384e9c9552c81b72.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Many Bourne shells go slightly beyond the POSIX sh specification to also support a &#x27;-l&#x27; option that makes the shell act as a &#x27;login shell&#x27;. POSIX&#x27;s omission of -l isn&#x27;t only because it doesn&#x27;t really talk about login shells at all, it&#x27;s also because Unix has a special way of marking login shells that goes back very far in its history . The -l option isn&#x27;t n…</div>
+        <div class="content">
+          <div class="wikitext"><p>Many Bourne shells go slightly beyond <a href="https://pubs.opengroup.org/onlinepubs/9799919799/utilities/sh.html">the POSIX sh specification</a>
+to also support a '-l' option that makes the shell act as a 'login
+shell'. POSIX's omission of -l isn't only because it doesn't really
+talk about login shells at all, it's also because <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/LoginShellMarkerHistory">Unix has a
+special way of marking login shells that goes back very far in its
+history</a>. The -l option isn't necessarily
+what <code>login</code> and <code>sshd</code> and so on use, it's something that you can
+use if you specifically want to get a login shell in an unusual
+circumstance.</p>
+
+<p>Bourne shells also have a '-c &lt;command string>' option that causes
+the shell to execute the command string rather than be interactive
+(this is a long standing option that is in POSIX). It may surprise
+you to hear that most or all Bourne shells that support -l also
+allow you to use -l and -c together. Basically all Bourne shells
+interpret this as first executing your .profile and so on, then
+executing the command string instead of going interactive. One use
+for this is to non-interactively run a command line in the context
+of your fully set up shell, with <code>$PATH</code> and other environment
+variables ready for use.</p>
+
+<p>Now, suppose (not hypothetically) that you have some things in your
+.profile that you would like to not run in this situation. Perhaps
+they're unnecessary and expensive, or perhaps they cause problems
+in the rest of your environment if they're run outside the context
+of a genuine login shell. It would be nice for your .profile to be
+able to detect this. Unfortunately, as far as I know at the moment
+this is impossible in general.</p>
+
+<p>If you're using Bash specifically (and /bin/sh is Bash), Bash will
+set '<code>$BASH_EXECUTION_STRING</code>' in this case when invoked as either
+'bash -l -c ...' or 'sh -l -c'. As far as I know, this is the only
+common Bourne compatible shell that provides any way to detect this.
+I've been unable to find any other shell that provides any indicator
+of this, neither as environment variables nor as, for example setting
+'<code>$*</code>' or '<code>$0</code>' to any special values.</p>
+
+<p>(I checked Dash on Ubuntu LTS, which is their standard /bin/sh, the
+OpenBSD ksh (which is also /bin/sh), and FreeBSD /bin/sh (also a
+descendant of Kenneth Almquist's shell, like Dash. Fedora Linux
+uses Bash as /bin/sh.)</p>
+
+<p>If you use Bash as your login shell but /bin/sh is something else
+(and things are specifically doing '/bin/sh -l -c ...'), you can
+rename your .profile to be <code>.bash_profile</code>, so it will only be
+read by Bash. If you have common setup stuff, you could put it in
+.profile and source that from your <code>.bash_profile</code> (although
+<a href="https://utcc.utoronto.ca/~cks/space/blog/unix/BashDetectRemoteInvocation">Bash has some complicated tangles around startup files</a>, <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/BashrcWithPtySsh">also</a>).</p>
+
+<p>If what you really care about is running your .profile a second
+time inside a first session, you can set a marker environment
+variable at the end of your .profile and then have your .profile
+look to see if the environment variable is set. If it is, you can
+skip re-doing things. This doesn't help if some clever program is
+doing 'ssh yourhost sh -l -c ....' in order to run some command
+line with your full environment set up (or if <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/XDMHeresy">a graphical login
+environment</a> does this, partly because of <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/ShellInitializationProblem">the Unix
+shell initialization problem</a>). Under
+some circumstances you can detect this in your .profile because it
+won't be connected to a tty and you can check this with, for example,
+'test -t 0'. Under <a href="https://mastodon.social/@cks/116524338945409193">other circumstances</a>, you may have a
+tty despite being 'non interactive' in practice.</p>
+
+<p>(It's possible that there is some generally available marker that
+I'm not aware of. If so, I'd be happy to hear about it.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
