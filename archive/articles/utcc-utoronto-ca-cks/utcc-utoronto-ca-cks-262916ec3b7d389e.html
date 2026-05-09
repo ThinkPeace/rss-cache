@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notes on using GNU Emacs&#x27; Tramp system in an unusual shell environment | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Notes on using GNU Emacs&#x27; Tramp system in an unusual shell environment</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-09T02:09:46Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/programming/EmacsTrampNotes">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-262916ec3b7d389e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Tramp is a famous and often praised GNU Emacs system for editing remote files; lots of people will call it one of Emacs&#x27; compelling features. I&#x27;ve always had a decidedly different view of Tramp because Tramp has mostly not worked for me in opaque ways. I recently took another run at getting Tramp working (so I could have an informed opinion on why I&#x27;m not a…</div>
+        <div class="content">
+          <div class="wikitext"><p><a href="https://www.gnu.org/software/tramp/">Tramp</a> is a famous and often
+praised GNU Emacs system for editing remote files; lots of people will
+call it one of Emacs' compelling features. I've always had a decidedly
+different view of Tramp because Tramp has mostly not worked for me in
+opaque ways. I recently took another run at getting Tramp working (so
+I could have an informed opinion on why I'm not a fan), and in the
+process I've learned a bunch of things that I don't want to forget.</p>
+
+<p>Although Tramp has a bunch of ways to get access to files remotely
+('methods' in Tramp jargon), the dominant way is for Tramp to SSH in
+to the remote system and do stuff. In order to work with your remote
+shell, Tramp really wants your login on the remote system to have a
+conventional shell environment, ideally one that uses the Bourne shell
+(especially Bash).</p>
+
+<p>(But see <a href="https://www.gnu.org/software/emacs/manual/html_node/tramp/Remote-shell-setup.html">Remote shell setup hints</a>
+and <a href="https://www.gnu.org/software/emacs/manual/html_node/tramp/Frequently-Asked-Questions.html">the Tramp FAQ</a>.)</p>
+
+<p>In specific, Tramp has requirements for its <code>ssh</code> method in a stock
+setup:</p>
+
+<ul><li>Your shell must have a relatively conventional shell prompt.
+Defining this is beyond the scope of this entry; see the definition
+of <code>tramp-shell-prompt-pattern</code> in <a href="https://gitweb.git.savannah.gnu.org/gitweb/?p=emacs.git;a=blob;f=lisp/net/tramp.el;h=6219d097f4fd00ba4039a3ba97824fcba53ddf87;hb=HEAD#l686">tramp.el</a>.</li>
+<li>Your shell must accept and use backslash quoting of more or less
+arbitrary characters in command lines.</li>
+<li>Your shell login can't pause to ask questions; it can produce some
+additional output but it needs to drop you to a shell prompt (that
+Tramp can recognize).</li>
+</ul>
+
+<p>All of these are required because with the '<code>ssh</code>' method, Tramp ssh's
+in and starts a full login session, then switches to /bin/sh (or the
+Tramp remote shell you've set) with some special things that will let
+it reliably recognize its own Tramp (shell) prompts. Using the
+'<code>sshx</code>' method can bypass a lot of this because with it, Tramp
+directly runs /bin/sh without going through your remote login session.
+I believe <code>sshx</code> is also often going to be faster, at the cost of not
+establishing all of the environment variables and so on that your
+login session would (including your remote shell's normal $PATH).</p>
+
+<p>If your login shell environment doesn't match all of these you're
+going to have a varying amount of problems, especially with the
+'<code>ssh</code>' method. If you have <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/ShellPromptTrick">an unconventional prompt</a>, you can sort of fix it, but <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/WhyISwitchedToRc">a shell
+with different quoting rules</a> will be
+painful. Tramp has some mechanisms to deal with additional questions
+but my impression is that they're at least a slog (see parts of
+<a href="https://www.gnu.org/software/emacs/manual/html_node/tramp/Remote-shell-setup.html">Remote shell setup</a>).</p>
+
+<p>(Since I went through this, to deal with quoting issues you need to
+redefine <code>tramp-end-of-output</code> to something that doesn't require
+quoting that your shell doesn't support, and then make sure that your
+<code>tramp-shell-prompt-pattern</code> matches it in addition to everything
+else. The only characters that won't be quoted with backslashes by GNU
+Emacs are -, ., /, 0-9. and a-zA-Z (this is deep in
+<code>shell-quote-argument</code>). There are some things that may break inside
+GNU Emacs and Tramp if you do this but I haven't had any problems
+yet.)</p>
+
+<p>If you ask Tramp to use the (remote) $PATH your remote environment
+sets up, it must be able to run '/bin/sh -l -c ...' in a way that
+successfully runs the command string without having your .profile blow
+things up, <a href="https://utcc.utoronto.ca/~cks/space/blog/unix/BourneShellLoginWithCommand">despite your .profile probably not being able to detect
+this</a>. This is typically
+triggered by you putting 'tramp-own-remote-path' somewhere in
+<code>tramp-remote-path</code> (either <a href="https://www.gnu.org/software/emacs/manual/html_node/tramp/Remote-programs.html">the global version or a connection
+profile</a>).
+Because Tramp is that way, the remote path is not part of the
+<a href="https://www.gnu.org/software/emacs/manual/html_node/tramp/Predefined-connection-information.html">predefined connection information</a>
+that you can set directly.</p>
+
+<p>Despite Tramp carefully initializing your remote login session (if you
+use '<code>ssh</code>'), Tramp then normally ignores your remote $PATH and
+instead generates its own, based on <code>tramp-remote-path</code>. Various bits
+of Tramp documentation will imply that you can use '~' in things you
+add to <code>tramp-remote-path</code> (<a href="https://www.gnu.org/software/emacs/manual/html_node/tramp/Remote-programs.html">cf some of the examples</a>),
+but as far as I can tell this is what you would call inoperable. As
+part of connection setup, Tramp reduces <code>tramp-remote-path</code> down to
+the directories that exist on the remote machine, and the mechanism
+Tramp uses for this appears to be incompatible with the use of either
+'~' or environment variables like '<code>$HOME</code>'.</p>
+
+<p>(Tramp does this path check using the <code>tramp-bundle-read-file-names</code>
+defconst and you can read what that expands to in order to see the
+details, along with the <code>tramp-get-remote-path</code> function and the stuff
+it calls. Since the shell snippet Tramp sends to the remote end quotes
+all of the directory names it checks, whether or not the remote shell
+supports '~' is irrelevant and it won't expand $HOME for you. It's
+possible that this is a bug and Tramp will get fixed some day, but
+don't hold your breath.)</p>
+
+<p>There's no particularly good fix to this that I know of; instead, I
+think you have two options. The first is to make
+<code>tramp-own-remote-path</code> work (it probably will if you use a
+conventional shell and .profile), add it to <code>tramp-remote-path</code>, and
+set up and handle your $PATH properly in each machine's .profile. This
+is probably the better option if you can arrange it, in part because
+you probably want a correctly set remote $PATH for when you're logged
+in to the machine directly. The second option, suitable only if you
+have a common home directory name pattern or two across all your
+machines, is to add all likely directories to your <code>tramp-remote-path</code>
+in whatever variations of your home directory you might have:</p>
+
+
+<blockquote><pre>
+(dolist (pe '("/home/cks/go/bin" "/u/cks/go/bin" ....))
+  (add-to-list 'tramp-remote-path pe))
+</pre>
+</blockquote>
+
+<p>(Or you could write an ELisp function that generated the list from
+multiple sublists, one for things relative to your home directory and
+one a list of possible home directories.)</p>
+
+<p>Many modern Unix systems in standard configurations will make your
+home directory be <code>/home/&lt;login></code>, so you can cover all of them by a
+few paths in <code>tramp-remote-path</code>. Well, assuming you have the same
+login on all of them. Otherwise, you'll probably have to venture into
+the world of <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Connection-Local-Variables.html">connection local variables and profiles</a>.</p>
+
+<p>When changing <code>tramp-remote-path</code> there is something very important
+that can cause you (me) a great deal of frustration if you don't know
+the full story. At the very end of <a href="https://www.gnu.org/software/emacs/manual/html_node/tramp/Remote-programs.html">Tramp's documentation on remote
+programs</a>,
+there is this critically important bit:</p>
+
+<blockquote><p><strong>When remote search paths are changed, local Tramp caches must be
+recomputed</strong>. To force Tramp to recompute afresh, call M-x
+tramp-cleanup-this-connection RET or friends (see <a href="https://www.gnu.org/software/emacs/manual/html_node/tramp/Cleanup-remote-connections.html">Cleanup remote
+connections</a>).</p>
+</blockquote>
+
+<p>If you're me, you might innocently think that it's safe to, for
+example, set or modify <code>tramp-remote-path</code> before you make any
+connections. This is false, and calling
+<code>tramp-cleanup-this-connection</code> is not sufficient to force 'local
+Tramp caches' to be recomputed. In fact, not even quitting and
+restarting Emacs will do so. <a href="https://www.gnu.org/software/emacs/manual/html_node/tramp/Connection-caching.html">Tramp maintains a persistent file based
+cache of information about each host you've ever connected to</a>,
+including the remote $PATH it determined at the time of the first
+connection (with the first connection's <code>tramp-remote-path</code>), and it
+will use that cached remote $PATH value until and unless you clear the
+entire cache by, for example, deleting <code>~/.emacs.d/tramp</code> (with Emacs
+not running), or you use <code>tramp-cleanup-all-connections</code>, which I
+think is probably sufficient.</p>
+
+<p>Given its persistent and dangerous effects, you might want to disable
+this Tramp cache file. The <a href="https://www.gnu.org/software/emacs/manual/html_node/tramp/Connection-caching.html">fine documentation</a>
+asserts that you can do this by setting <code>tramp-persistency-file-name</code>
+to <code>nil</code>. This appears to be technically correct but practically
+inoperative, because you cannot customize the variable to <code>nil</code> (only
+to a filename) or usefully <code>setq</code> it before Tramp is loaded. You can
+only <code>setq</code> it to nil (and have it stick) after Tramp is loaded (and
+you probably also want to invoke <code>tramp-cleanup-all-connections</code> to
+get rid of anything Tramp may have loaded).</p>
+
+<p>Tramp isn't a mode and so doesn't have any hook that fires when it
+loads and starts to activate, which would be the right time to augment
+<code>tramp-remote-path</code>, clear any cached data Tramp loaded, and so on.
+This is unfortunate but <code>use-package</code> provides a way to work around
+it:</p>
+
+<blockquote><pre>
+(use-package tramp
+  :defer t
+  ;; :config will be run right after Tramp loads.
+  :config
+  (cks/tramp-setup)
+  )
+</pre>
+</blockquote>
+
+<p>This appears to reliably fire as I start to enter '/sshx:' or '/ssh:'
+or what have you.</p>
+
+<p>(The manual version of this would be to directly use
+<code>eval-after-load</code>, but I might as well stick with use-package even if
+that's what use-package is using under the (macro) hood.)</p>
+
+<p>When it works, <a href="https://mastodon.social/@cks/116524415618726418">Tramp can be pretty magical</a>. However, <a href="https://mastodon.social/@cks/116524338945409193">my
+voyage of getting to this point was anything but smooth</a>, and parts of it
+were <a href="https://mastodon.social/@cks/116535076214493483">extremely frustrating</a>. That part was the
+part with the Tramp file cache, which made various changes to
+<code>tramp-remote-path</code> have no effect and then sometimes have effect and
+then go back to having no effect because I wasn't religiously clearing
+and removing the cache.</p>
+
+<p>(Tramp badly needs a command that reports all of the relevant
+parameters for the current connection, such as the current remote path
+that Tramp is using. I could probably put my own version together with
+enough determination, but I shouldn't have to.)</p>
+
+<p>PS: This entry was written in my working Tramp configuration from <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/HomeMachine2018">my
+home desktop</a>, but I'm not sure I'm going to
+bother doing this again (I normally write entries in vim on the host
+that <a href="https://utcc.utoronto.ca/~cks/space/blog/">Wandering Thoughts</a> is on). The red squiggles under
+(potentially) misspelled words are sort of nice, but on the other hand
+I turn out to have lots of vim reflexes for writing <a href="https://utcc.utoronto.ca/~cks/space/blog/">Wandering
+Thoughts</a> entries.</p>
+
+<p>(The reflexes aren't triggered by writing in general, because these
+days I write a lot of email in GNU Emacs and that goes fine.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
