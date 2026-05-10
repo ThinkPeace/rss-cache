@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reverse engineering Mersenne Twister with Linear Algebra | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Reverse engineering Mersenne Twister with Linear Algebra</h1>
+        <div class="meta">John D. Cook 2026-05-10T17:32:02Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/05/10/reverse-mersenne-twister/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-bc73af21543c198c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The Mersenne Twister (MT) is a random number generator with good statistical properties but bad cryptographic properties. In buzzwords, it’s a PRNG but not a CSPRNG. This post will show how the internal state of a MT generator can be recovered from its output. We’ll do this using linear algebra. The bit twiddling approach is […] The post Reverse engineering…</div>
+        <div class="content">
+          <p>The Mersenne Twister (MT) is a random number generator with good statistical properties but bad cryptographic properties. In buzzwords, it&#8217;s a PRNG but not a CSPRNG.</p>
+<p>This post will show how the internal state of a MT generator can be recovered from its output. We&#8217;ll do this using linear algebra. The bit twiddling approach is more common and more efficient, but the linear algebra approach is conceptually simpler.</p>
+<h2>How MT works</h2>
+<p>There are numerous variations on the Mersenne Twister. We&#8217;ll focus on the original version that had internal state consists of vector <code>x</code> of length 640 filled with 32-bit numbers. The ideas in this post would apply equally to all MT versions.</p>
+<p>The first call to MT returns a &#8220;tempered&#8221; version of <code>x[0]</code>. The next call returned a tempered version of <code>x[1]</code>, and so on. After every 640 calls, the state is scrambled. This scrambling is where the &#8220;twist&#8221; in the name Mersenne Twister comes from. (The Mersenne part comes from the fact that the period of an MT generator is a <a href="https://www.johndcook.com/blog/2011/09/09/five-interesting-things-about-mersenne-primes/">Mersenne prime</a>.)</p>
+<h2>Tempering</h2>
+<p>Here is Python code for performing the tempering step.</p>
+<pre>def temper(y):
+    y ^= (y &gt;&gt; 11) 
+    y ^= (y &lt;&lt;  7) &amp; 0x9d2c5680 
+    y ^= (y &lt;&lt; 15) &amp; 0xefc60000 
+    y ^= (y &gt;&gt; 18)  
+    return y
+</pre>
+<p>Each step is reversible, and so the <code>temper</code> function is reversible.</p>
+<p>Because the tempering step is reversible, the first output can be used to infer the first element of the internal state, the second output to infer the second element, and so on. After 640 calls one can know the entire internal state and predict the rest of the generator&#8217;s output from then on.</p>
+<h2>Linear algebra</h2>
+<p>The bitwise operations above all correspond to linear operations over GF(2), the field with just two elements, 0 and 1. Addition in this field is XOR and multiplication is AND.</p>
+<p>Each step corresponds to multiplying a vector of 32 bits on the left by a 32 × 32 matrix with entries that are 0&#8217;s and 1&#8217;s, with the understanding that the sum of two bits is their XOR and the product of two bits is their AND. Equivalently, arithmetic is carried out mod 2. So you can compute the matrix-vector product as ordinary integers if you then reduce every integer mod 2.</p>
+<p>We will find the matrix <em>M</em> that corresponds to the temper operation and prove that it is invertible by finding its inverse. This proves that tempering is invertible, and one could compute the inverse of tempering by multiplying by <em>M</em><sup>−1</sup>, though it would be more efficient to undo temporing by bit twiddling.</p>
+<p>One way to recover a matrix is to multiplying by unit vectors <em>e</em><sub><em>i</em></sub> where the <em>i</em>th component of <em>e</em><sub><em>i</em></sub> is 1 and the rest of the components are zero. Then</p>
+<p><em>M</em> <em>e</em><sub><em>i</em></sub></p>
+<p>is the <em>i</em>th column of <em>M</em>.</p>
+<p>So we can find the <em>n</em>th column of <em>M</em> by tempering 1 &lt;&lt; <em>n</em> = 2<sup><em>n</em></sup>.</p>
+<pre>M = np.zeros((32, 32), dtype=int)
+for i in range(32):
+    t = temper(1 &lt;&lt; (31-i))
+    s = f"{t:032b}"
+    for j in range(32):
+        M[j, i] = int(s[j])
+</pre>
+<p>Let&#8217;s generate a random number and compute its tempered form two ways: directly and matrix multiplication.</p>
+<pre>x = random.getrandbits(32)
+y = temper(x)
+print(f"{y:032b}")
+
+vx = np.array([int(b) for b in f"{x:032b}"]) # vector form of x
+vy = M @ vx % 2 # vector form of y
+print("".join(str(b) for b in vy))
+</pre>
+<p>Both produce the same bits:</p>
+<pre>10100101100101101100110101000110
+10100101100101101100110101000110
+</pre>
+<p>We can find the matrix representation of the untemper function by inverting the matrix <em>M</em>. However, we need to invert it over the field GF(2), not over the integers or reals.</p>
+<pre>import galois
+GF2 = galois.GF(2)
+Minv = np.linalg.inv(GF2(M))
+</pre>
+<p>Here are visualizations of <em>M</em> and its inverse using a black square for a 1 and a white square for a 0.</p>
+<p><em>M</em>:</p>
+<p><img fetchpriority="high" decoding="async" class="aligncenter size-medium" src="https://www.johndcook.com/MT_M.png" width="400" height="400" /></p>
+<p><em>M</em><sup>−1</sup>:</p>
+<p><img decoding="async" class="aligncenter size-medium" src="https://www.johndcook.com/MT_U.png" width="400" height="400" /></p>
+<p>The next post will back up and look at the linear algebra of the components that comprise the Mersenne Twister.</p>The post <a href="https://www.johndcook.com/blog/2026/05/10/reverse-mersenne-twister/">Reverse engineering Mersenne Twister with Linear Algebra</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
