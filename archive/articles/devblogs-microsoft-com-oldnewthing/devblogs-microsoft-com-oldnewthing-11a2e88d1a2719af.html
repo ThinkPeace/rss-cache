@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Additional notes on controlling which handles are inherited by Create­Process | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Additional notes on controlling which handles are inherited by Create­Process</h1>
+        <div class="meta">The Old New Thing 2026-05-11T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260511-00/?p=112313">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-11a2e88d1a2719af.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Putting the handles in a private container. The post Additional notes on controlling which handles are inherited by &lt;CODE&gt;Create­Process&lt;/CODE&gt; appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Some time ago, I wrote about <a title="Programmatically controlling which handles are inherited by new processes in Win32" href="https://devblogs.microsoft.com/oldnewthing/20111216-00/?p=8873"> programmatically controlling which handles are inherited by new processes in Win32</a> by using the <code>PROC_<wbr />THREAD_<wbr />ATTRIBUTE_<wbr />HANDLE_<wbr />LIST</code> to limit exactly which handles are inherited. That way, when you create a new process, you have precise control over which handles get inherited and don&#8217;t accidentally inherit handles created by unrelated components in your process.</p>
+<p>A collegue of mine pointed out that you still have the reverse problem: Since handles must be marked as inheritable for them to participate in <code>PROC_<wbr />THREAD_<wbr />ATTRIBUTE_<wbr />HANDLE_<wbr />LIST</code>, if another thread calls <code>Create­Process</code> with <code>bInheritHandles</code> = <code>TRUE</code> but without using <code>PROC_<wbr />THREAD_<wbr />ATTRIBUTE_<wbr />HANDLE_<wbr />LIST</code>, then they will accidentally inherit all of <i>your</i> handles.</p>
+<p>This problem could have been avoided if the <code>PROC_<wbr />THREAD_<wbr />ATTRIBUTE_<wbr />HANDLE_<wbr />LIST</code> allowed you to include non-inheritable handles, in which case they would be non-inheritable by normal <code>Create­Process</code> but inheritable if explicitly opted back in. But alas, that&#8217;s not how it was designed.</p>
+<p>Instead, you can create a helper process. All this helper process does is wait for the main process to exit, and then exit itself.</p>
+<pre>WaitForSingleObject(hMainProcess, INFINITE);
+ExitProcess(0);
+</pre>
+<p>This process doesn&#8217;t sound like it&#8217;s doing anything useful, and it&#8217;s not. But what makes it useful is not what it&#8217;s doing but rather what is done <i>to</i> it.</p>
+<p>The components in the main process create their handles as non-inheritable. When they wants to create a process with specific inherited handles, they duplicate the desired handles into the helper process (as inheritable), and then build a <code>PROC_<wbr />THREAD_<wbr />ATTRIBUTE_<wbr />HANDLE_<wbr />LIST</code> that lists those duplicates as handles to inherit. They also use the <code>PROC_<wbr />THREAD_<wbr />ATTRIBUTE_<wbr />PARENT_<wbr />PROCESS</code> to specify that the <i>helper</i> process is the parent process that the handles should be inherited from. Then they pass those thread attributes to <code>Create­Process</code>, and the new process will inherit exactly those handles. Then they clean up by closing the handles in the helper process with the help of <code>Duplicate­Handle</code> and <code>DUPLICATE_<wbr />CLOSE_<wbr />SOURCE</code>.</p>
+<p>Notice that multiple threads can simultaneously be operating on the helper process in this way, so you need only one helper process to service all your handle-inheritance-control needs.</p>
+<p>This avoids the accidental inheritance problem because the handles that belong to the components in the main process are still marked non-inheritable, so any other code in the main process that does a <code>Create­Process</code> will not inherit them.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260511-00/?p=112313">Additional notes on controlling which handles are inherited by &lt;CODE&gt;Create&shy;Process&lt;/CODE&gt;</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
