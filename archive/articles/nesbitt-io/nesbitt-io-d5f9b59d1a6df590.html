@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>proxy | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>proxy</h1>
+        <div class="meta">Andrew Nesbitt 2026-05-11T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/05/11/proxy.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-d5f9b59d1a6df590.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A lightweight multi-ecosystem caching package proxy</div>
+        <div class="content">
+          <p>Building tools that talk to package registries means making thousands of requests to npm, RubyGems, PyPI, and crates.io while you iterate, and at some point you start to feel bad about it. Recorded HTTP fixtures go stale, mocking sixteen different registry protocols by hand is its own project, and pointing the test suite at the real thing means every red-green cycle is a few hundred more requests to infrastructure other people are paying for. I wanted something I could point <a href="https://github.com/git-pkgs/git-pkgs">git-pkgs</a> and <a href="https://github.com/git-pkgs/brief">brief</a> at locally that would answer like the real registries do but only fetch from upstream once.</p>
+
+<p><a href="https://github.com/git-pkgs/proxy">proxy</a> is a single Go binary that speaks the wire protocols of npm, PyPI, RubyGems, Cargo, Go modules, Maven, NuGet, Composer, Hex, pub.dev, Conan, Conda, CRAN, Debian, RPM, and the OCI container registry. Start it, point a package manager at <code class="language-plaintext highlighter-rouge">localhost:8080</code>, and the first install fetches from upstream and writes the artifact to local storage; every install after that is served from the cache. Metadata responses are rewritten on the way through so tarball URLs point back at the proxy rather than the origin, which is the part most simple HTTP caches get wrong.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>proxy &amp;
+<span class="nv">npm_config_registry</span><span class="o">=</span>http://localhost:8080/npm/ npm <span class="nb">install
+</span><span class="nv">GOPROXY</span><span class="o">=</span>http://localhost:8080/go,direct go build
+pip <span class="nb">install</span> <span class="nt">--index-url</span> http://localhost:8080/pypi/simple/ requests
+</code></pre></div></div>
+
+<p>That’s all I originally wanted from it, a local set of registry endpoints I could hammer from tests without bothering anyone. It’s still a side project for me, mostly a test bed where I can try package-registry experiments against real protocol handlers without first convincing sixteen upstream teams to ship them.</p>
+
+<p>But sitting between a package manager and its registry turns out to be a useful place to stand, and once those handlers existed it was also most of the way to being a free, single-binary alternative to Artifactory or Nexus for people who just want a caching mirror without the rest of the platform attached.</p>
+
+<h3 id="ci">CI</h3>
+
+<p>The dependency caching built into GitHub Actions and its equivalents works at the filesystem level: tar up <code class="language-plaintext highlighter-rouge">~/.npm</code> or <code class="language-plaintext highlighter-rouge">~/.cargo</code>, key it on a hash of the lockfile, restore it next time. That’s fine until the lockfile changes by one package and the whole cache key misses, or a matrix build spreads the same dependency set across six OS and runtime combinations that each get their own tarball.</p>
+
+<p>A registry-protocol cache sits one level up, keyed on package coordinates rather than filesystem layout, so <code class="language-plaintext highlighter-rouge">lodash-4.17.21.tgz</code> is stored once and served to every job that wants it regardless of what else changed in the lockfile or which runner is asking. Point it at S3 or Postgres instead of the default SQLite-and-local-disk and it can be shared across runners. Longer term I’d like to see this wired directly into something like Forgejo’s CI runner, so every job on an instance gets a shared package cache and a cooldown policy by default rather than every repo having to configure it.</p>
+
+<h3 id="mirroring">Mirroring</h3>
+
+<p>The proxy can be told to fetch packages before anything asks for them. <code class="language-plaintext highlighter-rouge">proxy mirror</code> takes PURLs, or a CycloneDX or SPDX SBOM, and pulls every listed artifact into the cache:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>proxy mirror pkg:npm/lodash@4.17.21 pkg:cargo/serde@1.0.219
+proxy mirror <span class="nt">--sbom</span> sbom.cdx.json
+</code></pre></div></div>
+
+<p>Feed it the SBOM for a repository and you have an offline mirror of exactly that project’s dependency tree, which is the shape you want for air-gapped builds or for warming a cache before a CI fleet starts pulling. The same operation is exposed as <code class="language-plaintext highlighter-rouge">POST /api/mirror</code> on the running server for driving it from a pipeline.</p>
+
+<h3 id="cooldowns">Cooldowns</h3>
+
+<p>Because the proxy is rewriting metadata responses anyway, it can also edit them. The <code class="language-plaintext highlighter-rouge">cooldown</code> setting strips any version younger than a configured age from the version lists it returns:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="na">cooldown</span><span class="pi">:</span>
+  <span class="na">default</span><span class="pi">:</span> <span class="s2">"</span><span class="s">3d"</span>
+  <span class="na">ecosystems</span><span class="pi">:</span>
+    <span class="na">npm</span><span class="pi">:</span> <span class="s2">"</span><span class="s">7d"</span>
+  <span class="na">packages</span><span class="pi">:</span>
+    <span class="s2">"</span><span class="s">pkg:npm/lodash"</span><span class="err">:</span> <span class="s2">"</span><span class="s">0"</span>
+</code></pre></div></div>
+
+<p>With that config, a version published to npm an hour ago doesn’t exist as far as anything behind the proxy is concerned, and won’t for a week. I <a href="/2026/03/04/package-managers-need-to-cool-down.html">wrote about why I think cooldowns are the single most effective supply-chain control most projects aren’t using</a>; the short version is that almost every malicious-package incident is caught within a day or two of publish, so a build that can’t see anything younger than three days was never exposed in the first place.</p>
+
+<p>A few package managers have grown a native setting for this since I wrote that post, but doing it at the proxy means one config covers every ecosystem at once, including the ones that haven’t.</p>
+
+<h3 id="web-ui">Web UI</h3>
+
+<p>There’s a web UI on <code class="language-plaintext highlighter-rouge">/</code> for browsing what’s in the cache: packages by ecosystem, hit counts, size, a source browser for reading files inside cached tarballs without extracting them, and a diff view for comparing two cached versions of the same package file by file. The enrichment API behind it (<code class="language-plaintext highlighter-rouge">/api/package/{ecosystem}/{name}/{version}</code>) returns licence, publish date, latest version, and any OSV advisories for a given coordinate, which is the same lookup git-pkgs needs, so the two share that code.</p>
+
+<p>There’s a lot more I want the UI to do, most of it on the list of <a href="/2026/04/16/features-everyone-should-steal-from-npmx.html">things worth stealing from npmx</a>: bundle composition, install-size sunbursts, typosquat warnings. A registry frontend that only shows you packages you’ve actually installed is a slightly different design problem from one that fronts all four million packages on npm, and I haven’t fully worked out what that should look like yet.</p>
+
+<h3 id="next">Next</h3>
+
+<p><a href="https://github.com/git-pkgs/proxy/issues/55">Upstream merging</a> would put an internal index and the public registry behind one URL, with the internal names shadowing the public ones, which is the dependency-confusion defence that pip in particular has no native answer for. I’d also like the proxy to enforce dependency policy more broadly than just cooldowns (licence allowlists, blocked package names, version floors), though <a href="/2026/03/19/the-fragmented-world-of-dependency-policy.html">there’s no shared format for writing those policies down</a>, so whatever config the proxy grows will be yet another one, and I’d rather that problem got solved upstream of any individual tool.</p>
+
+<p>The experiment I’m most looking forward to is a <a href="https://github.com/git-pkgs/proxy/issues/52">wrapper mode</a>, <code class="language-plaintext highlighter-rouge">proxy npm install express</code>, where the binary finds or starts a server, sets <code class="language-plaintext highlighter-rouge">NPM_CONFIG_REGISTRY</code> or <code class="language-plaintext highlighter-rouge">GOPROXY</code> or <code class="language-plaintext highlighter-rouge">PIP_INDEX_URL</code> as appropriate, and execs the underlying command. Add <code class="language-plaintext highlighter-rouge">alias npm="proxy npm"</code> to your shell and every install on your machine is cached and cooled down without ever touching an <code class="language-plaintext highlighter-rouge">.npmrc</code>.</p>
+
+<p>Most of the heavy lifting is in modules shared with the rest of the <a href="https://github.com/git-pkgs">git-pkgs</a> tooling: the manifest and lockfile parsers, the PURL handling, the SBOM readers, the OSV client. Each new registry backend is a few hundred lines of protocol handler on top of that, plus a config snippet for the install page.</p>
+
+<p>Contributions are very welcome on this one, particularly protocol handlers for the registries still unticked in the README (Helm, Swift, Alpine, Arch) and anything that makes the browse UI more useful. Tell me what you’d want it to do on <a href="https://mastodon.social/@andrewnez">Mastodon</a> or <a href="https://github.com/git-pkgs/proxy/issues">the issue tracker</a>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">brew install git-pkgs/git-pkgs/proxy</code> / <a href="https://github.com/git-pkgs/proxy">github.com/git-pkgs/proxy</a></p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
