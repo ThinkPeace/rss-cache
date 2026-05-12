@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Not a Security Issue | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Not a Security Issue</h1>
+        <div class="meta">Andrew Nesbitt 2026-05-12T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/05/12/not-a-security-issue.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-ace010ab4cc01e01.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">How curl&#x27;s disclosure policy filtered an AI scanner&#x27;s findings at source</div>
+        <div class="content">
+          <p>Daniel Stenberg <a href="https://daniel.haxx.se/blog/2026/05/11/mythos-finds-a-curl-vulnerability/">wrote yesterday</a> about Mythos finding a real curl vulnerability, which sent me poking around the curl tree with a couple of AI-assisted scanners to see what else turned up in a codebase that has already had every fuzzer and auditor on earth pointed at it. The findings were better than expected, and one reason stood out: the scanners had read <a href="https://github.com/curl/curl/blob/master/docs/VULN-DISCLOSURE-POLICY.md"><code class="language-plaintext highlighter-rouge">docs/VULN-DISCLOSURE-POLICY.md</code></a> and applied it.</p>
+
+<p>A whole class of results came back labelled in effect “real bug, worth fixing, but not a security issue per the project’s own policy”: server-triggered NULL dereferences, small leaks, things that only fire if you can already control the command line. The tool had found them, checked them against curl’s published list of what doesn’t count, and demoted them before I had to.</p>
+
+<p>One example from the demoted pile: the scanner found that <code class="language-plaintext highlighter-rouge">tool_formparse.c</code> walks a linked list of <code class="language-plaintext highlighter-rouge">-F</code> form parts recursively with no depth limit, built a 150k-line config file to prove it, and got an ASan stack-overflow trace out the other end. It then wrote, in its own summary, “trigger requires user to run curl with attacker-supplied config or args, so excluded by policy,” filed it under quality bugs, and moved on. A small <code class="language-plaintext highlighter-rouge">ber_free</code> leak on an LDAP error path got the same treatment with a terser “policy excludes small leaks.” The noise floor was lower than comparable runs on projects without a written policy.</p>
+
+<p>Almost everything written about AI-generated security reports over the past few months is about what to do once they land in your inbox. Daniel has <a href="https://daniel.haxx.se/blog/">written</a> and <a href="https://opensourcesecurity.io/2025/2025-05-curl_vs_ai_with_daniel_stenberg/">spoken</a> about it at length, Seth Larson <a href="https://sethmlarson.dev/slop-security-reports">called it early</a> from the Python side, ISC <a href="https://www.isc.org/blogs/2026-04-16-How-to-report-a-vulnerability/">reported</a> an 89% false-positive rate on one platform, and there’s an <a href="https://github.com/ossf/wg-vulnerability-disclosures/issues/178">OpenSSF working group effort</a> collecting triage practices. All of that addresses the receiving end, whereas the curl scan suggested the same documents that help a human triager can be loaded into the scanner’s context and suppress findings before anyone has to read them.</p>
+
+<p>Agentic scanners read the repository as they go, pulling in <code class="language-plaintext highlighter-rouge">SECURITY.md</code>, <code class="language-plaintext highlighter-rouge">CONTRIBUTING.md</code>, and anything that looks like policy, because they’re built on the same scaffolding as coding agents. A maintainer has no say over who points a scanner at the repo, but the files sitting there when it arrives are entirely theirs.</p>
+
+<h2 id="vuln-disclosure-policymd">VULN-DISCLOSURE-POLICY.md</h2>
+
+<p>The <a href="https://github.com/curl/curl/blob/master/docs/VULN-DISCLOSURE-POLICY.md#not-security-issues">section</a> that did the work is headed “Not security issues” and lists sixteen named categories, covering things like small memory leaks, never-ending transfers, NULL dereferences triggered by a malicious server, busy-loops that eventually end, escape sequences in terminal output, weak algorithms that a protocol requires, and anything that depends on tricking the user into running a crafted command line.</p>
+
+<p>Each entry gets a paragraph of reasoning: the busy-loop one says applications already have to handle the transfer loop legitimately running at 100% CPU, so a prolonged one is a bug rather than a vulnerability, and the command-line one points out that an attacker who can make you run a crafted curl invocation could make you run <code class="language-plaintext highlighter-rouge">sudo rm -rf /</code> instead.</p>
+
+<p>The reasoning is what lets a reader, human or otherwise, apply the rule to cases the list didn’t anticipate, and the categories only work because they’re specific to curl. A generic “DoS is out of scope” line wouldn’t have helped, but “never-ending transfers are not security issues because applications already need countermeasures for stalled connections” is something a tool can match a finding against.</p>
+
+<h2 id="prior-art">Prior art</h2>
+
+<p><a href="https://github.com/nodejs/node/blob/main/SECURITY.md">Node.js</a> embeds a full threat model in <code class="language-plaintext highlighter-rouge">SECURITY.md</code> with explicit trust boundaries, listing what the runtime does not trust (inbound network data, file content opened via the API) against what it does (the operating system, the developer’s own code), and sets a high bar for DoS reports by requiring asymmetric resource consumption and ruling out anything mitigable by ordinary process recycling.</p>
+
+<p><a href="https://docs.djangoproject.com/en/dev/internals/security/">Django’s policy</a> gives worked code examples of reports that are “not considered valid”, mostly variations on passing unsanitised input to an internal function and blaming the function. It also asks reporters not to include CVSS scores, severity assessments, or “lengthy background sections”, which is a fairly direct description of what an LLM produces by default.</p>
+
+<p><a href="https://chromium.googlesource.com/chromium/src/+/main/docs/security/faq.md">Chrome’s security FAQ</a> is the source of the most-borrowed single exclusion in the genre, that a physically-local attacker who can already run code as you is out of scope because the browser can’t defend against the operating system.</p>
+
+<p>I <a href="https://gist.github.com/andrew/4002775fc189c5ce7a05e058b84c5348">collected</a> around five hundred repositories that ship a threat model file of some kind. The filenames are all over the place, <code class="language-plaintext highlighter-rouge">THREAT-MODEL.md</code>, <code class="language-plaintext highlighter-rouge">threat_model.md</code>, <code class="language-plaintext highlighter-rouge">ThreatModel.md</code>, sometimes buried three directories into <code class="language-plaintext highlighter-rouge">docs/</code>, which means a tool has to go looking rather than checking a known path.</p>
+
+<p>The OpenSSF <a href="https://github.com/ossf/security-insights">SECURITY-INSIGHTS</a> schema has had <code class="language-plaintext highlighter-rouge">in-scope</code> and <code class="language-plaintext highlighter-rouge">out-of-scope</code> arrays under <code class="language-plaintext highlighter-rouge">vulnerability-reporting</code> for a couple of years, which would be the obvious machine-readable home for this, but I’ve not seen a scanner that consumes them.</p>
+
+<h2 id="what-to-write">What to write</h2>
+
+<p>The baseline is having a <a href="https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/adding-a-security-policy-to-your-repository"><code class="language-plaintext highlighter-rouge">SECURITY.md</code></a> at all, which a surprising share of widely-depended-on repos still lack, and on GitHub turning on <a href="https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability">private vulnerability reporting</a> so there’s somewhere for a report to go that isn’t a public issue. An empty policy file with a contact address is still better than nothing because it’s the first place both humans and tools look.</p>
+
+<p>The exclusion list is the cheap part and the part that did the work in the curl scan. Each entry needs the name of the pattern, a flat statement that it doesn’t qualify, and enough reasoning that the rule generalises beyond the exact case you wrote down.</p>
+
+<p>Underneath that sits a short threat model describing who the attacker is assumed to be and what they control, against what the project is actually trying to protect, which for most projects fits in three or four paragraphs. The exclusion list is really just the threat model restated as concrete cases. In practice most maintainers will write the exclusions first because that’s where the pain is, accumulating entries as bad reports come in, and only later write down the model that explains why they hold together, which is fine, though the list does tend to get sharper once the model exists. The <a href="https://github.com/cncf/tag-security/blob/main/community/assessments/guide/self-assessment.md">CNCF self-assessment template</a> is a reasonable starting shape if you want one.</p>
+
+<p>One category worth adding that I haven’t seen written down is documentation not matching behaviour. AI scanners flag this constantly because “docs say X, code does Y” is a finding template they’ve learned, and it is technically a defect, but it’s only a security issue if the documented behaviour was a security guarantee somebody relied on. A function that the docs say returns null on error but actually throws belongs in the public tracker, whereas a function documented as escaping HTML that turns out not to is a real vulnerability.</p>
+
+<p>Stating that distinction in the policy file would have trimmed the curl results further, and Piotr Karwasz <a href="https://github.com/ossf/wg-vulnerability-disclosures/issues/178#issuecomment-3897627638">made much the same observation</a> from the Log4j side, where most of the borderline reports describe real behaviour that the threat model excludes and the fix is usually a Javadoc line saying whether an argument is trusted.</p>
+
+<p>None of this stops someone pasting a hallucinated buffer overflow into your HackerOne queue without reading anything, and the bottom of the report-quality distribution is unreachable by documentation. But the better-built tools, the ones that read the repo before reporting, are the ones a policy file can steer, and those are increasingly the ones doing the scanning. Writing the threat model down was always good practice for human reporters, and it turns out the new readers take it more literally than the old ones ever did.</p>
+
+<p>Whatever mythical models turn up next will be reading the same files.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
