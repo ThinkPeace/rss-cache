@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A code (reformatting) conundrum in Python, and heuristics | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A code (reformatting) conundrum in Python, and heuristics</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-12T02:26:53Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/python/CodeFormattingBlockHeuristics">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-30970f79fef3df8e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Suppose that you are a Python code reformatter, and someone hands you the following snippet of Python code to act on: if something: blah blah blah [...] final-line some-statement [... more statements ...] Here&#x27;s the question: should you reindent &#x27;some-statement&#x27; so that it&#x27;s part of the &#x27; if &#x27; block? One answer is that you absolutely should not. The current…</div>
+        <div class="content">
+          <div class="wikitext"><p>Suppose that you are a Python code reformatter, and someone hands you
+the following snippet of Python code to act on:</p>
+
+
+<blockquote><pre>
+if something:
+    blah blah blah
+    [...]
+    final-line
+some-statement
+
+[... more statements ...]
+</pre>
+</blockquote>
+
+<p>Here's the question: should you reindent 'some-statement' so that it's
+part of the '<code>if</code>' block?</p>
+
+<p>One answer is that you absolutely should not. The current code is
+valid Python code, and you are a reformatter for style, not to correct
+(presumed) errors. Since this is valid code, you should re-flow line
+wrapping and so on within blocks, but not change what block valid code
+is part of.</p>
+
+<p>Another answer is that maybe the person writing this code made a
+mistake. Style wise, it's common to add a blank line between the end
+of an indented block and following code; the lack of a blank line
+suggests that a mistake was made. So maybe you should reindent
+'some-statement' to where it properly should be, especially if you
+have a style rule that says that there should be blank lines in this
+sort of situation.</p>
+
+<p>(Of course, you could also opt to add the blank line that your style
+guide says should be there and not change what block a statement goes
+in. But we're in heuristics territory here.)</p>
+
+<p>If you're a heuristic reformatter, your opinion may change depending
+on what the 'final-statement' is. For instance, if the final statement
+in the if block is 'return', it is pretty obvious that there's not
+supposed to be anything after it. Anything after it is dead code,
+which would be a different and less likely error. So you should leave
+'some-statement' alone and it's valid style to not have a blank line
+between the last statement in the 'if' block and 'some-statement'.</p>
+
+<p>Python doesn't have all that many statements that definitively end
+blocks, but it does have some that are extremely suggestive. Consider
+this pattern of code:</p>
+
+<blockquote><pre>
+try:
+   something
+except SomeError:
+   pass
+some-statement
+</pre>
+</blockquote>
+
+<p><a href="https://docs.python.org/3/reference/simple_stmts.html#the-pass-statement">The <code>pass</code> statement is a no-op</a>,
+not something that affects control flow, so it's perfectly valid to
+have statements after a '<code>pass</code>'; they will be executed normally. At
+the same time it's commonly used this way when there's not going to be
+anything after it, so a heuristic Python code formatter that moved
+'some-statement' up into the 'except' would make lots of people
+unhappy.</p>
+
+<p>One such heuristic Python code reformatter is the one used in GNU
+Emacs in both its conventional python-mode (which 'parses' Python code
+with regular expressions) and python-ts-mode (which fully parses
+Python code with a tree-sitter grammar). I'm not sure if these are the
+same reformatters, but they have the same effects. This particular
+reformatter heuristic turns out to be the root cause of <a href="https://utcc.utoronto.ca/~cks/space/blog/python/Python2WithPython3LSP">my Python
+code reformatting glitches</a>.</p>
+
+<p>(In fact the GNU Emacs Python code reformatting appears to take a
+'pass' as a hard end of block and will out-dent anything after it,
+regardless of which this does to control flow. If you add a 'pass' in
+the middle of a function and reflow with M-q, GNU Emacs will happily
+make all statements after it module level ones.)</p>
+
+<p>I experimented with some stand-alone Python code formatters I had
+sitting around, and none of them behaved this way, which I guess isn't
+surprising (I tried black, ruff, and yapf). Since the normal pylsp
+Python LSP server relies on one of them for code reformatting (which
+one depends on your configuration), this also means LSP-driven code
+reformatting won't do this. It's possible that only GNU Emacs has this
+(arguably incorrect) heuristic reformatting.</p>
+
+<p>(I was led to discover all of this by a comment ae left on <a href="https://utcc.utoronto.ca/~cks/space/blog/python/Python2EmacsLSPProblems">my
+earlier entry about Python 2 LSP problems</a>.)</p>
+
+<p>PS: There are other heuristic decisions you can make depending on what
+'some-statement' is and where it currently is in the overall block.
+For example, if 'some-statement' is the last statement in a function
+and in a 'return', then it's almost certainly correct in its current
+place. But these heuristics multiply endlessly.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
