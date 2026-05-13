@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>In praise of the Linux kernel netconsole (in the right circumstances) | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>In praise of the Linux kernel netconsole (in the right circumstances)</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-13T00:29:35Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/NetconsoleForDesktopPanics">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-b00c27f8c1bdcaa4.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The Linux kernel&#x27;s netconsole is a kernel module that will &quot;log kernel printk messages over UDP&quot; to a remote system, which makes it another form of kernel (message) console . These days it can be activated either on boot or after boot, and in the past I&#x27;ve had mixed views of it . However, I recently had a nice experience with netconsole that&#x27;s left me more…</div>
+        <div class="content">
+          <div class="wikitext"><p>The Linux kernel's <a href="https://www.kernel.org/doc/html/latest/networking/netconsole.html">netconsole</a> is
+a kernel module that will "log kernel printk messages over UDP" to a
+remote system, which makes it another form of <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/ManyConsolesOfLinux">kernel (message)
+console</a>. These days it can be activated either
+on boot or after boot, and <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/NetconsoleMixedViews">in the past I've had mixed views of it</a>. However, I recently had a nice experience with
+netconsole that's left me more well inclined to it in specific
+situations.</p>
+
+<p><a href="https://mastodon.social/@cks/116244639867759815">A while back, my home desktop started locking up every once in a
+while</a>. Several years
+ago my <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/HomeMachine2018">home desktop</a> had a somewhat similar problem
+that was due to <a href="https://utcc.utoronto.ca/~cks/space/blog/tech/CuringColdLockupMachine">hardware issues</a>,
+but the lockups this time were different, in that the machine would
+lock up for a bit and then reboot on its own. Local logs showed
+nothing, but I happen to have another machine sitting around so I
+thought I might as well try <a href="https://www.kernel.org/doc/html/latest/networking/netconsole.html">netconsole</a> again. These days
+netconsole can be enabled on the fly:</p>
+
+
+<blockquote><pre>
+modprobe netconsole
+cd /sys/kernel/config/netconsole
+mkdir heedra
+cd heedra
+echo em0 >dev_name
+echo 192.168.X.Y >remote_ip
+echo 1 >enabled
+</pre>
+</blockquote>
+
+<p>(This other machine is called <a href="https://nausicaa.fandom.com/wiki/Heedra">heedra</a> for obscure reasons.)</p>
+
+<p>On the other machine I ran a simple script to capture output inside a
+<code>screen</code> session:</p>
+
+<blockquote><pre>
+#!/bin/sh
+while :; do
+   nc --recv-only -u -l 6666 |
+      tee $HOME/work/h-logs/netconsole
+done
+</pre>
+</blockquote>
+
+<p>(The advantage of --recv-only is that <code>nc</code> won't complain if I hit CR
+a few times in the screen session to create blank lines, so new
+messages are more obvious.)</p>
+
+<p>After a while, my home desktop locked up again and rebooted soon
+afterward. When I checked the netconsole log file on the other
+machine, I discovered that I had actually captured kernel log
+messages, and reasonably useful ones at that.</p>
+
+<p>The kernel logs revealed that this appears to be a kernel 'soft
+lockup', where all cores had gone to 100% system usage during what
+appears to be TLB flushes or cross-core kernel communication. In
+several of the kernel stack backtraces, <code>bpf_trace_run4</code> appears, so
+I suspect that there's an uncommon eBPF locking race or issue that's
+infrequently tickled by the eBPF metrics gathering programs I normally
+run on my desktop.</p>
+
+<p>(It's probably not from <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/SystemdSocketIPRestrictions">the eBPF programs systemd uses for network
+access control</a>, since those are used
+widely.)</p>
+
+<p>Capturing these kernel messages doesn't give me a solution, but at
+least it gives me a way forward if the lockups get too frequent and
+annoying (I can try disabling my eBPF metrics collectors). And I
+couldn't have gotten these messages with anything else except a serial
+console, which I don't have available on my home desktop and anyway
+would have needed a second machine in physical proximity (which is
+awkward in my home setup).</p>
+
+<p>My understanding is that netconsole isn't quite as reliable as a
+serial console for getting last gasp kernel panic messages out, since
+you need more kernel pieces to still be working to transmit network
+packets. But it's more reliable than anything short of a serial
+console, and serial consoles are generally in short supply on modern
+desktops and desktop-like things (including hand-built <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/SlurmHowWeUseIt">SLURM nodes</a>). For one off, small scale use my
+listening script would be fine, although if <a href="https://support.cs.toronto.edu/">we</a> needed to use it on a larger scale,
+we'd need some infrastructure to collect netconsole logs from multiple
+machines.</p>
+
+<p>(Some suggestions for that are in the comments on <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/NetconsoleMixedViews">my earlier entry</a>.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
