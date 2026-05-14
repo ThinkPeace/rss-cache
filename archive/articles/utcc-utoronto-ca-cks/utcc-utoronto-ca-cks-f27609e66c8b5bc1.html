@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A GNU Emacs learning experience with text-mode hooks | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A GNU Emacs learning experience with text-mode hooks</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-14T17:51:54Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/programming/EmacsTextModeHooksGotcha">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-f27609e66c8b5bc1.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">For a while, one of my little irritations with my Emacs environment was that sometimes, when I fired up Emacs to edit some code and then quit out of it, Emacs would complain that there was still an ispell process running and ask me what to do with it. This was especially mysterious to me as I don&#x27;t normally use flyspell-prog-mode (I find it too irritating f…</div>
+        <div class="content">
+          <div class="wikitext"><p>For a while, one of my little irritations with my Emacs environment
+was that sometimes, when I fired up Emacs to edit some code and then
+quit out of it, Emacs would complain that there was still an ispell
+process running and ask me what to do with it. This was especially
+mysterious to me as I don't normally use flyspell-prog-mode (I find it
+too irritating for general use). Recently I got sufficiently irritated
+to use a combination of the ELisp debugger and strategic '<code>(message
+...)</code>' usage to track this down, which initially looked like one issue
+and actually turned out to be another one that I discovered only as
+part of writing this entry.</p>
+
+<p>One of the major modes in GNU Emacs is text-mode. I have a text-mode
+hook, probably like many people, and one of the things it does is turn
+on flyspell-mode in that buffer, which causes flyspell to invoke
+ispell and thus start an ispell process. It's also my custom from long
+ago to set the default major mode of buffers to text-mode (the out of
+the box default is fundamental-mode). If I'm editing something and
+it's not program source code, it's almost always text and having to
+say 'M-x text-mode' all the time is the kind of annoyance GNU Emacs is
+designed to erase.</p>
+
+<p>When I used <a href="https://www.gnu.org/software/emacs/manual/html_node/eintr/debug_002don_002dentry.html"><code>debug-on-entry</code></a>
+to find out where the ispell process was starting from, it pointed to
+my text-mode hook. At first I theorized that code buffers were
+starting out in the default mode (and thus triggering my text-mode
+hook) before being switched to their proper mode, but strategic use of
+'<code>(message ...)</code>' in my text-mode hook revealed that it was actually
+being triggered on a scratch buffer for Flycheck. So I switched my
+theory to Flycheck creating scratch buffers without specifying their
+mode, so they would up in the default major-mode, which for normal
+setups is fundamental-mode but for me is text-mode, triggering my
+text-mode hook and starting ispell.</p>
+
+<p>Except I looked at the Flycheck source and this is wrong. Here, let me
+quote a small bit:</p>
+
+
+<blockquote><pre>
+(define-derived-mode flycheck-error-message-mode text-mode
+  "Flycheck error messages"
+  "Major mode for extended error messages.")
+</pre>
+</blockquote>
+
+<p>Flycheck explicitly derives the mode for some of its scratch buffers
+from text-mode, which of course means that they run text-mode hooks.
+This is a perfectly reasonable thing to do in general, since text-mode
+is the appropriate mode in general for, well, text, but it leads me to
+today's GNU Emacs learning experience which is that <strong>text-mode hooks
+may run in surprising buffers, not just text files I'm visiting and
+editing</strong>. I shouldn't put anything in my text-mode hook that I want
+only for real text files that I'm editing, at least not without
+guarding it somehow. One of those things is flyspell, not just because
+of its side effects of starting an ispell process but also because I
+don't particularly want flyspell to mark 'misspelled' words in, for
+example, Flycheck diagnostics.</p>
+
+<p>(<a href="https://utcc.utoronto.ca/~cks/space/blog/programming/EmacsRemoteXAndMouseActions">Flyspell's markings also get in the way of mouse based copy and
+paste</a>.)</p>
+
+<p>My solution was to guard what my text-mode hook did so that it only
+happens in buffers associated with a file:</p>
+
+<blockquote><pre>
+(defun cks/text-mode-hook ()
+  (when buffer-file-name
+     ....))
+</pre>
+</blockquote>
+
+<p>It's possible that some day I'll want my text-mode setup in an
+anonymous buffer, but until that day I'll leave such scratch buffers
+alone. I could probably do a bit better by looking for buffer names
+that start and end with * (this is the usual GNU Emacs naming
+convention for explicit scratch buffers), but that would take a bit
+more work.</p>
+
+<p>(Although not much more, now that I've found <code>string-prefix-p</code> and
+<code>string-suffix-p</code>.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

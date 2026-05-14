@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A constant-space linear-time algorithm for deleting all but the 10 most recent files in a directory | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A constant-space linear-time algorithm for deleting all but the 10 most recent files in a directory</h1>
+        <div class="meta">The Old New Thing 2026-05-14T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260514-00/?p=112322">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-f12ee91ff1d9da22.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Using data structures you already knew. The post A constant-space linear-time algorithm for deleting all but the 10 most recent files in a directory appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Say you have a directory full of files, and you want to delete all but the 10 most recent files. Is there a way to tell <code>Find­First­File</code> to enumerate the files in date order?</p>
+<p>No, there is no way to tell <code>Find­First­File</code> to enumerate the files in date order. The files enumerated by <code>Find­First­File</code> are produced in whatever order the file system driver wants. For example, FAT typically enumerates them in the order the files appear in the directory listing, which could be in order of creation if the files were added sequentially, or some mishmash order if there were renames or deletions mixed in.</p>
+<p>Since you can&#8217;t control the order in which the files are enumerated, you&#8217;ll have to do the sorting yourself. The naïve solution is to read in all the entries, sort them by last-modified date, and then delete all but the last ten. This is <var>O</var>(<var>n</var>) space and <var>O</var>(<var>n</var> log <var>n</var>) running time.</p>
+<p>But you can do better.</p>
+<p>This job calls for a priority queue. A priority queue is a data structure that supports these operations, where <var>n</var> is the number of items in the priority queue.</p>
+<ul>
+<li>Add sorted: <var>O</var>(log <var>n</var>)</li>
+<li>Find largest: <var>O</var>(1)</li>
+<li>Remove largest: <var>O</var>(log <var>n</var>)</li>
+</ul>
+<p>The above description is for a max-priority queue. There is also a min-priority queue where the final two operations are &#8220;find smallest&#8221; and &#8220;remove smallest&#8221;. The two versions are equivalent because you can just use a reverse-sense comparison to switch from one to the other.</p>
+<p>What we can do is enumerate all the files and add them one by one to a min-priority queue sorted by modified date. The priority queue holds the newest items. If the priority queue size exceeds 10, then we delete the file corresponding to the &#8220;smallest&#8221; (earliest) entry in the priority queue, and the remove that entry from the priority queue.</p>
+<p>Since the priority queue size has a fixed cap, all of the operations run in <var>O</var>(1) time because the value of <var>n</var> is bounded by a predetermined constant. (Of course, the larger the cap, the larger the constant in <var>O</var>(1).) The overall algorithm then runs in <var>O</var>(<var>n</var>) times, where <var>n</var> is the number of files in the directory.</p>
+<p>Here&#8217;s a sketch of a solution. To get a min-priority heap, we have to reverse the sense of the comparison in <code>dateAscending</code>.</p>
+<pre>constexpr int files_to_keep = 10;
+
+auto dateAscending = [](const WIN32_FIND_DATA&amp; a, const WIN32_FIND_DATA&amp; b) {
+    return CompareFileTime(&amp;a.ftLastWriteTime, &amp;b.ftLastWriteTime) &gt; 0;
+    };
+
+std::priority_queue&lt;WIN32_FIND_DATA,
+        std::vector&lt;WIN32_FIND_DATA&gt;, decltype(dateAscending)&gt;
+        names(dateAscending);
+
+WIN32_FIND_DATA wfd;
+wil::unique_hfind findHandle( FindFirstFileW(L"*.*", &amp;wfd));
+if (findHandle.is_valid())
+{
+    do
+    {
+        if (wfd.dwFileAttributes &amp; FILE_ATTRIBUTE_DIRECTORY) {
+            // Skip directories
+            continue;
+        }
+
+        names.push(wfd);
+        if (names.size() &gt; files_to_keep) {
+            DeleteFileW(names.top().cFileName);
+            names.pop();
+        }
+    } while (FindNextFileW(findHandle.get(), &amp;wfd));
+}
+</pre>
+<p>It&#8217;s unfortunate that <code>std::<wbr />priority_<wbr />queue</code> doesn&#8217;t have a deduction guide that deduces the <code>Comparator</code>. We have to specify it explicitly, and since it comes after the <code>Container</code>, we have to write out the container type manually instead of allowing it to be deduced.</p>
+<p>It&#8217;s also unfortunate that it&#8217;s hard to call <code>reserve()</code> on the vector hiding inside the <code>priority_<wbr />queue</code>. This means that the <code>names.push()</code> could throw an exception. At least we use an RAII type (<code>wil::<wbr />unique_<wbr />hfind</code>) to ensure that the find handle is not leaked.</p>
+<p>If you have access to <code>std::<wbr />inplace_<wbr />vector</code>, you could use a</p>
+<pre>std::priority_queue&lt;WIN32_FIND_DATA,
+        std::inplace_vector&lt;WIN32_FIND_DATA, files_to_keep + 1&gt;,
+        decltype(dateAscending)&gt; names(dateAscending);
+</pre>
+<p>to avoid memory allocations entirely. (It also makes it clearer that the algorithm is constant-space.)</p>
+<p>This is an example of a so-called <a href="https://en.wikipedia.org/wiki/Online_algorithm">online algorithm</a>, an algorithm that does its work incrementally rather than requiring all of the input before it can start working.</p>
+<p><b>Exercise</b>: What if the task was to delete the 10 oldest files?</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260514-00/?p=112322">A constant-space linear-time algorithm for deleting all but the 10 most recent files in a directory</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
