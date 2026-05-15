@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Recovering the state of xorshift128 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Recovering the state of xorshift128</h1>
+        <div class="meta">John D. Cook 2026-05-15T12:34:29Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/05/15/xorshift128-state/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-184a1502b81641bc.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I’ve written a couple posts lately about reverse engineering the internal state of a random number generator, first Mersenne Twister then lehmer64. This post will look at xorshift128, implemented below. import random # Seed the generator state a: int = random.getrandbits(32) b: int = random.getrandbits(32) c: int = random.getrandbits(32) d: int = random.get…</div>
+        <div class="content">
+          <p>I&#8217;ve written a couple posts lately about reverse engineering the internal state of a random number generator, first <a href="https://www.johndcook.com/blog/2026/05/10/reverse-mersenne-twister/">Mersenne Twister</a> then <a href="https://www.johndcook.com/blog/2026/05/12/hacking-the-lehmer64-rng/">lehmer64</a>. This post will look at xorshift128, implemented below.</p>
+<pre>import random
+
+# Seed the generator state
+a: int = random.getrandbits(32)
+b: int = random.getrandbits(32)
+c: int = random.getrandbits(32)
+d: int = random.getrandbits(32)
+
+MASK = 0xFFFFFFFF
+
+def xorshift128() -&gt; int:
+    global a, b, c, d
+
+    t = d
+    s = a
+
+    t ^= (t &lt;&lt; 11) &amp; MASK t ^= (t &gt;&gt;  8) &amp; MASK
+    s ^= (s &gt;&gt; 19) &amp; MASK
+
+    a, b, c, d = (t ^ s) &amp; MASK, a, b, c
+
+    return a
+</pre>
+<h2>Recovering state</h2>
+<p>Recovering the internal state of the generator is simple: it&#8217;s the four latest outputs in reverse order. This is illustrated by the following chart.</p>
+<p><img decoding="async" class="aligncenter size-medium" src="https://www.johndcook.com/xorshift128_chart.png" alt=" a b c d output 5081e5ca 79259a41 63e12955 651e537d c793d11c c793d11c 5081e5ca 79259a41 63e12955 ad52e33a ad52e33a c793d11c 5081e5ca 79259a41 f8f09343 f8f09343 ad52e33a c793d11c 5081e5ca a7009622 a7009622 f8f09343 ad52e33a c793d11c fe42a8ef " width="400" height="111" /></p>
+<p>This means that once we&#8217;ve seen four outputs, we can predict the rest of the outputs. The following code demonstrates this.</p>
+<p>Let&#8217;s generate five random values.</p>
+<pre>out = [xorshift128() for _ in range(5)]</pre>
+<p>Running</p>
+<pre>print(hex(out[4]))
+</pre>
+<p>shows the output 0xc3f4795d.</p>
+<p>If we reset the state of the generator using the first four outputs</p>
+<pre>d, c, b, a, _ = out
+print(hex(xorshift128()))
+</pre>
+<p>we get the same result.</p>
+<h2>Good stats, bad security</h2>
+<p>Mersenne Twister and lehmer64 have good statistical properties, despite being predictable. The xorshift128 generator is even easier to predict, but it also has good statistical properties. These generators would be fine for many applications, such as Monte Carlo simulation, but disastrous for use in cryptography.</p>
+<p>The post on lehmer64 mentioned at the end that the internal state of PCG64 can also be recovered from its output. However, doing so requires far more sophisticated math and thousands of hours of compute time. Still, it&#8217;s not adequate for cryptography. For that you&#8217;d need a random number generator designed to be secure, such as <a href="https://www.johndcook.com/blog/2019/03/02/chacha-adiantum/">ChaCha</a>.</p>
+<p>So why not just use a cryptographically secure random number generator (CSPRNG) for everything? You could, but the other generators mentioned in this post use less memory and are much faster. PCG64 occupies an interesting middle ground: simple and fast, but not easily reversible.</p>The post <a href="https://www.johndcook.com/blog/2026/05/15/xorshift128-state/">Recovering the state of xorshift128</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
