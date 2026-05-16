@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Make ZIP files smaller with ZIP Shrinker | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Make ZIP files smaller with ZIP Shrinker</h1>
+        <div class="meta">Evan Hahn (dot com) 2026-05-16T00:00:00Z</div>
+        <div class="links">
+          <a href="https://evanhahn.com/make-zip-files-smaller-with-zip-shrinker/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/evanhahn-com/evanhahn-com-3b3e91063534775a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I built ZIP Shrinker, a little browser tool to shrink ZIP files. It also works with formats that are secretly ZIPs underneath, like APK, EPUB, JAR, and many more. Try it out! How does it work? At a high level, this tool (1) re-compresses every file in the ZIP archive with higher compression (2) removes all metadata (3) removes entries for directories. Re-co…</div>
+        <div class="content">
+          <p>I built ZIP Shrinker, a little browser tool to shrink ZIP files. It also works with formats that are secretly ZIPs underneath, like APK, EPUB, JAR, and many more.</p>
+<p><a href="https://evanhahn.com/uploads/2026-05-16-zip-shrinker/">Try it out!</a></p>
+<h2 id="how-does-it-work">How does it work?</h2>
+<p>At a high level, this tool (1) re-compresses every file in the ZIP archive with higher compression (2) removes all metadata (3) removes entries for directories.</p>
+<h3 id="re-compressing">Re-compressing</h3>
+<p>ZIP files are typically compressed with an algorithm called <a href="https://zlib.net/feldspar.html">Deflate</a>.</p>
+<p>There are a few tools that can re-compress Deflate data and make it smaller, usually by spending more time on the computation. I took one of these tools, <a href="https://github.com/ebiggers/libdeflate">libdeflate</a>, and applied it to each compressed entry in the ZIP. I chose libdeflate because of its performance; alternatives like <a href="https://github.com/google/zopfli">Zopfli</a> can achieve marginally smaller results but take <em>much</em> longer.</p>
+<p>I created <a href="https://codeberg.org/EvanHahn/libdeflate.js">libdeflate.js</a>, a WebAssembly wrapper for libdeflate, as part of this work. (I always relish my time working with WASM!)</p>
+<h3 id="removing-metadata-and-directories">Removing metadata and directories</h3>
+<p>Each entry in a ZIP file can contain additional metadata like comments. These aren&rsquo;t typically used, and if they&rsquo;re there, my shrinker removes them. This usually doesn&rsquo;t save too many bytes, but it doesn&rsquo;t hurt.</p>
+<p>Removing directories is a slightly spicier decision. Usually, the existence of a file entry implies the existence of the directory it&rsquo;s inside. For example, <code>foo/bar.txt</code> implies the existence of the <code>foo</code> directory. Some ZIPs include separate entries for directories, but because most extractors don&rsquo;t need them, I remove those. This has the side effect of removing empty directories—<a href="https://evanhahn.com/contact/">let me know</a> if that&rsquo;s a problem for you.</p>
+<p>If you want to see how the whole project works, <a href="https://codeberg.org/EvanHahn/zip-shrinker">check out the full source code</a>.</p>
+<h2 id="how-good-is-it">How good is it?</h2>
+<p>I tested several ZIPs to see what this tool could do. Some anecdotal results:</p>
+<table>
+  <thead>
+      <tr>
+          <th>File</th>
+          <th>Savings</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Linux v6.19 source</td>
+          <td>15.8 MiB (5.62%)</td>
+      </tr>
+      <tr>
+          <td>Romeo &amp; Juliet EPUB from Project Gutenberg</td>
+          <td>51.2 KiB (18.16%)</td>
+      </tr>
+      <tr>
+          <td>Signal for Android v8.3.4 (APK)</td>
+          <td>25.6 MiB (30.06%)</td>
+      </tr>
+  </tbody>
+</table>
+<p>Not particularly scientific, but useful to see.</p>
+<h2 id="why-did-i-do-this">Why did I do this?</h2>
+<p>This proof-of-concept shows that you can make ZIP files smaller without sacrificing backwards compatibility. It could be useful for sending an archive to someone, but could also be useful to reduce bandwidth and server costs. For example, if Project Gutenberg re-compressed all their EPUB books with this method, they might be able to save some money.</p>
+<p>Of course, ZIP isn&rsquo;t always the most efficient format. Typically, other archives like <code>.tar.bz2</code> can be smaller. But those aren&rsquo;t backwards-compatible!</p>
+<p>ZIP also supports compression methods other than Deflate. They&rsquo;re atypical, but you could use them to achieve a smaller result, too.</p>
+<p><a href="https://evanhahn.com/uploads/2026-05-16-zip-shrinker/">Give my tool a try</a> if you want a smaller ZIP.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
