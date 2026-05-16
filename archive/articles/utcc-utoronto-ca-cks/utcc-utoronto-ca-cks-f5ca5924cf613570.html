@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Getting C code navigation even for Debian (or Ubuntu) packages | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Getting C code navigation even for Debian (or Ubuntu) packages</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-16T02:00:52Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/CCodeIntelligenceForDebs">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-f5ca5924cf613570.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Every so often, I want (or need) to make modifications to programs in an Ubuntu package, and often the programs are written in C (and these days I&#x27;m using dgit to manipulate the package ). One of my challenges when I do this is that I generally don&#x27;t start out knowing where and how to change the code to do what I want; instead, I have to navigate around an…</div>
+        <div class="content">
+          <div class="wikitext"><p>Every so often, I want (or need) to make modifications to programs in
+an Ubuntu package, and often the programs are written in C (and these
+days <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/DgitOnUbuntuEarlyNotes">I'm using dgit to manipulate the package</a>). One of my challenges when I do this is that
+I generally don't start out knowing where and how to change the code
+to do what I want; instead, I have to navigate around an unfamiliar
+code base and work out enough of its structure to find the specific
+bit of code I need to change.</p>
+
+<p>These days, the dominant way to get smart code navigation and other
+code knowledge things is through <a href="https://en.wikipedia.org/wiki/Language_Server_Protocol">LSP servers and clients</a>. A variety of
+modern and semi-modern languages have LSP servers that you can
+immediately use in your editor of choice and then navigate around
+random code bases with handy features like 'find definition' and 'find
+references' (for example, Go, Python, and Rust). Unfortunately, C
+isn't such a language. In the general case, understanding C code
+requires knowing how it's compiled, and that means you often have to
+tell C LSP servers this information. Well, specifically you have to
+tell this stuff to <a href="https://clangd.llvm.org/">clangd</a>, the dominant
+LSP server for C and C++.</p>
+
+<p>(There's also <a href="https://github.com/MaskRay/ccls">ccls</a>, which may work
+out part of this information on its own, but it seems to be less
+popular and I have no experience with it.)</p>
+
+<p>Fortunately for people like me, there is a simple way to gather this
+compilation information even if the program's build system doesn't do
+it for you, and that's <a href="https://github.com/rizsotto/bear">Bear</a>
+(which is available as a standard Ubuntu package for extra
+convenience). <a href="https://github.com/rizsotto/bear">Bear</a> operates as a front-end on however you normally
+build your program; you build your program (or collection of programs)
+with '<code>bear -- &lt;build command></code>', and <a href="https://github.com/rizsotto/bear">Bear</a> monitors compiler
+execution and records everything. This is slower than a normal build
+(sometimes significantly so), but you get a compilation database out
+of it and then you can use LSP tooling to jump around the source code.</p>
+
+<p>(My understanding is that gcc, clang, and so on can generate this
+compilation information if they're asked, and modern build systems
+often ask them to do so, but an old fashioned build system using
+things like '<code>make</code>' won't include the magic compiler options
+necessary. Possibly you can include them yourself by hand, but
+<a href="https://github.com/rizsotto/bear">Bear</a> takes care of the work for you.)</p>
+
+<p>Somewhat to my surprise, <a href="https://github.com/rizsotto/bear">Bear</a> not only works with programs built
+by 'make', it also works when you build Debian or Ubuntu packages
+under Bear with '<code>bear -- dpkg-buildpackage -uc -b</code>'. If you're
+building a substantial package (such as Dovecot), you're definitely
+going to notice the slowdown, but you do get LSP based code
+intelligence out of it (and you only have to do this once, not every
+time you change the code).</p>
+
+<p>(Under some circumstances you may have to edit the generated
+<code>compile_commands.json</code> to take out gcc options that clang doesn't
+support, but fortunately the JSON file is in a human friendly format
+where each compiler option is on its own line. Possibly there's a way
+to manipulate the Debian/Ubuntu package build process to not use such
+options in the first place.)</p>
+
+<p>Building Debian and Ubuntu packages contaminate your source directory,
+so once you've run a build under Bear to generate the
+<code>compile_commands.json</code> file, you need to move the file to safety
+and then reset your source directory somehow. If you're using <a href="https://manpages.debian.org/testing/dgit/dgit.1.en.html">dgit</a> (<a href="https://utcc.utoronto.ca/~cks/space/blog/linux/DgitOnUbuntuEarlyNotes">which I
+very much think you should be</a>), I believe
+this can be done with a variant of the standard dgit source directory
+reset instructions:</p>
+
+
+<blockquote><pre>
+git clean -xdf -e compile_commands.json
+git reset --hard
+</pre>
+</blockquote>
+
+<p>The process I suspect I'm going to follow in future dgit modifications
+of Ubuntu packages is to <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/DgitOnUbuntuEarlyNotes">set up the package with dgit</a>, build it once under <a href="https://github.com/rizsotto/bear">Bear</a> in unmodified
+state, rm the generated .deb and .ddeb files, and then start poking
+around the source code with LSP intelligence to find where I need to
+make my modifications (and then commit them and do a dgit build as
+usual).</p>
+
+<p>(This elaborates on <a href="https://mastodon.social/@cks/116563392434455993">some Fediverse posts</a>.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
