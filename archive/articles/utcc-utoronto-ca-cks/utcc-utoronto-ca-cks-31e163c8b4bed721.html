@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notes about reading messages with the Python email packages | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Notes about reading messages with the Python email packages</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-20T03:01:03Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/python/EmailPackagesNotes">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-31e163c8b4bed721.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I have a long standing personal program to display MIME formatted email messages in the terminal in a sensible way (it was mentioned in this old entry on my email tools and its comments ). For a long time this was a Python 2 program, using the Python 2 version of the email package . Recently, I moved this program to Python 3 as part of my sudden enthusiasm…</div>
+        <div class="content">
+          <div class="wikitext"><p>I have a long standing personal program to display MIME formatted
+email messages in the terminal in a sensible way (it was mentioned in
+<a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/ToolsEmail">this old entry on my email tools and its comments</a>). For a long time this was a Python 2
+program, using <a href="https://docs.python.org/2.7/library/email.html">the Python 2 version of the <code>email</code> package</a>. Recently, I moved
+this program to Python 3 as part of <a href="https://utcc.utoronto.ca/~cks/space/blog/python/DWikiPython3Now">my sudden enthusiasm for Python
+3 conversions</a>, using <a href="https://docs.python.org/3/library/email.html">the Python 3 version of
+<code>email</code></a> and its
+sub-packages. In the process I have wound up with some notes and
+opinions on practical use of the Python 3 <a href="https://docs.python.org/3/library/email.html">email</a> packages.</p>
+
+<p>(The Python 2 version of <a href="https://docs.python.org/3/library/email.html">email</a> had its own quirks and oddities,
+but I worked all of those out that hard way years ago, have mostly
+forgotten them since, and they're not interesting any more now that
+the era of Python 2 is over.)</p>
+
+<p>The Python 3 <a href="https://docs.python.org/3/library/email.html">email</a> documentation will tell you that the modern
+interface for email messages is <a href="https://docs.python.org/3/library/email.message.html#email.message.EmailMessage"><code>email.message.EmailMessage</code></a>.
+The older <a href="https://docs.python.org/3/library/email.compat32-message.html#email.message.Message"><code>email.message.Message</code></a>
+is (theoretically) only there for Python 3.2 compatibility and you
+should ignore its methods and use only the <code>EmailMessage</code> methods.
+This is not entirely the case. If you look behind the curtain, you'll
+discover that many of the <code>EmailMessage</code> APIs for reading message
+contents are in fact <code>Message</code> APIs with masks on, and especially
+they're various masks for <a href="https://docs.python.org/3/library/email.compat32-message.html#email.message.Message.get_payload"><code>Message.get_payload()</code></a>.
+That <code>get_payload()</code> isn't obsolete in practice matters, because
+it turns out that <code>get_payload()</code> is the only way to do certain
+things you (I) need.</p>
+
+<p><a href="https://utcc.utoronto.ca/~cks/space/blog/python/DecodeEmailHeaderNotes">As with decoding email headers</a>, my strong
+impression is that the entire set of <a href="https://docs.python.org/3/library/email.html">email</a> parsing and message
+reading APIs are only really designed to deal with well formed email
+messages with fully correct MIME. This isn't what you find out in the
+real world, both due to programs being imperfect and also due to
+things like other mail systems sending you a bounce message that
+includes a message/rfc822 version of the original message where the
+other mail system has retained all of the message headers, including
+the Content-Type that says the original message was a
+multipart/alternative, but has replaced the entire body of the message
+with '(Body suppressed)'. As far as I can tell, there's no
+<code>EmailMessage</code> API that will give you (just) the body text of that
+(malformed) message/rfc822; your only way to dig it out is to use the
+older <a href="https://docs.python.org/3/library/email.compat32-message.html#email.message.Message.get_payload"><code>Message.get_payload()</code></a> API.</p>
+
+<p>(That bounce example is a real case that I've seen.)</p>
+
+<p>At the same time, <a href="https://docs.python.org/3/library/email.message.html#email.message.EmailMessage.get_content"><code>EmailMessage.get_content()</code></a>
+is a handy API that does a lot of the work for you for things like
+extracting a de-mangled, Unicode version of a text part (or anything
+that's sufficiently text-like, although you will get back a <code>bytes</code>
+thing instead of a <code>str</code> and then decode it yourself). So I use
+<code>get_content()</code> as much as possible but some things have to fall
+back to <code>get_payload()</code>. The one thing I'm cautious about with
+<code>get_content()</code> is that it has a cheerful trust in the asserted
+character set encoding of the MIME part, when I'm pretty certain that
+some mail creation programs blithely assume you'll typically interpret
+stuff as UTF-8 (especially if it has no type specified, which in
+theory means ASCII).</p>
+
+<p>(<code>get_payload()</code> will also probably <a href="https://mastodon.social/@cks/116599121242092127">give you heartburn if you're
+trying to use typing</a>, but this is a
+general <a href="https://docs.python.org/3/library/email.html">email</a> problem with API typing.)</p>
+
+<p>The <a href="https://docs.python.org/3/library/email.html">email</a> package parses your messages with stuff in
+<a href="https://docs.python.org/3/library/email.parser.html">email.parser</a>,
+which has some <a href="https://docs.python.org/3/library/email.parser.html#additional-notes">additional notes</a>
+on how it theoretically parses things. Some of these notes are
+experimentally false, especially the one for message/delivery-status.
+The actual story is in comments in the source code:</p>
+
+<blockquote><p>message/delivery-status contains blocks of headers separated by
+a blank line. We'll represent each header block as a separate
+nested message object, but the processing is a bit different
+than standard message/* types because there is no body for the
+nested messages. A blank line separates the subparts.</p>
+</blockquote>
+
+<p>Although the actual text of a message/delivery-status part is plain
+text (admittedly in a specific format, in theory), the parsed version
+is a multipart EmailMessage object containing a series of text/plain
+EmailMessage children, where the actual contents are in the headers of
+those text/plain children (and the 'body' is empty). The best way to
+extract the actual contents as text to print or process them is to use
+<a href="https://docs.python.org/3/library/email.message.html#email.message.EmailMessage.as_string"><code>EmailMessage.as_string()</code></a>
+on each child. This is quite confusing if you expect a
+message/delivery-status to have obvious contents or to match the
+documentation (and <code>EmailMessage.get_content()</code> doesn't work right
+on the multipart parent object; this may be a bug that will be fixed
+at some point).</p>
+
+<p>PS: The reason you don't want to use <code>.as_string()</code> on text or
+broken MIME parts is that MIME parts have headers, namely the various
+Content- ones, and <code>.as_string()</code> will give you those headers as
+well as the text you want. There's no option in the EmailMessage API
+to not get the headers.</p>
+
+<h3>Sidebar: Types for <a href="https://docs.python.org/3/library/email.html">email</a> stuff</h3>
+
+<p>Because sometimes I get enthusiasms, I added types to my program
+that's using <a href="https://docs.python.org/3/library/email.html">email</a>. It was <a href="https://mastodon.social/@cks/116597547718716703">somewhat painful</a> and the kind of
+thing that you describe after the fact as "a valuable learning
+experience". In order for future me to not lose that learning
+experience, here's some notes.</p>
+
+<p>My first problem was that often, mypy inferred that something was an
+email.message.Message instead of an email.message.EmailMessage; the
+latter is a subclass of the former. Much of this could be fixed with
+<code>isinstance()</code> to create <a href="https://mypy.readthedocs.io/en/stable/type_narrowing.html">type narrowing</a>. I found
+the most convenient way to do this to be an <code>assert()</code>, for example:</p>
+
+
+<blockquote><pre>
+prs = email.parser.BytesParser(policy=...)
+m = prs.parse(fp)
+assert(isinstance(m, EmailMessage))
+[...]
+</pre>
+</blockquote>
+
+<p>Here I know that email.parser.BytesParser will return an EmailMessage
+because that's what my policy is set up to do (<a href="https://docs.python.org/3/library/email.parser.html#email.parser.BytesFeedParser">cf</a>),
+but mypy can't see that.</p>
+
+<p>A more involved situation is the return value of
+<a href="https://docs.python.org/3/library/email.compat32-message.html#email.message.Message.get_payload"><code>Message.get_payload()</code></a>, which mypy typically typed as
+including 'list[Message]' when I know that what I have is a
+'list[EmailMessage]'. Fixing this requires <a href="https://docs.python.org/3/library/typing.html#typing.cast"><code>typing.cast()</code></a>:</p>
+
+<blockquote><pre>
+def showalternative(p: EmailMessage) -> None:
+  m = p.get_payload()
+  if isinstance(m, str):
+    [...]
+    return
+
+  assert(isinstance(m, list)) # for safety
+  m = typing.cast(list[EmailMessage], m)
+  [...]
+</pre>
+</blockquote>
+
+<p>You need to use <a href="https://docs.python.org/3/library/typing.html#typing.cast"><code>typing.cast()</code></a> to correct mypy's idea of the member
+type of a list or other container.</p>
+
+<p>(Technically mypy and any other type checker that does similar
+inference. I don't know my way around the Python typechecker
+landscape, although I've wound up with a few of them installed.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
