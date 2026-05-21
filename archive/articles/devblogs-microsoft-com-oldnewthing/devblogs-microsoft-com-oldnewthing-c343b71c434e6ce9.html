@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The classic TreeView control lets me sort by name or by lParam, but why not both? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The classic TreeView control lets me sort by name or by lParam, but why not both?</h1>
+        <div class="meta">The Old New Thing 2026-05-20T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260520-00/?p=112343">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-c343b71c434e6ce9.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">You need to arrange to get one from the other. The post The classic TreeView control lets me sort by name or by lParam, but why not both? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>The Win32 TreeView control in the common controls library provides two ways of sorting elements.</p>
+<ul>
+<li><code>TVM_­SORT­CHILDREN</code>: Sorts children alphabetically by name.</li>
+<li><code>TVM_­SORT­CHILDREN­CB</code>: Sorts children via custmm callback.</li>
+</ul>
+<p>The custom callback is provided the <code>lParam</code> of the two tree items being compared. But what if you want to sort by a combination of both the text and the <code>lParam</code>? How do you get both?</p>
+<p>There are two general designs for using UI controls that represent collections.</p>
+<p>One model is for the UI control to be the data repository. Everything you need to know about the item resides in the UI control, somewhere in its name, its check state, its selection state, whatever. If you need to know something about an item, you ask the UI control for the information.</p>
+<p>The second model is for the data repository to be some sort of object that itself does not have any UI. (This is known in the biz as a &#8220;data model&#8221;.) You then construct UI elements to be the representation of those objects.</p>
+<p>Windows controls generally lean toward the data model approach because there is usually a lot of information about an item that is not present in its UI representation. The data model approach also allows for optimizations in which where very large collections of items create UI elements only for the items that are visible on screen. You can see this in the XAML ListView control as well as in the classic Win32 ListView control when placed into owner-data mode.</p>
+<p>For the controls in the common controls library, the general pattern is to provide a place to store a pointer-sized value that is not shown in the UI, typically called &#8220;item data&#8221; or just <code>lParam</code>. Here is where you store a pointer to the data model object that the UI object represents.</p>
+<p>Okay, so let&#8217;s look at the TreeView sort methods again.</p>
+<p>The <code>TVM_­SORT­CHILDREN­CB</code> message takes a callback which is passed the <code>lParam</code>s of two items to compare. The theory is that these <code>lParam</code>s are pointers to larger data structures that describe the item, and you use those larger data structures to decide the ordering of the two items.</p>
+<p>The <code>TVM_­SORT­CHILDREN</code> message doesn&#8217;t take a callback. It is a convenience method for the case where you are just sorting by name, so it uses the already-available name assigned to the item.</p>
+<p>The case where you would need both is the case where the <code>lParam</code> is not enough to recover the name, either because it&#8217;s a pointer to a structure that doesn&#8217;t include a name, or because it&#8217;s not a pointer at all.</p>
+<p>I can imagine running into this case if the only information you need to track for each TreeView item is its name and a pointer-sized piece of data. You put the name in the TreeView item text and the other data in the <code>lParam</code>. This plan works great until you need to sort the items, and your sort comparison function wants access to both pieces of data.</p>
+<p>The solution is to switch to a data model pattern. Allocate a structure for each TreeView item and put the string and additional data in that structure. (Alternatively, you could just be sneaky and have the structure be the <code>HTREEITEM</code> and the additional data. Then you can recover the string by using the <code>TVM_<wbr />GET­ITEM</code> message.)</p>
+<p><b>Bonus chatter</b>: In theory, the <code>TVM_­SORT­CHILDREN­CB</code> could have passed the <code>HTREEITEM</code>s to the callback. The callback could then use the <code>HTREEITEM</code> to obtain both the string and the <code>lParam</code>. I suspect this didn&#8217;t happen because most callback functions would just ask for the <code>lParam</code> from the <code>HTREEITEM</code>, <code>TVM_­SORT­CHILDREN­CB</code> is doing you a favor and saving you a bunch of work by giving you the thing you probably wanted in the first place.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260520-00/?p=112343">The classic TreeView control lets me sort by name or by lParam, but why not both?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
