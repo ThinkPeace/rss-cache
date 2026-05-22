@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why do you say that a COM STA thread must pump messages if I see sample code creating STA threads and not pumping messages? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why do you say that a COM STA thread must pump messages if I see sample code creating STA threads and not pumping messages?</h1>
+        <div class="meta">The Old New Thing 2026-05-22T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260522-00/?p=112348">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-151f15eb0dd4f075.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">You need to pump messages when idle, but maybe you are never idle. The post Why do you say that a COM STA thread must pump messages if I see sample code creating STA threads and not pumping messages? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>One of the rules for COM single-threaded apartments (STA) is that the thread in that apartment must pump messages. But we also see code that initializes COM in single-threaded mode but which never pumps messages. Consider <a href="https://github.com/microsoft/Windows-classic-samples/blob/adf93f04125e0b5bd84ad0a9a073f7fea993a360/Samples/MSXML/DynamDom/cpp/dynamDOM.cpp#L271C1-L280C2"> this function</a> from the <a href="https://github.com/microsoft/Windows-classic-samples/blob/adf93f04125e0b5bd84ad0a9a073f7fea993a360/Samples/MSXML/DynamDom/README.md"> XML DOM object dynamic creation sample</a>:</p>
+<pre>int __cdecl wmain()
+{
+    HRESULT hr = CoInitialize(NULL);
+    if (SUCCEEDED(hr))
+    {
+        dynamDOM();
+        CoUninitialize();
+    }
+    return 0;
+}
+</pre>
+<p>The <code>Co­Initialize</code> function initializes COM in single-threaded apartment mode, and then the program does some work, and then it uninitializes COM, and it <i>never pumps messages</i>. What gives? Shouldn&#8217;t there be a message loop?</p>
+<p>The rule about single-threaded apartments is that they must pump messages <i>when idle</i>. If they are busy doing something, then clearly they can&#8217;t pump messages because they are busy doing something!¹</p>
+<p>If your thread initializes COM as a single-threaded apartment, and then does a bunch of work, and then uninitializes COM, then that&#8217;s great. Your thread was never idle, so it never got a chance to pump messages. (Though if your thread made COM calls out to other threads, COM will pump messages while waiting for the reply, so it did pump messages while the thread was idle.)</p>
+<p>Failing to pump messages when idle means that when another thread wants to communicate with your thread, it never gets a response. Now, if your thread is busy, then it&#8217;s fine that the other thread doesn&#8217;t get a response from you—you&#8217;re busy with something else after all. But if you are in a single-threaded COM apartment and you have finished with whatever you&#8217;re doing, you need to pump messages to see if there&#8217;s any work that COM wants you to do, or you need to uninitialize COM.</p>
+<p>Now, you might say, &#8220;Look, my thread doesn&#8217;t create any windows, and it doesn&#8217;t do any cross-thread COM stuff, so who cares that it&#8217;s not pumping messages? It&#8217;s not like anybody is ever going to ask this thread to do anything, and since it created no windows, nobody could send it anything.&#8221;</p>
+<p>Aha, but you see, your thread <i>did</i> create a window. When you initialize a thread as a single-threaded apartment, <u>COM</u> creates a window. It creates this window so that it can receive inbound requests for the thread to do something. If you don&#8217;t pump messages, then you have a thread blocked not pumping messages, which will jam up window broadcasts.</p>
+<p>¹ An intentionally obtuse interpretation of the rule that &#8220;an STA thread must pump messages&#8221; would be that your thread can&#8217;t do anything except call <code>GetMessage</code> and <code>DispatchMessage</code>! Because any other line of code would not be &#8220;pumping messages&#8221;.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260522-00/?p=112348">Why do you say that a COM STA thread must pump messages if I see sample code creating STA threads and not pumping messages?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
