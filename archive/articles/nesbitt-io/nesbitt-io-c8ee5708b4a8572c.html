@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Signing is for the bad days | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Signing is for the bad days</h1>
+        <div class="meta">Andrew Nesbitt 2026-05-24T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/05/24/signing-is-for-the-bad-days.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-c8ee5708b4a8572c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">TUF, in-toto, and Sigstore only look pointless while nothing is on fire</div>
+        <div class="content">
+          <p>I have had roughly the same conversation four or five times in the last month. I’m explaining why a registry should adopt Sigstore, or why a build pipeline should emit in-toto attestations, and the person across the table says some version of: we already use TLS to the registry, the registry already hashes the tarballs, the lockfile already pins the hash, what does a signature add? And on a Tuesday afternoon when nothing has gone wrong, the honest answer is that it adds a bit of CPU on publish and a bit of YAML in the workflow and not much else you can see.</p>
+
+<p>That answer is also why we keep having supply chain incidents, because a hash in a lockfile tells you the bytes haven’t changed since you locked them; it can’t tell you whether they were ever the right bytes, and the whole point of this class of tooling is to answer that second question. It does nothing visible until the day someone compromises a build server or swaps a tarball on a mirror, and on that day it’s the difference between “the client refused to install it” and a blog post that starts with the word “incident”. I want to walk through the three projects that most of this work sits on and what each one actually defends against, because the benefits are nearly impossible to see from the happy path.</p>
+
+<p>The thread connecting all three is <a href="https://badhomb.re/">Santiago Torres-Arias</a>. His name kept turning up as I was reading the papers and design docs behind each of these, often enough that I went and did a bit of digging into how that happened. He did his PhD at NYU under Justin Cappos, who had already built <a href="https://theupdateframework.io/">The Update Framework</a>. Santiago contributed to TUF, <a href="https://www.usenix.org/conference/usenixsecurity19/presentation/torres-arias">published in-toto</a> at USENIX Security ‘19 as the piece TUF was missing, and went on to be one of Sigstore’s creators. In 2021 he was one of the five keyholders who <a href="https://blog.sigstore.dev/a-new-kind-of-trust-root-f11eeeed92ef/">signed its root of trust</a>.</p>
+
+<p>He’s now at Purdue running a <a href="https://badhomb.re/publications/">lab</a> that keeps producing this stuff. <a href="https://guac.sh/">GUAC</a>, which turns a pile of SBOMs and attestations into a graph you can query when a CVE lands and you need to know what’s affected, came out of that lab. Before Purdue there was his <a href="https://www.usenix.org/conference/usenixsecurity16/technical-sessions/presentation/torres-arias">2016 paper on git metadata tampering</a>, which showed a hostile server could reorder branch pointers to feed you a vulnerable tree even when every commit was signed. There’s a single design assumption running through all of it, and it’s one most package managers were not built with: some part of your infrastructure is already compromised, and the job of the tooling is to make that survivable.</p>
+
+<h3 id="tuf-assume-the-registry-gets-owned">TUF: assume the registry gets owned</h3>
+
+<p>The thing TUF protects is the last hop, from the repository to the machine doing the install. The naive version of that is “sign the packages”, which PGP-based schemes have done for decades, and which falls apart the moment the signing key leaks. If there’s one key, kept online so the CI can sign releases automatically, then whoever pops the CI box can sign whatever they like and every client will trust it. The original TUF research came directly out of <a href="https://theupdateframework.io/papers/package-management-security-tr08-02.pdf">cataloguing those failure modes</a> across the Linux distro updaters of the late 2000s.</p>
+
+<p>TUF’s answer is to split signing into <a href="https://theupdateframework.io/docs/metadata/">roles</a> with separate keys and separate exposure. A <code class="language-plaintext highlighter-rouge">root</code> role, signed by keys that live offline in hardware and get touched once a year, says which keys are valid for the other roles. A <code class="language-plaintext highlighter-rouge">targets</code> role says which package files exist and what their hashes are. A <code class="language-plaintext highlighter-rouge">snapshot</code> role says which version of all that metadata is current, and a <code class="language-plaintext highlighter-rouge">timestamp</code> role, the only key that has to be online and hot, signs a short-lived statement that the snapshot is fresh. The hot key can only say “the metadata you already have is still current”; it can’t add a package or change a hash, and it can’t bless a new key for any other role.</p>
+
+<p>Walk an attacker through that: they compromise the registry’s online infrastructure and get the timestamp key, which is the one that’s actually reachable. They can now sign fresh timestamps, and that’s it. Tampering with a package needs a targets signature they don’t have the key for. Serving an old vulnerable version, a <a href="https://theupdateframework.io/docs/security/">rollback attack</a>, is blocked because snapshot version numbers only go up. Even sitting on the box and serving stale metadata indefinitely, a freeze attack, stops working once the timestamp signatures expire and clients notice they’ve stopped advancing. To actually ship malware they need the offline targets key, and to change which keys are trusted they need a threshold of the offline root keys, which are in safes in different buildings.</p>
+
+<p>None of this is visible when the registry is healthy: <code class="language-plaintext highlighter-rouge">pip install</code> with <a href="https://peps.python.org/pep-0458/">PEP 458</a> metadata behind it looks identical to <code class="language-plaintext highlighter-rouge">pip install</code> without. The difference only shows up in the scenario where someone has the server, and that’s exactly the scenario the <a href="/2026/05/05/package-manager-threat-models.html">threat model post</a> from a couple of weeks ago kept circling back to: registries are big targets with online credentials and we should plan for them to be breached occasionally.</p>
+
+<h3 id="in-toto-assume-the-pipeline-gets-owned">in-toto: assume the pipeline gets owned</h3>
+
+<p>TUF tells you the file you got is the file the registry meant to give you. It says nothing about whether the registry should have had that file in the first place. The tarball for <code class="language-plaintext highlighter-rouge">foo-1.2.3</code> arrived over TLS and matches the signed hash, fine, but who built it, from what source, on which machine, and did anything touch it between the compiler and the upload? For most of the history of package management the answer has been “whatever the <code class="language-plaintext highlighter-rouge">repository</code> field in the manifest claims, which is a string the publisher typed”.</p>
+
+<p><a href="https://in-toto.io/">in-toto</a> is Santiago’s answer to that gap, and I think it’s the most important idea in this whole space. The project owner writes a <code class="language-plaintext highlighter-rouge">layout</code>: a signed document that says these are the steps in my pipeline (clone, build, test, package), these are the keys authorised to perform each step, and these are the rules for what each step is allowed to consume from the previous one and produce for the next. Then each step, as it runs, records the hashes of its inputs and outputs and signs that record, a <code class="language-plaintext highlighter-rouge">link</code>, with its own key. Verification at the far end takes the final artifact, the layout, and the pile of links, and checks that there’s an unbroken signed chain from the source the layout names to the bytes you’re holding, with every step performed by someone the layout authorised.</p>
+
+<p>Run <a href="https://www.openwall.com/lists/oss-security/2024/03/29/4">xz</a> through that model: the backdoor was in the release tarball but never in the git repository; the attacker added it during the “make a release archive” step that they, as a maintainer, were trusted to perform by hand. An in-toto layout that said “the <code class="language-plaintext highlighter-rouge">package</code> step’s inputs must match the <code class="language-plaintext highlighter-rouge">tag</code> step’s outputs” would have failed verification, because the tarball contained files the tagged tree didn’t.</p>
+
+<p>The <a href="https://attack.mitre.org/campaigns/C0024/">SolarWinds</a> build server was a <code class="language-plaintext highlighter-rouge">build</code> step whose functionary key would have been on the compromised box, true, but the layout can require that the same source be built by two independent functionaries with matching output, which is the <a href="https://reproducible-builds.org/">reproducible builds</a> idea expressed as a verifiable policy rather than an aspiration. The <a href="https://about.codecov.io/security-update/">Codecov bash uploader</a> was a file modified in a bucket after CI had produced it; a <code class="language-plaintext highlighter-rouge">MATCH</code> rule between the CI step’s products and the distribution step’s materials catches exactly that.</p>
+
+<p>The <a href="https://www.usenix.org/conference/usenixsecurity19/presentation/torres-arias">USENIX paper</a> walks through thirty real compromises and shows where in the chain each would have been caught, and it’s a slightly uncomfortable read because almost all of them would have been. Again, on the happy path you see none of this. CI emits some JSON files alongside the artifact, the install client checks them, the check passes, nothing is printed.</p>
+
+<h3 id="sigstore-assume-nobody-will-manage-keys">Sigstore: assume nobody will manage keys</h3>
+
+<p>Both of the above assume people have signing keys and look after them properly, and thirty years of PGP in open source says they won’t. Keyservers are a graveyard of expired and revoked keys for projects that gave up; the <a href="https://central.sonatype.org/publish/requirements/gpg/">Maven signing requirement</a> is widely satisfied by a key generated once on a laptop in 2014 and never thought about again; the PyPI PGP support was eventually <a href="https://blog.pypi.org/posts/2023-05-23-removing-pgp/">removed outright</a> because almost nobody could verify the signatures that were there.</p>
+
+<p>Sigstore’s contribution, and the reason it’s been adopted faster than anything else in this space, is to delete the long-lived key from the developer’s life entirely. You authenticate with an OIDC identity you already have, GitHub Actions or Google or whatever. <a href="https://github.com/sigstore/fulcio">Fulcio</a> issues you a code-signing certificate bound to that identity that’s valid for ten minutes. You sign the artifact, the signature and cert go into <a href="https://github.com/sigstore/rekor">Rekor</a>, a public append-only transparency log, and then the key is thrown away.</p>
+
+<p>Verifiers don’t ask “is this signed by key 0xABCD”, they ask “does Rekor contain a signature for this hash from a cert that Fulcio issued to <code class="language-plaintext highlighter-rouge">github.com/foo/bar/.github/workflows/release.yml@refs/tags/v1.2.3</code>”. The thing being trusted is the identity and the log, neither of which the maintainer has to look after.</p>
+
+<p>There’s also nothing in the publisher’s config for an attacker to steal. The workflow file names the identity that’s expected to produce the signature, and that’s public information by design. Dump the repo and you learn which identity you’d have to impersonate, but nothing that helps you do it. The OIDC token only exists for a few minutes inside a running job, so stealing it means already having code execution in that job, which is a different and harder problem than reading a secrets store. With a long-lived signing key or a registry API token, the thing sitting in the secrets store is the credential itself, and exfiltrating it is the whole attack.</p>
+
+<p>Santiago co-authored the <a href="https://dl.acm.org/doi/10.1145/3548606.3560596">CCS ‘22 paper</a> that sets out Sigstore’s security model, and his influence is most visible in Rekor, which is the academic transparency-log literature (<a href="https://www.usenix.org/conference/usenixsecurity15/technical-sessions/presentation/melara">CONIKS</a>, Certificate Transparency) applied to software artifacts, and in the way Sigstore’s own keys are distributed under a TUF root so the “who signs the signers” recursion bottoms out in the same offline-threshold model as everything else. He physically holds one of the five hardware keys for that root. Identity-bound short-lived certs feeding a public log with TUF at the bottom is the research agenda he and Cappos had been pushing for years, here packaged so that <code class="language-plaintext highlighter-rouge">npm publish --provenance</code> can do it without the publisher knowing what a Merkle tree is.</p>
+
+<p>The transparency log is the part that does the most work on a bad day. If a maintainer’s GitHub account is phished and used to publish a malicious version, the maintainer can look at Rekor and say “I didn’t make that signature, here’s the log entry showing the OIDC identity and workflow run it came from”.</p>
+
+<p>When <a href="https://www.ledger.com/blog/security-incident-report">Ledger Connect Kit</a> was pushed from a phished npm account, the question of exactly what was published when, and from where, took longer to answer than it should have. A public log you can’t tamper with, which monitors can watch for “package X was just signed by an identity that’s never signed it before”, turns that forensic scramble into a query. It also means a registry operator can’t replace an artifact after the fact even if they wanted to, because the original hash is in a log the registry doesn’t control.</p>
+
+<h3 id="what-signing-didnt-stop">What signing didn’t stop</h3>
+
+<p>It would be dishonest to leave it there, because the last few months have been a running demonstration that this layer on its own is nowhere near sufficient. We’re currently at something close to a compromise a day, and the recurring pattern is attackers getting inside the CI run itself, where the OIDC token is just another thing to steal.</p>
+
+<p>The <a href="https://unit42.paloaltonetworks.com/monitoring-npm-supply-chain-attacks/">Shai-Hulud worm</a> and this month’s <a href="https://orca.security/resources/blog/tanstack-npm-supply-chain-worm/">TanStack wave</a> scraped the token straight out of the GitHub Actions runner’s process memory and POSTed to the registry with it. <a href="https://blog.pypi.org/posts/2024-12-11-ultralytics-attack-analysis/">Ultralytics</a> went the other way: cache poisoning meant the legitimate workflow built a poisoned artifact, so PyPI’s trusted publishing issued a perfectly valid token to a build that was already bad. Trusted publishing closed the “leaked long-lived token” door and the attackers walked through the workflow door instead.</p>
+
+<p>Where the signing did help in those cases was in working out what had happened, fast and with certainty. PyPI’s <a href="https://blog.pypi.org/posts/2024-12-11-ultralytics-attack-analysis/">own write-up</a> of Ultralytics is explicit that the Sigstore transparency log is what let them establish the first malicious wheels came from the real workflow rather than a stolen API token, which is what pointed the investigation at the build cache. The second round of bad releases, pushed with an old API token that had never been revoked, had no attestations at all, and the absence was itself a signal. That’s worth having, and it’s also clearly less than “the bad publish was prevented”, which is the strongest argument I know for having more than one of these layers in place at once.</p>
+
+<h3 id="what-you-get-when-you-stack-them">What you get when you stack them</h3>
+
+<p>The three layers compose, and in practice that composition is now what’s actually being deployed. in-toto defines what a valid build looks like. Sigstore is how each step signs its link without anyone managing keys, and how the final attestation gets bound to the CI identity that produced it. TUF is how the policy, the attestations, and the artifacts get to the client without the distribution channel being able to lie about any of them.</p>
+
+<p><a href="https://docs.npmjs.com/generating-provenance-statements">npm provenance</a>, <a href="https://docs.pypi.org/attestations/">PyPI attestations</a>, and <a href="https://blog.trailofbits.com/2024/05/14/a-peek-into-build-provenance-for-homebrew/">Homebrew’s build provenance</a> are all in-toto-format statements, signed via Sigstore, about artifacts whose distribution increasingly sits on TUF metadata. SLSA, which is what most people in industry have actually heard of, is essentially a set of named difficulty levels for in-toto layouts, and is now give or take what the US government <a href="https://www.cisa.gov/secure-software-attestation-form">asks its software suppliers to attest to</a>, which is a reasonable distance for a PhD thesis to have travelled.</p>
+
+<p>So when someone asks what signing adds over a hash in a lockfile: the lockfile tells you the bytes haven’t changed since you locked them. It can’t tell you those were ever the right bytes, or who produced them from what; it gives you nothing on first install before there’s a lock, and nothing to help anyone else figure out the blast radius after the fact. The stack above gives you a refusal to install when the build was tampered with or the registry is serving something it shouldn’t, a public record of who published what that the publisher themselves can audit, and an offline root that means stealing the online keys gets the attacker very little.</p>
+
+<p>Almost all of which is invisible almost all of the time, which is, I think, why I keep having that conversation. Santiago’s work is infrastructure in the proper sense, in that you only find out it’s there when something hits it, and “we added signing and nothing visibly changed” is what success looks like for this kind of work. The problem is that very few people hold the whole stack in their heads at once, the gap each layer covers only becomes obvious when an attacker walks through it, and so those of us who do understand it are going to have to keep explaining it, incident by incident, until it sticks.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
