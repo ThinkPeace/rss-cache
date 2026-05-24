@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>An idea: user level WireGuard for UDP based encryption and authentication | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>An idea: user level WireGuard for UDP based encryption and authentication</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-24T14:24:46Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/tech/WireGuardForUDPAuthEncryption">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-55ab8523be75a477.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">In some environments, you want to connect programs together with mutual authentication and encryption of their traffic (so each end can trust the other and the traffic is immune to easy eavesdropping). If the programs are talking to each other over TCP, there&#x27;s a well developed solution for this in the form of mutual TLS (mTLS) (although you&#x27;ll probably get…</div>
+        <div class="content">
+          <div class="wikitext"><p>In some environments, you want to connect programs together with
+mutual authentication and encryption of their traffic (so each end
+can trust the other and the traffic is immune to easy eavesdropping).
+If the programs are talking to each other over TCP, there's a well
+developed solution for this in the form of <a href="https://en.wikipedia.org/wiki/Mutual_authentication">mutual TLS (mTLS)</a> (although
+you'll probably get to enjoy the fun of running your own private
+Certificate Authority). But if you're using UDP, things are less
+clear. When this came up recently in a Fediverse discussion I was
+a peripheral part of, it occurred to me that we already have an
+existing, well regarded, UDP-based mechanism for authentication and
+encryption in the form of WireGuard.</p>
+
+<p>(Yes, there's <a href="https://en.wikipedia.org/wiki/QUIC">QUIC</a>, but that
+still leaves you with TLS and it gives you a reliable stream model
+instead of a UDP model.)</p>
+
+<p>WireGuard is normally used to create general networking connections
+between two machines, a connection that other programs can use to
+pass whatever traffic they want. But in theory it doesn't have to
+be used this way. There are purely user-level WireGuard libraries,
+and if you have a suitable library, you can have the program it's
+embedded in receive and handle the packets from inside the WireGuard
+connection, without injecting them into the operating system and
+exposing them to other programs (and it can also send its own packets
+back). You're probably going to need your own user level IP
+implementation to make the WireGuard library happy, and you may
+want or need a user level UDP or TCP implementation to make handling
+your own traffic simpler, but all of those are available if you
+hunt around.</p>
+
+<p>What you get out of this is a well regarded protocol with simple,
+straightforward authentication, and to some degree it handles out
+of order packet delivery and packet loss, which is presumably
+something you care about if you picked UDP to start with. You don't
+have to deal with the complexities of any variant of TLS, you don't
+need a private Certificate Authority, and you can always directly
+know what one program is willing to talk to, because you have a
+list of public keys.</p>
+
+<p>The drawback of this is that you have to put it together yourself.
+If you can find a suitable QUIC library (<a href="https://quic-go.net/docs/">eg</a>),
+it should do all of this for you in a hopefully straightforward API
+that looks a lot like (TCP based) TLS. The one potential drawback
+of the QUIC approach is that I believe it's only a stream based
+protocol without UDP-like, out of order delivery (and possible
+packet loss). If what you want is 'an authenticated, encrypted
+stream but over UDP', then QUIC is probably more like this than
+WireGuard. If what you want is 'authenticated, encrypted UDP', then
+WireGuard might be closer to that than QUIC.</p>
+
+<h3>Sidebar: WireGuard, QUIC, and out of order packets</h3>
+
+<p>As far as I can tell from reading <a href="https://www.wireguard.com/protocol/">the basic WireGuard protocol
+summary</a>, each WireGuard
+encrypted packet is independent. While packets are sort of ordered
+by a counter, WireGuard can handle them out of order and will accept
+them out of order within a window (<a href="https://www.wireguard.com/protocol/#nonce-reuse-replay-attacks">cf</a>). If
+you're sending UDP datagram traffic within WireGuard, I believe
+this means that your underlying system can still have the UDP
+properties of non-blocking, non-sequential receives.</p>
+
+<p>As I understand it, a single QUIC connection carries multiple
+streams within it and each of these streams runs independently, so
+packet loss and delays on one stream don't affect other streams.
+However, I believe packet loss and packet reordering will block a
+single stream because it's, well, a stream.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
