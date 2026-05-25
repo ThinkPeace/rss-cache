@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GitHub Actions security in Python packages | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>GitHub Actions security in Python packages</h1>
+        <div class="meta">Andrew Nesbitt 2026-05-25T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/05/25/github-actions-security-in-python-packages.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-ba06dc154b9a6e1a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Thank you Dr. Zizmor</div>
+        <div class="content">
+          <p><em>This is a written version of a talk I gave at PyCon US 2026 in Long Beach. <a href="https://github.com/andrew/pycon/raw/main/slides.pdf">Slides (PDF)</a>, scripts, and datasets are at <a href="https://github.com/andrew/pycon">github.com/andrew/pycon</a>.</em></p>
+
+<p>Of the roughly 864,000 packages PyPI lists, about 387,000 declare a repository URL on GitHub, mapping to 343,000 distinct repositories once you collapse the monorepos. 152,000 of those have something in <code class="language-plaintext highlighter-rouge">.github/workflows/</code>, and for practical purposes open source Python has one CI system: Travis CI, the previous default, accounts for 11% of the same population and stopped offering free open source builds in 2023, with everything else below 2%.</p>
+
+<p>Around 56,000 of those repositories reference <code class="language-plaintext highlighter-rouge">pypa/gh-action-pypi-publish</code> somewhere in a workflow file, which is to say they tag a commit, a runner spins up, a wheel gets built, and <code class="language-plaintext highlighter-rouge">twine upload</code> puts it on PyPI. About 22% of them have migrated to <a href="https://docs.pypi.org/trusted-publishers/">trusted publishing</a>, where PyPI accepts a short-lived OIDC token minted by the workflow instead of a stored API key, and the publisher configuration on PyPI’s side names the repository, the workflow file, and optionally a deployment environment. The other 44,000 or so still have a <code class="language-plaintext highlighter-rouge">PYPI_API_TOKEN</code> sitting in repository secrets.</p>
+
+<p>I think trusted publishing is one of the better things to have happened to Python packaging in years, and it also means the workflow’s identity is now the credential, so PyPI’s trust in a release rests on the integrity of an Actions run. <a href="https://peps.python.org/pep-0740/">PEP 740</a> attestations, Sigstore signatures, and SLSA provenance all bind an artifact to the workflow and commit it came from, which tells you where it was built but says nothing about whether something tampered with the workflow before the upload step ran. Signing is the last thing that happens, so every preceding step is in scope for an attacker who can reach any of them, which is the argument I made at length in <a href="/2026/04/28/github-actions-is-the-weakest-link.html">GitHub Actions is the weakest link</a> last month.</p>
+
+<h3 id="actions-as-a-package-manager">Actions as a package manager</h3>
+
+<p>A <code class="language-plaintext highlighter-rouge">uses:</code> line in a workflow is a dependency declaration that pulls code from somebody else’s repository and runs it on your runner with whatever permissions the job has, which is functionally <code class="language-plaintext highlighter-rouge">pip install</code> except that the thing after the <code class="language-plaintext highlighter-rouge">@</code> is a git ref rather than an immutable version, and whoever controls the source repository can move it.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git tag -f v41 &lt;new-sha&gt;
+git push -f origin v41
+</code></pre></div></div>
+
+<p>After those two commands every workflow on <code class="language-plaintext highlighter-rouge">@v41</code> runs the new commit on its next execution, including re-runs of last week’s green build. There’s no lockfile recording which SHA you accepted yesterday, nothing equivalent to <code class="language-plaintext highlighter-rouge">--require-hashes</code>, and a hijacked tag stays hijacked until somebody force-pushes it back because there’s no <a href="https://peps.python.org/pep-0592/">PEP 592</a> yank either. Composite actions resolve their own <code class="language-plaintext highlighter-rouge">uses:</code> lines at runtime, so an action you’ve pinned to a SHA can still pull <code class="language-plaintext highlighter-rouge">other/helper@main</code> internally and you’d never see it from your own workflow file. The longer version of that argument is the <a href="/2025/12/06/github-actions-package-manager.html">December post</a>; what’s changed since is that the list of incidents demonstrating it in production has reached ten, six of which end with a malicious wheel on PyPI.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>When</th>
+      <th>Project</th>
+      <th>Compromise</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Nov 2024</td>
+      <td>spotbugs</td>
+      <td><code class="language-plaintext highlighter-rouge">pull_request_target</code> ran fork code, maintainer PAT stolen</td>
+    </tr>
+    <tr>
+      <td>Dec 2024</td>
+      <td>Ultralytics</td>
+      <td>cache poisoning from fork PR -&gt; crypto miner on PyPI</td>
+    </tr>
+    <tr>
+      <td>Mar 2025</td>
+      <td>tj-actions / reviewdog</td>
+      <td>tags force-pushed, secrets dumped from ~23k repos</td>
+    </tr>
+    <tr>
+      <td>Mar 2026</td>
+      <td>Trivy</td>
+      <td><code class="language-plaintext highlighter-rouge">pull_request_target</code> ran fork code, CI tokens harvested</td>
+    </tr>
+    <tr>
+      <td>Mar 2026</td>
+      <td>Trivy (again)</td>
+      <td>75 of 76 tags force-pushed three weeks later with stolen tokens</td>
+    </tr>
+    <tr>
+      <td>Mar 2026</td>
+      <td>LiteLLM</td>
+      <td>PyPI token harvested via Trivy chain -&gt; malicious wheel</td>
+    </tr>
+    <tr>
+      <td>Mar 2026</td>
+      <td>Telnyx</td>
+      <td>PyPI token harvested via Trivy chain -&gt; malicious wheel</td>
+    </tr>
+    <tr>
+      <td>Apr 2026</td>
+      <td>elementary-data</td>
+      <td>issue comment -&gt; shell injection -&gt; malicious wheel</td>
+    </tr>
+    <tr>
+      <td>Apr 2026</td>
+      <td>lightning</td>
+      <td>stale long-lived token, no OIDC -&gt; malicious wheel</td>
+    </tr>
+    <tr>
+      <td>May 2026</td>
+      <td>mistralai, guardrails-ai</td>
+      <td>cache poison + OIDC token theft -&gt; malicious wheels</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Five of those six PyPI uploads are from March to May this year. The lightning row is the useful counter-example, since nothing was wrong with that workflow; it had a long-lived API token that leaked through some other route, and trusted publishing on its own would have stopped it. elementary-data and the mistralai chain are the opposite case, where trusted publishing was configured or wouldn’t have helped, because the attacker ended up holding a valid OIDC token minted by the real workflow. LiteLLM, Telnyx, and Ultralytics sit in between, with stored tokens stolen from a runner that an Actions misconfiguration let the attacker reach.</p>
+
+<p><a href="https://blog.pypi.org/posts/2024-12-11-ultralytics-attack-analysis/">Ultralytics</a> is worth walking through in detail because it stacks three failure modes in one incident. A <code class="language-plaintext highlighter-rouge">pull_request_target</code> workflow checked out and ran code from a fork PR with the cache write permission in scope, and the fork’s branch name interpolated into a shell step, which gave the attacker enough to poison a GitHub Actions cache entry. The legitimate publish workflow later restored that cache, built a wheel containing a crypto miner, and uploaded it to PyPI as 8.3.41 and 8.3.42 using a stored token. Then, because the token had already been lifted from the runner during phase one, two more malicious versions were uploaded directly without touching CI at all. The template injection bug had been <a href="https://blog.yossarian.net/2024/12/06/zizmor-ultralytics-injection">reported and patched</a> in August 2024 and reintroduced in a regression ten days after the advisory.</p>
+
+<h3 id="method">Method</h3>
+
+<p>What turns this from a list of anecdotes into something you can study is <a href="https://docs.zizmor.sh/">zizmor</a>, William Woodruff’s static analyser for Actions workflows, which reads <code class="language-plaintext highlighter-rouge">.github/workflows/</code> and reports findings as named audits with a severity and a confidence, running locally or in CI in a couple of seconds.</p>
+
+<p>I took the <a href="https://ecosyste.ms">ecosyste.ms</a> index of every PyPI package with a linked GitHub repository, shallow-cloned each one, ran <code class="language-plaintext highlighter-rouge">zizmor --format=json</code> on the workflows directory, and separately extracted every <code class="language-plaintext highlighter-rouge">uses:</code> line into an actions inventory, with both outputs going into SQLite. The scan ran 9-11 May 2026 with zizmor pinned to 1.24.1. About 20% of the linked repository URLs failed to clone (404, gone private, or renamed without a redirect), and those packages still <code class="language-plaintext highlighter-rouge">pip install</code> fine even though their source is no longer publicly readable, which probably deserves its own write-up.</p>
+
+<p>zizmor reads YAML files and nothing else. It can’t see if a repository’s “Workflow permissions” default has been flipped to read-only in the settings UI, or if a secret is environment-scoped behind a required reviewer, or if branch protection would stop the push that an injection would otherwise enable. Read the numbers below as counting workflows whose YAML permits a pattern, which is an upper bound on what’s exploitable today.</p>
+
+<h3 id="findings">Findings</h3>
+
+<p>There are currently 49 advisories filed under <code class="language-plaintext highlighter-rouge">ecosystem:actions</code> in the GitHub Advisory Database. Bucketing them against zizmor’s audit names and counting affected PyPI repositories gives this:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Audit</th>
+      <th>PyPI repos</th>
+      <th>GHSA advisories</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">excessive-permissions</code></td>
+      <td>102,235</td>
+      <td>6</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">unpinned-uses</code></td>
+      <td>85,774</td>
+      <td>4</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">use-trusted-publishing</code></td>
+      <td>44,181</td>
+      <td>n/a</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">template-injection</code></td>
+      <td>21,166</td>
+      <td>27</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">cache-poisoning</code></td>
+      <td>15,371</td>
+      <td>2</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">dangerous-triggers</code></td>
+      <td>7,025</td>
+      <td>8</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The advisory column counts how often each audit class has been the documented root cause of a published compromise, which is a different thing from how dangerous a single finding is. An <code class="language-plaintext highlighter-rouge">excessive-permissions</code> finding on its own is harmless, and a <code class="language-plaintext highlighter-rouge">template-injection</code> on its own often is too, so most of what follows reads better as combinations of audits than as a ranking; those two together, for instance, are how somebody else gets a release out of your repository.</p>
+
+<p><code class="language-plaintext highlighter-rouge">excessive-permissions</code> fires when a workflow has no <code class="language-plaintext highlighter-rouge">permissions:</code> block, so the job’s <code class="language-plaintext highlighter-rouge">GITHUB_TOKEN</code> inherits the repository default. For any repository created before February 2023 that default includes <code class="language-plaintext highlighter-rouge">contents: write</code> and <code class="language-plaintext highlighter-rouge">actions: write</code>, which means a step compromised by any other means can push commits and dispatch other workflows. About two thirds of the corpus, 102,000 repositories, have at least one workflow in this state, and <code class="language-plaintext highlighter-rouge">permissions: {}</code> at the top of the file with explicit grants per job closes it.</p>
+
+<p><code class="language-plaintext highlighter-rouge">unpinned-uses</code> is in about 86,000 repositories, which is 91% of those that use any third-party action at all. The four advisories in this bucket are exactly the four known tag-hijack compromises: tj-actions, reviewdog, Trivy, and xygeni. A month after the second Trivy compromise 403 PyPI packages were still on <code class="language-plaintext highlighter-rouge">aquasecurity/trivy-action</code> by tag, and 336 are still referencing <code class="language-plaintext highlighter-rouge">tj-actions/changed-files</code> by a moveable ref a full year after CVE-2025-30066. The fix is a 40-character commit SHA after the <code class="language-plaintext highlighter-rouge">@</code>, which both Dependabot and Renovate will keep up to date for you. <code class="language-plaintext highlighter-rouge">zizmor --fix=all</code> rewrites every tag in a repo to its current SHA in place, given a <code class="language-plaintext highlighter-rouge">GH_TOKEN</code>. Pinning <code class="language-plaintext highlighter-rouge">actions/*</code> itself is mostly a wash, since GitHub’s own organisation being compromised already invalidates the runner image you’re executing on.</p>
+
+<p><code class="language-plaintext highlighter-rouge">template-injection</code> accounts for 27 of the 49 published advisories, the majority of the table, and about 21,000 PyPI repositories have at least one. The pattern is a <code class="language-plaintext highlighter-rouge">${{ }}</code> expression containing attacker-influenced data interpolated into a <code class="language-plaintext highlighter-rouge">run:</code> block. The expansion happens before the shell parses the script, so a PR title or branch name or issue body becomes shell source. In the <a href="https://www.stepsecurity.io/blog/elementary-data-compromised-on-pypi-and-ghcr-forged-release-pushed-via-github-actions-script-injection">elementary-data</a> case an <code class="language-plaintext highlighter-rouge">issue_comment</code> trigger echoed <code class="language-plaintext highlighter-rouge">github.event.comment.body</code> into bash, and an account created two days earlier left a comment that closed the echo and appended <code class="language-plaintext highlighter-rouge">curl | bash</code>. Because there was no <code class="language-plaintext highlighter-rouge">permissions:</code> block the default <code class="language-plaintext highlighter-rouge">GITHUB_TOKEN</code> was write-scoped, and ten minutes after the comment there was a malicious 0.23.3 on PyPI exfiltrating SSH keys and cloud credentials.</p>
+
+<p>That repository was already in my dataset when it happened, and zizmor had flagged the exact line three weeks earlier with three separate audits, any one of which would have broken the chain if remediated. Narrowing the 21,000 repositories down to those where the interpolated expression actually carries attacker-controlled data gives 1,396, and filtering those for triggers like <code class="language-plaintext highlighter-rouge">issues</code> and <code class="language-plaintext highlighter-rouge">issue_comment</code> where secrets are always in scope leaves 99. After deduplicating shared monorepos and checking job-level permissions, ten of those have a write-scoped token in the same job as a stored PyPI credential. All ten are going through coordinated disclosure and aren’t named here. The fix for all of them is to pass the value through <code class="language-plaintext highlighter-rouge">env:</code> and reference the shell variable, which carries the same data without the pre-parse expansion.</p>
+
+<p><code class="language-plaintext highlighter-rouge">use-trusted-publishing</code> is in about 44,000 repositories, roughly 78% of <code class="language-plaintext highlighter-rouge">gh-action-pypi-publish</code> users, and has no GHSA advisories because nobody files a CVE for storing a long-lived token, though that token is what makes the other audits worth an attacker’s time. The largest packages still on stored tokens include <code class="language-plaintext highlighter-rouge">six</code> at 896M monthly downloads, <code class="language-plaintext highlighter-rouge">fsspec</code> at 616M, <code class="language-plaintext highlighter-rouge">pyasn1</code> at 430M, <code class="language-plaintext highlighter-rouge">tomli</code> at 377M, <code class="language-plaintext highlighter-rouge">greenlet</code> at 337M, and <code class="language-plaintext highlighter-rouge">sqlalchemy</code> at 335M. One caveat is that PyPI’s trusted publishing <a href="https://github.com/pypi/warehouse/issues/11096">doesn’t yet support reusable workflows</a>, so packages publishing through something like Speakeasy’s shared release workflow have a legitimate excuse. zizmor also misses those callers entirely because the <code class="language-plaintext highlighter-rouge">twine upload</code> lives in a different repository, and <code class="language-plaintext highlighter-rouge">mistralai</code> was one of them, which is why it wasn’t among the 44,000 despite having a stored token and partly why it ended up in the incidents table instead.</p>
+
+<p><code class="language-plaintext highlighter-rouge">cache-poisoning</code> fires for about 15,000 repositories where a privileged job restores from a cache namespace that a lower-privilege job can write into, with Ultralytics as one of the two published advisories. The May 2026 <a href="https://x.com/MsftSecIntel/status/2054041471280423424">mistralai and guardrails-ai compromise</a> was the same shape on the entry side: a <code class="language-plaintext highlighter-rouge">pull_request_target</code> job ran fork code, the fork code poisoned a cache, the publish workflow restored it, and the cached code lifted the runner’s OIDC token from memory. Trusted publishing didn’t help because the workflow had a legitimate <code class="language-plaintext highlighter-rouge">id-token: write</code> and the attacker was already executing inside it. 1,348 PyPI repositories have <code class="language-plaintext highlighter-rouge">dangerous-triggers</code> and <code class="language-plaintext highlighter-rouge">cache-poisoning</code> findings together, which is the population that exact chain applies to, and the remediation in every case is to not restore caches in jobs that build or publish artifacts.</p>
+
+<p><code class="language-plaintext highlighter-rouge">dangerous-triggers</code> is the smallest of the six at about 7,000 repositories with eight advisories. It fires on <code class="language-plaintext highlighter-rouge">pull_request_target</code> and <code class="language-plaintext highlighter-rouge">workflow_run</code>, both of which run in the base repository’s context with secrets available, and the usual mistake is to then check out the PR’s head and run its tests. The <a href="https://unit42.paloaltonetworks.com/github-actions-supply-chain-attack/">spotbugs</a> PAT theft that started the reviewdog and tj-actions chain four months later was this pattern, as was the Ultralytics entry point and the <a href="https://snyk.io/articles/trivy-github-actions-supply-chain-compromise/">Trivy</a> entry point. For most workflows the answer is plain <code class="language-plaintext highlighter-rouge">pull_request</code>, where fork PRs get a read-capped token and no secrets, and the cases that do need <code class="language-plaintext highlighter-rouge">pull_request_target</code> should never check out the PR head and never restore caches.</p>
+
+<p><code class="language-plaintext highlighter-rouge">archived-uses</code> isn’t in the table above because there are no advisories against it, but it catches about 3,600 repositories depending on at least one action whose maintainer has archived it on GitHub. <code class="language-plaintext highlighter-rouge">actions/create-release</code> is the standout, in nearly 2,000 repositories at 98.7% unpinned, archived by GitHub itself in March 2021. I wrote about this shape, dependencies that still install but that nobody is fixing any more, in <a href="/2026/05/08/weekend-at-bernies.html">Weekend at Bernie’s</a> a couple of weeks ago, and <code class="language-plaintext highlighter-rouge">actions/create-release</code> is one of the more on-the-nose Bernies in the dataset.</p>
+
+<h3 id="who-python-ci-depends-on">Who Python CI depends on</h3>
+
+<p>Alongside the audit findings, extracting every <code class="language-plaintext highlighter-rouge">uses:</code> line gives an inventory of who Python’s CI actually depends on. <code class="language-plaintext highlighter-rouge">pypa/gh-action-pypi-publish</code> is in about 56,000 repositories at 84% unpinned, <code class="language-plaintext highlighter-rouge">codecov/codecov-action</code> in 21,000 at 92%, <code class="language-plaintext highlighter-rouge">astral-sh/setup-uv</code> in 17,000 at 86%, then <code class="language-plaintext highlighter-rouge">softprops/action-gh-release</code>, <code class="language-plaintext highlighter-rouge">pre-commit/action</code>, the docker actions, and <code class="language-plaintext highlighter-rouge">pypa/cibuildwheel</code>. After the first few names the owners are increasingly individuals (<code class="language-plaintext highlighter-rouge">softprops</code>, <code class="language-plaintext highlighter-rouge">peter-evans</code> with sixteen separate actions, <code class="language-plaintext highlighter-rouge">dtolnay</code>, <code class="language-plaintext highlighter-rouge">ncipollo</code>, <code class="language-plaintext highlighter-rouge">JamesIves</code>), each a single account whose key compromise would propagate across thousands of dependents.</p>
+
+<p>zizmor’s audits stop at the workflow YAML, leaving what an action does at runtime as a separate question, so as a one-action case study I looked harder at <code class="language-plaintext highlighter-rouge">pypa/cibuildwheel</code>, which is in about 2,700 publish workflows and already runs zizmor on itself with one Low finding. Its <code class="language-plaintext highlighter-rouge">action.yml</code> is a thin composite wrapper around <code class="language-plaintext highlighter-rouge">python -m cibuildwheel</code>, and that Python code fetches CPython, PyPy, GraalPy, virtualenv, Node.js, nuget, and python-build-standalone from seven different upstream hosts at runtime over HTTPS with no hash pin, a transitive dependency tree that doesn’t appear in any <code class="language-plaintext highlighter-rouge">action.yml</code> and that every consuming workflow inherits without seeing. The other popular composites I checked either pin their internal <code class="language-plaintext highlighter-rouge">uses:</code> to SHAs or only call <code class="language-plaintext highlighter-rouge">actions/*</code>, with a few long-tail counterexamples that pull third-party actions by tag from inside the composite definition.</p>
+
+<p>Slicing for third-party actions that run in the same job as <code class="language-plaintext highlighter-rouge">pypa/gh-action-pypi-publish</code> narrows the picture again.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Action</th>
+      <th>Publish jobs</th>
+      <th>Unpinned</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">astral-sh/setup-uv</code></td>
+      <td>3,819</td>
+      <td>90.5%</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">softprops/action-gh-release</code></td>
+      <td>2,448</td>
+      <td>93.7%</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">python-semantic-release/python-semantic-release</code></td>
+      <td>451</td>
+      <td>87.0%</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">snok/install-poetry</code></td>
+      <td>381</td>
+      <td>95.9%</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">salsify/action-detect-and-tag-new-version</code></td>
+      <td>265</td>
+      <td>99.6%</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>A tag hijack on any of those would run alongside PyPI credentials across hundreds or thousands of packages. Astral at the top of that list is a funded company with a security team, but everything below it is back to individual maintainers, which is a different risk profile even at the same unpinned percentage. The one outlier further down the list is <code class="language-plaintext highlighter-rouge">step-security/harden-runner</code> at 144 publish jobs and 2.4% unpinned, an order of magnitude better than anything else on the list, which mostly tells you that the people already running an Actions security tool are also the people who pin.</p>
+
+<h3 id="githubs-roadmap">GitHub’s roadmap</h3>
+
+<p>Python packaging spent fifteen years building the controls that Actions doesn’t have. A <code class="language-plaintext highlighter-rouge">requirements.txt</code> with <code class="language-plaintext highlighter-rouge">--require-hashes</code>, a <code class="language-plaintext highlighter-rouge">uv.lock</code>, or a <a href="https://peps.python.org/pep-0751/">PEP 751</a> lockfile means yesterday’s resolution is tomorrow’s install regardless of what tags moved upstream. <a href="https://peps.python.org/pep-0592/">PEP 592</a> yanking lets a maintainer pull a release so resolvers stop selecting it, where in Actions a hijacked tag stays live until somebody force-pushes it back, and the tj-actions tags were malicious for hours before that happened.</p>
+
+<p>GitHub published a <a href="https://github.blog/news-insights/product-news/whats-coming-to-our-github-actions-2026-security-roadmap/">2026 security roadmap</a> in March that announces workflow dependency locking for direct and transitive action SHAs, policy controls that can ban <code class="language-plaintext highlighter-rouge">pull_request_target</code> outright at the organisation level, secrets scoped so repository write access no longer implies secret access, and an egress firewall for hosted runners. None of these has a committed ship date and the document reads as a statement of intent more than a release plan, but the locking feature is the lockfile, arriving roughly thirteen years after pip got <code class="language-plaintext highlighter-rouge">--require-hashes</code>. The roadmap doesn’t mention malware detection on the marketplace, a yank or recall mechanism, CVE alerts for actions you depend on, or any enforcement by default, all of which PyPI already has in some form.</p>
+
+<h3 id="hardening-a-publish-workflow">Hardening a publish workflow</h3>
+
+<p>If you maintain a Python package that publishes from Actions, the change with the best ratio of effort to effect is migrating to trusted publishing with a deployment environment, where the environment has either required reviewers or a branch restriction, and the trusted publisher on PyPI is bound to the environment name.</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="na">jobs</span><span class="pi">:</span>
+  <span class="na">pypi-publish</span><span class="pi">:</span>
+    <span class="na">environment</span><span class="pi">:</span> <span class="s">release</span>
+    <span class="na">permissions</span><span class="pi">:</span>
+      <span class="na">id-token</span><span class="pi">:</span> <span class="s">write</span>
+    <span class="na">steps</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="na">uses</span><span class="pi">:</span> <span class="s">actions/download-artifact@v4</span>
+      <span class="pi">-</span> <span class="na">uses</span><span class="pi">:</span> <span class="s">pypa/gh-action-pypi-publish@release/v1</span>
+</code></pre></div></div>
+
+<p>OIDC on its own removes the long-lived credential, but it’s the environment binding that stops the elementary-data pivot, where an injected step with <code class="language-plaintext highlighter-rouge">actions: write</code> dispatches the real publish workflow and gets a valid OIDC token because the workflow filename and repository claims still match. The <a href="https://www.upwind.io/feed/intercom-client-7-0-4-supply-chain-attack">intercom-client compromise</a> in April, on npm rather than PyPI but the mechanism is registry-agnostic, was <code class="language-plaintext highlighter-rouge">id-token: write</code> on a tag-push trigger with no environment configured: attacker pushed a tag, the workflow ran, the OIDC token was valid, and the workflow run was deleted afterwards so the audit trail went with it. The mistralai compromise is the third variant: code already executing inside the publish job can mint the OIDC token from runner memory regardless of environment, which is the case the environment binding can’t close and the reason keeping the publish job minimal and not restoring caches in it matter independently.</p>
+
+<p>Inside the workflow file, <code class="language-plaintext highlighter-rouge">permissions: {}</code> at the top with explicit grants per job removes the write-by-default inheritance. Third-party actions get pinned to a 40-character SHA (<code class="language-plaintext highlighter-rouge">zizmor --fix=all</code> will do the whole repo in one pass), with Dependabot or Renovate keeping the pins current. <code class="language-plaintext highlighter-rouge">${{ github.event.* }}</code> values referenced inside <code class="language-plaintext highlighter-rouge">run:</code> blocks go through <code class="language-plaintext highlighter-rouge">env:</code> instead. The publish job itself can be <code class="language-plaintext highlighter-rouge">actions/checkout</code>, <code class="language-plaintext highlighter-rouge">actions/download-artifact</code>, and <code class="language-plaintext highlighter-rouge">pypa/gh-action-pypi-publish</code>, with the wheel built in a separate job that hands the artifact across. A hijack of any third-party action then never runs in the same process as the publish credential.</p>
+
+<p>Wiring zizmor into CI is four lines:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="na">name</span><span class="pi">:</span> <span class="s">zizmor</span>
+<span class="na">on</span><span class="pi">:</span> <span class="pi">[</span><span class="nv">push</span><span class="pi">,</span> <span class="nv">pull_request</span><span class="pi">]</span>
+<span class="na">permissions</span><span class="pi">:</span> <span class="pi">{}</span>
+<span class="na">jobs</span><span class="pi">:</span>
+  <span class="na">zizmor</span><span class="pi">:</span>
+    <span class="na">runs-on</span><span class="pi">:</span> <span class="s">ubuntu-latest</span>
+    <span class="na">permissions</span><span class="pi">:</span>
+      <span class="na">security-events</span><span class="pi">:</span> <span class="s">write</span>
+    <span class="na">steps</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="na">uses</span><span class="pi">:</span> <span class="s">actions/checkout@v4</span>
+      <span class="pi">-</span> <span class="na">uses</span><span class="pi">:</span> <span class="s">zizmorcore/zizmor-action@v0</span>
+</code></pre></div></div>
+
+<p>Findings show up on the PR and in the Security tab, and the check fails by default. As proof that zero findings is achievable on a real project, <code class="language-plaintext highlighter-rouge">requests</code>, <code class="language-plaintext highlighter-rouge">pytest</code>, <code class="language-plaintext highlighter-rouge">stamina</code>, <code class="language-plaintext highlighter-rouge">flask</code>, <code class="language-plaintext highlighter-rouge">django</code>, and <code class="language-plaintext highlighter-rouge">boto3</code> all currently scan clean on their default branches, and their release workflows are reasonable templates to copy.</p>
+
+<p>I’ve been re-scanning the PyPI critical set at intervals to see whether publicised incidents change behaviour.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Audit</th>
+      <th>6 Apr</th>
+      <th>28 Apr</th>
+      <th>11 May</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">unpinned-uses</code></td>
+      <td>7,446</td>
+      <td>6,320</td>
+      <td>6,406</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">artipacked</code></td>
+      <td>2,755</td>
+      <td>2,337</td>
+      <td>2,376</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">excessive-permissions</code></td>
+      <td>2,186</td>
+      <td>1,887</td>
+      <td>1,900</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The first interval spans the second Trivy compromise and elementary-data, and finding counts dropped roughly fifteen percent across the board, with <code class="language-plaintext highlighter-rouge">apispec</code>, <code class="language-plaintext highlighter-rouge">awscli</code>, and <code class="language-plaintext highlighter-rouge">babel</code> going to zero entirely. The second interval had no comparable incident in the news and the numbers are flat to slightly up. Maintainers respond to compromises they see in their feeds and then attention moves on, which is roughly what you’d expect, and the argument for putting the check in CI as a blocking step is that it runs on every change without anyone having to remember.</p>
+
+<p>Thanks to <a href="https://github.com/woodruffw">William Woodruff</a> for building and maintaining zizmor, without which none of this analysis would have been possible, and for fielding a lot of questions while I was putting it together. zizmor is largely one person’s work; if it saves you an incident, or you’d just rather the best available defence for the dominant open source CI platform wasn’t running on one volunteer’s spare time, please consider supporting him through <a href="https://github.com/sponsors/woodruffw">GitHub Sponsors</a>, <a href="https://thanks.dev/u/gh/woodruffw">thanks.dev</a>, or <a href="https://ko-fi.com/woodruffw">ko-fi</a>.</p>
+
+<hr />
+
+<p><strong>Incidents referenced:</strong></p>
+
+<ul>
+  <li><a href="https://unit42.paloaltonetworks.com/github-actions-supply-chain-attack/">spotbugs -&gt; reviewdog -&gt; tj-actions chain</a>, Nov 2024 - Mar 2025</li>
+  <li><a href="https://blog.yossarian.net/2024/12/06/zizmor-ultralytics-injection">Ultralytics cache poisoning</a> and <a href="https://blog.pypi.org/posts/2024-12-11-ultralytics-attack-analysis/">PyPI’s analysis</a>, Dec 2024</li>
+  <li><a href="https://www.wiz.io/blog/github-action-tj-actions-changed-files-supply-chain-attack-cve-2025-30066">tj-actions/changed-files CVE-2025-30066</a>, Mar 2025</li>
+  <li><a href="https://www.cisa.gov/news-events/alerts/2025/03/18/supply-chain-compromise-third-party-tj-actionschanged-files-cve-2025-30066-and-reviewdogaction">CISA advisory on tj-actions/reviewdog</a></li>
+  <li><a href="https://snyk.io/articles/trivy-github-actions-supply-chain-compromise/">Trivy action compromise</a> and <a href="https://www.stepsecurity.io/blog/trivy-compromised-a-second-time---malicious-v0-69-4-release">second-round tag hijack</a>, Feb-Mar 2026</li>
+  <li><a href="https://blog.pypi.org/posts/2026-04-02-incident-report-litellm-telnyx-supply-chain-attack/">LiteLLM and Telnyx via the Trivy chain</a> and <a href="https://securitylabs.datadoghq.com/articles/litellm-compromised-pypi-teampcp-supply-chain-campaign/">Datadog’s TeamPCP write-up</a>, Mar 2026</li>
+  <li><a href="https://www.stepsecurity.io/blog/elementary-data-compromised-on-pypi-and-ghcr-forged-release-pushed-via-github-actions-script-injection">elementary-data comment injection</a>, Apr 2026</li>
+  <li><a href="https://www.stepsecurity.io/blog/lightning-obfuscated-javascript-credential-stealer-bundled-in-pypi-wheel">lightning credential stealer</a> and <a href="https://www.upwind.io/feed/intercom-client-7-0-4-supply-chain-attack">intercom-client OIDC bypass on npm</a>, Apr 2026</li>
+  <li><a href="https://x.com/MsftSecIntel/status/2054041471280423424">mistralai / guardrails-ai compromise</a> and <a href="https://labs.cloudsecurityalliance.org/research/csa-research-note-mini-shai-hulud-multi-ecosystem-supply-cha/">CSA Mini Shai-Hulud research note</a>, May 2026</li>
+</ul>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
