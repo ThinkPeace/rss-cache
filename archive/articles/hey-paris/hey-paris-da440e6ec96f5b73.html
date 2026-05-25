@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Leo wouldn&#x27;t stand still | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Leo wouldn&#x27;t stand still</h1>
+        <div class="meta">Dr Paris Buttfield-Addison 2026-05-21T00:00:00Z</div>
+        <div class="links">
+          <a href="https://hey.paris/posts/leo-sprite-alignment/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/hey-paris/hey-paris-da440e6ec96f5b73.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">We’re working on an adventure game, Leonardo’s Moon Ship . The player character, Leo, has the usual pile of animations: idle left and right, walk in four directions, a couple of stair anims. Since implementing the basics of the character, Leo has had this slightly cursed behaviour where he’d grow about 3% taller the moment he started walking, then shrink ba…</div>
+        <div class="content">
+          <html>
+  <body>
+    <p>We’re working on an adventure game, <a href="https://yarnspinner.dev/leonardo/">Leonardo’s Moon Ship</a>. The player character, Leo, has the usual pile of animations: idle left and right, walk in four directions, a couple of stair anims. Since implementing the basics of the character, Leo has had this slightly cursed behaviour where he’d grow about 3% taller the moment he started walking, then shrink back when he stopped. His feet would also lift off the ground by up to 27 pixels depending on which way he was facing. Not enough to be obviously broken in a screenshot. Exactly enough to make the game feel wrong.</p>
+    <p>That’s the bug overlaid on itself. The red ghost is the naive setup. The blue is the fixed version. When Leo’s idle they sit on top of each other. The second a walk anim kicks in the red drifts up and out of place.</p>
+    <h2>Why a single scale falls over</h2>
+    <p>The animations came from the artists on wildly inconsistent canvases. Not the character, the canvas the character was painted on. Here’s the actual sizes:</p>
+    <ul>
+      <li>idle_right: 675x1095, character tight-cropped</li>
+      <li>idle_left: 616x1094, basically the same character, slightly different crop</li>
+      <li>walk_right and walk_left: 1920x1200, but Leo himself is only about 700x1088 and floating somewhere inside all that transparent space</li>
+      <li>walk_up: 664x1202</li>
+      <li>walk_down: 664x1202</li>
+    </ul>
+    <p>This is normal. Artists work in whatever canvas size makes sense for the motion they’re drawing. Walk cycles need horizontal room for the stride, idle frames don’t. And good luck enforcing a single canvas size across hundreds of frames and constant revisions.</p>
+    <p>The naive setup was a single animated-sprite node with one <pre>sprite_scale</pre> of 0.28 and one <pre>feet_offset_y</pre> of -340 applied globally. That only works when every animation has the same character pixel height and the character sits at the same place inside its canvas. Neither was true here. The walk_right character was about 305 visible pixels tall, idle_right was 296. Multiply both by 0.28, and one renders three pixels taller than the other every time Leo stops moving. And because walk_down had Leo floating higher inside his canvas, applying the same offset put his feet 27 pixels above the ground.</p>
+    <p>
+      <graphic src="/posts/leo-sprite-alignment/explain.png" alt="Three-panel explainer: bounding boxes and visual feet line, naive render, fixed render"/>
+    </p>
+    <p>Panel one shows the loose alpha bounding box that a stock image library hands you (in red) versus the actual visual feet line (in green). Panel two is what you got with the single global scale and offset: drift everywhere. Panel three is the fix.</p>
+    <p>Levels in this game are tuned around the convention that Leo’s root node sits at his feet, so spawn points and collision shapes just work. That convention was being silently violated every time he changed animation. The collision body was fine. The visuals were lying about where the body actually was.</p>
+    <h2>The fix: per-anim metrics, computed at load</h2>
+    <p>The first instinct is to crop the bounding box and call it a day. Don’t. The stock alpha-bounding-box helper returns a rect containing every pixel with any alpha, which means it catches anti-aliasing halos and baked drop-shadow halos that extend a noticeable distance below the visible feet. Those halos vary per animation because the artist redrew the shadow each time. The loose bbox bottom is not where the feet are.</p>
+    <p>So at load time, the character script walks every frame of every animation and runs a small scan. For each frame it grabs the loose alpha bbox, then scans rows from the bottom upward looking for the first row where at least 5% of the bbox width has alpha greater than 0.5. That row is the visual feet line. The scan bails the instant it finds an opaque row, so it’s basically free even across a few hundred frames.</p>
+    <p>For each animation I average the visual-feet Y and the character pixel height across every frame, which means the walking bob doesn’t bias one frame and ruin the alignment. Then I pick idle_right as the reference, because the levels are already tuned to its feet position and I’m not redoing all that work. For every other animation:</p>
+    <pre>
+      <pre>anim_scale = sprite_scale * (ref_char_h / this_anim_char_h)
+anim_offset_y = ref_feet_local_y - (this_anim_feet_y * anim_scale)
+</pre>
+    </pre>
+    <p>That gives every animation a pre-computed scale and offset that makes its rendered character the same pixel height as idle_right and lands its visual feet at the same local Y. Then I hook the animation-change callback and apply the right values whenever the current animation flips.</p>
+    <p>Naive on the left, fixed on the right, same animation timeline. The red line on the naive side tracks where the feet actually are frame to frame, which is depressing. The green line on the fixed side is locked, and Leo stays on it.</p>
+    <h2>The shadow came along for the ride</h2>
+    <p>Leo has a shadow, a separate ellipse sprite parented to him. Originally it was anchored to the node origin, which meant it floated somewhere around his knees and danced about as he changed animation. With the feet now pinned to a known constant Y in Leo’s local space, the shadow just sits at that Y. No per-anim shadow logic. It works for the stair animations too, which I didn’t even bother testing until a week later because I’d already mentally filed the problem as solved. It was.</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
