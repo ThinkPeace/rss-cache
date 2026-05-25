@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Solving the board game Quoridor | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Solving the board game Quoridor</h1>
+        <div class="meta">Grant Slatton&#x27;s Blog 2026-05-25T20:01:38Z</div>
+        <div class="links">
+          <a href="https://grantslatton.com/solving-quoridor">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/grantslatton-com/grantslatton-com-a8557ecc61984b75.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Algorithmic and optimization playtime</div>
+        <div class="content">
+          <h1>Solving Quoridor</h1>
+<p>This post significantly improves the state of the art in solving the board game Quoridor. I describe novel techniques that enable fully solving almost all board configurations with area ≤ 28 (e.g. 5x5, 8x3, 7x4, etc) for most wall counts on a consumer laptop.</p>
+<h2>Background</h2>
+<p>I was introduced to the board game <a href="https://en.wikipedia.org/wiki/Quoridor">Quoridor</a> back in 2014 and was immediately taken by it.</p>
+<p>I usually spend a weekend returning to Quoridor once every couple years, writing different forms of AI bots to play it. This last weekend, I made a breakthrough that enables both much stronger bots, and much more complete solving.</p>
+<p><img src="https://grantslatton.com/images/b9d619bf531f0713.png" alt="Screenshot 2026-02-23 at 7.27.26 PM.png" /></p>
+<h3>Rules</h3>
+<p>The game is pretty simple:</p>
+<ul>
+<li>Pawns start on opposite sides of the 9x9 board</li>
+<li>Your goal is to get your pawn to the far side</li>
+<li>You have 10 walls</li>
+<li>On your turn, you can move your pawn 1 square, or place a wall</li>
+<li>You can jump over the opponent's pawn</li>
+<li>You can't place a wall that makes it impossible for a pawn to get to its goal</li>
+</ul>
+<p>That last rule is where all the performance complexity comes from. You might be planning on blocking your friend's straight shot — making him take the long way around — but he places a wall that cuts off the long route, so now it's illegal for you to block the short route!</p>
+<p>The "pawn jumps over opponent's pawn" rule creates interesting <a href="https://en.wikipedia.org/wiki/Parity_(mathematics)">parity</a>/<a href="https://en.wikipedia.org/wiki/Zugzwang">zugzwang</a> situations.</p>
+<p>In addition to the typical 9x9 board with 10 walls, <a href="https://alife-robotics.co.jp/LP/2022/OS13-3.htm">many</a> <a href="https://ipsj-kyushu.jp/page/ronbun/hinokuni/1011/Papers/A23-1.pdf">papers</a> <a href="https://alife-robotics.co.jp/LP/2023/OS18-2.htm">have</a> <a href="https://www.jstage.jst.go.jp/article/jrnal/10/3/10_4/_article/-char/ja">analyzed</a> smaller boards and wall counts, since the full game is currently intractable.</p>
+<h2>Major Results</h2>
+<h3>Parity Advantage vs Tempo Advantage</h3>
+<p><a href="https://mathoverflow.net/q/132967">Many</a> have <a href="https://boardgamegeek.com/thread/604118/mirroring-second-player-advantage">speculated</a> that Quoridor might be a 2nd player win on odd-height boards due to pawn jump parity. This work shows that odd-height Quoridor boards are <em>not</em> always 2nd player wins.</p>
+<p>They <em>are</em> always 2nd player wins with few walls, but typically turn into 1st player wins at a sufficiently high wall count. For example, 5x5 is a 2nd player win at ≤4 walls per player, but 1st player win at &gt;4 walls.</p>
+<p>The intuition here is that odd-height boards have a jump parity advantage for 2nd player, but 1st player still has a tempo advantage, so a sufficient number of walls makes the 1st player tempo advantage dominate the 2nd player's jump advantage.</p>
+<p>There are a few notable exceptions discussed below.</p>
+<p>Relatedly, we find that even-height boards are uniformly 1st player wins at all wall counts because 1st player has the jump parity advantage <em>and</em> the tempo advantage.</p>
+<h3>Forced Draws</h3>
+<p>It <a href="https://boardgamegeek.com/thread/447889/draw-possible">was known</a> that forced draws by repetition were possible to contrive, but this work shows that the 8x3 board with 3 walls per player is a draw <em>from the starting position</em>.</p>
+<p>Both players must just dance left and right forever. If either player deviates from this repetition, the other player has a forced win, therefore the optimal strategy is draw by repetition.</p>
+<h3>Weird geometries</h3>
+<p>There are some geometries with outlier results. For example:</p>
+<p>4x7 is a 2nd player win for 0 or 1 wall, 1st player win for 2 walls, then back to 2nd player for 3 walls, then 1st player beyond that.</p>
+<p>7x3 never transitions into a 1st player win at any wall count.</p>
+<p>3x5 is a 2nd player win at all wall counts <em>except</em> 3</p>
+<p>8x3 is a 2nd player win at all wall counts except 3 (where it's a draw, as noted above).</p>
+<h3>Full results table</h3>
+<p>Note: even-heights omitted, they are all 1st player win at all wall counts and geometries.</p>
+<table><thead><tr><th>W x H</th><th>0</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th></tr></thead><tbody>
+<tr><td>2 x 3</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+<tr><td>3 x 3</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td></tr>
+<tr><td>4 x 3</td><td>2</td><td>2</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+<tr><td>5 x 3</td><td>2</td><td>2</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+<tr><td>6 x 3</td><td>2</td><td>2</td><td>2</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+<tr><td>7 x 3</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td></tr>
+<tr><td>8 x 3</td><td>2</td><td>2</td><td>2</td><td>D</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td></tr>
+<tr><td>9 x 3</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+<tr><td>2 x 5</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td></tr>
+<tr><td>3 x 5</td><td>2</td><td>2</td><td>2</td><td>1</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td></tr>
+<tr><td>4 x 5</td><td>2</td><td>2</td><td>2</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+<tr><td>5 x 5</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+<tr><td>2 x 7</td><td>2</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+<tr><td>3 x 7</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+<tr><td>4 x 7</td><td>2</td><td>2</td><td>1</td><td>2</td><td>1</td><td>1</td><td>1</td><td>?</td><td>?</td><td>?</td><td>?</td></tr>
+<tr><td>2 x 9</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td></tr>
+<tr><td>3 x 9</td><td>2</td><td>2</td><td>2</td><td>2</td><td>2</td><td>1</td><td>1</td><td>1</td><td>1</td><td>?</td><td>?</td></tr>
+</tbody></table>
+<p>You can reproduce the results of this work by running the code in <a href="https://github.com/grantslatton/quoridor-solving">this repository</a>. The smaller configurations finish almost instantly, the largest ones in the table take up to 30 minutes on my M3 MacBook Pro. I have 128GB of RAM and the largest configurations use a sizeable chunk of that to store all the precomputed data and transposition table.</p>
+<h2>Complexity</h2>
+<p>Quoridor has two main complexifiers.</p>
+<p>The "illegal to fully block goal" rule makes enumerating legal moves hard. Naively, you have to do a pathfinding search for every candidate move. This means move generation is several orders of magnitude slower than a game like chess.</p>
+<p>Adding to this pain, the branching factor pretty high. On any given turn there are typically 4 pawn moves and about 100 possible wall moves. So not only are the wall moves super slow to check the legality of, there are also a ton of them.</p>
+<p>This huge branching factor makes naive alpha-beta <a href="https://en.wikipedia.org/wiki/Negamax">negamax</a> pretty weak. It takes a decent amount of work to get a bot searching to depth 6 or so.</p>
+<p>Beyond the giant branching factor, the <a href="https://en.wikipedia.org/wiki/Horizon_effect">horizon effect</a> is harder to deal with. In chess, you can deal with the horizon effect pretty easily with <a href="https://en.wikipedia.org/wiki/Quiescence_search">quiescence search</a> where you search only the "interesting" moves (i.e. captures, checks) until no such moves remain and the position is "quiet".</p>
+<p>In Quoridor, there are very few quiet positions because walls can be placed anywhere on the board at any time.</p>
+<p>In addition to not being able to look too deep, once you bottom-out on depth, evaluating a position is really hard. You have a short path, great. Can it be cut? Can you block it from being cut? You have walls, awesome — will you be able to effectively use them, or is your opponent in a safe-from-walls corridor? Etc.</p>
+<p>All these complexities make me think Quoridor would be really amenable to an <a href="https://en.wikipedia.org/wiki/AlphaZero">AlphaZero</a> type approach which shines on games with high branching factors and difficult evaluation functions.</p>
+<h2>Miscellaneous optimization tricks</h2>
+<p>A few tricks I've picked up over the years of hacking on Quoridor bots. Some are highly specific to Quoridor, others are well-known in e.g. the computer chess community. Not all of these were used or are applicable to the full solver, but are nonetheless interesting or applicable to a general Quoridor bot.</p>
+<h3>Wall legality heuristic</h3>
+<p>If you place a wall floating off in an open area, it's always possible to go around it, so no legality check is needed.</p>
+<p>Further, if you place a wall and it's only touching another wall (or board edge) at a single point, it's also always possible to go around it, so no legality check is needed.</p>
+<p>You only need to do a legality check if the wall touches another wall or edge at at least 2 of the 3 points the wall touches.</p>
+
+<h3>Most walls are legal</h3>
+<p>It's almost guaranteed your evaluation function uses path length as an input. This requires running a path algorithm.</p>
+<p>Since you are already going to do this for your leaf-node evaluation function, you should skip it during all move generation. Move moves are legal!</p>
+<p>Just recurse <em>assuming</em> all wall moves are legal, and if you discover at the leaf node that <em>whoops</em> we are in an illegal branch, that's fine, just return null instead of a score to mark that this node is invalid.</p>
+<p>If you're at an inner node and your very first child returns null, <em>then</em> do a path check to see if the inner node is illegal, and fast-return null if it is.</p>
+<p>This optimization only works because illegality is monotonic in Quoridor. Once you are in an illegal state, you cannot get to a legal state.</p>
+<h3>Bitboards</h3>
+<p>Standard Quoridor is a 9x9 cell board, but walls are length 2, so there are only 8x8 places to place a wall. This means you can represent all the horizontal walls as a 64 bit integer, and all the vertical walls as a 64 bit integer. Getting candidate wall moves can now be done with just a few ops.</p>
+<h3>Transposition</h3>
+<p>Transposition table is an easy 2x win. Add in horizontal symmetry for another 2x. You don't even really need to use <a href="https://en.wikipedia.org/wiki/Zobrist_hashing">Zobrist hashing</a> since the board state is so few bits, you can either use it as a key outright or hash it in just a few ops.</p>
+<h2>Solving</h2>
+<h3>Breakthrough optimization</h3>
+<p>There is one trick that makes solving boards like 5x5 Quoridor fast and easy, and it falls out of these two observations:</p>
+<ul>
+<li>There are only 2,532,560 total possible wall configurations on a 5x5 board</li>
+<li>If you have all the possible wall configurations, you can precompute legality bitboards for both players for all possible wall states</li>
+</ul>
+<p>That is, for each wall state, you floodfill from each player's goal row to make a mask that contains the set of legal cells that player's pawn can be on.</p>
+<p>This allows for extremely cheap legality checks. To check if a wall move is legal, you just look up the configuration in the table, and check that both players' pawns are on floodfilled cells.</p>
+<p>Below is an example of a board in a legal state vs illegal state from just one player's point of view.</p>
+
+<p>Combined with the other tricks, this allowed me to fully solve 5x5 Quoridor in just a few minutes on my laptop.</p>
+<p>Unfortunately this solution does not scale to the full 9x9 board which has 10<sup>20</sup> possible wall configurations.</p>
+<p>It's likely tractable to spend a few hundred dollars of cloud compute to solve the next frontier of board sizes if someone wants to throw money at the problem.</p>
+<p>6x6 is not really interesting since it's almost guaranteed to be a 1st player win due to even height, but e.g. 7x5 would probably be interesting.</p>
+
+<h3>Proof search</h3>
+<p><a href="https://alife-robotics.co.jp/LP/2022/OS13-3.htm">Previous</a> <a href="https://alife-robotics.co.jp/LP/2023/OS18-2.htm">work</a> <a href="https://www.jstage.jst.go.jp/article/jrnal/10/3/10_4/_article/-char/ja">has</a> largely focused on using <a href="https://www.chessprogramming.org/Retrograde_Analysis">retrograde analysis</a> to solve small Quoridor variants.</p>
+<p>This work largely uses an algorithm closely related to <a href="https://en.wikipedia.org/wiki/Proof-number_search">proof-number search</a> which, as far as I can find, appears to have never been applied to Quoridor.</p>
+<p>I was not aware of proof-number search before this work, and accidentally re-invented it by modifying the negamax algorithm until it was essentially a proof search.</p>
+<p>I had initially started with normal <a href="https://www.chessprogramming.org/Iterative_Deepening">iterative-deepening</a> negamax with (-∞, ∞) alpha-beta bounds and win/loss evaluation function, but you can get <em>significantly</em> more <a href="https://www.chessprogramming.org/Beta-Cutoff">beta-cutoffs</a> by initializing with (0, ∞) alpha-beta bounds.</p>
+<p>At each depth, you do a search assuming 1st player wins, and if that doesn't find a forced win, do a search assuming 2nd player wins, and if that doesn't find a forced win, try it all again at the next depth.</p>
+<p>Because of this structure, traditional alpha-beta techniques like <a href="https://www.chessprogramming.org/Move_Ordering">move ordering</a> can significantly speed up the search.</p>
+<p>I had gone into this conjecturing that this always terminates and there were no forced draws from the start position. I found the forced draw for 8x3 with 3 walls when the max depth kept ticking up indefinitely, then I added a retrograde solver fallback which proved the draw. The various optimizations mentioned in this work make retrograde analysis tractable for this size.</p>
+<h3>Additional implementation details</h3>
+<p>While precomputing all wall configurations and legality masks, you can squeeze out more performance by precomputing a bit more information for any wall configuration:</p>
+<ul>
+<li>All legal moves. Move generation is much cheaper with the legality masks, but you can still get a nice constant factor improvement by just precomputing it all upfront.</li>
+<li>Distance to goal. This is useful for move ordering which helps alpha-beta. You wanna try moves that help yourself or hurt your opponent first.</li>
+</ul>
+<h2>Future work</h2>
+<h3>Enumerating wall frontiers instead of whole wall configurations</h3>
+<p>You really shouldn't actually care about the <em>full</em> wall state. You really only care about the exact illegality frontier. That is, the minimal set of walls on the current board that causes the illegality.</p>
+
+<p>Because illegality is monotonic, once you have such a minimal set, any additional walls are not making the board "more illegal".</p>
+<p>So a better algorithm is to enumerate all possible such minimal illegality frontiers instead of all possible wall configurations. Then, implement some clever datastructure that can efficiently check if any illegality frontier is a subset of the current wall state.</p>
+<p>Unfortunately, this probably still isn't enough to solve 9x9 Quoridor, the branching factor is still too high even if you could do legality checks in 1 nanosecond.</p>
+<p>This method could probably be squeezed to scale to 6x6 or maybe even 7x7 though.</p>
+<h3>Enumerating all possible paths instead of walls</h3>
+<p>Rather than enumerating all possible wall configurations or frontiers, you can enumerate all possible paths, then perhaps there is a clever way to efficiently prune the set of valid paths given a current wall configuration. If the set of valid paths is empty, the state is illegal.</p>
+<p>I've thought less hard about this one but I feel there is probably something there. The number of possible paths from all squares is pretty tractable for 7x7 — just a few billion.</p>
+<h3>Divide-and-conquer tiles</h3>
+<p>There is probably something to be done where you divide the 9x9 board into smaller tiles, e.g. nine 3x3 tiles.</p>
+<p>Then you can precompute every possible tile. Each tile is keyed by its wall configuration + goal-reachability situation. A tile's goal-reachability situation is a function of its wall configuration + its neighbors' wall configurations and reachability situations.</p>
+<p>This turns your 9x9 pathfinding into a 3x3 pathfinding which should be around 10x faster. It's unclear to me if this is useful for solving, but is probably useful for playing.</p>
+<h2>Closing thoughts</h2>
+<p>I'll keep thinking about this problem in the shower every few months and hopefully have some more insights.</p>
+<p>It's interesting that the top LLMs — even tasked with grinding on this problem overnight in a harness — don't come close to this insight (tried with gpt-5.5-xhigh in codex CLI). It would be interesting to keep this as a private eval out of the training data, but publishing it is also valuable. It will be interesting to see if future LLMs can improve on this result.</p>
+<p>I did of course use coding agents to implement all the code for the most recent version of this project, after providing them the high-level insights described above. I've implemented enough Quoridor bitboards for one lifetime and wouldn't have spent such time revisiting this project without that accelerant.</p>
+<h3>Call for others</h3>
+<p>If any enterprising young person is confident they can train an AlphaZero style Quoridor bot for a few hundred dollars of cloud GPU, reach out to me with your proposal and I'd be interested in funding it. I'm really curious what superhuman Quoridor looks like.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
