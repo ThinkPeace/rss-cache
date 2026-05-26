@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>If C# and JavaScript lets me await a Windows Runtime asynchronous operation more than once, why not C++/WinRT? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>If C# and JavaScript lets me await a Windows Runtime asynchronous operation more than once, why not C++/WinRT?</h1>
+        <div class="meta">The Old New Thing 2026-05-26T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260526-00/?p=112354">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-2631e67c556665a2.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A difference in philosophy. The post If C# and JavaScript lets me await a Windows Runtime asynchronous operation more than once, why not C++/WinRT? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>The Windows Runtime expresses asynchronous execution in the form of types like <code>IAsync­Operation</code>. Different languages choose to represent this concept in different ways.</p>
+<ul>
+<li>C# wraps it inside a <code>System.<wbr />Threading.<wbr />Tasks.<wbr />Task</code>.</li>
+<li>JavaScript wraps it inside a <code>Promise</code>.</li>
+<li>Python wraps it inside an <code>asyncio.<wbr />Future</code>.</li>
+</ul>
+<p>All of the above wrappers support multiple continuations, which means that you can call <code>await</code> on them multiple times.</p>
+<p>But C++/WinRT doesn&#8217;t provide such a wrapper. C++/WinRT just exposes the original <code>IAsync­Operation</code>. The <code>IAsync­Operation</code> doesn&#8217;t allow multiple continuations to be attached, so you cannot <code>co_await</code> it multiple times.</p>
+<p>Boo.</p>
+<p>Why doesn&#8217;t C++/WinRT get with the program and provide a wrapper that supports multiple continuations?</p>
+<p>Well, one reason is that C#&#8217;s <code>System.<wbr />Threading.<wbr />Tasks.<wbr />Task</code>, JavaScript&#8217;s <code>Promise</code>, and Python&#8217;s <code>asyncio.<wbr />Future</code> are part of the respective languages&#8217; standard libraries. This makes them an obvious choice for projection since they are a way to represent asynchronous execution that is universally understood by anybody writing code in that language. Furthermore, the fact that they are standard library features lets the projections build on the work of others: The standard library maintainers have already implemented, tested, and optimized these classes.</p>
+<p>C++ does not have a standard library for asynchronous execution. Instead, C++ provides raw materials out of which you can write your own library. And we wrote one such library <a title="A map through the three major coroutine series" href="https://devblogs.microsoft.com/oldnewthing/20210504-01/?p=105178"> back when we learned about C++ coroutines</a> and implemented a <code>simple_task</code> class.</p>
+<p>The lack of a standard library <code>task</code> type means that there isn&#8217;t a pre-existing wrapper that C++ projections could take advantage of. It&#8217;s every man for himself.</p>
+<p>C++/WinRT provides a minimal coroutine promise for <code>IAsync­Operation</code> in deference to the general C++ principle of &#8220;you don&#8217;t pay for what you don&#8217;t use.&#8221; The overwhelming majority of the time, you have no need to await an <code>IAsync­Operation</code> more than once, so why make every <code>IAsync­Operation</code> pay for it?</p>
+<p>Next time, we&#8217;ll look at a case where you would want to await an <code>IAsync­Operation</code> more than once, and see what we can do to work around the C++/WinRT limitation.</p>
+<p><b>Bonus chatter</b>: There does exist a pre-existing library that supports multiple continuations: The Parallel Patterns Library <code>concurrency::<wbr />task</code> object. The older C++/CX projection does not natively wrap the <code>IAsyncOperation^</code>, but the Parallel Patterns Library does have special knowledge of the C++/CX <code>IAsyncOperation^</code>, so you can wrap an <code>IAsyncOperation^</code> inside a PPL <code>task</code> and <code>co_await</code> the <code>task</code> more than once.</p>
+<p>So I guess you could say that somebody already wrote the wrapper for you. Unfortunately, that wrapper is quite bulky because the PPL library has <i>so many features</i>, most of which you probably aren&#8217;t using. You could say that while C++/WinRT tries to be minimalist, PPL tries to be maximalist. It&#8217;s easier to start small and grow and it is to start big and try to pare back. (And C++/WinRT generally delegates the &#8220;grow&#8221; part to the Windows Implementation Library, which adds additional features with headers like <tt>cppwinrt_helpers.h</tt> and <tt>cppwinrt_authoring.h</tt>.)</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260526-00/?p=112354">If C# and JavaScript lets me await a Windows Runtime asynchronous operation more than once, why not C++/WinRT?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
