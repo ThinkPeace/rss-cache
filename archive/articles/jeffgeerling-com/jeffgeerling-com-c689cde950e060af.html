@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>I patched iozone for better disk benchmarks on modern macOS | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>I patched iozone for better disk benchmarks on modern macOS</h1>
+        <div class="meta">Jeff Geerling 2026-05-27T01:32:00Z</div>
+        <div class="links">
+          <a href="https://www.jeffgeerling.com/blog/2026/i-patched-iozone-for-better-disk-benchmarks-on-modern-macos/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jeffgeerling-com/jeffgeerling-com-c689cde950e060af.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A decade ago, I settled on iozone for disk benchmarking on all my systems. Tools like fio (&#x27;Flexible IO&#x27; tester) are a little more capable for raw disk performance testing, and other tools test network-scale filesystems better, but iozone gives me an easy overview of real-world disk performance across hard drives and SSDs, and runs on Mac, Windows, and Linu…</div>
+        <div class="content">
+          <html>
+  <body><h1>I patched iozone for better disk benchmarks on modern macOS</h1><p>A decade ago, I settled on <a href="https://iozone.org"> iozone</a> for disk benchmarking on all my systems. Tools like </p><pre>fio</pre> ('Flexible IO' tester) are a little more capable for raw disk performance testing, and other tools test network-scale filesystems better, but <pre>iozone</pre> gives me an easy overview of real-world disk performance across hard drives and SSDs, and runs on Mac, Windows, and Linux (and a smattering of other OSes).<graphic src="/blog/2026/i-patched-iozone-for-better-disk-benchmarks-on-modern-macos/iozone-website.jpg" alt="iozone Website with filesystem performance graph"/><p>It's been around <a href="https://www.iozone.org/src/stable/iozone.c">since 1991</a>, and is still updated today—in fact, the two latest updates (version 509 and 510) contain patches I sent in to get iozone to compile on Apple Silicon Macs running newer releases of macOS.</p><p>I was benchmarking a MacBook Neo, and the <pre>iozone</pre> compilation step broke my <a href="https://github.com/geerlingguy/sbc-reviews/tree/master/benchmark">PyInfra benchmarking scripts</a>. I think MacPorts and Homebrew tweaked their build scripts to override any errors, but it's better to just fix the upstream code.</p><p>I'm pretty bad with C, so I used a local Qwen model to help validate my fixes; see my patches in <a href="https://github.com/geerlingguy/sbc-reviews/issues/102#issuecomment-4047219198">this GitHub issue</a>.</p><p>I emailed the patches to Don Capps, who maintains <pre>iozone</pre>, and he incorporated them into the source. Version 510 contains the fix, and builds on all my Macs running macOS 26 with Clang 21.0.0.</p><pre><pre>cd ~/Downloads
+curl "http://www.iozone.org/src/current/iozone3_510.tar" | tar -x
+cd iozone3_510/src/current
+make --quiet macosx
+</pre></pre><p>The clang compiler still spits out a number of deprecation warnings, but you can ignore those.</p><p>After a few seconds, you should be able to run iozone to benchmark any storage device on your Mac (set the <pre>-f</pre> parameter to a file path in any connected volume, to test the filesystem performance on that volume).</p><p>Here I'm running it in my Downloads directory, to benchmark the SSD built into the Mac:</p><pre><pre>./iozone -e -I -a -s 1g -r 4k -r 1024k -i 0 -i 1 -i 2 -f ~/Downloads/iozone
+</pre></pre><p>With a 1GB test file size on my MacBook Neo, testing at 4k and 1M block sizes, I get the result:</p><pre><pre>$ ./iozone -e -I -a -s 1g -r 4k -r 1024k -i 0 -i 1 -i 2 -f ~/Downloads/iozone
+  Iozone: Performance Test of File I/O
+          Version $Revision: 3.510 $
+    Compiled for 64 bit mode.
+    Build: macosx 
+
+  Contributors:William Norcott, Don Capps, Isom Crawford, Kirby Collins
+               Al Slater, Scott Rhine, Mike Wisner, Ken Goss
+               Steve Landherr, Brad Smith, Mark Kelly, Dr. Alain CYR,
+               Randy Dunlap, Mark Montague, Dan Million, Gavin Brebner,
+               Jean-Marc Zucconi, Jeff Blomberg, Benny Halevy, Dave Boone,
+               Erik Habbinga, Kris Strecker, Walter Wong, Joshua Root,
+               Fabrice Bacchella, Zhenghua Xue, Qin Li, Darren Sawyer,
+               Vangel Bojaxhi, Ben England, Vikentsi Lapa,
+               Alexey Skidanov, Sudhir Kumar.
+
+  Run began: Tue May 26 16:17:26 2026
+
+  Include fsync in write timing
+  F_NOCACHE=1 - Turns data caching off
+  Auto Mode
+  File size set to 1048576 kB
+  Record Size 4 kB
+  Record Size 1024 kB
+  Command line used: ./iozone -e -I -a -s 1g -r 4k -r 1024k -i 0 -i 1 -i 2 -f /Users/jgeerling/Downloads/iozone
+  Output is in kBytes/sec
+  Time Resolution = 0.000001 seconds.
+  Processor cache size set to 1024 kBytes.
+  Processor cache line size set to 32 bytes.
+  File stride size set to 17 * record size.
+                                                                    random    random      bkwd     record     stride                                        
+              kB  reclen    write    rewrite      read    reread      read     write      read    rewrite       read    fwrite  frewrite     fread   freread
+         1048576       4    666141    188600   1465976   8232715   4415111    915494                                                                
+         1048576    1024    859037   1358016   1449306  16421172  15936521   1087545                                                                
+
+iozone test complete.
+</pre></pre><p>An average of 1.5 GB/sec for 1MB reads and writes isn't bad. Though writing that... it's mind-numbing how fast local storage has gotten in the past decade since we switched from HDD to SSD, and then from SATA to NVMe. 1.5 GB/sec is insanely fast, historically speaking. But it's rather slow for a single NVMe drive compared to my other machines!</p><p>Huge thanks to Don Capps for incorporating my patches into <pre>iozone</pre>, so it can be used on all flavors of macOS, in addition to Windows, Linux, FreeBSD, etc.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
