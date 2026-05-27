@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sharing the result of a single Windows Runtime IAsyncOperation among multiple coroutines, part 1 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Sharing the result of a single Windows Runtime IAsyncOperation among multiple coroutines, part 1</h1>
+        <div class="meta">The Old New Thing 2026-05-27T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260527-00/?p=112361">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-48ea22d8c52e7e74.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Caching the result and knowing when the cache is valid. The post Sharing the result of a single Windows Runtime IAsyncOperation among multiple coroutines, part 1 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Suppose you have a coroutine method called <code>GetThingAsync()</code>, and you want to do the work of getting &#8220;something&#8221; only once and caching the result. Here&#8217;s the version that does no caching:</p>
+<pre>struct Widget : WidgetT&lt;Widget&gt;
+{
+    IAsyncOperation&lt;Thing&gt; GetThingAsync()
+    {
+        co_return co_await GetThingWorkerAsync();
+    }
+
+    // The business logic goes here
+    IAsyncOperation&lt;Result&gt; GetThingWorkerAsync();
+};
+</pre>
+<p>Now, if this code were written in C#, we could take advantage of the fact that C# projects the Windows Runtime <code>IAsyncOperation</code> as a <code>Task</code>, and <code>Task</code> objects support being awaited on multiple times.</p>
+<pre>async Task&lt;Thing&gt; GetThingAsync()
+{
+    lock (m_lock) {
+        // First person to call GetThingAsync starts the task.
+        if (m_task == null) {
+            m_task = GetThingWorker();
+        }
+    }
+    return await m_getThingTask;
+}
+</pre>
+<p>But we don&#8217;t have that in C++/WinRT.</p>
+<p>One customer tried to build a solution out of <code>winrt::<wbr />resume_<wbr />on_<wbr />signal</code>, perhaps inspired by <a title="Creating a co_await awaitable signal that can be awaited multiple times, part 1" href="https://devblogs.microsoft.com/oldnewthing/20210301-00/?p=104914"> one of my earlier explorations of this topic</a>.</p>
+<pre>// Don't use this code. See discussion.
+struct Widget : WidgetT&lt;Widget&gt;
+{
+    winrt::Thing m_thing{ nullptr };
+    winrt::IAsyncOperation&lt;winrt::Thing&gt; m_task{ nullptr };
+    wil::unique_event m_finished{ wil::EventOptions::ManualReset }; /* initially unsignaled */
+    bool m_busy{ false };
+    std::mutex m_mutex;
+
+    IAsyncOperation&lt;winrt::Thing&gt; GetThingAsync()
+    {
+        bool shouldStart;
+        {
+            std::lock_guard guard(m_mutex);
+            if (m_thing != nullptr) {
+                // Operation has finished.
+                co_return m_thing;
+            } else if (m_busy) {
+                // Operation has started but not yet finished.
+                shouldStart = false;
+            } else {
+                // Operation hasn't even started.
+                m_busy = true;
+                shouldStart = true;
+            }
+        }
+
+        auto lifetime = get_strong();
+
+        if (shouldStart) {
+            auto task = GetThingWorker();
+            m_finished.ResetEvent();
+            task.Completed([weak = get_weak(), this](auto&amp;&amp;, auto&amp;&amp;) {
+                if (auto strong = weak.get()) {
+                    m_busy = false;
+                    m_finished.SetEvent();
+                }
+            });
+            m_task = std::move(task);
+        }
+
+        co_await winrt::resume_on_signal(m_finished.get());
+
+        {
+            std::lock_guard guard(m_mutex);
+            if (m_thing == nullptr &amp;&amp; m_task) {
+                m_thing = m_task.GetResults();
+            }
+        }
+
+        co_return m_thing;
+    }
+
+};
+</pre>
+<p>The idea is that the first time <code>Get­Thing­Async()</code> is called, we start the real task and then arrange to clear the busy flag and set the <code>m_finished</code> event when the task completes. Subsequent callers will see that the task has already started and will not start it again. And subsequent calls which occur after the task has completed will see that we already have a <code>m_thing</code> and return it immediately.</p>
+<p>Everybody then waits for the <code>m_finished</code> event, and then whoever manages to enter the mutex first gets the result and saves it. Finally, everybody returns whatever is in <code>m_thing</code>, which should be the result of the task.</p>
+<p>From the observation that they set <code>m_busy</code> back to false when the task completes, and they reset the <code>m_finished</code> event each time they start the task, I conclude that their intention was to allow multiple attempts to get the &#8220;something&#8221; if a previous attempt fails.</p>
+<p>Okay, so let&#8217;s see what could go wrong.</p>
+<p>For one thing, we see a data race because the completion lambda modifies <code>m_busy</code> outside the mutex. So we should at least protect that with a mutex.</p>
+<p>Another problem is that this code is not exception-safe. If <code>Get­Thing­Worker­Async</code> throws an exception before returning an <code>IAsync­Operation</code>, then the <code>m_busy</code> flag is set and gets stuck there. This means that nobody else will try to start the task, and the <code>m_task</code> remains null, so all subsequent callers just fall through and return a null <code>Thing</code>, which may not be something that the callers are expecting. (I mean, this code certainly doesn&#8217;t handle the case where <code>Get­Thing­Worker­Async</code> produces a null result because it thinks that a null <code>m_thing</code> means that we should try again instead of &#8220;I successfully got nothing.&#8221;)</p>
+<p>There&#8217;s also a race condition if the task completes just as somebody calls <code>Get­Thing­Async</code>:</p>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>Thread 1</td>
+<td>Thread 2</td>
+</tr>
+<tr>
+<td><tt>GetThingAsync</tt> called<br />
+<tt>m_busy = true</tt><br />
+<tt>shouldStart = true</tt><br />
+<tt>GetThingWorkerAsync()</tt><br />
+<tt>m_finished.ResetEvent()</tt><br />
+<tt>task.Completed(...)</tt><br />
+<tt>m_task = std::move(task)</tt><br />
+<tt>co_await resume_on_signal</tt></td>
+<td> </td>
+</tr>
+<tr>
+<td>(task completes)<br />
+<tt>m_busy = false</tt></td>
+<td> </td>
+</tr>
+<tr>
+<td> </td>
+<td><tt>GetThing</tt> called<br />
+<tt>m_busy = true</tt><br />
+<tt>shouldStart = true</tt><br />
+<tt>GetThingWorkerAsync</tt><br />
+<tt>m_finished.ResetEvent()</tt><br />
+<tt>task.Completed(...)</tt><br />
+<tt>m_task = std::move(task)</tt><br />
+<tt>co_await resume_on_signal</tt></td>
+</tr>
+<tr>
+<td><tt>m_finished.SetEvent()</tt><br />
+(completion handler returns)</td>
+<td> </td>
+</tr>
+<tr>
+<td><tt>m_thing = m_task.GetResults()</tt></td>
+<td> </td>
+</tr>
+</tbody>
+</table>
+<p>Notice that the second call to <code>Get­Thing­Async</code> happens after <code>m_busy</code> has been reset, but before we have signaled the event. This creates a window inside which another thread calls <code>Get­Thing­Async</code> and tries to start the task again. The second calls assignment to <code>m_task</code> overwrites the one from the first call, and then when the first caller tries to get the results, it gets them from the wrong task.</p>
+<p>But really, this code is trying too hard. We&#8217;ll look at a simpler version next time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260527-00/?p=112361">Sharing the result of a single Windows Runtime IAsyncOperation among multiple coroutines, part 1</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
