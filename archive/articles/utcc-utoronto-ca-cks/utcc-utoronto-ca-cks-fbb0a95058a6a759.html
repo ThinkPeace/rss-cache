@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Using typing in Python leads to different sorts of code | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Using typing in Python leads to different sorts of code</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-28T01:56:55Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/python/TypeHintsDifferentCode">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-fbb0a95058a6a759.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">So what happened is that I converted a big pile of (highly untyped) Python 2 to Python 3 recently , and then I wanted to experiment with typing-heavy Python LSP servers in GNU Emacs , so I decided to try them out by experimentally adding some type annotations to DWiki , the aforementioned pile of untyped Python (and the code powering Wandering Thoughts ). T…</div>
+        <div class="content">
+          <div class="wikitext"><p>So what happened is that <a href="https://utcc.utoronto.ca/~cks/space/blog/python/DWikiPython3Now">I converted a big pile of (highly untyped)
+Python 2 to Python 3 recently</a>, and then <a href="https://utcc.utoronto.ca/~cks/space/blog/python/PythonLSPServersInEmacs-2026">I wanted
+to experiment with typing-heavy Python LSP servers in GNU Emacs</a>, so I decided to try them out by
+experimentally adding some type annotations to <a href="https://utcc.utoronto.ca/~cks/space/dwiki/DWiki">DWiki</a>, the
+aforementioned pile of untyped Python (and the code powering
+<a href="https://utcc.utoronto.ca/~cks/space/blog/">Wandering Thoughts</a>). The experience was educational and
+taught me some new things about type annotations, but it also firmed
+up my view that typed Python code is different than untyped Python
+code (although not quite to the extent that <a href="https://utcc.utoronto.ca/~cks/space/blog/python/TypeHintsDifferentLanguage">they create a different
+language</a>, as I sort of felt before).
+There are idioms that are perfectly natural in untyped Python that are
+pretty annoying to deal with in typed Python.</p>
+
+<p>One of these idioms is dictionaries with multiple types of values. For
+instance, <a href="https://utcc.utoronto.ca/~cks/space/dwiki/DWiki">DWiki</a> has a dictionary that is basically 'a collection of
+information about the HTTP request'. The authentic type of the values
+in this dictionary is "str | bool | SimpleCookie | dict[str, str]",
+which is to say that values can be any of a string, a boolean, a HTTP
+Cookie, or a dictionary of string key/value pairs. Of course,
+individual keys in the dictionary have a fixed type for their value;
+for example, the key 'request-fullpath' only ever has a string value,
+so in untyped Python code it's natural to write something like:</p>
+
+
+<blockquote><pre>
+if reqdata['request-fullpath'] and \
+   reqdata['request-fullpath'][-1] != '/':
+    [...]
+</pre>
+</blockquote>
+
+<p>If you do this in typed Python, your type checker will almost
+certainly complain that this indexing isn't valid for booleans and
+HTTP Cookies. You need to either check or type-assert that the value
+is a string.</p>
+
+<p>In untyped Python, this is a perfectly decent data structure (although
+it might not be good style). In typed Python, this is a bad data
+structure that will cause you pain. There are ways around the pain
+that preserve the underlying dictionary, but they exist almost
+entirely to pacify the type checker. A proper data structure in typed
+Python is not multi-typed like this, or at least it's not multi-typed
+with a lot of keys.</p>
+
+<p>(One way is to use <a href="https://docs.python.org/3/library/typing.html#typing.TypedDict">typing.TypedDict</a>, but
+if you have a lot of keys it gets painful).</p>
+
+<p>There's a good reason for this insistence in typed Python, because
+right now there's nothing preventing me from putting in the wrong type
+of value for a particular key in this dictionary. I could slip up and
+set some key that's supposed to have a string value to a boolean, or a
+key that's supposed to have a dictionary to a plain string. Typing
+can't detect those errors because any of those are valid for the
+dictionary in general, just not for that particular key. A proper data
+structure in typed Python is one where the type checker itself can
+check your invariants, so string values are separated from boolean
+values and so on. This would probably also be clearer code.</p>
+
+<p>This is a general issue for any sort of variable-typed container
+object, return values, or the like. I saw a similar thing <a href="https://utcc.utoronto.ca/~cks/space/blog/python/EmailPackagesNotes">when
+typing my program that uses the email packages</a>;
+the <a href="https://docs.python.org/3/library/email.html">email</a> packages
+have old-school polymorphic API return values that typing is not fond
+of and that required type checks or casts. This is relatively valid on
+the part of programs determining typing (they're unlikely to ever do
+full flow control analysis to determine actual types), and is clearly
+part of the style of typed Python.</p>
+
+<p>(Another case of this in <a href="https://utcc.utoronto.ca/~cks/space/dwiki/DWiki">DWiki</a> is that I have a general caching layer
+that uses <a href="https://docs.python.org/3/library/pickle.html">pickle</a> to
+store and retrieve arbitrary objects. The callers know what they're
+storing and retrieving under a particular key, but this isn't visible
+in any types I could assign.)</p>
+
+<p>As far as I can see, typing also changes how you want to structure
+multi-file code with classes and other data structures. In untyped
+Python such as <a href="https://utcc.utoronto.ca/~cks/space/dwiki/DWiki">DWiki</a>, it's natural to have one source file declare a
+data structure, create an instance of it, and pass it as an argument
+to a function (or a class) from another file that the first file
+imports. In typed Python, this doesn't work so well. Because
+everything that either takes data structures as arguments or returns
+them wants to name the data structure in type hints, you need the
+classes for those data structures to be eventually be accessible in
+everything that touches them, which means a tangle of circular
+imports.</p>
+
+<p>(This is different from forward references in that the code that
+accepts instances of these data structures will normally never import
+the code that defines them, <a href="https://mypy.readthedocs.io/en/stable/runtime_troubles.html#string-literal-types-and-type-comments">cf</a>.)</p>
+
+<p>Circular imports work, technically (<a href="https://utcc.utoronto.ca/~cks/space/blog/python/PythonCircularImportPuzzle">as I've sort of written about
+before</a>), but they make me unhappy. I lack
+enough experience with typed Python to know the correct approach, but
+it certainly feels like one should define as many data structures as
+possible in low level files that are relatively standalone so they can
+be imported into everything without circular imports. I'm not sure how
+this works once you want to put methods on your classes that take
+other classes as arguments and so on.</p>
+
+<p>(<a href="https://mypy.readthedocs.io/en/stable/runtime_troubles.html#import-cycles">Mypy has some suggestions</a>
+but its answers don't make me feel happy.)</p>
+
+<p>Another practical issue I ran into was that <a href="https://utcc.utoronto.ca/~cks/space/dwiki/DWiki">DWiki</a> has a stack of
+middleware functions to fiddle with HTTP requests. All of the
+middleware functions take a standard set of four arguments, each with
+a specific type, and I have enough of theses functions that going
+through and adding the appropriate type annotation to each argument
+for each function (and the return value) was clearly a pain (in my
+experiment I only did this for a few). I found myself really wishing
+for a way to say that the function as a whole had a particular type
+shape, which would automatically infer the argument and return types.
+I think the proper way to do this is to pass each function fewer
+arguments (ideally one), but I'm not sure I like it (and the four
+arguments aren't tightly coupled to each other).</p>
+
+<p>(I also wound up feeling that I should create a 'types.py' file that
+had all of the basic type definitions that didn't depend on classes
+and so on. This would be things like the shape of callable functions,
+that 'data about the HTTP request' dictionary, and so on. Many of
+these are used in multiple files in <a href="https://utcc.utoronto.ca/~cks/space/dwiki/DWiki">DWiki</a> and this avoids various
+sorts of annoyances. I don't know if such a 'types.py' file is
+considered a code smell.)</p>
+
+<p>I don't regret my scratch experiments with adding some types to <a href="https://utcc.utoronto.ca/~cks/space/dwiki/DWiki">DWiki</a>
+(partly because I learned more useful things about Python typing), but
+it's clear that doing it properly is somewhere between infeasible and
+impossible (and <a href="https://typing.python.org/en/latest/guides/typing_anti_pitch.html">Python typing acknowledges that this can be the case</a>).
+A reasonable typed version of <a href="https://utcc.utoronto.ca/~cks/space/dwiki/DWiki">DWiki</a> would be structured significantly
+differently, and getting from the current code to any new
+type-friendly structure would be a significant rewrite (which would
+fix some old mess but likely introduce new mess).</p>
+
+<p>(The semi-typed results of my experimentation are messy enough that
+I'm to discard that copy of the source code.)</p>
+
+<p>(I <a href="https://mastodon.social/@cks/116649388775061720">said something about type hints on the Fediverse</a> and some interesting
+things came up in the replies, <a href="https://mastodon.social/@jeffglass/116649447192278647">eg</a>.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
