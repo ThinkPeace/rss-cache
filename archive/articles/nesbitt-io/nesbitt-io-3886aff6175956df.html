@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Composer’s dependency policies | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Composer’s dependency policies</h1>
+        <div class="meta">Andrew Nesbitt 2026-05-29T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/05/29/composer-dependency-policies.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-3886aff6175956df.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">uBlock Origin for composer install</div>
+        <div class="content">
+          <p><a href="https://github.com/composer/composer/releases/tag/2.10.0">Composer 2.10</a> ships a new <a href="https://getcomposer.org/doc/06-config.md#policy"><code class="language-plaintext highlighter-rouge">config.policy</code></a> block that puts security advisories, malware reports, abandoned packages, and arbitrary custom blocklists under a single configuration object. Each list has the same three knobs: <code class="language-plaintext highlighter-rouge">block</code> (remove matching versions from the resolver pool), <code class="language-plaintext highlighter-rouge">audit</code> (<code class="language-plaintext highlighter-rouge">ignore</code>/<code class="language-plaintext highlighter-rouge">report</code>/<code class="language-plaintext highlighter-rouge">fail</code>), and <code class="language-plaintext highlighter-rouge">ignore</code> (per-package exemptions with optional version constraints). The model is the one <a href="https://github.com/gorhill/uBlock">uBlock Origin</a> and other ad blockers use for their filter lists: named lists published at URLs by whoever maintains them, with a default set enabled and a config slot to subscribe to more or drop any.</p>
+
+<p>The malware list is on by default and, unlike the others, also blocks during <code class="language-plaintext highlighter-rouge">composer install</code> from a lockfile. A version that was clean when you locked it and has been flagged since is blocked at install, which is a stronger guarantee than <code class="language-plaintext highlighter-rouge">composer audit</code> reporting it after the fact.</p>
+
+<p>A Composer repository advertises support by setting <code class="language-plaintext highlighter-rouge">filter.metadata: true</code> in its <code class="language-plaintext highlighter-rouge">packages.json</code> alongside the names of the lists it serves, and Packagist.org <a href="https://repo.packagist.org/packages.json">currently advertises</a> one, <code class="language-plaintext highlighter-rouge">malware</code>, fed by <a href="https://www.aikido.dev/">Aikido’s</a> feed via <a href="https://github.com/composer/packagist/pull/1681">composer/packagist#1681</a>. The per-package metadata files that Composer already fetches during resolution gain a new <code class="language-plaintext highlighter-rouge">filter</code> key next to the version list, so there’s no extra round-trip during <code class="language-plaintext highlighter-rouge">composer update</code>.</p>
+
+<p>For <code class="language-plaintext highlighter-rouge">composer install</code> and <code class="language-plaintext highlighter-rouge">composer audit</code>, where Composer wouldn’t otherwise hit the registry for every locked package, the repository can advertise a <a href="https://github.com/composer/composer/pull/12833"><code class="language-plaintext highlighter-rouge">summary-url</code></a> returning a single JSON document of every flagged package and constraint, or an <a href="https://github.com/composer/composer/pull/12839"><code class="language-plaintext highlighter-rouge">api-url</code></a> that takes a POST of <a href="https://github.com/package-url/purl-spec">PURLs</a> and returns only the matches. Packagist’s <a href="https://repo.packagist.org/lists/all/summary.json">summary file</a> is currently 70 packages.</p>
+
+<p>A flagged entry on the wire looks like this, from the metadata for a package Aikido reported last October:</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nl">"filter"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+  </span><span class="nl">"malware"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w">
+    </span><span class="p">{</span><span class="w">
+      </span><span class="nl">"constraint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0.1.1"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://packagist.org/packages/techghoshal/my-library/filter-lists/malware/"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"malware"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PKFE-h151-2jj1-7rrv"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"aikido"</span><span class="w">
+    </span><span class="p">}</span><span class="w">
+  </span><span class="p">]</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p>The first iteration shipped in <a href="https://github.com/composer/composer/pull/12766">#12766</a> at the start of April as <code class="language-plaintext highlighter-rouge">config.filter</code>, was reworked into the unified <code class="language-plaintext highlighter-rouge">config.policy</code> object in <a href="https://github.com/composer/composer/pull/12804">#12804</a>, and the existing <code class="language-plaintext highlighter-rouge">config.audit.*</code> keys for advisories and abandoned packages now fall back to it with a deprecation path planned for 2.11. Stephan Vock did most of the implementation across both <a href="https://github.com/composer/composer/pull/12766">composer/composer</a> and <a href="https://github.com/composer/packagist/pull/1681">composer/packagist</a>, with the <a href="https://www.sovereign.tech/">Sovereign Tech Agency</a> and Aikido <a href="https://blog.packagist.com/an-update-on-composer-packagist-supply-chain-security/">funding the work</a>. Private Packagist <a href="https://blog.packagist.com/whats-new-in-private-packagist-may-2026-update/">already serves the lists</a> to organisations running pre-release Composer.</p>
+
+<p>The bit I find most interesting is that <code class="language-plaintext highlighter-rouge">malware</code> isn’t a reserved name. It’s a well-known list with built-in defaults, but any other key under <code class="language-plaintext highlighter-rouge">config.policy</code> defines a custom list with the same <code class="language-plaintext highlighter-rouge">block</code>/<code class="language-plaintext highlighter-rouge">audit</code>/<code class="language-plaintext highlighter-rouge">ignore</code> options, and the data for it can come from a Composer repository that advertises a list of that name, from one or more HTTPS endpoints configured under <code class="language-plaintext highlighter-rouge">sources</code>, or from both merged together. Composer POSTs the project’s dependency PURLs and the configured list names to each source URL and gets back filter entries in the same shape Packagist serves.</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"config"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="nl">"policy"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+      </span><span class="nl">"company-policy"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+        </span><span class="nl">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nl">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"url"</span><span class="p">,</span><span class="w"> </span><span class="nl">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://acme.example.com/filter.json"</span><span class="p">}],</span><span class="w">
+        </span><span class="nl">"block"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w">
+        </span><span class="nl">"audit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fail"</span><span class="w">
+      </span><span class="p">}</span><span class="w">
+    </span><span class="p">}</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p>Aikido is the default malware source on packagist.org, supplying the data under CC-BY 4.0, but it’s wired in as a named source, so <code class="language-plaintext highlighter-rouge">malware.ignore-source: ["aikido"]</code> drops it entirely and another vendor’s endpoint can run instead or alongside. The same slot works for lists nobody is selling: a community-maintained typosquat list, or an organisation’s “packages legal hasn’t cleared yet” list, plugs in next to the built-in ones with the same exemption syntax and no vendor in a privileged position. The <a href="https://github.com/composer/composer/issues/12786">tracking issue</a> reserves <code class="language-plaintext highlighter-rouge">license</code>, <code class="language-plaintext highlighter-rouge">support</code>, <code class="language-plaintext highlighter-rouge">maintenance</code>, and <code class="language-plaintext highlighter-rouge">minimum-release-age</code> as future built-in names, which will presumably arrive through the same mechanism rather than as separate features.</p>
+
+<p>One flip the wire format could already support is allowlists: a package-to-constraint mapping describes permitted versions as readily as forbidden ones, and the only difference is whether the client drops the matches or drops everything else. <a href="https://mozilla.github.io/cargo-vet/">cargo-vet</a> is the working example of that model in Rust, requiring every crate in <code class="language-plaintext highlighter-rouge">Cargo.lock</code> to be covered by an audit record that’s either local or <a href="https://mozilla.github.io/cargo-vet/importing-audits.html">imported</a> from a published set like <a href="https://hg.mozilla.org/mozilla-central/file/tip/supply-chain/audits.toml">Mozilla’s</a> or <a href="https://github.com/google/rust-crate-audits">Google’s</a>, with anything unaudited failing the build. A Composer list configured as allow-mode and backed by a community-published “packages someone has actually read” feed would give PHP the same federated-audit model. The reserved <code class="language-plaintext highlighter-rouge">license</code> name rather implies allow semantics are on the roadmap anyway, since licence policy is almost always a set of permitted SPDX identifiers rather than forbidden ones.</p>
+
+<h3 id="prior-art">Prior art</h3>
+
+<p>Most registries deal with confirmed malware by making it disappear server-side. PyPI’s <a href="https://blog.pypi.org/posts/2024-12-30-quarantine/">project quarantine</a>, live since August 2024, hides a project from the simple index so <code class="language-plaintext highlighter-rouge">pip install</code> can’t find it while admins investigate, and <a href="https://peps.python.org/pep-0792/">PEP 792</a> status markers now expose the quarantined state in the JSON API for clients to act on. npm’s process <a href="https://docs.npmjs.com/reporting-malware-in-an-npm-package/">removes the package and publishes a security-holding placeholder</a> under the same name. RubyGems and crates.io yank. Hex.pm <a href="https://hex.pm/docs/publish#retiring-a-package">retires</a> a release, which prints a warning at resolve time but doesn’t block.</p>
+
+<p>Server-side removal has the advantage that every client gets it for free, including ten-year-old installs that will never be upgraded. Its limitation is that the registry admins’ judgement is the only one available: there’s one list, it’s whatever they’ve actioned so far, and a security vendor that spotted something an hour ago can publish a blog post but can’t get between you and <code class="language-plaintext highlighter-rouge">pip install</code>. In Composer’s design the package stays on the registry with a flag attached and which flags are honoured is set in client config, including ones supplied by third parties, with the corresponding cost that a Composer 2.8 install will fetch a flagged version without complaint until Packagist’s slower manual yank catches up. Packagist is <a href="https://blog.packagist.com/an-update-on-composer-packagist-supply-chain-security/">making stable versions immutable</a> alongside 2.10, so an upstream git re-tag is rejected rather than silently replacing the published release, and as a server-side change that one does reach the older clients.</p>
+
+<p>Time-based cooldowns, which I <a href="/2026/03/04/package-managers-need-to-cool-down.html">surveyed in March</a>, are the other client-side defence that’s spread across package managers in the last year. pnpm, Yarn, Bun, npm, uv, pip, and Poetry all now refuse versions younger than a configured age. A cooldown blocks everything published in the last N days on the assumption that anything malicious gets caught and removed inside that window, where a filter list names specific versions and is only as good as the latency of whoever populates it. The <code class="language-plaintext highlighter-rouge">minimum-release-age</code> name reserved in Composer’s policy schema suggests both will eventually live under the same config block, and one reasonable configuration is a short cooldown plus a malware list for anything that slips past it.</p>
+
+<p>Third-party install-time blocking has existed for a while as CLI wrappers. Socket’s <a href="https://socket.dev/blog/introducing-safe-npm"><code class="language-plaintext highlighter-rouge">safe npm</code></a> and Aikido’s own <a href="https://www.aikido.dev/blog/introducing-safe-chain">Safe Chain</a> alias <code class="language-plaintext highlighter-rouge">npm</code> to a command that checks each package against the vendor’s database before writing anything to disk, and Socket’s <a href="https://docs.socket.dev/docs/socket-firewall-free">Firewall</a> does the same as a local registry proxy. <a href="https://embarkstudios.github.io/cargo-deny/">cargo-deny</a> takes a <code class="language-plaintext highlighter-rouge">deny.toml</code> of banned crates, advisories, and licences and fails CI if any appear in <code class="language-plaintext highlighter-rouge">Cargo.lock</code>, which is the closest existing thing to Composer’s custom-list shape, though it runs as a separate check rather than inside <code class="language-plaintext highlighter-rouge">cargo</code> resolution. I wrote about how <a href="/2026/03/19/the-fragmented-world-of-dependency-policy.html">none of these policy formats line up</a> a couple of months ago, and Composer’s <code class="language-plaintext highlighter-rouge">config.policy</code> adds yet another. The source protocol underneath it, a PURL list in and filter entries out, is a reasonable candidate for the cross-tool format I was after in that post.</p>
+
+<p>I’d like to see more package managers copy this wholesale, because the design is simple and open: the same config options for every kind of policy list, with data sources anyone can publish.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
