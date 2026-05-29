@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Go language server can do some impressive code navigation | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The Go language server can do some impressive code navigation</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-29T01:37:37Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/programming/GoLSPImpressiveCodeNavigation">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-07947a5ec4e1e45e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">For reasons outside the scope of this entry, I recently dug into how the Go runtime did (Unix) signal handling on 64-bit x86 Linux . When I undertook this quest, I decided that the easiest way to navigate through the code of the Go runtime was to use the code navigation features exposed by the standard Go language server, gopls . In the process I was surpri…</div>
+        <div class="content">
+          <div class="wikitext"><p>For reasons outside the scope of this entry, <a href="https://mastodon.social/@cks/116644069574827187">I recently dug into how
+the Go runtime did (Unix) signal handling on 64-bit x86 Linux</a>. When I undertook
+this quest, I decided that the easiest way to navigate through the
+code of the Go runtime was to use the code navigation features exposed
+by the standard Go language server, <a href="https://go.dev/gopls/">gopls</a>.
+In the process I was surprised by just how good its code navigation
+was, even in the Go runtime.</p>
+
+<p>On Linux, Go's signal handling talks directly to the Linux kernel
+rather than going through the C library. As you can imagine, this is
+relatively architecture and Linux specific, as well as being
+relatively specific to Unix. The result is a tangle of OS and
+architecture specific code in a variety of signal related files in
+<a href="https://go.googlesource.com/go/+/refs/heads/master/src/runtime/">src/runtime</a>. The
+first challenge for code navigation is picking out the right ones that
+apply to the environment you're interested with; in Go this is handled
+through build tags, which <a href="https://go.dev/gopls/">gopls</a> understand. So <a href="https://go.dev/gopls/">gopls</a> had no
+problem navigating from <a href="https://go.googlesource.com/go/+/refs/heads/master/src/runtime/signal_unix.go">general Unix signal handling</a>
+to <a href="https://go.googlesource.com/go/+/refs/heads/master/src/runtime/os_linux.go#476">setsig() in Linux-specific code</a>
+and <a href="https://go.googlesource.com/go/+/refs/heads/master/src/runtime/defs_linux_amd64.go#118">the 64-bit x86 Linux definition of the struct involved</a>.</p>
+
+<p>But that was only half the puzzle, because I was looking into how the
+Go runtime receives signals. This is done by '<code>sigtramp()</code>' and the
+related function <code>sigreturn__sigaction()</code>, and it turns out that
+these functions are not defined in Go. All you'll find in Go is stubs
+of them at the start of <a href="https://go.googlesource.com/go/+/refs/heads/master/src/runtime/os_linux.go">os_linux.go</a>.
+But <a href="https://go.dev/gopls/">gopls</a> had no problems navigating from the stubs to <a href="https://go.googlesource.com/go/+/refs/heads/master/src/runtime/sys_linux_amd64.s#346">the
+actual amd64 assembly version</a>,
+despite the fact that the assembly version has an odd name, and then
+it was able to navigate from the assembly version of '<code>sigtramp()</code>'
+back to the Go <a href="https://go.googlesource.com/go/+/refs/heads/master/src/runtime/signal_unix.go#421">'<code>sigtrampgo()</code>'</a>.</p>
+
+<p>(It turns out that one area where <a href="https://go.dev/gopls/">gopls</a> is currently limited for
+Go assembly language is finding references for assembly language
+symbols. Fortunately I didn't need that here, all I needed was 'find
+definition'.)</p>
+
+<p>Code navigation among Go code is not surprising, because that's what
+you expect from a (Go) language server like <a href="https://go.dev/gopls/">gopls</a>. What surprised
+and impressed me is code navigation into and out of Go assembly code,
+where I was expecting to have to resort to manual searches with
+(rip)grep. This is almost certainly a relatively niche feature, yet
+<a href="https://go.dev/gopls/">gopls</a> has basic support for it. This support doesn't come from the
+standard Go library; instead it's implemented specifically in
+<a href="https://go.dev/gopls/">gopls</a> in <a href="https://pkg.go.dev/golang.org/x/tools/gopls/internal/util/asm">internal/asm</a> and
+<a href="https://pkg.go.dev/golang.org/x/tools/gopls/internal/goasm">internal/goasm</a>.</p>
+
+<p>Another nice trick that <a href="https://go.dev/gopls/">gopls</a> can do (that I just investigated) is
+navigate from an interface or an interface method to everything in
+your codebase that implements the interface. This is done through (of
+course) the LSP 'find implementation' code navigation action (in Eglot
+in GNU Emacs, this is 'C-c i'). Gopls will also navigate backward from
+a concrete thing to all of the (in-scope) interfaces that it
+implements (again using 'find implementation'). Slightly
+inconveniently, if your thing has a String() method, this will report
+a number of interfaces in the Go standard library. Gopls currently
+includes non-exported interfaces in the standard library, which is
+technically correct but extra not useful.</p>
+
+<p>(Specifically, currently this will include context.stringer and
+runtime.stringer, as well as <a href="https://pkg.go.dev/fmt#Stringer">fmt.Stringer</a>, the public version (and
+<a href="https://pkg.go.dev/expvar#Var">expvar.Var</a>, which has the same shape
+but <a href="https://utcc.utoronto.ca/~cks/space/blog/programming/GoExpvarVarGotcha">incompatible return value requirements</a>). I
+assume the Go runtime and standard library has multiple versions of
+this interface internally to limit cross-imports.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
