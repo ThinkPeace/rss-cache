@@ -1,0 +1,1749 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>On first looking into JAX | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>On first looking into JAX</h1>
+        <div class="meta">Giles&#x27; blog 2026-05-30T18:45:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/05/on-first-looking-into-jax">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-f39698b81cea7a4d.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Much have I travell&#x27;d in the realms of gold, And many goodly states and kingdoms seen; Round many western islands have I been Which bards in fealty to Apollo hold. Oft of one wide expanse had I been told That deep-brow&#x27;d Homer ruled as his demesne; Yet did I never breathe its pure serene Till I heard Chapman speak out loud and bold: Then felt I like some wa…</div>
+        <div class="content">
+          <blockquote>
+  <p>Much have I travell'd in the realms of gold,<br />
+  And many goodly states and kingdoms seen;<br />
+  Round many western islands have I been<br />
+  Which bards in fealty to Apollo hold.<br />
+  Oft of one wide expanse had I been told<br />
+  That deep-brow'd Homer ruled as his demesne;<br />
+  Yet did I never breathe its pure serene<br />
+  Till I heard Chapman speak out loud and bold:<br />
+  Then felt I like some watcher of the skies<br />
+  When a new planet swims into his ken;<br />
+  Or like stout Cortez when with eagle eyes<br />
+  He star'd at the Pacific -- and all his men<br />
+  Look'd at each other with a wild surmise --<br />
+  Silent, upon a peak in Darien.<br />
+  <br />
+  John Keats, <em>On First Looking into Chapman's Homer</em></p>
+</blockquote>
+
+<p>I've been working with <a href="https://pytorch.org/">PyTorch</a> quite a lot for the last couple of years, and feel
+like I've come to a reasonably solid understanding of how it all fits together.
+<a href="/llm-from-scratch">Working through</a> <a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>",
+training my own LLMs <a href="/2025/12/llm-from-scratch-28-training-a-base-model-from-scratch">locally</a> and <a href="/2026/04/llm-from-scratch-32j-interventions-trying-to-train-a-better-model-in-the-cloud">in the cloud</a>,
+<a href="/2025/10/retro-language-models-rebuilding-karpathys-rnn-in-pytorch">rebuilding Andrej Karpathy's 2015-vintage RNNs</a> --
+over time, it all adds up!</p>
+
+<p>But, of course, there are other frameworks, and one I kept hearing about was
+<a href="https://docs.jax.dev/en/latest/index.html">JAX</a>.  While it's less
+dominant than PyTorch, it has a reputation for a certain cleanliness, a certain purity.
+And having spent time over the last couple of weeks working through the tutorials, and translating small PyTorch examples
+into it, I've been really impressed.</p>
+
+<p>In this post I want to give an overview -- to report back to beginners like me, still
+living in PyTorch-land, on my new discovery.  Less like Herschel discovering Uranus,
+and more like a 16th-century European coming back after having discovered something that
+the people who lived there were perfectly well aware of.  What is this JAX thing,
+and how does it differ from PyTorch?</p>
+<h3 id="some-theses-significantly-overstated">Some theses, significantly overstated</h3>
+
+<p>I think that the main differences between PyTorch and JAX are something like this, but a little
+less strident:</p>
+
+<ol>
+<li>PyTorch is engineering; JAX is maths.</li>
+<li>PyTorch has historically<sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup> been optimised piecewise, JAX is JITted.</li>
+<li>PyTorch is procedural, JAX (tries to be) functional.</li>
+<li>PyTorch is maximalist; JAX is minimalist.</li>
+</ol>
+
+<p>Having overstated my claims, let me dig in and perhaps walk them back a bit.
+Once I've gone through them, I'll do a walkthrough of porting a simple PyTorch
+training loop to JAX, which should illustrate the points well.</p>
+
+<p>Finally, I'll wrap up with the counterargument.  JAX is wonderful and shiny, and
+30+ years of industry experience and cynicism makes me fear that it might be doomed :-(</p>
+
+<p>But let's start with the positive!  [Happy face on.]</p>
+
+<h3 id="1-maths-versus-engineering">1. Maths versus engineering</h3>
+
+<p>A simple example that nicely contrasts the different philosophies of
+the two frameworks is what the core of a training loop looks like.  Here's how
+you might write one in PyTorch:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_function</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+
+    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>This is kind of mechanistic.  You're telling the computer what to do, step by step:</p>
+
+<ul>
+<li>Zero out the gradients that you currently have attached to the parameters.</li>
+<li>Do a forward pass to get the model's outputs.</li>
+<li>Work out the loss based on those outputs.</li>
+<li>Do the backward pass.</li>
+<li>Update the parameters based on the gradients that the backward pass attached to them.</li>
+</ul>
+
+<p>Now let's look at a parallel JAX implementation:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">calculate_loss</span><span class="p">(</span><span class="n">parameters</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">):</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">forward</span><span class="p">(</span><span class="n">parameters</span><span class="p">,</span> <span class="n">inputs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">loss_function</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+
+<span class="o">...</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">train</span><span class="p">():</span>
+    <span class="o">...</span>
+
+    <span class="n">grads</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">calculate_loss</span><span class="p">)(</span><span class="n">layers</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+
+    <span class="n">layers</span> <span class="o">=</span> <span class="n">step</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">grads</span><span class="p">,</span> <span class="n">learning_rate</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>It's clearly very different.  No explicit backward pass, no gradient-zeroing,
+and the forward pass and loss calculation are baked into a separate function.
+But why is it shaped that way?</p>
+
+<p>Let's think about what we're actually doing in our training loop.  The gradients
+are the partial derivative of the loss function <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x02112;</mi></mrow></math> against
+the weights <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>W</mi></mrow></math>:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mtext>gradients</mtext><mo>&#x0003D;</mo><mfrac><mrow><mo>&#x02202;</mo><mi>&#x02112;</mi></mrow><mrow><mo>&#x02202;</mo><mi>W</mi></mrow></mfrac></mrow></math>
+
+<p>Now, I'm being a bit sloppy with that notation, because <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x02112;</mi></mrow></math> is a function, and
+it -- in the mathematical formulation -- takes the weights as a parameter.  So it would be
+better written like this:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mtext>gradients</mtext><mo>&#x0003D;</mo><mfrac><mrow><mo>&#x02202;</mo></mrow><mrow><mo>&#x02202;</mo><mi>W</mi></mrow></mfrac><mi>&#x02112;</mi><mo stretchy="false">&#x00028;</mo><mi>W</mi><mo stretchy="false">&#x00029;</mo></mrow></math>
+
+<p>But that's still not quite right.  In a real training loop, we're doing this in the
+context of a particular input batch, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>X</mi></mrow></math>,
+and its associated targets, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>Y</mi></mrow></math>. <sup class="footnote-ref" id="fnref-2"><a href="#fn-2">2</a></sup>  We might write that mathematically as this:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mtext>gradients</mtext><mo>&#x0003D;</mo><mfrac><mrow><mo>&#x02202;</mo></mrow><mrow><mo>&#x02202;</mo><mi>W</mi></mrow></mfrac><mi>&#x02112;</mi><mo stretchy="false">&#x00028;</mo><mi>W</mi><mi>:</mi><mi>X</mi><mo>&#x0002C;</mo><mi>Y</mi><mo stretchy="false">&#x00029;</mo></mrow></math>
+
+<p>...where you can read the colon as "given".  Now let's look again at the JAX code to work
+out the gradients:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">grads</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">calculate_loss</span><span class="p">)(</span><span class="n">layers</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That's an almost-perfect mirror of the maths!</p>
+
+<p>The <code>jax.grad</code> function takes a function <code>f</code>, and returns another function, <code>g</code>,
+which takes the same arguments.  When you call <code>g</code>, instead of returning the result
+of <code>f</code>, it will return the derivative of <code>f</code> with respect to its first argument,
+given the values of the others. <sup class="footnote-ref" id="fnref-3"><a href="#fn-3">3</a></sup></p>
+
+<p>How is it doing that magic?  Let's look at a simple concrete example:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;In the function </span><span class="si">{</span><span class="n">x</span><span class="si">=}</span><span class="s2">, </span><span class="si">{</span><span class="n">y</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+</code></pre>
+</div>
+
+<p>If you do the initial call to <code>grad</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">g</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...then it just wraps <code>f</code> in a helper function.  It's when you call <code>g</code> that the magic
+happens.</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">g</span><span class="p">(</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...will print out this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">In the function x=GradTracer(primal=2.0, typeof(tangent)=f32[]), y=1.0</span>
+</code></pre>
+</div>
+
+<p>The first parameter -- the one with respect to which we're asking for the derivative --
+is replaced by a <code>GradTracer</code> object.  Because it's wrapping a float, it can
+be used like one, so the function executes as expected. But it also keeps track of what happens to this
+variable as the code executes, and essentially builds up what in PyTorch would be
+represented by the computation graph.</p>
+
+<p>So: while in PyTorch, the variables that you pass in to a function that you need gradients
+for need to be special PyTorch objects that can keep a reference to those gradients --
+the <code>requires_grad</code> parameter that pops up frequently in PyTorch code -- in JAX, it's
+all handled by variables being automatically wrapped in these special tracers.</p>
+
+<p>Once it has the results of the function as a whole, including the chain of operations
+that was traced, it can automatically do a backward pass, and we're done.
+That's really nifty!</p>
+
+<p>Now, the example above was a toy one, with just one parameter.
+In a real training loop, you're differentiating against a set of weights, and
+those will be something more complex.  But <code>grad</code>
+handles that gracefully.  Let's see what happens if we pass in an array
+as the first parameter:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="o">&gt;&gt;&gt;</span> <span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="o">...</span>     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;In the function </span><span class="si">{</span><span class="n">x</span><span class="si">=}</span><span class="s2">, </span><span class="si">{</span><span class="n">y</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="o">...</span>     <span class="k">return</span> <span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">y</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+<span class="o">...</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">g</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">g</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">2.</span><span class="p">,</span> <span class="mf">3.</span><span class="p">]),</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">4.</span><span class="p">,</span> <span class="mf">5.</span><span class="p">,</span> <span class="mf">6.</span><span class="p">]))</span>
+<span class="n">In</span> <span class="n">the</span> <span class="n">function</span> <span class="n">x</span><span class="o">=</span><span class="n">GradTracer</span><span class="p">(</span><span class="n">primal</span><span class="o">=</span><span class="p">[</span><span class="mf">1.</span> <span class="mf">2.</span> <span class="mf">3.</span><span class="p">],</span> <span class="n">typeof</span><span class="p">(</span><span class="n">tangent</span><span class="p">)</span><span class="o">=</span><span class="n">f32</span><span class="p">[</span><span class="mi">3</span><span class="p">]),</span> <span class="n">y</span><span class="o">=</span><span class="n">Array</span><span class="p">([</span><span class="mf">4.</span><span class="p">,</span> <span class="mf">5.</span><span class="p">,</span> <span class="mf">6.</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)</span>
+<span class="n">Array</span><span class="p">([</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">1.</span><span class="p">,</span> <span class="mf">1.</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>So, we've got partial derivatives with respect to the elements of the array that was the first parameter --
+just what we'd need for a single-layer neural network without bias.</p>
+
+<p>But what about something more
+complicated?  For something like (say) an LLM, we have quite a lot of structure to our weights: our
+input embeddings, output head, all of the layers with their attention and feed-forward
+weights, and so on.</p>
+
+<p><code>grad</code> handles that by understanding basic Python structures --
+things that can be mapped to what JAX calls PyTrees.  PyTrees are nested tree structures of dictionaries,
+lists, tuples and so on, where the leaves are numbers or JAX arrays <sup class="footnote-ref" id="fnref-4"><a href="#fn-4">4</a></sup>.</p>
+
+<p>If you ask for gradients of a variable that can be represented by a PyTree, you get them back in
+a form that mirrors that PyTree:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="o">&gt;&gt;&gt;</span> <span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="o">...</span>     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;In the function </span><span class="si">{</span><span class="n">x</span><span class="si">=}</span><span class="s2">, </span><span class="si">{</span><span class="n">y</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="o">...</span>     <span class="k">return</span> <span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="s2">&quot;a&quot;</span><span class="p">][</span><span class="s2">&quot;b&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">y</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+<span class="o">...</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">g</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+<span class="o">&gt;&gt;&gt;</span> <span class="n">g</span><span class="p">({</span><span class="s2">&quot;a&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;b&quot;</span><span class="p">:</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">2.</span><span class="p">,</span> <span class="mf">3.</span><span class="p">])}},</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">4.</span><span class="p">,</span> <span class="mf">5.</span><span class="p">,</span> <span class="mf">6.</span><span class="p">]))</span>
+<span class="n">In</span> <span class="n">the</span> <span class="n">function</span> <span class="n">x</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;a&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;b&#39;</span><span class="p">:</span> <span class="n">GradTracer</span><span class="p">(</span><span class="n">primal</span><span class="o">=</span><span class="p">[</span><span class="mf">1.</span> <span class="mf">2.</span> <span class="mf">3.</span><span class="p">],</span> <span class="n">typeof</span><span class="p">(</span><span class="n">tangent</span><span class="p">)</span><span class="o">=</span><span class="n">f32</span><span class="p">[</span><span class="mi">3</span><span class="p">])}},</span> <span class="n">y</span><span class="o">=</span><span class="n">Array</span><span class="p">([</span><span class="mf">4.</span><span class="p">,</span> <span class="mf">5.</span><span class="p">,</span> <span class="mf">6.</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)</span>
+<span class="p">{</span><span class="s1">&#39;a&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;b&#39;</span><span class="p">:</span> <span class="n">Array</span><span class="p">([</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">1.</span><span class="p">,</span> <span class="mf">1.</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)}}</span>
+</code></pre>
+</div>
+
+<p>If you combine that with JAX's tree-aware <code>map</code> function, you can combine those gradients with the
+original parameters to update them as you train.  I'll show you how that works later on, when we go through an
+example of porting some PyTorch code to JAX.</p>
+
+<p>So, all of that cool stuff was made possible by the tracer objects, which are passed
+in instead of the real parameters, and keep track of the computation graph (just like the
+graph that PyTorch attaches directly to the variables).</p>
+
+<p>But tracers are more generally useful than that; they really come into their own with the next JAX difference: the JIT.</p>
+
+<h3 id="2-jit-vs-piecewise-optimisation">2. JIT vs piecewise optimisation</h3>
+
+<p>Imagine that you've built some kind of nifty model in PyTorch.  As part of it, you
+do a calculation something like this:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mtext>score</mtext><mo stretchy="false">&#x00028;</mo><mi>q</mi><mo>&#x0002C;</mo><mi>d</mi><mo stretchy="false">&#x00029;</mo><mo>&#x0003D;</mo><msub><mo>&#x02211;</mo><mi>i</mi></msub><msub><mo>max</mo><mi>j</mi></msub><mi>&#x027E8;</mi><msub><mi>q</mi><mi>i</mi></msub><mo>&#x0002C;</mo><msub><mi>d</mi><mi>j</mi></msub><mi>&#x027E9;</mi></mrow></math>
+
+<p>You decide that this is generally useful, so you
+<a href="https://huggingface.co/kernels/erikkaum/maxsim">code it up as a CUDA kernel</a> and make
+it available to the community, like Erik Kaunismäki has with his "MaxSim" kernel.  Maybe later on, it will get
+added to the PyTorch library as a standard component.</p>
+
+<p>There are a lot of optimisations like that built into PyTorch; people found that there
+were higher-level abstractions on top of basic tensor operations that were generally useful,
+so they coded up lower-level optimised versions.  For example, in the LLM I've been
+working with, there is <a href="/2025/07/llm-from-scratch-16-layer-normalisation">an implementation of LayerNorm</a>.
+But PyTorch has <a href="https://docs.pytorch.org/docs/2.12/generated/torch.nn.LayerNorm.html">its own one built in</a>.
+And there's a <a href="https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/cuda/layer_norm_kernel.cu">CUDA implementation</a> that
+it will use automatically if it has the appropriate hardware available.</p>
+
+<p>There is a problem, though.  Imagine that someone else is working on a different kind
+of model in the future.  And for reasons completely unrelated to the MaxSim calculations
+that Kaunismäki nicely optimised, they happen to need to do the same calculations.</p>
+
+<p>Now, there are two things that can happen from there:</p>
+
+<ol>
+<li>They don't know that the MaxSim kernel exists, so their code remains unoptimised.</li>
+<li>They do know that it exists, so they repurpose it for whatever their use case is.</li>
+</ol>
+
+<p>The first is not ideal; but the second isn't great either, if what they're using it
+for is not a MaxSim operation in reality, just something that happens to look the same
+mathematically.</p>
+
+<p>In the general case: all optimisations that get into PyTorch have to be carefully named
+so that they reflect the exact level of abstraction that they're targeting.  And when
+people are writing PyTorch models, they need to actually know which optimised abstractions
+are available, and where to apply them.</p>
+
+<p>Now let's look at JAX.</p>
+
+<p>It has an innocuous-looking decorator, <code>jit</code>, and you can use it by adding a single
+line before your function:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">selu</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">1.67</span><span class="p">,</span> <span class="n">lambda_</span><span class="o">=</span><span class="mf">1.05</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">lambda_</span> <span class="o">*</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">x</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">alpha</span> <span class="o">*</span> <span class="n">jnp</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">-</span> <span class="n">alpha</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Behind that single line is a huge amount of useful infrastructure.  Just like
+<code>grad</code>, it's a function that takes one function and returns another, without necessarily running
+the underlying code. <sup class="footnote-ref" id="fnref-5"><a href="#fn-5">5</a></sup>  But when you call the wrapped function for the first time, some impressive stuff
+happens:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">selu</span><span class="p">(</span><span class="mf">1.234</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>This will essentially execute the <code>selu</code> code twice:</p>
+
+<ol>
+<li><p>The first time through, it will create another of those tracer objects; this time,
+though, it won't wrap the number <code>1.234</code> -- it will just know that it is a wrapper
+for a float.  It will call the Python code with that tracer, and all of the operations in the function will be run, but the result
+that comes out at the end will essentially just be a representation of what calculations
+were done in an abstract sense -- like the computation graph that was used for
+working out gradients, but without specific numbers in it.</p>
+
+<p>JAX has a nice way to display these representations
+as what it calls JAXPRs, and the JAXPR for that function's representation when called
+with a float parameter will look something
+like this:</p>
+
+<pre><code>    { lambda ; a:f32[]. let
+    b:bool[] = gt a 0.0:f32[]
+    c:f32[] = exp a
+    d:f32[] = mul 1.67:f32[] c
+    e:f32[] = sub d 1.67:f32[]
+    f:f32[] = jit[
+      name=_where
+      jaxpr={ lambda ; b:bool[] a:f32[] e:f32[]. let
+          f:f32[] = select_n b e a
+        in (f,) }
+    ] b a e
+    g:f32[] = mul 1.05:f32[] f
+  in (g,) }
+</code></pre>
+
+<p>That JAXPR can be compiled into the appropriate code for the platform where
+you're running it -- x86 machine code, compiled CUDA, the equivalent for AMD
+or Google Tensor Processing Units (TPUs), and will be cached.  The key for
+the cache will be meta-information about the parameter -- in this case, something
+like "a 32-bit floating-point scalar".</p></li>
+<li><p>Next, the compiled code -- not the original Python -- is run with the actual value of the parameter, the
+<code>1.234</code> that we provided.</p></li>
+</ol>
+
+<p>Now, of course, the advantage of doing this is that when you call it with a different
+floating-point number -- say, <code>5.678</code> -- then you don't need to do the compilation again.
+You can just rely on the cached version.  And the fact that the compiled code is
+cached based on the metadata means that if you call <code>selu</code> with a vector, then it will compile
+a new version for that, and likewise for a matrix version. <sup class="footnote-ref" id="fnref-6"><a href="#fn-6">6</a></sup></p>
+
+<p>This is all really nifty, and you can see how it would help right away.  But for me,
+at least, an excellent extra benefit is how it can save people like Erik Kaunismäki the bother
+of writing custom kernels.  The compilation that happens, taking the representation
+that it got from the tracing process and turning it into backend code, goes through an
+optimising compiler, <a href="https://openxla.org/">XLA</a>.  And that compiler can recognise
+"standard" operations and combine them together.</p>
+
+<p>This won't be at the level of "standard operations" like MaxSim, of course -- more,
+"this looks like a convolution, let's use the standard kernel".  But it does mean that
+instead of someone having to take code written in Python and hand-port it over to
+CUDA to get a GPU speedup, the same expertise can be put into improving the optimisation
+part of XLA to get a speedup for all code.</p>
+
+<p>That's pretty amazing.  However...</p>
+
+<h3 id="3-procedural-vs-functional-code">3. Procedural vs functional code</h3>
+
+<p>If you want something like the JIT to work properly, you need to limit the kind of code
+that it works with.  In particular, it needs to be functional.  A function must always
+return the same value when given the same inputs -- so this is fine:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">add</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">add</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>...but this will cause problems:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">addY</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+
+<span class="n">y</span> <span class="o">=</span> <span class="mi">2</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">addY</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+<span class="n">y</span> <span class="o">=</span> <span class="mi">3</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">addY</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>...because <code>y</code> could be changed.  Specifically -- because the global <code>y</code> had the value
+<code>2</code> during the initial traced run of the function, that value will essentially get hard-coded
+into the cached JITted version, so both prints in the second example will output <code>3</code>.</p>
+
+<p>Something slightly surprising comes out of this -- something that makes JAX code look very different
+to PyTorch.  How we handle randomness needs to completely change.</p>
+
+<p>Consider this code:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+
+<span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>As a whole, it's deterministic.  But it breaks the functional requirement that
+the function can only depend on its inputs.  Both calls to <code>f</code> take the same input,
+but they return different results.</p>
+
+<p>Even worse, if we were to do something that consumed
+randomness between those two calls to <code>f</code>, for example:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+<span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>...we'd get different results.  The state of the random number generator is
+global state kept outside the function, just like <code>y</code> in the <code>addY</code> example above.</p>
+
+<p>A naive solution to this might be to make the state of the RNG explicit as a variable --
+you can imagine a library that worked something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">updated_random</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">random_state</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">random_state</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+
+<span class="n">random_state</span> <span class="o">=</span> <span class="n">updated_random</span><span class="o">.</span><span class="n">new_state</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">random_state</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">random_state</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>That <em>looks</em> more functional, but when you think
+about it, we haven't actually fixed the problem.  We're passing the same <code>random_state</code>
+variable in in both cases, along with the same number, but we're getting different results.
+It's not global, but it's still mutable behind the scenes.</p>
+
+<p>What you'd actually need to do to make it purely functional would be something like
+this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">updated_random</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">random_state</span><span class="p">):</span>
+    <span class="n">new_state</span><span class="p">,</span> <span class="n">randint</span> <span class="o">=</span> <span class="n">updated_random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="n">random_state</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">new_state</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="n">randint</span>
+
+<span class="n">initial_random_state</span> <span class="o">=</span> <span class="n">updated_random</span><span class="o">.</span><span class="n">new_state</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+<span class="n">first_call_random_state</span><span class="p">,</span> <span class="n">result</span> <span class="o">=</span> <span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">initial_random_state</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+<span class="n">second_call_random_state</span><span class="p">,</span> <span class="n">result</span> <span class="o">=</span> <span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">first_call_random_state</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>The <code>updated_random.randint</code> function is generating a new random integer and returning
+both that and the new state of the RNG, then we pass that back along with our
+result.  We've made the random state variables immutable, and so it's functional.  But the
+API is getting pretty ugly pretty quickly.</p>
+
+<p>So JAX does something that is
+equivalent, but a bit cleaner.  There's a concept of a <em>key</em>, which needs to be passed
+into any function that consumes randomness:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">key</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That's kind of like the <code>random_state</code> that we have in the first version of the code above.
+But it's immutable; when you use it, like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="p">(),</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">11</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...it will not be changed, so no matter how many times you call it with the same
+key, that function will return the same value.  (Note that <code>jax.random.randint</code>
+takes an inclusive lower bound and an exclusive upper bound, like Python's <code>range</code>,
+but unlike the stdlib's <code>random.randint</code>.  It also needs to know the shape of the
+result -- <code>()</code> for a scalar, <code>(1, 2)</code> for a 1x2 array, and so on.)</p>
+
+<p>If you want it to "move on" to a new state, you use the <code>split</code> function, which
+takes an existing key and returns two (or more) new ones.  So you can do something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">jax.random</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="p">(),</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">11</span><span class="p">)</span>
+
+<span class="n">initial_key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">key</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+<span class="n">first_call_key</span><span class="p">,</span> <span class="n">new_key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">initial_key</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">first_call_key</span><span class="p">))</span>
+<span class="n">second_call_key</span><span class="p">,</span> <span class="n">new_new_key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">new_key</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">second_call_key</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>Now, that <code>new_key</code> and <code>new_new_key</code> stuff is a bit ugly, but while it's not OK
+to mutate the contents of variables in functional code, it's absolutely fine to assign a new value to
+an existing one, so what I've found myself doing is writing stuff like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">jax.random</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="p">(),</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">11</span><span class="p">)</span>
+
+<span class="n">key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">key</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+<span class="n">first_call_key</span><span class="p">,</span> <span class="n">key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">first_call_key</span><span class="p">))</span>
+<span class="n">second_call_key</span><span class="p">,</span> <span class="n">key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">second_call_key</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>However, there are more powerful ways to use <code>split</code>; I'm not confident enough at
+using it yet to go into that, though, so I'll hold back for now.  I suspect (assuming I keep using JAX) I'll be
+posting about them in the future.</p>
+
+<p>OK: so the JIT means that we have to write functional code, which makes things a
+bit fiddly -- no more global state.  And that has a surprisingly big knock-on effect
+with randomness.</p>
+
+<p>But there's another thing that comes out of the JIT and the way it does
+tracing.  It's not a functional thing (though some of the docs seem to almost be
+treating it that way), but is caused by the same kind of constraints.  It's not
+part of my four theses above, but I think it's important enough to call out in
+its own subsection.</p>
+
+<h3 id="35-control-flow-and-values">3.5. Control flow and values</h3>
+
+<p>Imagine this function:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">x</span> <span class="o">**</span> <span class="mi">2</span>
+    <span class="k">return</span> <span class="n">x</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mf">10.0</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>It's purely functional, so no problem there.
+But let's think about what the JIT is trying to do.  It wants to convert the function
+into a simple sequence of operations, so it will create a tracer for
+a floating-point scalar, then call <code>f</code> with it.</p>
+
+<p>When it hits that <code>if</code> statement, there will be
+a problem.  The tracer is meant to represent any arbitrary float, so should it take
+the <code>if</code> branch or not?  There's no good answer.  It doesn't know which branch to follow
+-- whether the sequence should be "square it and return the result" or just
+"return it directly" --
+and will fail with a somewhat obscure error message:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">jax.errors.TracerBoolConversionError: Attempted boolean conversion of traced array with shape bool[].</span>
+</code></pre>
+</div>
+
+<p>So this gives a hard constraint on functions that you want to JIT: by default, they can't base
+control flow on the values you pass in.  There is a workaround -- but it comes
+with tradeoffs.  Let's take a slightly sideways route to explain it.</p>
+
+<p>Firstly, although you cannot do control flow based on the <em>value</em> of a parameter -- which
+the tracer doesn't know -- you
+can base it on other information that actually is stored in the tracer.  Let's say that we called
+<code>f</code> like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">f</span><span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">numpy</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">2.</span><span class="p">],</span> <span class="p">[</span><span class="mf">3.</span><span class="p">,</span> <span class="mf">4.</span><span class="p">]]))</span>
+</code></pre>
+</div>
+
+<p>The tracer that would be passed in when trying to trace the function would be
+something representing a 2x2 array.  The <em>shape</em> of the parameter is part of the tracer, even
+though the values aren't.  So you could do something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">x</span> <span class="o">**</span> <span class="mi">2</span>
+    <span class="k">return</span> <span class="n">x</span>
+</code></pre>
+</div>
+
+<p>...and it would work.  It's worth thinking explicitly why this is.</p>
+
+<p>When you call
+a JITted function, it will create a tracer that contains information about the type
+of thing you passed in as a parameter -- scalar versus array, and if it's an array,
+the array's shape.  It then runs the function with the tracer, gets the sequence of
+operations, compiles them and then stores the result in a cache keyed on the metadata --
+type and, if appropriate, shape -- that it used to create the tracer.</p>
+
+<p>So when we call that function with a 2x2 array, we get a 2x2 array version, then if we
+call it later with a one-dimensional array of length 2, we'll get a new version for that.</p>
+
+<p>One workaround for basing control flow on values is essentially to tell the <code>jit</code> function
+that it should treat the values of a particular variable as being like the metadata used
+for this cache keying: it should
+compile a new version for each value it sees, rather than just using the metadata.  It
+takes a parameter <code>static_argnums</code>, and a matching <code>static_argnames</code>, which tell it
+which parameters to do that with.  So, this will work:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">functools</span><span class="w"> </span><span class="kn">import</span> <span class="n">partial</span>
+
+<span class="nd">@partial</span><span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">jit</span><span class="p">,</span> <span class="n">static_argnums</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,))</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">x</span> <span class="o">**</span> <span class="mi">2</span>
+    <span class="k">return</span> <span class="n">x</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mf">10.0</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>(Remember that the thing after the <code>@</code> for a decorator needs to be a function that
+returns a function, so we have to use <code>partial</code> to "inject" in the extra argument.)</p>
+
+<p>However, the downside is pretty clear: every time we call <code>f</code> with a new value, it's
+going to have to JIT a new version of the function and cache it -- that's going to be slow
+and take up memory.</p>
+
+<p>So, as an alternative, we can use <a href="https://docs.jax.dev/en/latest/jax.lax.html#control-flow-operators">the <code>jax.lax</code> package</a>.
+This provides more functional-looking alternatives for control flow, which <em>are</em>
+compatible with the way the JIT works.  For example, there's a <code>cond</code> function, which
+we can use to replace <code>if</code>s:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">jax</span><span class="o">.</span><span class="n">lax</span><span class="o">.</span><span class="n">cond</span><span class="p">(</span><span class="n">x</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">,</span> <span class="k">lambda</span><span class="p">:</span> <span class="n">x</span> <span class="o">**</span> <span class="mi">2</span><span class="p">,</span> <span class="k">lambda</span><span class="p">:</span> <span class="n">x</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="p">(</span><span class="mf">10.0</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>That feels a little bit like a workaround, but it does solve the problem.  How?  Well,
+it's worth checking the JAXPR for it:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="o">&gt;&gt;&gt;</span> <span class="n">jax</span><span class="o">.</span><span class="n">make_jaxpr</span><span class="p">(</span><span class="n">f</span><span class="p">)(</span><span class="mf">10.0</span><span class="p">)</span>
+<span class="p">{</span> <span class="k">lambda</span> <span class="p">;</span> <span class="n">a</span><span class="p">:</span><span class="n">f32</span><span class="p">[]</span><span class="o">.</span> <span class="n">let</span>
+    <span class="n">b</span><span class="p">:</span><span class="n">f32</span><span class="p">[]</span> <span class="o">=</span> <span class="n">jit</span><span class="p">[</span>
+      <span class="n">name</span><span class="o">=</span><span class="n">f</span>
+      <span class="n">jaxpr</span><span class="o">=</span><span class="p">{</span> <span class="k">lambda</span> <span class="p">;</span> <span class="n">a</span><span class="p">:</span><span class="n">f32</span><span class="p">[]</span><span class="o">.</span> <span class="n">let</span>
+          <span class="n">c</span><span class="p">:</span><span class="nb">bool</span><span class="p">[]</span> <span class="o">=</span> <span class="n">gt</span> <span class="n">a</span> <span class="mf">2.0</span><span class="p">:</span><span class="n">f32</span><span class="p">[]</span>
+          <span class="n">d</span><span class="p">:</span><span class="n">i32</span><span class="p">[]</span> <span class="o">=</span> <span class="n">convert_element_type</span><span class="p">[</span><span class="n">new_dtype</span><span class="o">=</span><span class="n">int32</span> <span class="n">weak_type</span><span class="o">=</span><span class="kc">False</span><span class="p">]</span> <span class="n">c</span>
+          <span class="n">b</span><span class="p">:</span><span class="n">f32</span><span class="p">[]</span> <span class="o">=</span> <span class="n">cond</span><span class="p">[</span>
+            <span class="n">branches</span><span class="o">=</span><span class="p">(</span>
+              <span class="p">{</span> <span class="k">lambda</span> <span class="p">;</span> <span class="n">e</span><span class="p">:</span><span class="n">f32</span><span class="p">[]</span><span class="o">.</span> <span class="n">let</span>  <span class="ow">in</span> <span class="p">(</span><span class="n">e</span><span class="p">,)</span> <span class="p">}</span>
+              <span class="p">{</span> <span class="k">lambda</span> <span class="p">;</span> <span class="n">f</span><span class="p">:</span><span class="n">f32</span><span class="p">[]</span><span class="o">.</span> <span class="n">let</span> <span class="n">g</span><span class="p">:</span><span class="n">f32</span><span class="p">[]</span> <span class="o">=</span> <span class="n">integer_pow</span><span class="p">[</span><span class="n">y</span><span class="o">=</span><span class="mi">2</span><span class="p">]</span> <span class="n">f</span> <span class="ow">in</span> <span class="p">(</span><span class="n">g</span><span class="p">,)</span> <span class="p">}</span>
+            <span class="p">)</span>
+          <span class="p">]</span> <span class="n">d</span> <span class="n">a</span>
+        <span class="ow">in</span> <span class="p">(</span><span class="n">b</span><span class="p">,)</span> <span class="p">}</span>
+    <span class="p">]</span> <span class="n">a</span>
+  <span class="ow">in</span> <span class="p">(</span><span class="n">b</span><span class="p">,)</span> <span class="p">}</span>
+</code></pre>
+</div>
+
+<p>What's happened here, I think, is that the JIT has recognised the call to <code>jax.lax.cond</code> as
+being a primitive function in its intermediate language, so has just kept it in there.  It
+couldn't do that with the <code>if</code> because when it was tracing, all JAX itself saw was what was
+happening to the tracer -- there was a boolean comparison, and then the stuff in the chosen
+branch happened.  The fact that there was an <code>if</code> there happened in Python itself, outside
+JAX, so it was "invisible" to the trace.</p>
+
+<p>That feels a little inelegant to me right now, and I'll come back to
+it later.</p>
+
+<p>Let's move on to the final difference between the two libraries that I want to cover: JAX's relative
+minimalism to PyTorch's more maximalist approach.</p>
+
+<h3 id="4-minimalism-versus-maximalism">4. Minimalism versus maximalism</h3>
+
+<p>I think the smaller size of JAX -- at least in terms of its API, if not in terms of
+the JIT and XLA magic under the hood -- compared to the sprawl of PyTorch is not
+entirely unrelated to the JIT being at its core.</p>
+
+<p>PyTorch, after some initial design, has almost been forced to grow organically; JAX feels more carefully designed,
+so it doesn't have the same <em>need</em> to grow (though of course it can).</p>
+
+<p>The reason for PyTorch's growth is, at least in part, because
+it needs to absorb optimisations.  If something is slow, someone needs to write a CUDA
+kernel for it.  If there's a CUDA kernel, it needs an API.  And if it is generally useful, that API becomes part of
+PyTorch.  Multi-head attention?  <a href="https://docs.pytorch.org/docs/2.12/generated/torch.nn.MultiheadAttention.html">There's a class for that</a>.
+SELU?  <a href="https://docs.pytorch.org/docs/2.12/generated/torch.nn.SELU.html">Yup</a>.
+Very specific softmax approximations based on a paper published in 2016?
+<a href="https://docs.pytorch.org/docs/2.12/generated/torch.nn.AdaptiveLogSoftmaxWithLoss.html">PyTorch has you covered</a>.</p>
+
+<p>By contrast, JAX doesn't even have linear layers or optimisers in the framework
+itself; if you want to use them, you can write them yourself (contraindicated), or
+you can use <a href="https://docs.jax.dev/en/latest/#ecosystem">libraries built on top of JAX</a>, like
+<a href="https://flax.readthedocs.io/en/stable/">Flax</a> for common neural network components
+and <a href="https://optax.readthedocs.io/en/latest/">Optax</a> for optimisers.</p>
+
+<p>This feels like a nice division of responsibilities, and it also seems like something
+that would have been very hard without the JIT.  So while the JAX core may well grow in the
+future, the design it has now puts it in a good position to grow in a more planned,
+well-designed manner -- rather than <em>having</em> to grow to absorb more and more abstractions
+just to keep it fast.  Those abstractions can more easily sit in libraries written on
+top of JAX.</p>
+
+<hr />
+
+<h3 id="porting-a-toy-pytorch-model-to-jax">Porting a toy PyTorch model to JAX</h3>
+
+<p>That's the 10,000-foot overview; four (or maybe four and a half) main differences
+between PyTorch and JAX.  It's more maths-y, JITted, functional and minimalist.
+What does that actually mean when you get down to coding with it?  Let's get
+into the weeds with an example.</p>
+
+<p>Let's use a really simple one: training a neural network with two inputs and one hidden
+layer to calculate the XOR function.  The code is in <a href="https://github.com/gpjt/toy-pytorch-to-jax">this GitHub repo</a>,
+but I'll put the relevant bits here in this post.</p>
+
+<p>Firstly, an idiomatic PyTorch implementation:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+
+<span class="n">data</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">([</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
+    <span class="p">([</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">1.</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">]),</span>
+    <span class="p">([</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">]),</span>
+    <span class="p">([</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">1.</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
+<span class="p">]</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">XORModel</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">layer1</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">layer1_activation</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Sigmoid</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">layer2</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">layer2_activation</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Sigmoid</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="n">hidden</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">layer1_activation</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">layer1</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">layer2_activation</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">layer2</span><span class="p">(</span><span class="n">hidden</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">output</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">calculate_loss</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">target</span><span class="p">):</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">((</span><span class="n">result</span> <span class="o">-</span> <span class="n">target</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+    <span class="n">torch</span><span class="o">.</span><span class="n">manual_seed</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+
+    <span class="n">model</span> <span class="o">=</span> <span class="n">XORModel</span><span class="p">()</span>
+    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">SGD</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">lr</span><span class="o">=</span><span class="mf">0.1</span><span class="p">)</span>
+
+    <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10000</span><span class="p">):</span>
+        <span class="n">losses</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+            <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">calculate_loss</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
+            <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+            <span class="n">losses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">loss</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+
+            <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">epoch</span> <span class="o">%</span> <span class="mi">1000</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">avg_loss</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">losses</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">losses</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Loss at epoch </span><span class="si">{</span><span class="n">epoch</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">avg_loss</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Trained in </span><span class="si">{</span><span class="n">end</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">start</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">s&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Loss at end: </span><span class="si">{</span><span class="n">avg_loss</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">model</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">x</span><span class="si">=}</span><span class="s2">: </span><span class="si">{</span><span class="n">result</span><span class="si">=}</span><span class="s2">, </span><span class="si">{</span><span class="n">y</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>If we run that, it trains a solid-looking model in about four seconds on my machine:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/toy-pytorch-to-jax<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytorch_xor.py
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">0</span>:<span class="w"> </span><span class="m">0</span>.279327
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">1000</span>:<span class="w"> </span><span class="m">0</span>.254715
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">2000</span>:<span class="w"> </span><span class="m">0</span>.254279
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">3000</span>:<span class="w"> </span><span class="m">0</span>.253985
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">4000</span>:<span class="w"> </span><span class="m">0</span>.253649
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">5000</span>:<span class="w"> </span><span class="m">0</span>.251566
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">6000</span>:<span class="w"> </span><span class="m">0</span>.189219
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">7000</span>:<span class="w"> </span><span class="m">0</span>.030093
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">8000</span>:<span class="w"> </span><span class="m">0</span>.006666
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">9000</span>:<span class="w"> </span><span class="m">0</span>.003516
+Trained<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">4</span>.154s
+Loss<span class="w"> </span>at<span class="w"> </span>end:<span class="w"> </span><span class="m">0</span>.003516
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.0483<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.9567<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.9425<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.0434<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+</code></pre>
+</div>
+
+<p>Now, if we're porting to JAX we need to do something about the fact that JAX doesn't
+have optimisers and the neural network stuff built in.  If this was a real codebase,
+we'd almost certainly do that by using the libraries built on top of JAX, like
+Flax and Optax.  But for this toy example, I think it's more illustrative to strip
+down the PyTorch version so that it uses fewer parts of the API -- essentially so that
+it only uses the stuff that JAX has -- and then to port the result.</p>
+
+<p>The optimiser first.  <a href="https://github.com/gpjt/toy-pytorch-to-jax/blob/main/pytorch_xor_no_optimizer.py">The code is here</a>
+but the diffs are pretty simple.  Instead of creating an optimiser, we just
+specify our learning rate:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gd">&lt;     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)</span>
+<span class="gs">---</span>
+<span class="gi">&gt;     learning_rate = 0.1</span>
+</code></pre>
+</div>
+
+<p>Instead of zeroing out the gradients using the optimiser, we can just ask the model
+to do it:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gd">&lt;             optimizer.zero_grad()</span>
+<span class="gs">---</span>
+<span class="gi">&gt;             model.zero_grad()</span>
+</code></pre>
+</div>
+
+<p>And instead of stepping the optimiser, we call a new <code>step</code> function passing in
+the model and the learning rate:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gd">&lt;             optimizer.step()</span>
+<span class="gs">---</span>
+<span class="gi">&gt;             step(model, learning_rate)</span>
+</code></pre>
+</div>
+
+<p>The <code>step</code> function is simple enough; we just switch into <code>no_grad</code> mode so that PyTorch
+doesn't try to track the computation graph (working out gradients for applying gradients
+and triggering some kind of crazy gradient-ception), then we just iterate over the model's
+parameters and follow the normal SGD process, subtracting the
+gradients times the learning rate:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">learning_rate</span><span class="p">):</span>
+    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">p</span> <span class="o">-=</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span> <span class="o">*</span> <span class="n">learning_rate</span>
+</code></pre>
+</div>
+
+<p>Running that on my machine actually works out slightly faster than the original <sup class="footnote-ref" id="fnref-7"><a href="#fn-7">7</a></sup>!</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/toy-pytorch-to-jax<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytorch_xor_no_optimizer.py
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">0</span>:<span class="w"> </span><span class="m">0</span>.279327
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">1000</span>:<span class="w"> </span><span class="m">0</span>.254715
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">2000</span>:<span class="w"> </span><span class="m">0</span>.254279
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">3000</span>:<span class="w"> </span><span class="m">0</span>.253985
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">4000</span>:<span class="w"> </span><span class="m">0</span>.253649
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">5000</span>:<span class="w"> </span><span class="m">0</span>.251566
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">6000</span>:<span class="w"> </span><span class="m">0</span>.189219
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">7000</span>:<span class="w"> </span><span class="m">0</span>.030091
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">8000</span>:<span class="w"> </span><span class="m">0</span>.006665
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">9000</span>:<span class="w"> </span><span class="m">0</span>.003516
+Trained<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">3</span>.806s
+Loss<span class="w"> </span>at<span class="w"> </span>end:<span class="w"> </span><span class="m">0</span>.003516
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.0483<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.9567<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.9425<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.0434<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+</code></pre>
+</div>
+
+<p>It's also quite nice to see that (within the bounds of the printing precision) the
+loss and the final results are identical.</p>
+
+<p>OK, so now that we've got rid of the optimiser, let's do the same with the
+<code>nn.Linear</code>s.  <a href="https://github.com/gpjt/toy-pytorch-to-jax/blob/main/pytorch_xor_no_nn_helpers.py">Here's the code</a>,
+but let's do a quick walk through the differences.</p>
+
+<p>Instead of creating an <code>XORModel</code>, we will just generate an array of layers:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gd">&lt;     model = XORModel()</span>
+<span class="gs">---</span>
+<span class="gi">&gt;     layers = [</span>
+<span class="gi">&gt;         generate_layer_parameters(2, 2),</span>
+<span class="gi">&gt;         generate_layer_parameters(2, 1),</span>
+<span class="gi">&gt;     ]</span>
+</code></pre>
+</div>
+
+<p>Zeroing out the existing gradients will also need to be done on those layers:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gd">&lt;             model.zero_grad()</span>
+<span class="gs">---</span>
+<span class="gi">&gt;             zero_grad(layers)</span>
+</code></pre>
+</div>
+
+<p>...and likewise our loss calculations and the <code>step</code> function will need to use them:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gd">&lt;             loss = calculate_loss(model, torch.tensor(x), torch.tensor(y))</span>
+<span class="gs">---</span>
+<span class="gi">&gt;             loss = calculate_loss(layers, torch.tensor(x), torch.tensor(y))</span>
+58c76
+<span class="gd">&lt;             step(model, learning_rate)</span>
+<span class="gs">---</span>
+<span class="gi">&gt;             step(layers, learning_rate)</span>
+</code></pre>
+</div>
+
+<p>We used a couple of new helper functions there; this one generates the
+initial weights for the layers (based on the <a href="https://docs.pytorch.org/docs/2.12/generated/torch.nn.Linear.html">docs for <code>torch.nn.Linear</code></a>):</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">generate_layer_parameters</span><span class="p">(</span><span class="n">d_in</span><span class="p">,</span> <span class="n">d_out</span><span class="p">):</span>
+    <span class="n">root_k</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mf">1.</span> <span class="o">/</span> <span class="n">d_in</span><span class="p">)</span>
+    <span class="n">weights</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="n">d_out</span><span class="p">,</span> <span class="n">d_in</span><span class="p">)</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">root_k</span><span class="p">)</span> <span class="o">-</span> <span class="n">root_k</span>
+    <span class="n">biases</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="n">d_out</span><span class="p">)</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">root_k</span><span class="p">)</span> <span class="o">-</span> <span class="n">root_k</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;weights&quot;</span><span class="p">:</span> <span class="n">weights</span><span class="o">.</span><span class="n">requires_grad_</span><span class="p">(),</span>
+        <span class="s2">&quot;biases&quot;</span><span class="p">:</span> <span class="n">biases</span><span class="o">.</span><span class="n">requires_grad_</span><span class="p">(),</span>
+    <span class="p">}</span>
+</code></pre>
+</div>
+
+<p>Note that each of the tensors we created, the <code>weights</code> and the <code>biases</code> need to be
+explicitly told, using <code>requires_grad_</code>, that we're going to want PyTorch to track
+gradients on them.</p>
+
+<p>Zeroing out the gradients is just a case of chugging through each layer, and then for each
+setting the weights' and the biases' gradients to <code>None</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">zero_grad</span><span class="p">(</span><span class="n">layers</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">layer</span> <span class="ow">in</span> <span class="n">layers</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="p">(</span><span class="n">layer</span><span class="p">[</span><span class="s2">&quot;weights&quot;</span><span class="p">],</span> <span class="n">layer</span><span class="p">[</span><span class="s2">&quot;biases&quot;</span><span class="p">]):</span>
+            <span class="n">p</span><span class="o">.</span><span class="n">grad</span> <span class="o">=</span> <span class="kc">None</span>
+</code></pre>
+</div>
+
+<p>Now, to calculate the loss, we're actually not changing much.  We had this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">calculate_loss</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">target</span><span class="p">):</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">((</span><span class="n">result</span> <span class="o">-</span> <span class="n">target</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>...and now we just change it to this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">calculate_loss</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">target</span><span class="p">):</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">forward</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">inputs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">((</span><span class="n">result</span> <span class="o">-</span> <span class="n">target</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>That is, we've added on a new function <code>forward</code> to do a forward pass through the
+given layers with the given parameters.  That looks like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">inputs</span><span class="p">):</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">inputs</span>
+    <span class="k">for</span> <span class="n">layer</span> <span class="ow">in</span> <span class="n">layers</span><span class="p">:</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sigmoid</span><span class="p">(</span>
+            <span class="n">x</span> <span class="o">@</span> <span class="n">layer</span><span class="p">[</span><span class="s2">&quot;weights&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">T</span> <span class="o">+</span> <span class="n">layer</span><span class="p">[</span><span class="s2">&quot;biases&quot;</span><span class="p">]</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">x</span>
+</code></pre>
+</div>
+
+<p><a href="https://www.gilesthomas.com/2025/02/basic-neural-network-matrix-maths-part-2">Standard NN stuff</a>.</p>
+
+<p>A quick tweak to use <code>forward</code> in the printing of the results at the end:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gd">&lt;             result = model(torch.tensor(x))</span>
+<span class="gs">---</span>
+<span class="gi">&gt;             result = forward(layers, torch.tensor(x))</span>
+</code></pre>
+</div>
+
+<p>...and we're done!</p>
+
+<p>Let's run it:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/toy-pytorch-to-jax<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytorch_xor_no_nn_helpers.py
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">0</span>:<span class="w"> </span><span class="m">0</span>.279327
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">1000</span>:<span class="w"> </span><span class="m">0</span>.254715
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">2000</span>:<span class="w"> </span><span class="m">0</span>.254279
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">3000</span>:<span class="w"> </span><span class="m">0</span>.253985
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">4000</span>:<span class="w"> </span><span class="m">0</span>.253649
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">5000</span>:<span class="w"> </span><span class="m">0</span>.251566
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">6000</span>:<span class="w"> </span><span class="m">0</span>.189218
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">7000</span>:<span class="w"> </span><span class="m">0</span>.030092
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">8000</span>:<span class="w"> </span><span class="m">0</span>.006665
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">9000</span>:<span class="w"> </span><span class="m">0</span>.003516
+Trained<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">3</span>.504s
+Loss<span class="w"> </span>at<span class="w"> </span>end:<span class="w"> </span><span class="m">0</span>.003516
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.0483<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.9567<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.9425<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.0434<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+</code></pre>
+</div>
+
+<p>Even faster!  Sounds like there aren't any nice pre-baked optimisations in that part
+of PyTorch, then...  But again, within the bounds of our precision, that's exactly the
+same numbers as we got from the original PyTorch version, which is very reassuring.</p>
+
+<p>OK, now that we've got something that's kind of JAX-shaped, let's port it over.  I think
+it's worth showing all of the code for that (though it's
+<a href="https://github.com/gpjt/toy-pytorch-to-jax/blob/main/pure_jax_xor_no_jit.py">here on GitHub</a>
+if you want to view it there), and then I'll highlight the important diffs separately.</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+
+<span class="n">jax</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">&quot;jax_platform_name&quot;</span><span class="p">,</span> <span class="s2">&quot;cpu&quot;</span><span class="p">)</span>
+
+
+<span class="n">data</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">([</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
+    <span class="p">([</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">1.</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">]),</span>
+    <span class="p">([</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">]),</span>
+    <span class="p">([</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">1.</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
+<span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">generate_layer_parameters</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">d_in</span><span class="p">,</span> <span class="n">d_out</span><span class="p">):</span>
+    <span class="n">weight_key</span><span class="p">,</span> <span class="n">bias_key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+    <span class="n">root_k</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mf">1.</span> <span class="o">/</span> <span class="n">d_in</span><span class="p">)</span>
+    <span class="n">weights</span> <span class="o">=</span> <span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="n">weight_key</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">d_out</span><span class="p">,</span> <span class="n">d_in</span><span class="p">))</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">root_k</span><span class="p">)</span> <span class="o">-</span> <span class="n">root_k</span>
+    <span class="n">biases</span> <span class="o">=</span> <span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="n">bias_key</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">d_out</span><span class="p">,))</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">root_k</span><span class="p">)</span> <span class="o">-</span> <span class="n">root_k</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;weights&quot;</span><span class="p">:</span> <span class="n">weights</span><span class="p">,</span>
+        <span class="s2">&quot;biases&quot;</span><span class="p">:</span> <span class="n">biases</span><span class="p">,</span>
+    <span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">inputs</span><span class="p">):</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">inputs</span>
+    <span class="k">for</span> <span class="n">layer</span> <span class="ow">in</span> <span class="n">layers</span><span class="p">:</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">sigmoid</span><span class="p">(</span>
+            <span class="n">x</span> <span class="o">@</span> <span class="n">layer</span><span class="p">[</span><span class="s2">&quot;weights&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">T</span> <span class="o">+</span> <span class="n">layer</span><span class="p">[</span><span class="s2">&quot;biases&quot;</span><span class="p">]</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">x</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">grads</span><span class="p">,</span> <span class="n">learning_rate</span><span class="p">):</span>
+    <span class="n">layers</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">p</span><span class="p">,</span> <span class="n">g</span><span class="p">:</span> <span class="n">p</span> <span class="o">-</span> <span class="n">g</span> <span class="o">*</span> <span class="n">learning_rate</span><span class="p">,</span>
+        <span class="n">layers</span><span class="p">,</span>
+        <span class="n">grads</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">layers</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">calculate_loss</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">target</span><span class="p">):</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">forward</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">inputs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">((</span><span class="n">result</span> <span class="o">-</span> <span class="n">target</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">key</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+
+    <span class="n">layer_1_key</span><span class="p">,</span> <span class="n">layer_2_key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+    <span class="n">layers</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">generate_layer_parameters</span><span class="p">(</span><span class="n">layer_1_key</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span>
+        <span class="n">generate_layer_parameters</span><span class="p">(</span><span class="n">layer_2_key</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+    <span class="p">]</span>
+
+    <span class="n">learning_rate</span> <span class="o">=</span> <span class="mf">0.1</span>
+
+    <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10000</span><span class="p">):</span>
+        <span class="n">losses</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+            <span class="n">loss</span><span class="p">,</span> <span class="n">grads</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">value_and_grad</span><span class="p">(</span><span class="n">calculate_loss</span><span class="p">)(</span><span class="n">layers</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
+            <span class="n">losses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">loss</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+
+            <span class="n">layers</span> <span class="o">=</span> <span class="n">step</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">grads</span><span class="p">,</span> <span class="n">learning_rate</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">epoch</span> <span class="o">%</span> <span class="mi">1000</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">avg_loss</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">losses</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">losses</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Loss at epoch </span><span class="si">{</span><span class="n">epoch</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">avg_loss</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Trained in </span><span class="si">{</span><span class="n">end</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">start</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">s&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Loss at end: </span><span class="si">{</span><span class="n">avg_loss</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">forward</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">x</span><span class="si">=}</span><span class="s2">: </span><span class="si">{</span><span class="n">result</span><span class="si">=}</span><span class="s2">, </span><span class="si">{</span><span class="n">y</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>If you look at it side-by-side with <a href="https://github.com/gpjt/toy-pytorch-to-jax/blob/main/pytorch_xor_no_nn_helpers.py">the previous PyTorch implementation</a>,
+you'll see that it's really similar!  Running <code>diff</code> between them makes them look
+more different than they are because of the extra threading through of keys that we
+need to do in order to satisfy the strict constraints on random number handling in JAX,
+(and of course there are function name changes like <code>torch.rand</code> becoming <code>jax.random.uniform</code>
+and <code>torch.sigmoid</code> becoming <code>jax.nn.sigmoid</code>).  But the important changes are much smaller.</p>
+
+<p>Firstly, weights and biases no longer need to know that we'll want to track gradients for them,
+because that's all handled by the tracers that JAX wraps around them:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gd">&lt;         &quot;weights&quot;: weights.requires_grad_(),</span>
+<span class="gd">&lt;         &quot;biases&quot;: biases.requires_grad_(),</span>
+<span class="gs">---</span>
+<span class="gi">&gt;         &quot;weights&quot;: weights,</span>
+<span class="gi">&gt;         &quot;biases&quot;: biases,</span>
+</code></pre>
+</div>
+
+<p>Relatedly, the <code>zero_grad</code> function that iterated over the layers and zeroed out
+the existing ones is completely gone.  Because gradients are now stored on tracers
+that wrap around our parameters rather than on the parameters themselves, we don't need to zero them out.</p>
+
+<p>The step function is still there, though, but it's much simpler.
+Before we get to that, let's take a look at the way we're getting the gradients for it,
+in the main training loop.  Here's the diff:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gd">&lt;             loss = calculate_loss(layers, torch.tensor(x), torch.tensor(y))</span>
+<span class="gd">&lt;             loss.backward()</span>
+<span class="gs">---</span>
+<span class="gi">&gt;             loss, grads = jax.value_and_grad(calculate_loss)(layers, jnp.array(x), jnp.array(y))</span>
+</code></pre>
+</div>
+
+<p>Hopefully the change there will be nice and familiar from the start of this post:
+we've moved from the PyTorch procedural "do a forward pass then do the backward pass"
+to the JAX maths-y "work out the gradients for this function".  <code>value_and_grad</code> is
+a utility function that does the same as the <code>grad</code> we encountered then, but rather than
+just returning the gradients, it also returns
+the value of <code>calculate_loss</code> with the given parameters,
+which is useful for our logging.</p>
+
+<p>Now, remember that <code>layers</code> is a list of dictionaries, something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">[</span>
+<span class="go">    {</span>
+<span class="go">        &#39;biases&#39;: Array([-0.11810607, -0.58481467], dtype=float32),</span>
+<span class="go">        &#39;weights&#39;: Array([[-0.37359995,  0.6218162 ], [-0.4298191 ,  0.15088385]], dtype=float32)</span>
+<span class="go">    },</span>
+<span class="go">    {</span>
+<span class="go">        &#39;biases&#39;: Array([-0.49658495], dtype=float32),</span>
+<span class="go">        &#39;weights&#39;: Array([[-0.38409787,  0.6165393 ]], dtype=float32)</span>
+<span class="go">    }</span>
+<span class="go">]</span>
+</code></pre>
+</div>
+
+<p>And also remember that <code>grad</code> -- and likewise <code>value_and_grad</code> -- have that smart trick
+where they return the gradients in the same PyTree structure as the parameter that we're
+taking the derivative with respect to.  So <code>grads</code> will also be a list of dictionaries,
+each of which has <code>weights</code> and <code>biases</code>.</p>
+
+<p>Now, as I mentioned earlier, JAX has a useful function called <code>jax.tree.map</code>.  Like the <a href="https://docs.python.org/3/library/functions.html#map">Python <code>map</code></a>
+function that maps a function over one or more lists, JAX's version maps a function over one or
+more things with the same PyTree structure.</p>
+
+<p>So, because <code>layers</code> and <code>grads</code> have the same
+structure, our <code>step</code> function can just use it to apply simple gradient descent
+like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">grads</span><span class="p">,</span> <span class="n">learning_rate</span><span class="p">):</span>
+    <span class="n">layers</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">p</span><span class="p">,</span> <span class="n">g</span><span class="p">:</span> <span class="n">p</span> <span class="o">-</span> <span class="n">g</span> <span class="o">*</span> <span class="n">learning_rate</span><span class="p">,</span>
+        <span class="n">layers</span><span class="p">,</span>
+        <span class="n">grads</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">layers</span>
+</code></pre>
+</div>
+
+<p>Very clean :-)</p>
+
+<p>That's it!  A full JAX implementation of our toy example, and when we run it:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/toy-pytorch-to-jax<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pure_jax_xor_no_jit.py
+An<span class="w"> </span>NVIDIA<span class="w"> </span>GPU<span class="w"> </span>may<span class="w"> </span>be<span class="w"> </span>present<span class="w"> </span>on<span class="w"> </span>this<span class="w"> </span>machine,<span class="w"> </span>but<span class="w"> </span>a<span class="w"> </span>CUDA-enabled<span class="w"> </span>jaxlib<span class="w"> </span>is<span class="w"> </span>not<span class="w"> </span>installed.<span class="w"> </span>Falling<span class="w"> </span>back<span class="w"> </span>to<span class="w"> </span>cpu.
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">0</span>:<span class="w"> </span><span class="m">0</span>.267455
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">1000</span>:<span class="w"> </span><span class="m">0</span>.247348
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">2000</span>:<span class="w"> </span><span class="m">0</span>.061305
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">3000</span>:<span class="w"> </span><span class="m">0</span>.008652
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">4000</span>:<span class="w"> </span><span class="m">0</span>.004108
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">5000</span>:<span class="w"> </span><span class="m">0</span>.002627
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">6000</span>:<span class="w"> </span><span class="m">0</span>.001912
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">7000</span>:<span class="w"> </span><span class="m">0</span>.001496
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">8000</span>:<span class="w"> </span><span class="m">0</span>.001224
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">9000</span>:<span class="w"> </span><span class="m">0</span>.001034
+Trained<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">104</span>.540s
+Loss<span class="w"> </span>at<span class="w"> </span>end:<span class="w"> </span><span class="m">0</span>.001034
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.03008602<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.97214633<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.96557194<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.02664344<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+</code></pre>
+</div>
+
+<p>...it works!  So, let's move on to...</p>
+
+<p>Hang on:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Trained in 104.540s</span>
+</code></pre>
+</div>
+
+<p>Yikes.  It was almost 30 times slower than the PyTorch version.  But then -- we did
+all of that work to port the code over to JAX, which is great because it has a JIT,
+and then we didn't use the JIT.  Whoops!</p>
+
+<p>Adding a few calls to <code>@jax.jit</code> helps.  If we add them to the <code>forward</code>, <code>step</code>
+and <code>calculate_loss</code> function then we get <a href="https://github.com/gpjt/toy-pytorch-to-jax/blob/main/pure_jax_xor_initial_jit.py">this code</a>,
+which is faster:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/toy-pytorch-to-jax<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pure_jax_xor_initial_jit.py
+An<span class="w"> </span>NVIDIA<span class="w"> </span>GPU<span class="w"> </span>may<span class="w"> </span>be<span class="w"> </span>present<span class="w"> </span>on<span class="w"> </span>this<span class="w"> </span>machine,<span class="w"> </span>but<span class="w"> </span>a<span class="w"> </span>CUDA-enabled<span class="w"> </span>jaxlib<span class="w"> </span>is<span class="w"> </span>not<span class="w"> </span>installed.<span class="w"> </span>Falling<span class="w"> </span>back<span class="w"> </span>to<span class="w"> </span>cpu.
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">0</span>:<span class="w"> </span><span class="m">0</span>.267455
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">1000</span>:<span class="w"> </span><span class="m">0</span>.247348
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">2000</span>:<span class="w"> </span><span class="m">0</span>.061305
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">3000</span>:<span class="w"> </span><span class="m">0</span>.008652
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">4000</span>:<span class="w"> </span><span class="m">0</span>.004108
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">5000</span>:<span class="w"> </span><span class="m">0</span>.002627
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">6000</span>:<span class="w"> </span><span class="m">0</span>.001912
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">7000</span>:<span class="w"> </span><span class="m">0</span>.001496
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">8000</span>:<span class="w"> </span><span class="m">0</span>.001224
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">9000</span>:<span class="w"> </span><span class="m">0</span>.001034
+Trained<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">27</span>.663s
+Loss<span class="w"> </span>at<span class="w"> </span>end:<span class="w"> </span><span class="m">0</span>.001034
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.03008603<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.97214633<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.96557194<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.02664347<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+</code></pre>
+</div>
+
+<p>...but it's still almost eight times slower than the PyTorch code.</p>
+
+<p>How can we make it faster?  Well, perhaps we can do more if we put more of the
+loop into the JITted stuff.  Right now,
+the core of our training loop looks like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+            <span class="n">loss</span><span class="p">,</span> <span class="n">grads</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">value_and_grad</span><span class="p">(</span><span class="n">calculate_loss</span><span class="p">)(</span><span class="n">layers</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
+            <span class="n">losses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">loss</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+
+            <span class="n">layers</span> <span class="o">=</span> <span class="n">step</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">grads</span><span class="p">,</span> <span class="n">learning_rate</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p><code>calculate_loss</code> and <code>step</code> are JITted.  But what happens if we try to JIT a larger
+step?  We can move the forward pass and the step into a JITted function on their own:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">train_step</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">learning_rate</span><span class="p">):</span>
+    <span class="n">loss</span><span class="p">,</span> <span class="n">grads</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">value_and_grad</span><span class="p">(</span><span class="n">calculate_loss</span><span class="p">)(</span><span class="n">layers</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+    <span class="n">layers</span> <span class="o">=</span> <span class="n">step</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">grads</span><span class="p">,</span> <span class="n">learning_rate</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">layers</span><span class="p">,</span> <span class="n">loss</span>
+</code></pre>
+</div>
+
+<p>...and then call it in the loop like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+            <span class="n">layers</span><span class="p">,</span> <span class="n">loss</span> <span class="o">=</span> <span class="n">train_step</span><span class="p">(</span><span class="n">layers</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">y</span><span class="p">),</span> <span class="n">learning_rate</span><span class="p">)</span>
+            <span class="n">losses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">loss</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+</code></pre>
+</div>
+
+<p>With that, all of the JAX code apart from input and target wrangling is moved into a JITted function.
+We get <a href="https://github.com/gpjt/toy-pytorch-to-jax/blob/main/pure_jax_xor_final_jit.py">this code</a>, and running it gives us this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/toy-pytorch-to-jax<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pure_jax_xor_final_jit.py
+An<span class="w"> </span>NVIDIA<span class="w"> </span>GPU<span class="w"> </span>may<span class="w"> </span>be<span class="w"> </span>present<span class="w"> </span>on<span class="w"> </span>this<span class="w"> </span>machine,<span class="w"> </span>but<span class="w"> </span>a<span class="w"> </span>CUDA-enabled<span class="w"> </span>jaxlib<span class="w"> </span>is<span class="w"> </span>not<span class="w"> </span>installed.<span class="w"> </span>Falling<span class="w"> </span>back<span class="w"> </span>to<span class="w"> </span>cpu.
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">0</span>:<span class="w"> </span><span class="m">0</span>.267455
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">1000</span>:<span class="w"> </span><span class="m">0</span>.247348
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">2000</span>:<span class="w"> </span><span class="m">0</span>.061305
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">3000</span>:<span class="w"> </span><span class="m">0</span>.008652
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">4000</span>:<span class="w"> </span><span class="m">0</span>.004108
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">5000</span>:<span class="w"> </span><span class="m">0</span>.002627
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">6000</span>:<span class="w"> </span><span class="m">0</span>.001912
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">7000</span>:<span class="w"> </span><span class="m">0</span>.001496
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">8000</span>:<span class="w"> </span><span class="m">0</span>.001224
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">9000</span>:<span class="w"> </span><span class="m">0</span>.001034
+Trained<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">2</span>.432s
+Loss<span class="w"> </span>at<span class="w"> </span>end:<span class="w"> </span><span class="m">0</span>.001034
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.03008603<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.97214633<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.96557194<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>Array<span class="o">([</span><span class="m">0</span>.02664347<span class="o">]</span>,<span class="w"> </span><span class="nv">dtype</span><span class="o">=</span>float32<span class="o">)</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+</code></pre>
+</div>
+
+<p>Woohoo!  Almost 45% faster than the PyTorch version :-)</p>
+
+<p>So: porting to JAX alone gives us nice maths-y code, but we need to JIT it properly
+to get performance that matches PyTorch.  (The fact that it's faster than PyTorch in this
+case is not something
+that I think you could rely on -- this is, after all, a toy example.)</p>
+
+<p>It's also an interesting indicator that you actually need to think about
+what to JIT.  My initial thought, "just whack an <code>@jit</code> on the inner stuff", was
+not enough.  We needed to do more than that.  I've just had an interesting chat
+with Claude Opus 4.8 about that, though, and will probably post more about it later.
+For now, I think a useful rule-of-thumb is to wrap stuff in <code>@jit</code> at as high a level
+as you reasonably can, to maximise coverage.</p>
+
+<p>So, this completes the happy part of this post -- I've shown what it can do, how
+nicely it maps to the maths, and how it's (relatively) easy to make it fast.  What
+are the downsides?</p>
+
+<h3 id="why-jax-is-doomed">Why JAX is doomed</h3>
+
+<p>Another deliberately overly-strident heading ;-)</p>
+
+<p>I've been programming for more than 40 years, and working professionally in the tech
+industry for more than 30.  I'd like to feel that this makes me a better engineer than
+I was when I was first starting out, but I can confidently say that it has made me a
+much more cynical one.</p>
+
+<p>Over that period, I've come to categorise new APIs, languages, and tools into three
+approximate groups: godawful hacks, solid but not overly inspiring engineering,
+and things of beauty.  They're loose categories, and most things are somewhere between one
+and another.  But I think they hold reasonably well.</p>
+
+<p>My cynicism and experience tells me that:</p>
+
+<ul>
+<li>Horrible hacks can inexplicably become popular, but
+normally die off when people get tired of swearing at them.  (Though sometimes
+a large installed base means that they linger.)</li>
+<li>Things of beauty get people excited, and often pull in the best engineers.  But eventually,
+they drop by the wayside.  Perhaps there's some hidden flaw that no-one noticed at the outset,
+or perhaps the mental model you need to build in order to use them effectively
+is too complicated for them to get to critical mass.</li>
+<li>Solid, boring engineering wins in the long term.</li>
+</ul>
+
+<p>When we were building our programmable spreadsheet, <a href="/resolver-one">Resolver One</a>,
+some of the team pointed out that a functional language -- specifically,
+<a href="https://www.haskell.org/">Haskell</a> -- would be a better fit than Python.  It was
+a tough decision to stick with Python, and I'm still not 100% sure it was the right one.</p>
+
+<p>But I do remember having sales meetings with quants at various financial firms about it,
+and in those meetings, some of the potential customers also suggested a Haskell port.
+I'm not saying that there's a perfect correlation between where we heard that,
+and the later notes in our sales status spreadsheet saying
+<a href="/2008/11/do-one-thing-and-do-it-well">"client being acquired by a non-bankrupt competitor, all expenditure on hold"</a>
+during the 2008 financial crisis.  But I'm not <em>not</em> saying that either.</p>
+
+<p>If you've read this far, you can probably tell that I see PyTorch as solid engineering,
+and JAX as closer to a thing of beauty.</p>
+
+<p>Maybe it's just the cynicism of age, but let me try to articulate the things I worry
+might put JAX into the "beautiful but doomed" side of the "beautiful" category.</p>
+
+<p>Firstly, I'm not convinced by the way that JAX, with its JIT, requires you to try
+to write Python as if it were a functional language.  It's easy enough to see that
+this isn't functional:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">addY</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+</code></pre>
+</div>
+
+<p>...but harder with this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Even worse, the way that tracing works means that you have even more constraints
+than "just" being functional would require -- remember this example from earlier?</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">x</span> <span class="o">**</span> <span class="mi">2</span>
+    <span class="k">return</span> <span class="n">x</span>
+</code></pre>
+</div>
+
+<p>Python is not functional, and is deliberately so.  Trying to make it so is always going
+to lead to weird bugs (for example, how the value of the global <code>y</code> on the first run
+would be baked into that <code>addY</code> function) and hard-to-understand error messages (you
+really need to be clued-up to work out what <code>Attempted boolean conversion of traced array with shape bool[]</code>
+means).</p>
+
+<p>The <code>jax.lax</code> package -- for example, the <code>cond</code> function we used to
+work around the fact that JAX could not "see" the Python <code>if</code> way back in this post --
+feels like a bit of an ugly workaround.  Python has control flow functions, but they
+don't work with the JIT's tracing, so we have to re-implement them in JAX.  Hmmm.</p>
+
+<p>Now, I've written extensively above about how JAX's restrictions, however confusing, enable a lot
+of the amazing stuff that wouldn't be possible in normal PyTorch.  What if there were
+some way to write PyTorch code and compile it directly to something that can execute
+on the hardware?</p>
+
+<p>It turns out that as of 2023, there is: <a href="https://docs.pytorch.org/tutorials/intermediate/torch_compile_tutorial.html"><code>torch.compile</code></a>.
+From what I understand, you're meant to be able to just attach it to your code and
+it gets JITted.  But unlike JAX, you don't need to restrict the code you write.  I've
+not investigated in much depth (after all, this post is already absurdly long and
+has taken more than a month on and off to put together), but it looks like it handles
+stuff that can't be compiled by using a concept of a "graph break" -- that is, it happily
+JITs what it can, then if it hits something that it can't JIT, it will cache the
+"work so far" as one compiled unit, run the Python code for the unJITable stuff, then
+(when it can) drop back into JIT mode.</p>
+
+<p>The best of both worlds?  I don't know, and would need to spend much more time investigating
+in order to learn.  But I can say that for my minimal-effort
+<a href="https://github.com/gpjt/toy-pytorch-to-jax/blob/main/pytorch_xor_with_compile.py">port of my toy XOR code</a>,
+following the structure of the JITted JAX version, it really did not help:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@perry:~/Dev/toy-pytorch-to-jax<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytorch_xor_with_compile.py
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">0</span>:<span class="w"> </span><span class="m">0</span>.279327
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">1000</span>:<span class="w"> </span><span class="m">0</span>.254715
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">2000</span>:<span class="w"> </span><span class="m">0</span>.254279
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">3000</span>:<span class="w"> </span><span class="m">0</span>.253985
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">4000</span>:<span class="w"> </span><span class="m">0</span>.253649
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">5000</span>:<span class="w"> </span><span class="m">0</span>.251566
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">6000</span>:<span class="w"> </span><span class="m">0</span>.189218
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">7000</span>:<span class="w"> </span><span class="m">0</span>.030091
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">8000</span>:<span class="w"> </span><span class="m">0</span>.006665
+Loss<span class="w"> </span>at<span class="w"> </span>epoch<span class="w"> </span><span class="m">9000</span>:<span class="w"> </span><span class="m">0</span>.003516
+Trained<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">6</span>.688s
+Loss<span class="w"> </span>at<span class="w"> </span>end:<span class="w"> </span><span class="m">0</span>.003516
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.0483<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">0</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.9567<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">0</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.9425<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">1</span><span class="o">]</span>
+<span class="nv">x</span><span class="o">=[</span><span class="m">1</span>.0,<span class="w"> </span><span class="m">1</span>.0<span class="o">]</span>:<span class="w"> </span><span class="nv">result</span><span class="o">=</span>tensor<span class="o">([</span><span class="m">0</span>.0434<span class="o">])</span>,<span class="w"> </span><span class="nv">y</span><span class="o">=[</span><span class="m">0</span><span class="o">]</span>
+</code></pre>
+</div>
+
+<p>For those who are keeping track, that's slower than the uncompiled version, which came
+in at about 3.5s.  And the
+issue doesn't seem to be an up-front cost of JITting that would be paid off if we ran
+for more epochs -- each individual "Loss at epoch XXX" print comes out slower.</p>
+
+<p>Again, for the sake of sanity I'm not going to dig into it further, especially given that
+this is a tiny toy model and probably about as far from the target use case of
+<code>torch.compile</code> as you can get.  But it's something
+well worth noting for the future.</p>
+
+<p>Stepping back: one other way of looking at this is that Python might just be the wrong language
+to try to build code that compiles to GPUs.  I'm learning JAX right now so that I
+can re-implement my existing <a href="/llm-from-scratch">LLM from scratch</a> project in something
+other than PyTorch, to make sure that I really understand it.  I
+<a href="https://x.com/gpjt/status/1985434030880293004">asked people on X/Twitter for votes or ideas</a>,
+and while JAX won, <a href="https://x.com/jeremyphoward/status/1985784350412304390">Jeremy Howard suggested Mojo</a>.</p>
+
+<p><a href="https://mojolang.org/">Mojo</a> is a Pythonic language that compiles directly to
+CPU or GPU code, so it explicitly only contains features that can be ported that way.
+Unfortunately, it's lower-level than I really wanted for this project (and, importantly, does not
+have built-in autograd support).</p>
+
+<p>But if it did -- if, for example, there was a library like JAX for it, perhaps it would
+be better than using Python as the foundation?  I've looked for something like that, but
+to no avail.  Some work-in-progress projects, but nothing ready for use.</p>
+
+<p>At the end of the day, I think further experience is essential if I'm going to come to a solid
+opinion on JAX.  Experience with other tools can only get you so far, and it's easy
+to fail by pattern-matching what you're looking at with things that you've seen before,
+especially when you're old and cynical.
+All I can say at this point is that JAX is making my "beautiful but doomed" spidey-sense
+tingle. <sup class="footnote-ref" id="fnref-8"><a href="#fn-8">8</a></sup></p>
+
+<h3 id="wrapping-up">Wrapping up</h3>
+
+<p>The title of this post is important -- it is my impressions on first looking into
+JAX, not the considered thoughts of someone who's spent months or years working with
+it.  I've only scratched the surface, and haven't even touched the larger JAX ecosystem,
+or indeed its powerful handling of memory sharding for multi-GPU or even multi-node
+setups (which may well be one of its biggest advantages).</p>
+
+<p>My next step is going to be to implement a GPT-2-style LLM in JAX, probably using
+Flax and Optax as helpers, and perhaps by the time I'm done with that I'll have changed
+my views.</p>
+
+<p>But at this point -- after working through the tutorials and porting some toy models
+to get at least an initial feel for it, I've come to the conclusion that I like it.
+The question is, do I like it like I liked Python when I first came to it -- "this thing
+is really neat and clean, even if it has flaws" or is it more like I liked Haskell -- "this is
+a stunning thing of beauty and is completely doomed in the real world"?</p>
+
+<p>Time will tell.  But in the meantime, if you've been working with JAX for some time
+and want to counter any of the points I made, if I've completely misunderstood
+anything, or if you have any corrections, then please let me know!  After all,
+explorers in areas new to them are prone to making mistakes from time to time...</p>
+
+<blockquote>
+  <p>The forest of Skund was indeed enchanted, which was nothing unusual on the
+  Disc, and was also the only forest in the whole universe to be called -- in the
+  local language -- Your Finger You Fool, which was the literal meaning of the word Skund.</p>
+  
+  <p>The reason for this is regrettably all too common. When the first explorers
+  from the warm lands around the Circle Sea travelled into the chilly hinterland
+  they filled in the blank spaces on their maps by grabbing the nearest native,
+  pointing at some distant landmark, speaking very clearly in a loud voice, and
+  writing down whatever the bemused man told them. Thus were immortalised in
+  generations of atlases such geographical oddities as Just A Mountain,
+  I Don't Know, What? and, of course, Your Finger You Fool.</p>
+  
+  <p>Rainclouds clustered around the bald heights of Mt. Oolskunrahod ('Who is this
+  Fool who does Not Know what a Mountain is') and the Luggage settled itself
+  more comfortably under a dripping tree, which tried unsuccessfully to strike up a conversation.</p>
+  
+  <p><a href="https://www.goodreads.com/quotes/886291-the-forest-of-skund-was-indeed-enchanted-which-was-nothing">Terry Pratchett, <em>The Light Fantastic</em></a></p>
+</blockquote>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>Specifically, prior to the introduction of <code>torch.compile</code> -- more about that
+later.&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-2">
+<p>That's something I find myself constantly forgetting; I'll talk about "the loss
+landscape" as if it's something our training loop is exploring.  And, of course,
+there is an overall loss landscape across all of the training data as a whole, but in
+any given iteration through the training loop, the loss is relative to the specific
+batch we're looking at.&#160;<a href="#fnref-2" class="footnoteBackLink" title="Jump back to footnote 2 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-3">
+<p>You can also pass in an <code>argnums</code> argument, zero by default, to tell it to do the derivative
+with respect to a different parameter or with respect to a sequence of parameter indexes.  If
+you give a sequence, it will return a tuple of gradients.  Additionally, there's a
+<code>value_and_grad</code> that returns a tuple of the value of <code>f</code> and the gradients,
+which is useful for tracking loss as you train -- we'll use that later on.&#160;<a href="#fnref-3" class="footnoteBackLink" title="Jump back to footnote 3 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-4">
+<p>You can also make classes "PyTree-compatible" by providing helper functions that
+map to and from that representation.&#160;<a href="#fnref-4" class="footnoteBackLink" title="Jump back to footnote 4 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-5">
+<p>A reminder if your memory of Python decorator syntax is rusty -- this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@a_decorator</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">some_function</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="o">...</span>
+</code></pre>
+</div>
+
+<p>...is just syntactic sugar for this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">some_function</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="o">...</span>
+
+<span class="n">some_function</span> <span class="o">=</span> <span class="n">a_decorator</span><span class="p">(</span><span class="n">some_function</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p><a href="#fnref-5" class="footnoteBackLink" title="Jump back to footnote 5 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-6">
+<p>It's a tad more complicated than that -- the metadata for array traces also
+contains the shape.  More about that later.&#160;<a href="#fnref-6" class="footnoteBackLink" title="Jump back to footnote 6 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-7">
+<p>For the pedantic: over ten runs of each, the numbers were pretty stable.&#160;<a href="#fnref-7" class="footnoteBackLink" title="Jump back to footnote 7 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-8">
+<p>In case you're thinking that JAX is backed by Google and guaranteed to thrive
+because of that, remember <a href="https://en.wikipedia.org/wiki/Ada_(programming_language)">Ada</a>.
+Backed by the US Department of Defense.  For its time, well-designed and elegant.
+It's still used, but it's hardly mainstream...
+I remember reading about it in <em>Byte</em> magazine back in 1988 or so, and had an
+"it's so beautiful" moment then too.  To be fair to me, I was 14.&#160;<a href="#fnref-8" class="footnoteBackLink" title="Jump back to footnote 8 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
