@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sharing the result of a single Windows Runtime IAsyncOperation among multiple coroutines, part 3 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Sharing the result of a single Windows Runtime IAsyncOperation among multiple coroutines, part 3</h1>
+        <div class="meta">The Old New Thing 2026-05-29T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260529-00/?p=112368">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-13498393f1428e14.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A variation where we try only once. The post Sharing the result of a single Windows Runtime IAsyncOperation among multiple coroutines, part 3 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, <a title="Sharing the result of a single Windows Runtime IAsyncOperation among multiple coroutines, part 2" href="https://devblogs.microsoft.com/oldnewthing/20260528-00/?p=112365"> we wrote a coroutine function that cached the result of another coroutine</a>, but it only cached successful calls. It didn&#8217;t cache failures, so if the inner coroutine fails, the outer one will simply try again the next time it is called. But what if we want to call the inner coroutine only once and cache the failure, too?</p>
+<p>We now have three states: Never tried, tried with success (and cache the success result), and tried with failure (and cache the failure). We can represent that as a variant with three types, using <code>std::<wbr />monostate</code> to represent the &#8220;never tried&#8221; state.¹</p>
+<pre>struct Widget : WidgetT&lt;Widget&gt;
+{
+    std::variant&lt;std::monostate, winrt::Thing, std::exception_ptr&gt; m_thing;
+    wil::unique_event m_busy{ wil::EventOptions::Signaled }; // auto-reset, initially signaled
+
+    IAsyncOperation&lt;winrt::Thing&gt; GetThingAsync()
+    {
+        auto lifetime = get_strong();
+
+        co_await winrt::resume_on_signal(m_busy.get());
+        auto not_busy = m_busy.SetEvent_scope_exit();
+
+        // If haven't tried, then this is our chance.
+        if (m_thing.holds_alternative&lt;std::monostate&gt;()) {
+            try {
+                m_thing = co_await GetThingWorkerAsync();
+            } catch (...) {
+                m_thing = std::current_exception();
+            }
+        }
+
+        // Return the cached result or cached failure.
+        if (auto thing = std::get_if&lt;winrt::Thing&gt;(&amp;m_thing)) {
+            co_return *thing;
+        } else {
+            std::rethrow_exception(std::get&lt;std::exception_ptr&gt;());
+        }
+    }
+};
+</pre>
+<p>After getting past our serialization, we check whether the <code>m_thing</code> holds a <code>std::<wbr />monostate</code>, meaning that we haven&#8217;t tried getting the thing yet. If so, then this is the first time through the function, so we will call <code>Get­Thing­Worker­Async</code> and save the answer in the <code>m_thing</code>. If the call fails, then we save the exception in the <code>m_thing</code>.</p>
+<p>Regardeless of whether this is the first or subsequent call, we know that by the time we get past the first <code>if</code>, the <code>m_thing</code> is definitely not a <code>std::<wbr />monostate</code>. If it has a <code>winrt::<wbr />Thing</code>, then we return that cached thing. Otherwise, it must be a <code>std::<wbr />exception_<wbr />ptr</code>, so we rethrow that exception.</p>
+<p>If we know that <code>Get­Thing­Worker­Async</code> never succeeds with <code>nullptr</code>, we can simplify the code by having separate variables (one for the non-null successful result and one for the exception pointer on failure), knowing that at most one of them will be non-null. And if both are null, then it means we haven&#8217;t attempted the call yet.</p>
+<pre>struct Widget : WidgetT&lt;Widget&gt;
+{
+    <span>winrt::Thing m_thing{ nullptr };</span>
+    <span>std::exception_ptr m_ex;        </span>
+    wil::unique_event m_busy{ wil::EventOptions::Signaled }; // auto-reset, initially signaled
+
+    IAsyncOperation&lt;winrt::Thing&gt; GetThingAsync()
+    {
+        auto lifetime = get_strong();
+
+        co_await winrt::resume_on_signal(m_busy.get());
+        auto not_busy = m_busy.SetEvent_scope_exit();
+
+        // If haven't tried, then this is our chance.
+        if (<span>!m_thing &amp;&amp; !m_ex</span>) {
+            try {
+                m_thing = co_await GetThingWorkerAsync();
+                <span>assert(m_thing);</span>
+            } catch (...) {
+                <span>m_ex</span> = std::current_exception();
+            }
+        }
+
+        <span>// Return the cached result or cached failure.</span>
+        <span>if (m_thing) {                                </span>
+        <span>    co_return m_thing;                        </span>
+        <span>} else {                                      </span>
+        <span>    std::rethrow_exception(m_ex);             </span>
+        <span>}                                             </span>
+    }
+};
+</pre>
+<p>¹ Bonus reading about <code>std::<wbr />monostate</code>: <a title="What's the point of std::monostate? You can't do anything with it!" href="https://devblogs.microsoft.com/oldnewthing/20240708-00/?p=109959"> What&#8217;s the point of <code>std::<wbr />monostate</code>? You can&#8217;t do anything with it</a>.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260529-00/?p=112368">Sharing the result of a single Windows Runtime IAsyncOperation among multiple coroutines, part 3</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
