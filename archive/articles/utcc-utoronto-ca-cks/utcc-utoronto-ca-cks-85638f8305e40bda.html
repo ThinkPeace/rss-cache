@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Our unusual system of &quot;web home directories&quot; for people | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Our unusual system of &quot;web home directories&quot; for people</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-05-30T23:50:13Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/OurWebHomeDirectories">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-85638f8305e40bda.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">One of the things we operate for the research side of the department is an old fashioned general purpose web server, where everyone has a home page area of their own in the traditional &#x27;/~&lt;login&gt;/&#x27; style ( cf ). This web server has been there for a very long time, and one of the decisions that was made very early on was that for security reasons, the web se…</div>
+        <div class="content">
+          <div class="wikitext"><p>One of the things <a href="https://support.cs.toronto.edu/">we</a> operate
+for the research side of the department is an old fashioned general
+purpose web server, where everyone has a home page area of their
+own in the traditional '/~&lt;login>/' style (<a href="https://www.cs.toronto.edu/~cks/">cf</a>). This web server has been there
+for a very long time, and one of the decisions that was made very
+early on was that for security reasons, the web server would not
+NFS mount people's regular home directories from <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/ZFSFileserverSetupIII">our fileservers</a>.</p>
+
+<p>The traditional Apache way to do '/~&lt;login>/' home pages is to have
+<a href="https://httpd.apache.org/docs/current/howto/public_html.html">some location under your home directory that's exposed as your
+web home page area</a>; the
+traditional name for this is '<code>public_html</code>'. One alternative is
+to relocate this to a separate directory tree, but this directory
+tree is flat, which makes it awkward to have different pools of
+disk space for different people (<a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/HowWeSellStorage">which is absolutely required for
+us</a>). Since we didn't want to use people's regular
+home directories for security reasons and we couldn't put everyone
+in one directory, we did the obvious hack: people have a different,
+special home directory on the web server. These home directories
+are in special 'webdir' filesystems on <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/ZFSFileserverSetupIII">our fileservers</a>, and
+these webdir filesystems are the only NFS filesystems that the web
+server NFS mounts.</p>
+
+<p>The result is that everyone actually has two home directories in
+two different filesystems (although those two filesystems will come
+from the same ZFS pool). They have their regular home directory
+filesystem, which is accessible on our login and compute servers
+but not the web server, and their 'webdir' home directory, which
+is accessible everywhere. To make this more convenient to people,
+we create a '<code>public_html</code>' symlink in people's regular home
+directories that points to the '<code>public_html</code>' in their webdir
+home directory.  If people have <a href="https://utcc.utoronto.ca/~cks/space/blog/web/UserRunWebservers">personally run web servers</a>, these and their support files also live
+in the 'webdir' home directory, for relatively obvious reasons.</p>
+
+<p>(<a href="https://utcc.utoronto.ca/~cks/space/blog/unix/SlashU">We have a special short name form of people's home directories</a>, so on the web server this short form points to
+their web home directory. The <code>public_html</code> symlink combined with
+this means that '/u/&lt;login>/public_html' always refers to your
+web home page directory tree no matter what machine you're on.)</p>
+
+<p>Because everyone's web home directory filesystem is in the same ZFS
+pool as their normal home directory filesystem, the web server still
+depends on all of <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/ZFSFileserverSetupIII">our ZFS fileservers</a>.
+Since our web server is <a href="https://utcc.utoronto.ca/~cks/space/blog/web/OurWebServer24Hours-2026">reasonably active</a> (<a href="https://mastodon.social/@cks/115851872715237648">also</a>, <a href="https://utcc.utoronto.ca/~cks/space/blog/web/HTTP2OurWebServerHowMuch-2025">also</a>), it tends to react very
+rapidly to any NFS fileserver hiccups.</p>
+
+<p>PS: The web home directory security decision predates me, so I don't
+know why it was made, but in my view it's a perfectly sensible
+decision.  In general you should probably assume that your web
+server can be coaxed into reading and disclosing any Unix file that
+it has filesystem level access to. If you don't like the implications
+of this, you need to arrange for it to have access to fewer files.
+A dedicated set of filesystems is one relatively straightforward
+way to do that.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
