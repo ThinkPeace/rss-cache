@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>I&#x27;m not sure we&#x27;d use AppArmor much even if we could | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>I&#x27;m not sure we&#x27;d use AppArmor much even if we could</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-06-01T02:47:52Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/AppArmorAndUsThoughts">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-bb3721ff7a5a4e61.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The news of the time interval is a string of local privilege escalation vulnerabilities in Linux (in part in the kernel). We very much need the security boundary of Unix logins , and some of these vulnerabilities are mitigated or blocked by various Linux kernel security modules (&#x27;LSMs&#x27;) ( cf ), so I&#x27;ve recently been thinking if we&#x27;d use AppArmor , the LSM t…</div>
+        <div class="content">
+          <div class="wikitext"><p>The news of the time interval is a string of local privilege
+escalation vulnerabilities in Linux (in part in the kernel). <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/WhyWeNeedUnixLoginSecurity">We
+very much need the security boundary of Unix logins</a>, and some of these
+vulnerabilities are mitigated or blocked by various <a href="https://en.wikipedia.org/wiki/Linux_Security_Modules">Linux kernel
+security modules ('LSMs')</a> (<a href="https://etbe.coker.com.au/2026/05/08/dirty-frag-on-debian-and-se-linux/">cf</a>),
+so I've recently been thinking if we'd use <a href="https://wiki.ubuntu.com/AppArmor">AppArmor</a>, the LSM that Ubuntu supports.</p>
+
+<p>(AppArmor didn't block as many of the vulnerabilities as a proper
+SELinux setup did, but <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/SELinuxNeedsDistroBuyin">SELinux needs distribution buyin</a> and that's not what Canonical provides.)</p>
+
+<p>We've traditionally disabled AppArmor because it's had issues in
+our environment of <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/SnapsVersusNFSHomedirs">NFS home directories in our own locations for
+them</a> (<a href="https://utcc.utoronto.ca/~cks/space/blog/linux/UbuntuAppArmorPersistence">also</a>).
+So let's assume that AppArmor magically works now for NFS home
+directories and other directories (or can easily be set with tuning
+knobs), and still provides meaningful security afterward. Setting
+up AppArmor for our environment will take some amount of work (<a href="https://utcc.utoronto.ca/~cks/space/blog/linux/ErrnoForLSMs">cf</a>), so the question is how much protection against
+local privilege escalation we get.</p>
+
+<p>Roughly speaking, <a href="https://support.cs.toronto.edu/">our</a> systems
+fall into two categories; systems that normal people can access and
+run programs on, and systems that are purely for services (including
+things such as IMAP mail). For services, in theory we (or the people
+writing AppArmor profiles) can work out what the services should
+be allowed to do and not do, and thus lock things down against local
+privilege escalations in kernel systems that the services shouldn't
+be touching anyway (and other vulnerabilities, such as information
+disclosure from reading files the service shouldn't be accessing).
+However, this protects against an unlikely set of chained issues,
+where there's both a vulnerability in a service itself and then an
+additional vulnerability in the kernel.</p>
+
+<p>(If these issues aren't unlikely, we have bigger problems.)</p>
+
+<p>That leaves the systems where normal people can run their own
+programs (<a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/WhyWeNeedUnixLoginSecurity">which are the ones where we really need the security
+boundary of logins</a>). On
+these systems we have to assume that an attacker can gain the ability
+to run relatively arbitrary programs, either by compromising an
+account outright or through, for example, a compromised package
+that people are using in the code they're writing for their research
+(or a compromised editor extension, or etc; there are lots of ways
+in). Since people are effectively running arbitrary code, we can't
+protect ourselves by having AppArmor restrict what specific programs
+can do the way we can on service-based machines. Instead, we have
+to find and inventory kernel features that people will never
+legitimately use, and then block them through AppArmor rules.</p>
+
+<p>(This is how a strict SELinux setup appears to protect against the
+recent vulnerabilities; <a href="https://etbe.coker.com.au/2026/05/24/debian-selinux-pintheft/">a normal login is simply not allowed to
+use, eg, RDS sockets</a>.)</p>
+
+<p>The Linux kernel has a lot of features and facilities, although
+some of them are blocked off because we don't allow user namespaces,
+and people doing <a href="https://www.cs.toronto.edu/">CS</a> research do a
+lot of things, some of them at least unusual. Could an AppArmor
+profile (or a set of them) be written so that people would be allowed
+access to what they use and not allowed access to things that they
+don't? Probably (although AppArmor is more focused on programs than
+on people, well, logins). Would we be able to find an out of the
+box set of AppArmor rules and so on that worked? Maybe, and this
+depends on exploits not being found in areas that people pretty
+much have to be given access to.</p>
+
+<p>If we had a reliable set of AppArmor or SELinux profiles, we might
+well use them because it would be easy enough. Without a reliable
+set of AppArmor profiles, I'm not sure we'd try to build some
+ourselves unless we were desperate. And if we were going to do the
+work, it appears that we might get more results for less effort
+through things like explicitly blocking all the loadable kernel
+modules for Linux socket types that we don't use.</p>
+
+<p>(Some people even block all kernel modules that their current
+configuration doesn't use. I'm not sure I'd go that far, but I
+suppose you can always un-block things like the netfilter modules
+if you turn out to want to add some nftables rules later.)</p>
+</div>
+<div> (<a href="https://utcc.utoronto.ca/~cks/space/blog/linux/AppArmorAndUsThoughts?showcomments#comments">One comment</a>.) </div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
