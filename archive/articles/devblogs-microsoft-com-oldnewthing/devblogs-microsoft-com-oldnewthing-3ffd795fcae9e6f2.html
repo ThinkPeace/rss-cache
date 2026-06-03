@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rotation revisited: Another unidirectional algorithm | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Rotation revisited: Another unidirectional algorithm</h1>
+        <div class="meta">The Old New Thing 2026-06-02T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260602-00/?p=112376">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-3ffd795fcae9e6f2.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Moving in a straight line, in a different way. The post Rotation revisited: Another unidirectional algorithm appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Some time ago, we looked at the problem of <a title="Swapping two blocks of memory that reside inside a larger block, in constant memory" href="https://devblogs.microsoft.com/oldnewthing/20260101-00/?p=111955"> swapping two blocks of memory that reside inside a larger block, in constant memory</a>, and along the way, we learned about <code>std::<wbr />rotate</code> which swaps two <i>adjacent</i> blocks of memory (not necessarily the same size).</p>
+<p>I noted in a postscript that <a href="https://github.com/llvm/llvm-project/blob/682c8e22e61f50ce2d9a0c42475a3aa6d578a1ad/libcxx/include/__algorithm/rotate.h"> clang&#8217;s libcxx</a> and <a href="https://github.com/gcc-mirror/gcc/blob/master/libstdc%2B%2B-v3/include/bits/stl_algo.h"> gcc&#8217;s libstdc++</a> contain specializations of <code>std::<wbr />rotate</code> for random-access iterators that view the operation as a permutation and decomposes the permutation into cycles.</p>
+<p>I was mistaken.</p>
+<p>The implementation in gcc&#8217;s libstdc++ has special cases for single-element rotations, but in the general case, it uses a different algorithm.</p>
+<p>Let&#8217;s call the blocks of memory to be exchanged A and B, where A is made up of elements A1, A2, A3, and so on; and block B has elements B1, B2, B3, and so on. Without loss of generality, suppose the A block is smaller. (If not, we can just mirror the algorithm.) And for concreteness let&#8217;s say that the elements are A1, A2, A3, B1, B2, B3, B4, B5.</p>
+<table title="See text above" border="0" cellspacing="0" cellpadding="1">
+<tbody>
+<tr>
+<td>A1</td>
+<td>A2</td>
+<td>A3</td>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+</tr>
+<tr>
+<td>↑</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>↑</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>↑</td>
+</tr>
+<tr>
+<td>first</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>mid</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>last</td>
+</tr>
+</tbody>
+</table>
+<p>Exchange elements at <code>first</code> and <code>mid</code>, then move both iterators forward. After the first step, we have this:</p>
+<table title="B1 A2 A3 A1 B2 B3 B4 B5, with first pointing at A2 and mid pionting at B2" border="0" cellspacing="0" cellpadding="1">
+<tbody>
+<tr>
+<td>B1</td>
+<td>A2</td>
+<td>A3</td>
+<td>A1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>↑</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>↑</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>↑</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>first</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>mid</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>last</td>
+</tr>
+</tbody>
+</table>
+<p>After three steps, we have moved all of the A&#8217;s out and replaced them with an equal number of B&#8217;s.</p>
+<table title="B1 B2 B3 A1 A2 A3 B4 B5, with first pointing at A1 and mid pointing at B4" border="0" cellspacing="0" cellpadding="1">
+<tbody>
+<tr>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>A1</td>
+<td>A2</td>
+<td>A3</td>
+<td>B4</td>
+<td>B5</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>↑</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>↑</td>
+<td>&nbsp;</td>
+<td>↑</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>first</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>mid</td>
+<td>&nbsp;</td>
+<td>last</td>
+</tr>
+</tbody>
+</table>
+<p>But don&#8217;t stop. Keep on going until <code>mid</code> reaches <code>last</code>.</p>
+<table title="B1 B2 B3 B4 B5 A3 A1 A2, with first pointing at A1 and mid pointing one past the final element" border="0" cellspacing="0" cellpadding="1">
+<tbody>
+<tr>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+<td>A3</td>
+<td>A1</td>
+<td>A2</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>↑</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>↑</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>first</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>mid<br />
+last</td>
+</tr>
+</tbody>
+</table>
+<p>All of the B&#8217;s have been swapped to their final positions, but the A&#8217;s are jumbled.</p>
+<p>But you can predict the exact nature of the jumbling. The A block is in two chunks. If we let <var>n</var> be the total number of elements |A| + |B| and <var>a</var> be the number of elements in A, then the first chunk has the final <var>n</var> % <var>a</var> elements, and the second chunk has the initial <var>a</var> − (<var>n</var> % <var>a</var>) elements.</p>
+<p>Therefore, we can recursively rotate the two pieces of the A block to finish the job. Move <code>mid</code> to <code>first</code> + (<var>n</var> % <var>a</var>) and restart the algorithm.</p>
+<p>This algorithm performs <var>n</var> − 1 swaps. You can calculate this inductively by observing that we perform |B| swaps, and then recursively rotate |A|. Or you can calculate this directly by observing that each swap moves one element to its final position, except that the final swap moves two elements to their final position.</p>
+<p>The locality of this algorithm fairly good. The <code>first</code> iterator moves steadily forward, and the <code>mid</code> iterator moves forward most of the time, with at most <var>O</var>(log (min(|A|, |B|)) backward resets.</p>
+<p>Next time, we&#8217;ll make a shocking discovery about this algorithm.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260602-00/?p=112376">Rotation revisited: Another unidirectional algorithm</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
