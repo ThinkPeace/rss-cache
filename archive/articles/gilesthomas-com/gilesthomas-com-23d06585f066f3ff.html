@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Using Safetensors with Flax | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Using Safetensors with Flax</h1>
+        <div class="meta">Giles&#x27; blog 2026-06-04T23:30:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/06/flax-and-safetensors">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-23d06585f066f3ff.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I&#x27;m porting my PyTorch LLM code to JAX , using Flax as the neural network layer. For various reasons I wanted to use Safetensors to store checkpoints of the model. It took a little while to get it working; here&#x27;s the trick I learned. If you look at the Safetensors docs, you&#x27;ll see that it doesn&#x27;t mention a JAX implementation -- indeed, searching for &quot;safete…</div>
+        <div class="content">
+          <p>I'm porting my <a href="/llm-from-scratch">PyTorch LLM code</a> to
+<a href="https://www.gilesthomas.com/2026/05/on-first-looking-into-jax">JAX</a>, using
+<a href="https://flax.readthedocs.io/en/stable/">Flax</a> as the neural network layer.
+For various reasons I wanted to use <a href="https://huggingface.co/docs/safetensors/index">Safetensors</a>
+to store checkpoints of the model.  It took a little while to get it working;
+here's the trick I learned.</p>
+<p>If you look at the Safetensors docs, you'll see that it doesn't mention a JAX implementation --
+indeed, searching for "safetensors jax" at the time I'm writing this gives you a link
+to <a href="https://github.com/alvarobartt/safejax">this GitHub repo by Alvaro Bartolome</a> -- which was last updated in
+2023.</p>
+
+<p>However, if you look more closely at the docs, they <em>do</em> have a link to the
+<a href="https://huggingface.co/docs/safetensors/api/flax">Flax API</a>.  I feel this is somewhat
+misnamed, as it is actually a JAX API.  There's no reference (again, as of the time of
+writing) to Flax in the source -- it's all just JAX code.  And in fact Bartolome's library
+uses it under the hood.</p>
+
+<p>There is one problem, though.  The API works with simple single-level dictionaries,
+with strings mapping directly to JAX arrays.  For example, the <code>save_file</code> function has this
+signature:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">save_file</span><span class="p">(</span>
+    <span class="n">tensors</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Array</span><span class="p">],</span>
+    <span class="n">filename</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">PathLike</span><span class="p">],</span>
+    <span class="n">metadata</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre>
+</div>
+
+<p>This can cause problems if you're not careful.  If you look at the
+<a href="https://flax.readthedocs.io/en/stable/guides/checkpointing.html">Flax documentation on checkpointing</a>,
+it suggests that you use <a href="https://orbax.readthedocs.io/en/latest/index.html">Orbax</a> <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>,
+which has its own API and file format, but then goes on to say:</p>
+
+<blockquote>
+  <p>When interacting with checkpoint libraries (like Orbax), you may prefer to work
+  with Python built-in container types. In this case, you can use the
+  <code>nnx.State.to_pure_dict</code> and <code>nnx.State.replace_by_pure_dict</code> API to convert an
+  <code>nnx.State</code> to and from pure nested dictionaries.</p>
+</blockquote>
+
+<p>I initially put two and two together -- that and the dictionary-based API
+for Safetensors -- and got five, and tried feeding one of those "pure" dicts into
+Safetensors.  I got a very confusing error:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">SafetensorError: dtype object is not covered</span>
+</code></pre>
+</div>
+
+<p>It's worth digging in to why that happens.</p>
+
+<p>The problem is that although Safetensors is expecting a dict of strings mapping to
+tensors, it doesn't check that that is what it actually gets.  And while the dictionaries
+from <code>nnx.State.to_pure_dict</code> are "pure", they are also nested (as the docs say!).  Even for the simple
+model I was working with, I got a structure like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="p">{</span>
+    <span class="s1">&#39;output_head&#39;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s1">&#39;kernel&#39;</span><span class="p">:</span> <span class="n">Array</span><span class="p">([</span><span class="o">...</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)</span>
+    <span class="p">},</span>
+    <span class="s1">&#39;token_embedding&#39;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s1">&#39;embedding&#39;</span><span class="p">:</span> <span class="n">Array</span><span class="p">([</span><span class="o">...</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre>
+</div>
+
+<p>So, we had strings mapping to dicts, and those dicts mapped from strings to the JAX arrays.
+More complex models would have had deeper dict structures.</p>
+
+<p>Now, internally inside Safetensors, the Flax/JAX API is a simple wrapper.  It
+iterates over the keys in the dictionary it's been provided with, and tries to convert
+their respective values into NumPy arrays.  It does that by passing them into
+NumPy's <code>asarray</code> function, which accepts things like lists, tuples, and NumPy arrays,
+and converts them into arrays.  JAX's own <code>Array</code> class exposes an interface that it
+recognises, so they're converted without trouble.</p>
+
+<p>Once it's done that, it passes the result
+to a lower-level Rust implementation that actually converts everything to Safetensors
+format.</p>
+
+<p>But because Safetensors didn't check types, in my case it was iterating over the top level of the
+dict, trying to convert the values to NumPy arrays, and got something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="p">{</span>
+    <span class="s1">&#39;output_head&#39;</span><span class="p">:</span> <span class="n">numpy</span><span class="o">.</span><span class="n">array</span><span class="p">({</span><span class="s1">&#39;kernel&#39;</span><span class="p">:</span> <span class="n">Array</span><span class="p">([</span><span class="o">...</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)},</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">object</span><span class="p">),</span>
+    <span class="s1">&#39;token_embedding&#39;</span><span class="p">:</span> <span class="n">numpy</span><span class="o">.</span><span class="n">array</span><span class="p">({</span><span class="s1">&#39;embedding&#39;</span><span class="p">:</span> <span class="n">Array</span><span class="p">([</span><span class="o">...</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)},</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">object</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre>
+</div>
+
+<p>That is -- because it assumed that the values in the top-level dict were JAX <code>Array</code>s,
+it blindly tried to convert them to NumPy arrays.  But they were dicts (that
+happened to map from strings to arrays) -- and if you ask <code>asarray</code> to create an array based on
+a random object, it happily does so and wraps that object in a NumPy array, with a <code>dtype</code>
+of <code>object</code>.</p>
+
+<p>When that is then fed into the lower-level Rust code that is trying to write the
+file, it encounters NumPy arrays that have a <code>dtype</code> it can't handle, <code>object</code> --
+hence that error:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">SafetensorError: dtype object is not covered</span>
+</code></pre>
+</div>
+
+<p>It all makes sense when you read through the code, but I was a bit perplexed for a while!</p>
+
+<p>I think all this might be the reason why Bartolome created his GitHub
+repo.  In the README, he says that:</p>
+
+<blockquote>
+  <p>There are no plans from HuggingFace to extend safetensors to support anything
+  more than tensors e.g. <code>FrozenDicts</code>, see their response at
+  <a href="https://github.com/safetensors/safetensors/discussions/138">huggingface/safetensors/discussions/138</a>.</p>
+  
+  <p>So the motivation to create <code>safejax</code> is to easily provide a way to serialize
+  <code>FrozenDicts</code> using safetensors as the tensor storage format</p>
+</blockquote>
+
+<p>However, you don't need to use that library to serialise simple Flax models.</p>
+
+<p>Consider how PyTorch models get serialised to Safetensors; my LLMs have keys with names
+like <code>out_head.weight</code>, <code>pos_emb.weight</code>, and <code>trf_blocks.0.att.out_proj.weight</code>.
+They're "flat" dictionaries mapping strings to PyTorch Tensors, similar to what Safetensors
+wants for these Flax ones, but they use dots to separate different levels, with integers
+for list items and strings for field names.</p>
+
+<p>Looking at the pure-dict structure I had for my model:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="p">{</span>
+    <span class="s1">&#39;output_head&#39;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s1">&#39;kernel&#39;</span><span class="p">:</span> <span class="n">Array</span><span class="p">([</span><span class="o">...</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)</span>
+    <span class="p">},</span>
+    <span class="s1">&#39;token_embedding&#39;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s1">&#39;embedding&#39;</span><span class="p">:</span> <span class="n">Array</span><span class="p">([</span><span class="o">...</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre>
+</div>
+
+<p>...you can see that you could walk the dictionary structure to generate keys like
+<code>output_head.kernel</code> and <code>token_embedding.embedding</code>.  That would be easy enough to code
+up.</p>
+
+<p>But -- as Adithya Dsilva <a href="https://github.com/google/flax/discussions/4900">points out on GitHub</a> -- you can get there even faster by using
+<a href="https://flax.readthedocs.io/en/stable/api_reference/flax.nnx/state.html#flax.nnx.to_flat_state"><code>nnx.to_flat_state</code></a>.
+That returns a (non-dict) structure like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">FlatState</span><span class="p">([</span>
+  <span class="p">((</span><span class="s1">&#39;output_head&#39;</span><span class="p">,</span> <span class="s1">&#39;kernel&#39;</span><span class="p">),</span> <span class="n">Param</span><span class="p">(</span> <span class="c1"># 786,432 (3.1 MB)</span>
+    <span class="n">value</span><span class="o">=</span><span class="n">Array</span><span class="p">([[</span> <span class="mf">2.3581974e-02</span><span class="p">,</span>  <span class="mf">3.0957451e-02</span><span class="p">,</span> <span class="o">-</span><span class="mf">3.5088759e-02</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span>
+            <span class="o">-</span><span class="mf">4.5880198e-02</span><span class="p">,</span>  <span class="mf">5.3717274e-02</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.6590331e-02</span><span class="p">],</span>
+           <span class="o">...</span><span class="p">,</span>
+           <span class="p">[</span><span class="o">-</span><span class="mf">9.6302675e-03</span><span class="p">,</span> <span class="o">-</span><span class="mf">3.3276502e-02</span><span class="p">,</span>  <span class="mf">5.7173111e-02</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span>
+            <span class="o">-</span><span class="mf">7.9063717e-03</span><span class="p">,</span>  <span class="mf">2.0532632e-02</span><span class="p">,</span>  <span class="mf">5.4753982e-02</span><span class="p">]],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)</span>
+  <span class="p">)),</span>
+  <span class="p">((</span><span class="s1">&#39;token_embedding&#39;</span><span class="p">,</span> <span class="s1">&#39;embedding&#39;</span><span class="p">),</span> <span class="n">Param</span><span class="p">(</span> <span class="c1"># 786,432 (3.1 MB)</span>
+    <span class="n">value</span><span class="o">=</span><span class="n">Array</span><span class="p">([[</span> <span class="mf">0.00273973</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.01754938</span><span class="p">,</span>  <span class="mf">0.04656043</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.04276522</span><span class="p">,</span>
+            <span class="o">-</span><span class="mf">0.03986642</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.00781331</span><span class="p">],</span>
+           <span class="o">...</span><span class="p">,</span>
+           <span class="p">[</span> <span class="mf">0.01421758</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.0219186</span> <span class="p">,</span> <span class="o">-</span><span class="mf">0.01701825</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.00793659</span><span class="p">,</span>
+             <span class="mf">0.00500103</span><span class="p">,</span>  <span class="mf">0.03839901</span><span class="p">]],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">float32</span><span class="p">)</span>
+  <span class="p">))</span>
+<span class="p">])</span>
+</code></pre>
+</div>
+
+<p>If you iterate over that <code>FlatState</code>, you get tuples where the first element is that
+tuple of strings, like <code>('output_head', 'kernel')</code>, and the second is a <code>Param</code> object wrapping
+the JAX <code>Array</code>.
+The tuples mirror the dot-separated string format in the PyTorch-style Safetensors files.</p>
+
+<p><code>Param</code> objects also implement an interface that <code>asarray</code> can understand,
+so you can quickly and easily convert the <code>FlatState</code> to a regular dict for Safetensors:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="kn">from</span><span class="w"> </span><span class="nn">safetensors.flax</span><span class="w"> </span><span class="kn">import</span> <span class="n">save_file</span>
+
+    <span class="o">...</span>
+
+    <span class="n">model_state</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">state</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+    <span class="n">flat_state</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">to_flat_state</span><span class="p">(</span><span class="n">model_state</span><span class="p">)</span>
+    <span class="n">simple_dict</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">tuple_key</span><span class="p">,</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">flat_state</span><span class="p">:</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="s2">&quot;.&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">tuple_key</span><span class="p">)</span>
+        <span class="n">simple_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">param</span>
+
+    <span class="n">save_file</span><span class="p">(</span><span class="n">simple_dict</span><span class="p">,</span> <span class="s2">&quot;model.safetensors&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>(You need to wrap <code>key</code> in a <code>str</code> because if you have a <code>nnx.Sequential</code> in your model, the
+item in the tuple will get an integer index rather than a string).</p>
+
+<p>You can go the other way pretty easily too; given a model, you can load the saved
+checkpoint into it like this (because <code>from_flat_state</code> accepts raw JAX <code>Array</code>s
+in place of explicit <code>Param</code>s):</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="kn">from</span><span class="w"> </span><span class="nn">safetensors.flax</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_file</span>
+
+    <span class="o">...</span>
+
+    <span class="n">simple_dict</span> <span class="o">=</span> <span class="n">load_file</span><span class="p">(</span><span class="s2">&quot;model.safetensors&quot;</span><span class="p">)</span>
+
+    <span class="n">dict_flat_state</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">array</span> <span class="ow">in</span> <span class="n">simple_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">elements</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+        <span class="n">list_key</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">element</span> <span class="ow">in</span> <span class="n">elements</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">list_key</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">element</span><span class="p">))</span>
+            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+                <span class="n">list_key</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">element</span><span class="p">)</span>
+        <span class="n">dict_flat_state</span><span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">list_key</span><span class="p">)]</span> <span class="o">=</span> <span class="n">array</span>
+
+    <span class="n">new_flat_state</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">from_flat_state</span><span class="p">(</span><span class="n">dict_flat_state</span><span class="p">)</span>
+    <span class="n">nnx</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">new_flat_state</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>A little more work than I'd ideally like, but given that it can be tucked away
+in general <code>save_checkpoint</code>/<code>load_checkpoint</code> functions, not too big a deal.</p>
+
+<p>Hope that's of use for other people coming across this problem!</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>I'm beginning to feel a bit swamped with all of these libraries with names
+ending in -ax.  It reminds me of
+<a href="https://asterix.fandom.com/wiki/List_of_Asterix_characters#Villagers_of_the_Indomitable_Village">the names of the characters in Asterix's village</a>...&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
