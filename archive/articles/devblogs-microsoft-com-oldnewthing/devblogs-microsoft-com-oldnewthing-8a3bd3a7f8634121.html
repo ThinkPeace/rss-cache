@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rotation revisited: A shocking discovery about gcc’s unidirectional rotation algorithm | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Rotation revisited: A shocking discovery about gcc’s unidirectional rotation algorithm</h1>
+        <div class="meta">The Old New Thing 2026-06-03T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260603-00/?p=112378">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-8a3bd3a7f8634121.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">We&#x27;ve seen this before. The post Rotation revisited: A shocking discovery about gcc’s unidirectional rotation algorithm appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, we looked at <a title="Rotation revisited: Another unidirectional algorithm" href="https://devblogs.microsoft.com/oldnewthing/20260602-00/?p=112376"> the rotation algorithm used by gcc libstdc++ for random-access iterators</a>, and I concluded by noting that we&#8217;re going to make a shocking discovery.</p>
+<p>As with all shocking discoveries, this one will <span>shock</span> <span>disappoint</span> you.</p>
+<p>The discovery is that the gcc libstdc++ algorithm is the same as <a title="How can you swap two non-adjacent blocks of memory using only forward iterators?" href="https://devblogs.microsoft.com/oldnewthing/20260105-00/?p=111962"> the forward-iterator algorithm</a>!</p>
+<p>Let&#8217;s run both algorithms on a problem where the two blocks are A1, A2, A3, B1, B2, B3, B4, B5. I&#8217;ll put the old forward iterator algorithm on top and the new gcc libstdc++ algorithm below.</p>
+<table title="A1, A2, A3, B1, B2, B3, B4, B5" border="0" cellspacing="0" cellpadding="1">
+<tbody>
+<tr>
+<td colspan="2" align="left">first</td>
+<td>&nbsp;</td>
+<td colspan="2" align="left">mid</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">last</td>
+</tr>
+<tr>
+<td align="left">↓</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↓</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↓</td>
+</tr>
+<tr>
+<td>A1</td>
+<td>A2</td>
+<td>A3</td>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+</tr>
+<tr>
+<td align="left">↑</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↑</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↑</td>
+</tr>
+<tr>
+<td colspan="2" align="left">first</td>
+<td>&nbsp;</td>
+<td colspan="2" align="left">mid</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">last</td>
+</tr>
+</tbody>
+</table>
+<p>We swap at <code>first</code> and <code>mid</code>, then advance both pointers. The two algorithms agree until <code>first</code> reaches the end of the original A block.</p>
+<table title="A1, A2, A3, B1, B2, B3, B4, B5" border="0" cellspacing="0" cellpadding="1">
+<tbody>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td colspan="2" align="left">first</td>
+<td>&nbsp;</td>
+<td>mid</td>
+<td>&nbsp;</td>
+<td>last</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↓</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↓</td>
+<td>&nbsp;</td>
+<td align="left">↓</td>
+</tr>
+<tr>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>A1</td>
+<td>A2</td>
+<td>A3</td>
+<td>B4</td>
+<td>B5</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↑</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↑</td>
+<td>&nbsp;</td>
+<td align="left">↑</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td colspan="2" align="left">first</td>
+<td>&nbsp;</td>
+<td>mid</td>
+<td>&nbsp;</td>
+<td>last</td>
+</tr>
+</tbody>
+</table>
+<p>The old algorithm recurses in order to exchange A1, A2, A3 with B4, B4. This happens by exchanging A1 with B4 and A2 with B5.</p>
+<p>The new algorithm just keeps swapping <code>first</code> with <code>mid</code>, which also exchanges A1 with B4 and A2 with B5.</p>
+<table title="A1, A2, A3, B1, B2, B3, B4, B5" border="0" cellspacing="0" cellpadding="1">
+<tbody>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td colspan="2" align="left" valign="bottom">first</td>
+<td>&nbsp;</td>
+<td>mid<br />
+last</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↓</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↓</td>
+</tr>
+<tr>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+<td>A3</td>
+<td>A1</td>
+<td>A2</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↑</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td align="left">↑</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td colspan="2" align="left" valign="baseline">first</td>
+<td>&nbsp;</td>
+<td>last<br />
+mid</td>
+</tr>
+</tbody>
+</table>
+<p>The old algorithm now recurses to swap the A3 block with the A1+A2 block. And that&#8217;s what the new algorithm does, too.</p>
+<p>So it&#8217;s the same algorithm, just with a different point of view. It&#8217;s another case of <a title="The geeky thrill of discovering that two things are really the same thing, just with different labels" href="https://devblogs.microsoft.com/oldnewthing/20140414-01/?p=1253"> the geeky thrill of discovering that two things are really the same thing, just with different labels</a>.</p>
+<p>Now, the two algorithms are not identical. The new algorithm is symmetric and performs its swaps from right to left if the larger block is on the right. The old algorithm always operates from left to right.</p>
+<p>But the similarity is striking.</p>
+<p>Next time, we&#8217;ll look at how clang performs rotation by decomposing into cycles.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260603-00/?p=112378">Rotation revisited: A shocking discovery about gcc&#8217;s unidirectional rotation algorithm</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
