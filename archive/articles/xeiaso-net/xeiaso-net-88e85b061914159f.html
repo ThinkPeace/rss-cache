@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IPv6 zones in URLs are a mistake | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>IPv6 zones in URLs are a mistake</h1>
+        <div class="meta">Xe Iaso&#x27;s blog 2026-06-05T00:00:00Z</div>
+        <div class="links">
+          <a href="https://xeiaso.net/notes/2026/ipv6-zones-go-url/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xeiaso-net/xeiaso-net-88e85b061914159f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Run away while you still can, it&#x27;s not too late for you to avoid the curse of knowledge.</div>
+        <div class="content">
+          <p>IPv6 is weird. One of the more strange parts of the standard is that every interface's link local addresses are in <code>fe80::whatever</code>. If you have a machine with two network interfaces, both of them will be in <code>fe80::</code>, so if you have a packet destined to <code>fe80::4</code>, how do you disambiguate it?</p>
+        <p>The answer is you use <a href="https://en.wikipedia.org/wiki/IPv6_address#Scoped_literal_IPv6_addresses_(with_zone_index)">IPv6 scopes/zones</a>. The exact format of what goes into a zone is OS dependent, but on Linux it's the interface name and on Windows it's the interface ID. This lets the kernel's routing table know how to handle an address range conflict.</p>
+        <p>On my tower, this would be represented like this:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">fe80::4%eth0
+        </span></code></pre>
+        <p>Where <code>eth0</code> is the name of my tower's ethernet device.</p>
+        <p>When you create a host:port bindhost, you normally separate the hostname and port with a colon. IPv6 uses colons to separate hex groups. In order to disambiguate what's the host and what's the port, you typically format the IPv6 address in square brackets, so <code>fe80::4</code> on port 80 would look like this:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">[fe80::4]:80
+        </span></code></pre>
+        <p>And with the right scope it looks like this:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">[fe80::4%eth0]:80
+        </span></code></pre>
+        <p>Now let's get URL encoding into the mix. From high orbit, you can imagine a URL's format as being something like this:</p>
+        <pre><code class="code-highlight"><span class="code-line">&lt;scheme>:[//][&lt;username>[:&lt;password>]@][&lt;hostname>][:&lt;port>][/&lt;path>][?&lt;query>][#&lt;fragment>]
+        </span></code></pre>
+        <p>An IPv6 zone would then be part of the hostname, just like with that <code>fe80::4</code> port 80 example from earlier. So you'd think the URL would be something like this:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">http://[fe80::4%eth0]:80
+        </span></code></pre>
+        <p>But if you try to parse this as a URL in Go, you get an error:</p>
+        <pre class="language-go"><code class="language-go code-highlight"><span class="code-line"><span class="token keyword">package</span> main
+        </span><span class="code-line">
+        </span><span class="code-line"><span class="token keyword">import</span> <span class="token string">&quot;net/url&quot;</span>
+        </span><span class="code-line">
+        </span><span class="code-line"><span class="token keyword">func</span> <span class="token function">main</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">	<span class="token keyword">if</span> <span class="token boolean">_</span><span class="token punctuation">,</span> err <span class="token operator">:=</span> url<span class="token punctuation">.</span><span class="token function">Parse</span><span class="token punctuation">(</span><span class="token string">&quot;http://[fe80::4%eth0]:80&quot;</span><span class="token punctuation">)</span><span class="token punctuation">;</span> err <span class="token operator">!=</span> <span class="token boolean">nil</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">		<span class="token function">panic</span><span class="token punctuation">(</span>err<span class="token punctuation">)</span>
+        </span><span class="code-line">	<span class="token punctuation">}</span>
+        </span><span class="code-line"><span class="token punctuation">}</span>
+        </span></code></pre>
+        <p>Yields:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">panic: parse &quot;http://[fe80::4%eth0]:80&quot;: invalid URL escape &quot;%et&quot;
+        </span></code></pre>
+        <p>This happens because URLs can't represent all Unicode values, so any values that don't fit into the grammar of a URL become <a href="https://en.wikipedia.org/wiki/Percent-encoding">percent-encoded</a>. This is why sometimes you'll see a <code>%20</code> in URLs in the wild; that's encoding the ascii space key, which is invalid in URLs.</p>
+        <p>In order to work around this, you need to percent-encode the percent sign in the IPv6 zone:</p>
+        <pre class="language-go"><code class="language-go code-highlight"><span class="code-line"><span class="token keyword">package</span> main
+        </span><span class="code-line">
+        </span><span class="code-line"><span class="token keyword">import</span> <span class="token punctuation">(</span>
+        </span><span class="code-line">	<span class="token string">&quot;fmt&quot;</span>
+        </span><span class="code-line">	<span class="token string">&quot;net/url&quot;</span>
+        </span><span class="code-line"><span class="token punctuation">)</span>
+        </span><span class="code-line">
+        </span><span class="code-line"><span class="token keyword">func</span> <span class="token function">main</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">	u<span class="token punctuation">,</span> err <span class="token operator">:=</span> url<span class="token punctuation">.</span><span class="token function">Parse</span><span class="token punctuation">(</span><span class="token string">&quot;http://[fe80::4%25eth0]:80&quot;</span><span class="token punctuation">)</span>
+        </span><span class="code-line">	<span class="token keyword">if</span> err <span class="token operator">!=</span> <span class="token boolean">nil</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">		<span class="token function">panic</span><span class="token punctuation">(</span>err<span class="token punctuation">)</span>
+        </span><span class="code-line">	<span class="token punctuation">}</span>
+        </span><span class="code-line">	fmt<span class="token punctuation">.</span><span class="token function">Println</span><span class="token punctuation">(</span>u<span class="token punctuation">.</span><span class="token function">Hostname</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+        </span><span class="code-line"><span class="token punctuation">}</span>
+        </span></code></pre>
+        <p>Yields:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">fe80::4%eth0
+        </span></code></pre>
+        <p>In theory, there is guidance for how to properly handle IPv6 zones in user interfaces in <a href="https://www.rfc-editor.org/rfc/rfc9844.txt">RFC 9884</a>, but there's no such guidance for URLs. Go also does not seem to follow this RFC in <a href="https://pkg.go.dev/">net/url</a>.</p>
+        <p>So in the meantime in order for Anubis to point to IPv6 zoned addresses, you need to encode the <code>%</code> with percent encoding. This is horrible, but it seems that this is an edge case that applies to other frameworks, programming languages, and libraries:</p>
+        <ul>
+        <li><a href="https://trac.nginx.org/nginx/ticket/623">https://trac.nginx.org/nginx/ticket/623</a></li>
+        <li><a href="https://github.com/psf/requests/issues/6808">https://github.com/psf/requests/issues/6808</a></li>
+        <li><a href="https://datatracker.ietf.org/doc/html/draft-schinazi-httpbis-link-local-uri-bcp-03">https://datatracker.ietf.org/doc/html/draft-schinazi-httpbis-link-local-uri-bcp-03</a> -- Browsers don't currently support IPv6 zones because it breaks the concept of an &quot;origin&quot; which is used for many subtle things, this RFC draft attempts to define an zone origin in IPv6 so that browsers have a leg to stand on</li>
+        </ul>
+        <p>Maybe some day in the future there will be a better option here. In the meantime my policy of not forking the Go standard library means that this somewhat terrible UX for an edge case is acceptable. I hate it, but what can you do?</p>
+        <p>TL;DR: computers were a mistake.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
