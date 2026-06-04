@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>gittuf - a signed log for git refs | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>gittuf - a signed log for git refs</h1>
+        <div class="meta">Andrew Nesbitt 2026-06-04T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/06/04/gittuf-a-signed-log-for-git-refs.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-ee92b863d53ffdc8.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Branch protection is a row in someone else&#x27;s database</div>
+        <div class="content">
+          <p>Commit signatures are part of git. Branch protection isn’t. It’s a row in a database run by the forge, checked by the forge’s API before accepting a push. Most of the interesting source-repository attacks have landed in the gap between the two.</p>
+
+<h3 id="what-the-forge-enforces">What the forge enforces</h3>
+
+<p>Branch protection, required reviews, <a href="https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners">CODEOWNERS</a>, merge queues, status checks, required signatures: every one is administered by the forge, and none follow the repository when you clone it. A server presenting the repository can serve whatever ref pointers it likes. The rules can also be changed without any record in git. A flipped toggle in the settings page disables required reviews for the time it takes to push a commit, and re-enables it after. The only record sits in an audit log run by the same forge.</p>
+
+<p>In March 2021 someone pushed two commits onto the <a href="https://news-web.php.net/php.internals/113838">self-hosted PHP git server</a>, into php-src, falsely attributed to Rasmus Lerdorf and Nikita Popov. The post-mortem points at the server itself, not at either developer’s account. The project’s response was to stop running their own git server and move canonical hosting to GitHub. Commit signing wouldn’t have stopped this on its own: the commits weren’t signed, and nothing would have forced a check on them if they had been.</p>
+
+<p>In <a href="https://wiki.gentoo.org/wiki/Project:Infrastructure/Incident_Reports/2018-06-28_Github">June 2018 the Gentoo GitHub organisation was taken over</a> after an administrator reused a password that had leaked elsewhere. The attacker removed the legitimate developers, added dummy admin accounts, and pushed commits to gentoo/gentoo, gentoo/musl, and gentoo/systemd containing <code class="language-plaintext highlighter-rouge">rm -rf</code> in ebuilds and obfuscated deletes in the systemd configure script.</p>
+
+<p>Malicious refs sat at the tip of master for eight to ten hours depending on the repo, and recovery involved getting GitHub support to freeze the organisation before force-pushing clean history over the top. Branch protection was enforced by the same forge admin role the attacker had just taken over.</p>
+
+<p>In March 2025 a leaked PAT on the <a href="https://www.stepsecurity.io/blog/harden-runner-detection-tj-actions-changed-files-action-is-compromised">tj-actions/changed-files</a> maintainer’s bot account let an attacker create one malicious commit and retarget almost every existing tag to point at it. The action was in use by around twenty-three thousand repositories, and any that pulled it by tag during the compromise window got the new payload, which dumped CI secrets into the build log.</p>
+
+<p>Tag objects are immutable: their content can’t change without their hash changing. The ref pointing at a tag is a pointer like any other, and a force push can move it if the forge accepts the push.</p>
+
+<h3 id="refs-arent-signed">Refs aren’t signed</h3>
+
+<p>The <a href="https://www.usenix.org/conference/usenixsecurity16/technical-sessions/presentation/torres-arias">2016 USENIX paper</a> that came up in the <a href="/2026/05/24/signing-is-for-the-bad-days.html">previous post</a> described this pattern: a hostile server can roll a ref back to an earlier commit, or swap it for a different valid commit on another branch. The fetching client gets a tip that verifies cleanly, a real commit properly signed, just not the one the maintainers most recently advanced the branch to. Git does not sign refs, and the repository carries no record of which commit was the last legitimate tip.</p>
+
+<h3 id="the-reference-state-log">The Reference State Log</h3>
+
+<p><a href="https://gittuf.dev">gittuf</a>, written up in a <a href="https://www.ndss-symposium.org/ndss-paper/rethinking-trust-in-forge-based-git-security/">2025 NDSS paper</a> from the same research group, records every ref update as a signed entry in a hash chain stored in the repository, under <code class="language-plaintext highlighter-rouge">refs/gittuf/reference-state-log</code>. Each entry names a ref, the new commit hash, and the hash of the previous entry, signed by keys the policy allows to advance that ref.</p>
+
+<p>Verifying a clone means walking the RSL forward and checking each ref movement against the policy in force at the time. If the tip your clone holds for main is not the tip the RSL ends on, something between you and the maintainers served you a ref they didn’t sign for.</p>
+
+<p>Reviews and other approvals sit alongside the RSL as separate signed attestations, not folded into the ref-advancement entries themselves. Verification can then check both that an authorised key moved the ref and that the approvals the policy required are present.</p>
+
+<p>Verification runs outside the forge, against policy and keys the forge doesn’t hold. For the PHP and Gentoo shape, an attacker on a compromised forge can produce a valid commit, and can push an RSL entry pointing at it, but can’t produce a valid one. A verifier walking the log stops at the last entry that satisfies the policy. A tag move is a ref update like any other, signed by keys the policy permits to advance tags, so the tj-actions attack would leave the log either inconsistent or signed by a key the attacker doesn’t hold.</p>
+
+<h3 id="policy-delegations-and-thresholds">Policy, delegations, and thresholds</h3>
+
+<p>The policy lives in <code class="language-plaintext highlighter-rouge">refs/gittuf/policy</code>, in metadata derived from <a href="https://theupdateframework.io/">TUF</a>. A root policy lists trusted key holders and the threshold required to change the root. The root delegates to rule files of the form “two of these three keys can advance <code class="language-plaintext highlighter-rouge">refs/heads/main</code>”, or “this set governs anything under <code class="language-plaintext highlighter-rouge">src/crypto/</code>”, or “only release manager keys can move tags matching <code class="language-plaintext highlighter-rouge">v*</code>”.</p>
+
+<p>Delegations chain: a rule can hand off authority over a path to another rule file signed by a different set of keys. A child rule can only add requirements on its scope, not weaken what it inherited, so granting infra owners authority over <code class="language-plaintext highlighter-rouge">infra/</code> can’t drop the threshold the root set on <code class="language-plaintext highlighter-rouge">main</code>. The verifier walks the graph and checks whether each ref update satisfied a permitting rule.</p>
+
+<p>Threshold signing is the bit people have started asking GitHub for as a product feature. Required reviewers today is a setting in the forge, checked by its API before a push lands. gittuf’s M-of-N is the cryptographic version, answerable from the repository alone. The same pattern handles CODEOWNERS-style controls on sensitive paths: a delegation can scope a rule to <code class="language-plaintext highlighter-rouge">refs/heads/main</code> and paths under <code class="language-plaintext highlighter-rouge">infra/</code>, requiring two signatures from a named set.</p>
+
+<h3 id="where-it-sits-with-the-signing-stack">Where it sits with the signing stack</h3>
+
+<p>The artifact-signing stack from the previous post assumes the tree the artifact came from is the tree the maintainers approved. gittuf provides that check. Sigstore covers the journey from a tree state to an artifact in a registry, with attestations describing who built it from what source. An in-toto attestation can name the commit the build came from, but it doesn’t record whether that commit was a legitimate tip of the ref. The RSL adds that record.</p>
+
+<p>The chain a client checks then runs from the registry, through the build, through the RSL entry authorising the commit, out to keys held outside the forge.</p>
+
+<p>I’d like to see forges build gittuf in directly, so the workflows people rely on (editing a file in the web UI, clicking merge on a PR) produce signed RSL entries on the maintainer’s behalf. The closest thing today is the gittuf project’s own <a href="https://github.com/gittuf/github-app">GitHub App</a>, which records PR review approvals as attestations from outside the forge, but the merge itself still comes from a forge with no key in the delegation graph. A forge holding a key and using it to advance refs in response to authenticated user actions would become a participant in the chain, and most of the daily workflow could stay as it is.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
