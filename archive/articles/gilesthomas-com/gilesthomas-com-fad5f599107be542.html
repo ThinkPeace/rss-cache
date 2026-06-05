@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JAX backends and devices | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>JAX backends and devices</h1>
+        <div class="meta">Giles&#x27; blog 2026-06-05T19:30:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/06/jax-backends-and-devices">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-fad5f599107be542.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">There&#x27;s nothing like writing your own code with a framework to clarify how things fit together! Continuing with my port of my PyTorch LLM code to JAX , I wanted to load up a large dataset: the 10,248,871,837 16-bit unsigned integers in the train split of gpjt/fineweb-gpt2-tokens . That&#x27;s just over 19GiB of data. from safetensors.flax import load_file ... fu…</div>
+        <div class="content">
+          <p>There's nothing like writing your own code with a framework to clarify how things
+fit together!  Continuing with my port of my <a href="/llm-from-scratch">PyTorch LLM code</a> to
+<a href="https://docs.jax.dev/">JAX</a>, I wanted to load up a large dataset:
+the 10,248,871,837 16-bit unsigned integers in the <code>train</code> split of
+<a href="https://huggingface.co/datasets/gpjt/fineweb-gpt2-tokens"><code>gpjt/fineweb-gpt2-tokens</code></a>.
+That's just over 19GiB of data.</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">safetensors.flax</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_file</span>
+<span class="o">...</span>
+<span class="n">full_dataset</span> <span class="o">=</span> <span class="n">load_file</span><span class="p">(</span><span class="n">dataset_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;train.safetensors&quot;</span><span class="p">)[</span><span class="s2">&quot;tokens&quot;</span><span class="p">]</span>
+</code></pre>
+</div>
+
+<p>When I ran that, I got a CUDA out-of-memory error:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 19.09GiB.</span>
+</code></pre>
+</div>
+
+<p>That makes sense!  The allocation it was trying to do is exactly the size of
+the data I was trying to load.  I have an RTX 3090 with 24 GiB, but some is already used up by
+the OS, various apps, and a model that the code creates earlier on.</p>
+
+<p>But in PyTorch land, I was used to things being loaded into RAM by default, and only
+moved over to the GPU when I asked it to do that.  JAX was clearly loading to the GPU
+by default.  How could I stop it from doing that for this case?  The load into the GPU
+was happening inside Safetensors, in code I couldn't directly control.</p>
+
+<p>Understanding how to do it helped me understand a little bit more about JAX.</p>
+<p>JAX has a function that looks relevant: <code>jax.devices</code>.
+Without reading the docs, let's try running it.  In my virtualenv, with the <code>jax[cuda13]</code>
+package installed, I get this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">In</span> <span class="p">[</span><span class="mi">1</span><span class="p">]:</span> <span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">2</span><span class="p">]:</span> <span class="n">all_devices</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">devices</span><span class="p">()</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">3</span><span class="p">]:</span> <span class="n">all_devices</span>
+<span class="n">Out</span><span class="p">[</span><span class="mi">3</span><span class="p">]:</span> <span class="p">[</span><span class="n">CudaDevice</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="mi">0</span><span class="p">)]</span>
+</code></pre>
+</div>
+
+<p>That seems a bit weird!  I do indeed have a CUDA device, but I also have a CPU, obviously.
+Why isn't it showing up?</p>
+
+<p>Running the same code in another virtualenv, with just <code>jax</code> installed -- no CUDA -- gets this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">In</span> <span class="p">[</span><span class="mi">1</span><span class="p">]:</span> <span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">2</span><span class="p">]:</span> <span class="n">all_devices</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">devices</span><span class="p">()</span>
+<span class="n">An</span> <span class="n">NVIDIA</span> <span class="n">GPU</span> <span class="n">may</span> <span class="n">be</span> <span class="n">present</span> <span class="n">on</span> <span class="n">this</span> <span class="n">machine</span><span class="p">,</span> <span class="n">but</span> <span class="n">a</span> <span class="n">CUDA</span><span class="o">-</span><span class="n">enabled</span> <span class="n">jaxlib</span> <span class="ow">is</span> <span class="ow">not</span> <span class="n">installed</span><span class="o">.</span> <span class="n">Falling</span> <span class="n">back</span> <span class="n">to</span> <span class="n">cpu</span><span class="o">.</span>
+
+<span class="n">In</span> <span class="p">[</span><span class="mi">3</span><span class="p">]:</span> <span class="n">all_devices</span>
+<span class="n">Out</span><span class="p">[</span><span class="mi">3</span><span class="p">]:</span> <span class="p">[</span><span class="n">CpuDevice</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="mi">0</span><span class="p">)]</span>
+</code></pre>
+</div>
+
+<p>OK, so it <em>did</em> recognise it this time.  Feels like it might be time to RTFM.</p>
+
+<p>The <a href="https://docs.jax.dev/en/latest/_autosummary/jax.devices.html"><code>jax.devices</code> docs</a> explain things
+a bit:</p>
+
+<blockquote>
+  <p><code>jax.devices(</code><em><code>backend=None</code></em><code>)</code></p>
+  
+  <p>Returns a list of all devices for a given backend.</p>
+  
+  <p>...</p>
+  
+  <p>If <code>backend</code> is <code>None</code>, returns all the devices from the default backend. The
+  default backend is generally <code>'gpu'</code> or <code>'tpu'</code> if available, otherwise <code>'cpu'</code>.</p>
+</blockquote>
+
+<p>OK.  So JAX has multiple backends -- named that because they're classes of backend hardware that XLA
+(the compiler behind the JIT) targets.  There is a default one, which is essentially
+going to be the "best" one available given the hardware configuration and the parts of
+JAX that are installed.</p>
+
+<p>When I had the CUDA version installed, it made the <code>gpu</code> backend
+default, but when I didn't, it defaulted to <code>cpu</code> (and warned me).  And because it
+only shows the devices on the default backend, when that was <code>gpu</code>, I didn't see the CPU.</p>
+
+<p>However, you can specify which backend you want to use with that <code>backend</code> parameter, so let's go back to the
+virtualenv with CUDA:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">In</span> <span class="p">[</span><span class="mi">4</span><span class="p">]:</span> <span class="n">jax</span><span class="o">.</span><span class="n">devices</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span>
+<span class="n">Out</span><span class="p">[</span><span class="mi">4</span><span class="p">]:</span> <span class="p">[</span><span class="n">CpuDevice</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="mi">0</span><span class="p">)]</span>
+</code></pre>
+</div>
+
+<p>Great!  So is there some way to list which backends are available?
+<a href="https://github.com/jax-ml/jax/issues/6459">Apparently not</a> -- the recommended
+way appears to be to try loading devices for the different possibilities, and
+catch <code>RuntimeErrors</code> to see which ones aren't available.  Yuck.</p>
+
+<p>But maybe that's not such a big deal.  In PyTorch-land I was very much used to putting
+code like this near the start of my code:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">&quot;cuda&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...then moving models to the device:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">model</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and then moving data to the model's device as needed:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">device</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">())</span><span class="o">.</span><span class="n">device</span>
+<span class="o">...</span>
+<span class="n">inputs</span> <span class="o">=</span> <span class="n">inputs</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>What I actually wanted was essentially what JAX does -- have everything on the fastest
+device available at all times -- but with specific exceptions.  In particular, the one
+that started off this investigation: how would I put this huge array of training
+data on the CPU's RAM rather than the GPU's VRAM?</p>
+
+<p>I had a bit of a false start when I spotted that the <code>load_file</code> function in the
+<a href="https://huggingface.co/docs/safetensors/api/flax">Safetensors FLAX API</a> has a <code>backend</code>
+parameter, but that appears to be more to do with how it loads up the file -- a backend
+in a different sense.  And anyway, <em>backend</em> is not the right concept in JAX-land, as
+the backend means just something generic like <code>gpu</code> -- for what we're trying to do, we want
+to load it onto a specific <em>device</em>.</p>
+
+<p>After some digging around, I discovered that JAX has a concept of a <em>default device</em>,
+which is the one used when it doesn't have any
+indication of where to put something.  It makes sense that this will be on the default
+backend -- indeed, it looks like it's essentially "the first device in the list that
+<code>jax.devices</code> returns for the default backend".</p>
+
+<p>There is a <code>jax_default_device</code> config option which
+you can use to set it; you'd <a href="https://docs.jax.dev/en/latest/config_options.html">normally use</a> <code>jax.config.update</code> or an environment
+variable to change it.</p>
+
+<p>But what if you only want to change it temporarily?  I found <a href="https://docs.jax.dev/en/latest/_autosummary/jax.default_device.html">this documentation for
+<code>jax.default_device</code></a>.</p>
+
+<p>The docs are more than a little confusing:</p>
+
+<blockquote>
+  <p><code>jax.default_device =</code><em><code>&lt;jax._src.config.State object&gt;</code></em></p>
+  
+  <p>Context manager for <code>jax_default_device</code> config option.</p>
+  
+  <p>Configure the default device for JAX operations. Set to a Device object (e.g.
+  <code>jax.devices("cpu")[0]</code>) to use that Device as the default device for JAX
+  operations and jit’d function calls (there is no effect on multi-device
+  computations, e.g. pmapped function calls). Set to None to use the system
+  default device.</p>
+</blockquote>
+
+<p>That <code>=</code> near the start tripped me up, as I missed the words "Context manager" just
+below, and the odd <code>State</code> type, and tried this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">jax</span><span class="o">.</span><span class="n">default_device</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">devices</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">full_dataset</span> <span class="o">=</span> <span class="n">load_file</span><span class="p">(</span><span class="n">dataset_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;train.safetensors&quot;</span><span class="p">)[</span><span class="s2">&quot;tokens&quot;</span><span class="p">]</span>
+<span class="n">jax</span><span class="o">.</span><span class="n">default_device</span> <span class="o">=</span> <span class="kc">None</span>
+</code></pre>
+</div>
+
+<p>I still got the CUDA OOM, though, so I reread the docs, spotted the "context manager" bit,
+swore violently, and tried this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">with</span> <span class="n">jax</span><span class="o">.</span><span class="n">default_device</span><span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">devices</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]):</span>
+    <span class="n">full_dataset</span> <span class="o">=</span> <span class="n">load_file</span><span class="p">(</span><span class="n">dataset_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;train.safetensors&quot;</span><span class="p">)[</span><span class="s2">&quot;tokens&quot;</span><span class="p">]</span>
+</code></pre>
+</div>
+
+<p>...which works.  It looks like the equals sign in the docs is being used to mean something
+very different to what you'd normally use it for, and they decided not to actually
+document the signature of the context manager.  Heigh ho.  I guess
+<a href="https://www.reddit.com/r/ProgrammerHumor/comments/gv6yhy/documentation_hell/">documentation is hard</a>.</p>
+
+<p>Still, at least now I have a solution.  And as I said earlier, doc grumbles aside,
+the shape of the code might wind up being a little less fiddly than PyTorch.  The
+default location of things I create is the fastest hardware I have, which is what I want.
+And for the rare exceptions when I don't want to use that, there is a reasonably
+simple (now that I know it) way to say where I want things to go.</p>
+
+<p>I'll call that a win :-)   The only thing I'll need to remember is that when, in
+my training loop, I want to use subsets of that in-RAM tensor, I'll need to move them
+to the GPU.  <a href="https://docs.jax.dev/en/latest/_autosummary/jax.device_put.html"><code>jax.device_put</code></a> looks
+like the right tool for that.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
