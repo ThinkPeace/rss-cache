@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rotation revisited: Cycle decomposition in clang’s libcxx | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Rotation revisited: Cycle decomposition in clang’s libcxx</h1>
+        <div class="meta">The Old New Thing 2026-06-04T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260604-00/?p=112384">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-5b7e0d955e521f0a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Rotating in the minimum number of steps by performing cycle decomposition. The post Rotation revisited: Cycle decomposition in clang’s libcxx appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>We got distracted by the rotation algorithm in gcc&#8217;s libstdc++, <a title="Rotation revisited: Another unidirectional algorithm" href="https://devblogs.microsoft.com/oldnewthing/20260602-00/?p=112376"> but let&#8217;s get back to the cycle decomposition algorithm in </a><a href="https://github.com/llvm/llvm-project/blob/682c8e22e61f50ce2d9a0c42475a3aa6d578a1ad/libcxx/include/__algorithm/rotate.h"> clang&#8217;s libcxx</a><a title="Rotation revisited: Another unidirectional algorithm" href="https://devblogs.microsoft.com/oldnewthing/20260602-00/?p=112376">. </a></p>
+<p>The implementation in clang&#8217;s libcxx performs the minimum number of swaps, roughly <var>n</var>/2, where <var>n</var> is the total number of elements. It does so by viewing the rotation as a permutation and walking through each of the cycles.</p>
+<p>For notational convenience, let <var>a</var> be |A| and <var>n</var> be |A| + |B| (the total number of elements). The number of cycles is <a href="https://en.wikipedia.org/wiki/Greatest_common_divisor">gcd</a>(<var>a</var>, <var>b</var>), and the <var>k</var>&#8216;th cycle consists of the elements starting at <code>first</code> + <var>k</var>, and then stepping to the next element by moving forward another <var>a</var> elements, with wraparound, until you return back to the starting point.</p>
+<p>For example, if you have |A| = 4 and |B| = 6, then the cycle that starts at A1 takes 4 steps forward to continues to B1; takes another 4 steps forward to B5; then takes 2 steps forward, wraps around, and then two more steps forward, landing on A3; then takes 4 steps forward to B3; and then takes 4 steps forward and wraps around to A1, which is the starting point.</p>
+<table title="See text" border="0" cellspacing="0" cellpadding="1">
+<tbody>
+<tr>
+<td>A1</td>
+<td>A2</td>
+<td>A3</td>
+<td>A4</td>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+<td>B6</td>
+</tr>
+<tr>
+<td>↳</td>
+<td>→</td>
+<td>→</td>
+<td>→</td>
+<td>↴</td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+</tr>
+<tr>
+<td>A1</td>
+<td>A2</td>
+<td>A3</td>
+<td>A4</td>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+<td>B6</td>
+</tr>
+<tr>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td>↳</td>
+<td>→</td>
+<td>→</td>
+<td>→</td>
+<td>↴</td>
+<td><!-- --></td>
+</tr>
+<tr>
+<td>A1</td>
+<td>A2</td>
+<td>A3</td>
+<td>A4</td>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+<td>B6</td>
+</tr>
+<tr>
+<td>→</td>
+<td>→</td>
+<td>↴</td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td>↳</td>
+<td>→</td>
+</tr>
+<tr>
+<td>A1</td>
+<td>A2</td>
+<td>A3</td>
+<td>A4</td>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+<td>B6</td>
+</tr>
+<tr>
+<td><!-- --></td>
+<td><!-- --></td>
+<td>↳</td>
+<td>→</td>
+<td>→</td>
+<td>→</td>
+<td>↴</td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+</tr>
+<tr>
+<td>A1</td>
+<td>A2</td>
+<td>A3</td>
+<td>A4</td>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+<td>B6</td>
+</tr>
+<tr>
+<td>↴</td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td><!-- --></td>
+<td>↳</td>
+<td>→</td>
+<td>→</td>
+<td>→</td>
+</tr>
+<tr>
+<td>A1</td>
+<td>A2</td>
+<td>A3</td>
+<td>A4</td>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>B5</td>
+<td>B6</td>
+</tr>
+</tbody>
+</table>
+<p>There&#8217;s another cycle that starts at A2 and continues to B2, B6, A4, B4, then back to A2.</p>
+<p>Now, we&#8217;ve been counting swaps, but a single-element rotation is not done as a sequence of swaps, but rather by picking up the first element, sliding all the other elements over, and then putting the original first element at the end. I&#8217;ve been informally calling an assignment &#8220;half of a swap&#8221;, though a swap is really a constructor, two assignments, and a destructor. But let&#8217;s stick with the &#8220;half a swap&#8221; accounting fiction.</p>
+<p>The rotation algorithm goes like this:</p>
+<pre>auto a = std::distance(first, mid); // number of "A" elements
+auto n = std::distance(first, last); // total elements
+auto g = gcd(a, n); // number of cycles
+
+for (auto k = 0; k &lt; g; ++k) {
+    // Rotate the elements in the cycle starting at k
+    auto save = std::move(first[k]);
+    auto i, next = k;
+    while (i = next, next = (i + a) % n, next != k) {
+        first[i] = std::move(first[next]);
+    }
+    first[i] = std::move(save);
+}
+</pre>
+<p>For example, if rotating A1, A2, B1, B2, B3, B4, there are two cycles: A1, B1, B3; and A2, B2, B4. The elements within each cycle rotate one position.</p>
+<table title="See text" border="0" cellspacing="0" cellpadding="1">
+<tbody>
+<tr>
+<td>⮣</td>
+<td>→</td>
+<td>→</td>
+<td>→</td>
+<td>→</td>
+<td>→</td>
+<td>⮧</td>
+</tr>
+<tr>
+<td>⮤</td>
+<td><!-- --></td>
+<td>←</td>
+<td><!-- --></td>
+<td>←</td>
+<td><!-- --></td>
+<td>⮠</td>
+</tr>
+<tr>
+<td colspan="7"><!-- --></td>
+</tr>
+<tr>
+<td> </td>
+<td>A1</td>
+<td>A2</td>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+</tr>
+<tr>
+<td colspan="7"><!-- --></td>
+</tr>
+<tr>
+<td>⮦</td>
+<td><!-- --></td>
+<td>←</td>
+<td><!-- --></td>
+<td>←</td>
+<td><!-- --></td>
+<td>⮢</td>
+</tr>
+<tr>
+<td>⮡</td>
+<td>→</td>
+<td>→</td>
+<td>→</td>
+<td>→</td>
+<td>→</td>
+<td>⮥</td>
+</tr>
+</tbody>
+</table>
+<p>And when you&#8217;re done with all the cycles, you&#8217;ve rotated the entire A and B blocks.</p>
+<table title="See text" border="0" cellspacing="0" cellpadding="1">
+<tbody>
+<tr>
+<td>B1</td>
+<td>B2</td>
+<td>B3</td>
+<td>B4</td>
+<td>A1</td>
+<td>A2</td>
+</tr>
+</tbody>
+</table>
+<p>This performs <var>n</var>/2 swaps, which is the fewest swaps of all the algorithms we&#8217;ve looked at so far. However, it has terrible locality because the elements in the cycle are all spread out.</p>
+<p>Calculating the greated common divisor of two numbers can be done in <var>O</var>(log <var>n</var>) steps via Euclid&#8217;s algorithm.</p>
+<pre>int gcd(int a, int b)
+{
+    do {
+        auto r = a % b;
+        a = b;
+        b = r;
+    } while (r);
+    return a;
+}
+</pre>
+<p><a href="https://devblogs.microsoft.com/oldnewthing/20260101-00/?p=111955&amp;commentid=143690#comment-143690"> Commenter Brent thought that the cycle decomposition algorithm was obvious</a>. Of course, the trick is the step they called &#8220;Repeat&#8221;. How many times do you repeat?</p>
+<p>The clang libcxx algorithm calculates the number of repeats by taking the gcd. But there&#8217;s a trick so we don&#8217;t have to calculated it at all. We&#8217;ll look at that trick next time.</p>
+<p><b>Bonus chatter</b>: I think it&#8217;s interesting that of the three major implementations of the C++ standard library, each one uses a different rotation algorithm when given random-access iterators!</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260604-00/?p=112384">Rotation revisited: Cycle decomposition in clang&#8217;s libcxx</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
