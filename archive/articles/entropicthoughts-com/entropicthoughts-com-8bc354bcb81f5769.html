@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LLMs and almost good code | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>LLMs and almost good code</h1>
+        <div class="meta">Entropic Thoughts 2026-06-08T22:00:00Z</div>
+        <div class="links">
+          <a href="https://entropicthoughts.com/llms-and-almost-good-code">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/entropicthoughts-com/entropicthoughts-com-8bc354bcb81f5769.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">TL;DR: My new prior is that top-of-the-line LLMs working on easy tasks generate code that is maybe 10 % more complicated than necessary. I also think we accept this complexity too easily, because it comes from code that is right here , right now , solving an immediate problem. This may have consequences for maintenance in the long term. The background to th…</div>
+        <div class="content">
+          <html>
+  <body><h1>LLMs and almost good code</h1><p><graphic src="https://entropicthoughts.com/image/banner/llms-and-almost-good-code.jpg" alt="llms-and-almost-good-code.jpg"/>
+</p><p>tl;dr: My new prior is that top-of-the-line llms working on easy tasks generate code that is maybe 10 % more complicated than necessary. I also think we accept this complexity too easily, because it comes from code that is right here, right now, solving an immediate problem. This may have consequences for maintenance in the long term.</p><p>The background to this discovery was that I needed to do some crud plumbing in a work project. It was a simple change that mostly mirrored existing functionality. This is a perfect fit for llms, in my experience, so I used a frontier model to generate the code for it. The change ended up being a total of just over 200 lines, mostly additions.</p><p>The part of the generated code we’ll talk about is a 24-line function that converts an arbitrary (user-supplied) string to a safe http header value.1 Encoding it into a safe value is necessary to avoid confusing mistakes, but also to prevent http header injection attacks.</p><pre><pre>toHeaderValue :: Text -&gt; Text
+toHeaderValue raw =
+  let
+    attrChars = "!#$&amp;+-.^_`|~"
+    padHex t = if Text.length t &lt; 2 then "0" &lt;&gt; t else t
+    percentEncode c =
+      if (isAscii c &amp;&amp; isAlphaNum c) || elem c attrChars then
+        Text.singleton c
+      else
+        Text.concat
+          [ "%" &lt;&gt; padHex (Text.toUpper (Text.pack (showHex b "")))
+          | b &lt;- ByteString.unpack (encodeUtf8 (Text.singleton c))
+          ]
+    rfc5987Encode = Text.concatMap percentEncode
+    isPrintable c = c &gt;= ' ' &amp;&amp; c /= '\DEL'
+    replacePathSeparator c =
+      if c == '/' || c == '\\' then
+        '_'
+      else
+        c
+    cleaned =
+      Text.map replacePathSeparator (Text.filter isPrintable raw)
+  in
+    rfc5987Encode cleaned
+</pre></pre>
+<p>When looking at this function like this, it obviously seems a bit too complicated, but recall that this was just 24 lines in a 200-line change. I confirmed that the underlying idea was correct, and that the generated tests covered all the edge cases I would want to see covered. It’s not pretty code, but it is proven correct by tests.</p><p>More importantly, it is highly local. If anything about this code needs replacing, it can be replaced without touching anything else. Apprentice-level programmers worry equally about code quality everywhere; I’ve long wanted to write an article called “Don’t worry, it’s local” where I tell these programmers that bad code quality is fine, as long as it’s self-contained in a small location.2 The reason I haven’t written that article is that I’m waiting on a bunch of examples the article would need. But I keep forgetting to collect them, so the total number of examples I have collected so far are zero.</p><p>I accepted this code. I needed the implementation to work, and this code obviously worked. It was right there, right now. It would have been silly to not accept it! Accepting it was the easy choice, and certainly not a bad decision.</p><p>However, in a pleasant twist of fate, the ci pipeline for this project has a mandatory statement test coverage check3 I’m not a huge fan of statement coverage, but that’s another separate article I’ve put off writing for years., and that check failed for this code. See if you can spot where and why.</p><p>
+I’ll give you a hint: it has to do with the <pre>padHex</pre> function, which takes a
+hexadecimal value in the range <pre>0x0</pre>–<pre>0xff</pre> and zero-pads it if it is less than
+<pre>0x10</pre>.
+</p><p>
+The data passed into <pre>padHex</pre> has already gone through the <pre>isPrintable</pre> filter,
+which removes all bytes lower than <pre>0x20</pre>. Thus no value passed to <pre>padHex</pre> is
+ever below <pre>0x10</pre>, and it never ends up padding anything! It is always a no-op.
+The statement coverage check warns on the padding branch of <pre>padHex</pre>, because it
+is exercised by no test. It is in fact impossible to exercise it in a test.
+</p><p>This was annoying:</p><ul><li>On the one hand, we shouldn’t assume <pre>percentEncode</pre>is always called with characters greater than<pre>0x1f</pre>, even if that happens to be true at the moment. Such an assumption relies on spooky action at a distance, which – even if it is local to this function – we want to avoid.</li><li>On the other hand, the coverage report is right too: there is something awkward about this whole construction.</li></ul><p>So I stepped in and wrote my own implementation. The implementation that ended up shipping was closer to this:</p><pre><pre>toHeaderValue :: Text -&gt; Text
+toHeaderValue =
+  let
+    retainPrintable = Text.filter (\c -&gt; c &gt;= ' ' &amp;&amp; c /= '\DEL')
+    replacePathSeparators = Text.replace "/" "_" . Text.replace "\\" "_"
+    -- URL encoding is also legal RFC5987 encoding.
+    rfc5987Encode = decodeUtf8 . urlEncode True . encodeUtf8
+  in
+    rfc5987Encode . replacePathSeparators . retainPrintable
+</pre></pre>
+<p>
+This is 15 <a href="https://entropicthoughts.com/lines-of-code">lines of complexity</a> shorter. That’s around 8 % of the change.
+</p><p>The llm did not generate bad code.4 In some sense, its code is better. The rfc 5987 encoding is more lax than url encoding, so my implementation technically over-encodes. It just generated code that was 8 % more complex than it needed to be. That’s not a disaster today, and when there’s pressure to ship, it is easy to accept it because it is right there, right now, and it solves the problem. I accepted and was about to ship code that was 8 % too complex. It was only by chance I looked into it more deeply and realised the problems with it.</p><p>This experience leaves me with a bunch of questions I don’t have answers to.</p><ul><li>What about all the other changes that are also unnecessarily complex, but which I accept anyway?</li><li>What if this was an easy case, and when we sic an llm on a more complicated task, it generates code that is more than 8 % too complex, like 20 %, or 40 %, or even 3× more complex than it needs to be?</li><li>Will we put our foots down when we get code that is so unnecessarily complex? Or will we accept, because it’s not a disaster today, and it is right there, right now?</li><li>What happens in a year or two, when we continue shipping code that’s consistently more complex than it needs to be?</li></ul><p>On the one hand, this worries me. On the other hand, the obvious counter-argument is that code-writing robots improve fast enough that in two years’ time when this becomes a problem, they will know how to deal with it.</p><p>Maybe. I’m not convinced.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
