@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plugins case study: Pluggy | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Plugins case study: Pluggy</h1>
+        <div class="meta">Eli Bendersky&#x27;s website 2026-06-14T03:21:00Z</div>
+        <div class="links">
+          <a href="https://eli.thegreenplace.net/2026/plugins-case-study-pluggy/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/eli-thegreenplace-net/eli-thegreenplace-net-040e48eb3c90a4f8.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Recently I came upon Pluggy , a Python library for developing plugin systems. It was originally developed as part of the pytest project - known for its rich plugin ecosystem - and later extracted into a standalone library. You&#x27;re supposed to reach out for Pluggy if you want to add a plugin system …</div>
+        <div class="content">
+          <p>Recently I came upon <a class="reference external" href="https://pluggy.readthedocs.io/en/latest/">Pluggy</a>,
+a Python library for developing plugin systems. It was originally developed
+as part of the <tt class="docutils literal">pytest</tt> project - known for its rich plugin ecosystem - and
+later extracted into a standalone library. You're supposed to reach out for
+Pluggy if you want to add a plugin system to your tool or library and want
+to use something proven rather than rolling your own.</p>
+<p>In this post I will share some notes on how Pluggy works, and will
+then review how it aligns with the
+<a class="reference external" href="https://eli.thegreenplace.net/2012/08/07/fundamental-concepts-of-plugin-infrastructures">fundamental concepts of plugin infrastructures</a>.</p>
+<img alt="Pluggy plug logo" class="align-center" src="https://eli.thegreenplace.net/images/2026/pluggy-plug.png" />
+<div class="section" id="using-pluggy">
+<h2>Using Pluggy</h2>
+<p>Pluggy is built around the concept of <em>hooks</em>: functions that host
+applications or tools (from here on, just &quot;hosts&quot;) expose and plugins implement.
+A host exposes hooks by using
+a decorator returned from <tt class="docutils literal">pluggy.HookspecMarker</tt> and a plugin implements this
+hook using a decorator returned from <tt class="docutils literal">pluggy.HookimplMarker</tt>.</p>
+<p>Pluggy's <a class="reference external" href="https://pluggy.readthedocs.io/en/stable/">documentation</a> explains
+this fairly well; in this post, I'll show how to implement the <tt class="docutils literal">htmlize</tt> tool
+with some plugins, introduced in <a class="reference external" href="https://eli.thegreenplace.net/2012/08/07/fundamental-concepts-of-plugin-infrastructures">the original article in my plugin series</a>.</p>
+<p>As a reminder, <tt class="docutils literal">htmlize</tt> is a toy tool that takes markup notation similar to
+reStructuredText, and converts it to to HTML. It supports plugins to handle
+custom &quot;roles&quot; like:</p>
+<div class="highlight"><pre><span></span>some text :role:`customized text` and more text
+</pre></div>
+<p>As well as plugins that do arbitrary processing on the entire text.</p>
+<div class="section" id="defining-hooks">
+<h3>Defining hooks</h3>
+<p><a class="reference external" href="https://github.com/eliben/code-for-blog/tree/main/2026/plugin-pluggy/htmlize/htmlize">Out host</a> defines two hooks:</p>
+<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">pluggy</span>
+
+<span class="n">hookspec</span> <span class="o">=</span> <span class="n">pluggy</span><span class="o">.</span><span class="n">HookspecMarker</span><span class="p">(</span><span class="s2">&quot;htmlize&quot;</span><span class="p">)</span>
+
+<span class="nd">@hookspec</span><span class="p">(</span><span class="n">firstresult</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">htmlize_role_handler</span><span class="p">(</span><span class="n">role_name</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return a function accepting role contents.</span>
+
+<span class="sd">    The function will be called with a single argument - the role contents, and</span>
+<span class="sd">    should return what the role gets replaced with.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">pass</span>
+
+<span class="nd">@hookspec</span>
+<span class="k">def</span> <span class="nf">htmlize_contents</span><span class="p">(</span><span class="n">post</span><span class="p">,</span> <span class="n">db</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Return a function accepting full document contents.</span>
+
+<span class="sd">    The function will be called with a single argument - the document contents</span>
+<span class="sd">    (after paragraph splitting and role processing), and should return the</span>
+<span class="sd">    transformed contents.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">pass</span>
+</pre></div>
+<p>A hook is created by calling <tt class="docutils literal">HookspecMarker</tt> with the project's name. This
+project name has to match between the host and its plugins. Pluggy is permissive
+about what hooks accept as parameters and what they return; for maximal
+flexibility and to stay true to the original <tt class="docutils literal">htmlize</tt> example, our hooks
+return functions.</p>
+<p>To accompany this <tt class="docutils literal">HookspecMarker</tt>, the host also defines a <tt class="docutils literal">HookimplMarker</tt> with
+the same name:</p>
+<div class="highlight"><pre><span></span><span class="n">hookimpl</span> <span class="o">=</span> <span class="n">pluggy</span><span class="o">.</span><span class="n">HookimplMarker</span><span class="p">(</span><span class="s2">&quot;htmlize&quot;</span><span class="p">)</span>
+</pre></div>
+<p>This is used by plugins to attach to hooks when they're loaded.</p>
+</div>
+<div class="section" id="loading-plugins-in-the-host">
+<h3>Loading plugins in the host</h3>
+<p>The host's main function loads plugins at startup as follows:</p>
+<div class="highlight"><pre><span></span><span class="n">pm</span> <span class="o">=</span> <span class="n">pluggy</span><span class="o">.</span><span class="n">PluginManager</span><span class="p">(</span><span class="s2">&quot;htmlize&quot;</span><span class="p">)</span>
+<span class="n">pm</span><span class="o">.</span><span class="n">add_hookspecs</span><span class="p">(</span><span class="n">hookspecs</span><span class="p">)</span>
+<span class="n">pm</span><span class="o">.</span><span class="n">load_setuptools_entrypoints</span><span class="p">(</span><span class="s2">&quot;htmlize&quot;</span><span class="p">)</span>
+</pre></div>
+<p><tt class="docutils literal">hookspecs</tt> is our Python module containing the hooks shown above.
+<tt class="docutils literal">load_setuptools_entrypoints</tt> is Pluggy's helper for loading plugins that
+were <tt class="docutils literal">pip</tt>-installed into the same environment and registered as
+setuptools <a class="reference external" href="https://setuptools.pypa.io/en/latest/userguide/entry_point.html">entry points</a>.
+It's a way to signal - in one's <tt class="docutils literal">setup.py</tt> or <tt class="docutils literal">pyproject.toml</tt> file - some
+metadata that projects can review at runtime. In our project, the plugins
+register themselves with this section in the <tt class="docutils literal">pyproject.toml</tt> file:</p>
+<div class="highlight"><pre><span></span>[project.entry-points.htmlize]
+tt = &quot;tt&quot;
+</pre></div>
+<p>This says &quot;for entry point <tt class="docutils literal">htmlize</tt>, define a new entry named <tt class="docutils literal">tt</tt>&quot;.
+Pluggy's <tt class="docutils literal">load_setuptools_entrypoints</tt> then uses <a class="reference external" href="https://docs.python.org/3/library/importlib.metadata.html">importlib.metadata</a>
+to access this information.</p>
+<p>Note that Pluggy doesn't require using this mechanism. Hosts can implement any
+plugin discovery method they want, and add plugins directly to their
+<tt class="docutils literal">PluginManager</tt> with the <tt class="docutils literal">register</tt> method. But this is the mechanism used
+for <tt class="docutils literal">pytest</tt> and many other projects; it makes it very easy to
+automatically discover and register plugins that are installed with <tt class="docutils literal">pip</tt> and
+equivalent tools.</p>
+</div>
+<div class="section" id="invoking-plugins">
+<h3>Invoking plugins</h3>
+<p>Once <tt class="docutils literal">PluginManager</tt> loads the plugins, invoking them is straightforward;
+here's how <tt class="docutils literal">htmlize</tt> invokes the contents hooks <a class="footnote-reference" href="#footnote-1" id="footnote-reference-1">[1]</a>:</p>
+<div class="highlight"><pre><span></span><span class="c1"># Build full contents back again, and ask plugins to act on</span>
+<span class="c1"># contents.</span>
+<span class="n">contents</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">handler</span> <span class="ow">in</span> <span class="n">plugin_manager</span><span class="o">.</span><span class="n">hook</span><span class="o">.</span><span class="n">htmlize_contents</span><span class="p">(</span><span class="n">post</span><span class="o">=</span><span class="n">post</span><span class="p">,</span> <span class="n">db</span><span class="o">=</span><span class="n">db</span><span class="p">):</span>
+    <span class="n">contents</span> <span class="o">=</span> <span class="n">handler</span><span class="p">(</span><span class="n">contents</span><span class="p">)</span>
+<span class="k">return</span> <span class="n">contents</span>
+</pre></div>
+<p>Generally, hook invocations return a <em>list</em> of all the hooks attached to by
+different plugins (a single host application can have multiple plugins installed
+and attaching to the same hook). When the host invokes the hook as shown above,
+the default order is LIFO, but plugins can affect this with
+<a class="reference external" href="https://pluggy.readthedocs.io/en/stable/#call-time-order">hook options</a>
+like <tt class="docutils literal">tryfirst</tt> and <tt class="docutils literal">trylast</tt>.</p>
+</div>
+<div class="section" id="implementing-hooks-in-plugins">
+<h3>Implementing hooks in plugins</h3>
+<p>Here's our entire <tt class="docutils literal">narcissist</tt> plugin that's attaching to the contents hook:</p>
+<div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">htmlize</span>
+
+<span class="nd">@htmlize</span><span class="o">.</span><span class="n">hookimpl</span>
+<span class="k">def</span> <span class="nf">htmlize_contents</span><span class="p">(</span><span class="n">post</span><span class="p">,</span> <span class="n">db</span><span class="p">):</span>
+    <span class="n">repl</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;&lt;b&gt;I (</span><span class="si">{</span><span class="n">post</span><span class="o">.</span><span class="n">author</span><span class="si">}</span><span class="s1">)&lt;/b&gt;&#39;</span>
+
+    <span class="k">def</span> <span class="nf">hook</span><span class="p">(</span><span class="n">contents</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;\bI\b&#39;</span><span class="p">,</span> <span class="n">repl</span><span class="p">,</span> <span class="n">contents</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">hook</span>
+</pre></div>
+<p>Some notes:</p>
+<ul class="simple">
+<li>It expects <tt class="docutils literal">htmlize</tt> to be installed; as discussed previously, we rely on
+Pluggy's default install-based approach where both the host and plugins are
+installed into the same Python environment and can thus find each other.
+However, Pluggy supports any custom discovery method.</li>
+<li>It uses the <tt class="docutils literal">hookimpl</tt> exported value shown earlier.</li>
+<li>It returns a function that acts on contents; this is the <tt class="docutils literal">htmlize</tt>-specific
+contract (ABI, if you will) we've discussed before.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="fundamental-plugin-concepts-in-this-case-study">
+<h2>Fundamental plugin concepts in this case study</h2>
+<p>Let's see how this case study of Pluggy measures against the
+<a class="reference external" href="https://eli.thegreenplace.net/2012/08/07/fundamental-concepts-of-plugin-infrastructures">Fundamental plugin concepts</a>
+that were covered <a class="reference external" href="https://eli.thegreenplace.net/tag/plugins">several times on this blog</a>.</p>
+<p>It's important to remember that Pluggy is not a specific host application with
+a bespoke plugin system; rather, it's a reusable library for creating such
+plugin systems. Therefore, this is more of a <em>meta</em> case study.</p>
+<div class="section" id="discovery">
+<h3>Discovery</h3>
+<p>Generally, Pluggy leaves discovery logic to the user's discretion. Its
+<tt class="docutils literal">PluginManager</tt> has a <tt class="docutils literal">register</tt> method for adding plugins, and these can
+be discovered in any way the application chooses.</p>
+<p>That said, Pluggy comes with one discovery mechanism built in - through the
+entry points process of Python packaging, as shown above. This is hugely
+convenient for a large number of applications, as long as both the application
+and its plugins are installed via standard Python packaging tools (which is
+a very reasonable assumption in the Python ecosystem).</p>
+</div>
+<div class="section" id="registration">
+<h3>Registration</h3>
+<p>In the entry point process, plugins register themselves by adding a
+<tt class="docutils literal"><span class="pre">[project.entry-points.&lt;HOST-ID&gt;]</span></tt> section in their <tt class="docutils literal">pyproject.toml</tt>
+file.</p>
+<p>Otherwise - as in the previous section - users are free to devise their own
+registration schemes.</p>
+</div>
+<div class="section" id="hooks">
+<h3>Hooks</h3>
+<p>This one is easy, since it's called <em>hooks</em> in Pluggy parlance as well!
+Pluggy's implementation of hooks is rather elegant, with function decorators
+available for plugins to set. We've seen an example of this above with
+<tt class="docutils literal">&#64;htmlize.hookimpl</tt> decorating <tt class="docutils literal">htmlize_contents</tt>.</p>
+</div>
+<div class="section" id="exposing-an-application-api-to-plugins">
+<h3>Exposing an application API to plugins</h3>
+<p>Since Pluggy is designed for Python hosts and Python plugins, this one is
+fairly straightforward. The plugins typically assume the host project is
+already installed in the Python environment and its modules can be imported.</p>
+<p>In our example, <tt class="docutils literal">hookimpl</tt> is imported from <tt class="docutils literal">htmlize</tt> by the plugin to
+accomplish this. It also shows how host data is passed to the plugin - the
+<tt class="docutils literal">post</tt> and <tt class="docutils literal">db</tt> parameters. These are APIs exposed by the host for the
+plugins' use.</p>
+</div>
+</div>
+<div class="section" id="conclusion-is-pluggy-worth-it">
+<h2>Conclusion - is Pluggy worth it?</h2>
+<p>In footnote 2 of my original <a class="reference external" href="https://eli.thegreenplace.net/2012/08/07/fundamental-concepts-of-plugin-infrastructures">fundamental concepts of plugin infrastructures</a>
+post, I wrote <a class="footnote-reference" href="#footnote-2" id="footnote-reference-2">[2]</a>:</p>
+<blockquote>
+This is probably why there are very few well-established plugin frameworks
+in existence (even in low-level languages like C or C++). It's too easy (and
+tempting) to roll your own.</blockquote>
+<p>I still believe my statement is true - plugin frameworks are very easy
+to create, and the functionality they provide is relatively small compared to
+their large surface area. In other words, this is a <em>shallow API</em>.</p>
+<p>That said, Pluggy does provide some nice functionality for the more advanced
+uses of plugins:</p>
+<ul class="simple">
+<li>Automatic entry point registration mechanism - if you need it</li>
+<li>Signature validation</li>
+<li>Consistent plugin result collection across multiple hook attachments in a
+single plugin and across many plugins</li>
+<li>Plugin ordering with <tt class="docutils literal">firstresult</tt>, <tt class="docutils literal">tryfirst</tt>, <tt class="docutils literal">trylast</tt>, etc.</li>
+<li>Hook &quot;wrappers&quot; for some special use cases</li>
+</ul>
+<p>Are these worthwhile for your project? It really depends on the project,
+and it's always worth keeping the <a class="reference external" href="https://eli.thegreenplace.net/2017/benefits-of-dependencies-in-software-projects-as-a-function-of-effort/">tradeoff between dependencies and project
+effort</a>
+in mind.</p>
+</div>
+<div class="section" id="code">
+<h2>Code</h2>
+<p>The full code repository for this post <a class="reference external" href="https://github.com/eliben/code-for-blog/tree/main/2026/plugin-pluggy">is available here</a>.</p>
+<hr class="docutils" />
+<table class="docutils footnote" frame="void" id="footnote-1" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-1">[1]</a></td><td>Here <tt class="docutils literal">plugin_manager</tt> is the value previously returned from
+<tt class="docutils literal">pluggy.PluginManager</tt>; in the previous code snippet it's saved into
+<tt class="docutils literal">pm</tt> - the different variable name is because a function call is made
+and <tt class="docutils literal">plugin_manager</tt> is the parameter name.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="footnote-2" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-2">[2]</a></td><td>To be fair, that post predates the creation of Pluggy!</td></tr>
+</tbody>
+</table>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
