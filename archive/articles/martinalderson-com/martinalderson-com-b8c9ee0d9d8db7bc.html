@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A brief history of KV cache compression developments | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A brief history of KV cache compression developments</h1>
+        <div class="meta">Martin Alderson 2026-06-15T00:00:00Z</div>
+        <div class="links">
+          <a href="https://martinalderson.com/posts/a-brief-history-of-kv-cache-compression-developments/?utm_source=rss&amp;utm_medium=rss&amp;utm_campaign=feed">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/martinalderson-com/martinalderson-com-b8c9ee0d9d8db7bc.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">How KV cache compression - from MQA and GQA to MLA and linear-attention hybrids - quietly unlocked the long context windows that make modern agentic LLMs possible.</div>
+        <div class="content">
+          <p>While much is focused on the improvement of <em>models</em>, there's been <em>radical</em> improvements in the efficiency of KV cache compression. I was curious to figure out just <em>how</em> big the improvements are and why I think it matters so much.</p>
+<p>The headline figure: the memory needed to store one token of context has fallen by roughly <em>100x</em> since 2017. Over the same period, the memory on a top of the range datacentre GPU has gone from 16GB to 288GB - an 18x improvement. The memory wall in AI has mostly been solved with maths, not silicon.</p>
+<h2>What is a KV cache?</h2>
+<p>When you use an LLM - either via the web on ChatGPT et al, or agentically via Claude Code, your &quot;context&quot; is stored in a KV cache. This is/has been an incredibly memory intensive process which has led to hard limits on the session length.</p>
+<p>Put simply, the longer your &quot;conversation&quot; grows with the LLM, the more KV cache you need. A more efficient KV cache allows you to input <em>more</em> stuff - conversations, code, reference documents, images - in the same amount of memory.</p>
+<p>An inexact analogy is compression for audio visual files. It was the MP3 algorithm that allowed audio files in the late 90s to be compressed enough that Napster was (nearly) workable. Equally, MPEG2 allowed digital TV to work, and subsequent algorithms like H.264 allowed Netflix to work well on slow(er) broadband connections.</p>
+<p>Without modern video compression codecs, a 4K stream on Netflix would require (many) gigabits of bandwidth to work. <em>With</em> compression codecs, it can be squeezed into a 15mbit/sec bandwidth allocation - a 100x+ compression ratio.</p>
+<p>By allowing this efficiency you can often leapfrog hardware improvements. No doubt broadband connections will converge <em>fast</em> enough at some point to allow uncompressed 4K video streams, but compression allows you to roll out improvements far faster, to a wider market.</p>
+<h2>The inception of KV caches</h2>
+<p>When transformers first came around in ~2017, a 128K token context window (roughly 100,000 English words) would require ~<em>340GB</em> of GPU memory for one conversation, using MHA. That assumes a 70B-class dense model at 16 bit precision - which works out at about 2.6MB of memory for every single token in your conversation.</p>
+<p>In 2017 the absolute state of the art datacentre GPU parts like the Tesla V100 shipped with 16GB of HBM2 memory. So, on that architecture, you'd need ~20 top of the range GPUs to hold one conversation - which these days would feel limiting.</p>
+<p>While this is revisionist - you wouldn't be able to have <em>any</em> conversation with a transformer at that point - it shows just how far out hardware and efficiency was.</p>
+<p>The first major leap was MQA in 2019, from Noam Shazeer at Google. This allowed a huge 64x reduction (on a model with 64 attention heads) by sharing a single KV head across all query heads. However, this had major downsides - quality took a real hit and training became less stable - and long recall significantly degraded. It saw some adoption (PaLM and Falcon used it), but it was clear the compression was too aggressive.</p>
+<h2>GQA</h2>
+<p>As LLMs started ramping up in capability, the context window became an enormous problem. GPT3.5 had a context window limit of just 4K tokens - barely enough to input a few pages of documents. This is no doubt because of the enormous memory requirements.</p>
+<p>It's hard to overstate how big a limitation this was. While the models were still at a very early stage, if there weren't further developments in context window efficiency LLMs would have been limited to very short question and answer sessions. Agentic workflows of any type, regardless of model quality, would have been extremely constrained - even defining the tools an agent has access to now requires 20k tokens in Claude Code, before <em>anything</em> is input or output.</p>
+<p>The core way LLM providers patched over this was just deleting messages from your session. ChatGPT might just take your first message, and the last <em>n</em> messages that fit in the context window. This led to hilariously bad results, as it'd instantly forget something it had just said a few messages ago. It would have been completely unworkable for any serious document work.</p>
+<p>GQA arrived in 2023, allowing <em>groups</em> of query heads to share KV heads - a middle ground between MHA and MQA. With 8 KV head groups this allowed an 8x reduction - with <em>very little</em> quality loss as the session grew. Llama 2 70B and Mistral adopted it almost immediately, and it quickly became the default for open models.</p>
+<p>Around the same time another trick emerged in parallel: sliding window attention, where some layers only attend to a fixed window of recent tokens, so their share of the KV cache stops growing entirely. Mistral shipped it in 2023, and Google's Gemma models later interleaved local and global attention layers to similar effect.</p>
+<p>Once approaches like this became commonplace, we start seeing a rapid increase in the context window length - no doubt alongside more memory being available. GPT3.5-Turbo allowed 16k context windows, and while the original GPT4 launched at just 8k (with a pricey 32k variant), GPT4-Turbo expanded dramatically to 128k by late 2023.</p>
+<h2>MLA - the DeepSeek surprise</h2>
+<p>The next big jump came from DeepSeek in 2024 with MLA. Instead of sharing KV heads between query heads, MLA compresses the keys and values down into a much smaller latent vector, and folds the decompression step into the surrounding projection matrices so the full keys and values never have to be materialised at all. DeepSeek claimed a 93% reduction in KV cache size in their V2 paper - while <em>improving</em> on quality benchmarks, not just holding steady.</p>
+<p>This was an important proof point. MQA showed you could compress hard if you accepted the quality hit, and GQA showed a modest compression with almost no hit - but MLA showed you could go an order of magnitude beyond GQA without giving anything up. It's also a decent chunk of how DeepSeek served their models so cheaply that they <a href="https://www.cnbc.com/2025/01/27/nvidia-falls-10percent-in-premarket-trading-as-chinas-deepseek-triggers-global-tech-sell-off.html">wiped nearly $600bn off Nvidia's market cap</a> in a single day in early 2025.</p>
+<p>Alongside this, quantisation of the KV cache itself - storing the keys and values at 8 or even 4 bit precision rather than 16 - became increasingly standard, roughly doubling or quadrupling effective capacity again on top of everything else. More recent approaches like Google's <a href="https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/">TurboQuant</a> push this much further still.</p>
+<p>(There's also a whole parallel universe of serving-side improvements like vLLM's PagedAttention - but that's about <em>managing</em> KV memory rather than compressing it, so I'm leaving it out of scope here.)</p>
+<h2>Agentic capabilities</h2>
+<p>Between late 2023 and 2025 models got somewhat &quot;stuck&quot; in context window size, with OpenAI and Anthropic offering models around the 128-200k token length. It's fair to say that these context lengths were not <em>terrible</em> - they allowed coding tasks and moderately sophisticated document processing. But as true coding agents ramped up, it did become extremely limiting.</p>
+<p>In this timespan you had to spend a <em>lot</em> of time thinking about this if you were building or using agents. Reading too many large files would blow through the window, causing the dreaded &quot;compaction&quot; to run - a fairly crude process of trying to summarise everything the agent had access to.</p>
+<p>The next major breakthroughs around 2025 were linear-attention hybrids - models like Qwen3-Next and Kimi Linear replaced most of their full attention layers with linear attention, which keeps a small <em>fixed size</em> state per layer rather than an ever-growing cache. Only a minority of layers keep a full KV cache. This (and no doubt other, less publicly known about) approaches allowed context windows to grow to 1M tokens with minimal quality loss. It's presumably a big part of why Anthropic could <a href="https://martinalderson.com/posts/why-claudes-new-1m-context-length-is-a-big-deal/">ship a 1M context window</a> earlier this year without even charging extra for it.</p>
+<img src="https://martinalderson.com/img/kv-cache-bytes-per-token.png" alt="Sketch-style log scale chart showing KV cache memory per token falling from ~2.6MB with MHA in 2017 to tens of KB with linear hybrids in 2025" class="no-border">
+<blockquote>
+<p>KV cache memory per token of context, on a log scale. GPU memory only improved ~18x in the same period.</p>
+</blockquote>
+<h2>The future</h2>
+<p>There's no sign of this slowing down. Research is increasingly pointed at getting rid of the quadratic attention bottleneck entirely - pure linear and recurrent approaches that keep a fixed size state no matter how long the context grows. Whether they can fully match attention on quality is still an open question, but the hybrids have already shown you don't need <em>every</em> layer to pay full price.</p>
+<p>The thing I find most interesting though: across nine years of ~100x compression gains, surprisingly little of it showed up as <em>cheaper</em>. Token prices have come down, sure - but most of the efficiency got spent on longer context windows instead. 4K became 128K became 1M. Much like video codecs got spent on higher resolutions rather than smaller files, we keep spending memory efficiency on more capable agents. And with memory now <a href="https://martinalderson.com/posts/what-next-for-the-compute-crunch/">one of the hardest constraints</a> on the AI buildout, I'd expect that to continue.</p>
+<p>As ever in this space, half of this post will probably be out of date within a year. There's an enormous amount of money pointed at making context cheaper - I certainly wouldn't bet against another 100x.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
