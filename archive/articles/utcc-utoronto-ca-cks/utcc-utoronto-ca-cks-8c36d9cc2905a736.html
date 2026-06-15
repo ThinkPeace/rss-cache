@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Systemd-resolved and sticking (or not) to what distributions do | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Systemd-resolved and sticking (or not) to what distributions do</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-06-15T02:50:24Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/SystemdResolvedOrNot">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-8c36d9cc2905a736.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">We have a long established approach for configuring our Linux systems, and specifically our Ubuntu systems (since these days the only Linux we run is Ubuntu). Part of that has been that we use a standard /etc/resolv.conf that points to our local DNS resolvers (which have our split horizon DNS setup). However, as people may have noticed, Linux distributions…</div>
+        <div class="content">
+          <div class="wikitext"><p><a href="https://support.cs.toronto.edu/">We</a> have a long established
+approach for configuring our Linux systems, and specifically our
+Ubuntu systems (since these days the only Linux we run is Ubuntu).
+Part of that has been that we use a standard <code>/etc/resolv.conf</code> that
+points to our local DNS resolvers (which have our split horizon DNS
+setup). However, as people may have noticed, Linux distributions these
+days are moving to <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-resolved.html">systemd-resolved</a>
+instead of a straight /etc/resolv.conf setup.</p>
+
+<p>There are good reasons for this switch in general. Systemd-resolved
+can cope with a variety of situations and problems that trip up the
+standard resolv.conf setup and it cooperates better with other
+programs. Almost none of these apply in our particular situation for
+our own servers, which have a static network configuration, a static
+DNS resolution search domain, and our DNS resolvers already handle all
+of the split resolution (and we had to make this work well before
+systemd-resolved existed).</p>
+
+<p>(The one aspect of systemd-resolved that matters to us is that if you
+have multiple DNS resolvers, as we do, resolved will rapidly fail over
+from one that isn't responding to one that is. Resolved can also cache
+answers locally but for us this isn't a feature and we'd turn it off.)</p>
+
+<p>Although I switched to systemd-resolved on my own desktops (<a href="https://utcc.utoronto.ca/~cks/space/blog/linux/SystemdResolvedNotFor">cf</a>), our servers have traditionally stuck with
+our static /etc/resolv.conf setup and entirely turned off
+systemd-resolved (which means even its D-Bus interface isn't
+available, because we'd rather have D-Bus based DNS lookups fail
+entirely than have them return different results). This isn't the
+Ubuntu default (which has been systemd-resolved for a number of LTS
+releases). So far we've been able to get Ubuntu to accept this without
+complaint, but as time goes on I've been feeling more and more nervous
+about going the /etc/resolv.conf path, especially without a working
+D-Bus systemd-resolved setup.</p>
+
+<p>The reason I'm nervous is the traditional issue of people writing and
+testing software only to and against the default system environment.
+Some day we're going to find some piece of software that simply
+assumes that it can make D-Bus DNS queries to systemd-resolved; if
+we're lucky, the software will explicitly state this as a requirement.
+And some day there will probably be software that relies on some
+aspect of systemd-resolved's behavior even while doing traditional
+non-D-Bus name resolution, such as expecting the special
+'_outbound' name to resolve (although that's not universally
+available even on systemd-resolved hosts).</p>
+
+<p>It's possible to configure systemd-resolved so that it only handles
+DNS resolution for people who ask over D-Bus. But if you're going to
+do that, you need to make sure that the systemd-resolved configuration
+(for DNS resolvers and DNS search path) matches your /etc/resolv.conf,
+and once you have a matching configuration, perhaps it's simpler and
+less error-prone to use systemd-resolved for everything. That gets you
+(us) on to the theoretical happy path of using the setup that Ubuntu
+expects (at the cost of having to care about the DNS settings in
+/etc/netplan files, and possibly having to update them if you ever,
+say, change or add a DNS resolver).</p>
+
+<p>Through Ubuntu 24.04 LTS, we explicitly masked and disabled
+systemd-resolved and used our /etc/resolv.conf. In our current
+experimental Ubuntu 26.04 LTS setup, we first arranged to configure
+systemd-resolved (via /etc/netplan) to match our resolv.conf so that
+D-Bus resolution would work if anyone explicitly tried to use it, and
+now we're trying out having systemd-resolved be the normal resolution
+method. This makes our 26.04 machines more like Ubuntu expects at the
+cost of being different from our 24.04 machines, and maybe exposing
+them to oddities in systemd-resolved's behaviour. We'll have to see
+how it goes (and we may go back to our /etc/resolv.conf ways).</p>
+
+<p>(The one thing we don't do is have <a href="https://www.freedesktop.org/software/systemd/man/latest/nss-resolve.html">nss-resolve</a>
+be used in /etc/nsswitch.conf. I don't even know if putting it there
+is stock Ubuntu 26.04 behavior, and I don't even use it on my desktops
+so I have no experience with it.)</p>
+
+<p>PS: We're not planning to make any use of <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/SystemdResolvedDnsDelegates">systemd-resolved DNS
+server delegations</a>. All of that DNS
+steering is going to continue to live only on our DNS resolvers.</p>
+</div>
+<div> (<a href="https://utcc.utoronto.ca/~cks/space/blog/linux/SystemdResolvedOrNot?showcomments#comments">One comment</a>.) </div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
