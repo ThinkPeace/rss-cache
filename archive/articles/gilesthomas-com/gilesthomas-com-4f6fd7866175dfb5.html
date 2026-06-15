@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JAX: commitment issues | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>JAX: commitment issues</h1>
+        <div class="meta">Giles&#x27; blog 2026-06-15T21:30:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/06/jax-commitment-issues">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-4f6fd7866175dfb5.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Imagine you have JAX code like this, and run it on a machine with CUDA set up: key = jax . random . key ( 42 ) cpu0 = jax . devices ( &quot;cpu&quot; )[ 0 ] with jax . default_device ( cpu0 ): array = jax . random . randint ( key , ( 530640 , 6 , 1024 ), 0 , 50_000 , dtype = jax . numpy . uint16 ) array . block_until_ready () item = array [ 0 ] item . block_until_rea…</div>
+        <div class="content">
+          <p>Imagine you have JAX code like this, and run it on a machine with CUDA set up:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">key</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">key</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+
+    <span class="n">cpu0</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">devices</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">with</span> <span class="n">jax</span><span class="o">.</span><span class="n">default_device</span><span class="p">(</span><span class="n">cpu0</span><span class="p">):</span>
+        <span class="n">array</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span>
+            <span class="n">key</span><span class="p">,</span>
+            <span class="p">(</span><span class="mi">530640</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">1024</span><span class="p">),</span>
+            <span class="mi">0</span><span class="p">,</span> <span class="mi">50_000</span><span class="p">,</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">jax</span><span class="o">.</span><span class="n">numpy</span><span class="o">.</span><span class="n">uint16</span>
+        <span class="p">)</span>
+        <span class="n">array</span><span class="o">.</span><span class="n">block_until_ready</span><span class="p">()</span>
+
+    <span class="n">item</span> <span class="o">=</span> <span class="n">array</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">item</span><span class="o">.</span><span class="n">block_until_ready</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>We're creating a big array, blocking until it's ready (JAX is asynchronous, so
+this makes sure that it's actually finished creating it), then getting
+the first item, and as a belt-and-braces thing making sure that that is ready too.
+How long do you think those last two lines -- a simple retrieval of a 6 x 1024 array
+from a larger one -- will take?  Some tiny fraction of a second would seem
+reasonable.</p>
+
+<p>But running it on my machine just now, the answer is a bit of a surprise: just over 5 seconds.  And if you try to
+get <code>array[1]</code> immediately afterwards, it still takes about 1.2s.  Further lookups into
+<code>array</code> consistently take more than a second -- so while the larger
+initial number might be something to do with setup -- maybe internal stuff being JITted -- that's clearly not the whole story.
+Something is making these seemingly-simple array lookups take much longer than you'd
+expect them to.</p>
+
+<p>Let's dig into that.</p>
+<h3 id="a-bit-of-background">A bit of background</h3>
+
+<p>First things first, why would you want to do that slightly strange dance with the
+<code>jax.default_device</code> context manager in the first place, rather than telling <code>randint</code> what
+device you want to use (eg. with <code>out_sharding</code>)?</p>
+
+<p>I'm writing some LLM training
+code, and want to load my training dataset.  I don't want to load it into the VRAM
+on the GPU -- that would be a waste of valuable GPU resources -- so I need it in
+the CPU-side memory.  I'm using Safetensors, which will
+<a href="/2026/06/jax-backends-and-devices">load stuff onto the system's default device</a>.
+So I need to override that temporarily to make sure that the dataset is loaded onto
+the device where I want it.</p>
+
+<p>I initially discovered this problem when I tried to iterate over the resulting array in my training
+loop; the code above is a simplified version of that -- a minimal repro of the issue.
+And it's a serious one!  If each iteration has an overhead of 1.2s just to get 6,144 tokens
+ready for the model, JAX will max out at about 5,000 tokens per second
+of training speed <em>just due to that overhead</em> -- a real forward and backward pass plus
+an optimiser step will obviously make things even slower.  For comparison, my PyTorch training loop managed almost 20,000 tokens/second
+on the same hardware: all steps from getting the training data, putting it on the GPU,
+and doing the actual training.</p>
+
+<h3 id="debugging">Debugging</h3>
+
+<p>So, let's look at that code again.  We've created
+our variable <code>array</code> on the CPU explicitly, and indeed if you print <code>array.device</code>,
+it says <code>CpuDevice(id=0)</code>.  But if you print the device of the <code>item</code>, you get
+<code>CudaDevice(id=0)</code>.  What's worse, if you watch <code>nvtop</code> while the code is running,
+as soon as it hits the lookup into the array, it starts using the GPU -- for each one,
+there's a spike in GPU usage.</p>
+
+<p>So, what gives?  We asked JAX to put the array on the CPU, but now it's doing
+GPU work, and putting the items there.</p>
+
+<p>The problem is that when you create an array using the <code>default_device</code> context manager,
+it is placed on the specified device, but it's not <a href="https://docs.jax.dev/en/latest/_autosummary/jax.Array.committed.html">committed</a> to it.
+If an array is not committed to its device, then JAX will feel free to move it
+around to others.</p>
+
+<p>In order to commit an array to a device, you need to use <code>jax.device_put</code> explicitly
+stating which device you want it on.  Running
+the same code, but with this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">array</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">device_put</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">cpu0</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...immediately before the lookup into the array changes the numbers drastically;
+the first lookup takes about 0.95s on my machine, the second 0.0002s, and then
+subsequent ones less than 0.0001s.</p>
+
+<h3 id="some-more-detailed-tests">Some more detailed tests</h3>
+
+<p>I decided to exercise this in depth, and wrote <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/3d28bf64c87e92a62dceac26f32eaa2248ece12c/array_speed_test.py">this script</a>.
+If you run it without the <code>--commit</code> command line flag, it will create the array,
+then iterate over the first ten items, measuring how long it takes to get each one.
+Running it just now:</p>
+
+<ul>
+<li>Getting the zeroth item from the array took about 5.4s.</li>
+<li>Each subsequent one consistently took about 1.2s</li>
+</ul>
+
+<p>With the <code>--commit</code> flag, it uses <code>device_put</code> to explicitly commit the array to the
+CPU.  Running that:</p>
+
+<ul>
+<li>Getting the zeroth item from the array took about 0.95s</li>
+<li>Each subsequent one took less than 0.0002s.</li>
+</ul>
+
+<p>Now, that didn't quite cover my use case -- what if, I wondered, the slow operation
+was putting things onto the GPU?  The script also has a <code>--put_items_to_gpu</code> flag to
+do that -- after getting each item, it uses <code>device_put</code>.  With that flag:</p>
+
+<ul>
+<li>Getting the zeroth item from the array took about 0.86s, and putting it on the GPU took 0.02s.</li>
+<li>Subsequent items had "get" times similar to the previous run,
+and "put" times of about 0.0006s.</li>
+</ul>
+
+<p>So, there's still a small startup penalty -- perhaps JAX is having to JIT some of
+its internal stuff -- but a perfectly decent speed after that.  Commitment works!</p>
+
+<h3 id="wrapping-up">Wrapping up</h3>
+
+<p>I'm still building my mental model of how JAX works, and working out exactly what
+is going on here is proving a bit tricky.  The split between a committed and an
+uncommitted array seems clear; the former is tied to a device, while JAX will move
+the latter around as needed.</p>
+
+<p>It also makes a certain amount of sense that it would want to move the items to the GPU;
+it is, after all, the default device.  But I'm less clear on why that was so slow, compared
+to the manual process of getting the item then putting it there.</p>
+
+<p>Hypothesis: the array is on the CPU's RAM, but not committed there.  We ask for an item
+from that array, and maybe JAX wants that to be on the default device, the GPU.  So it moves the entire
+"parent" array there, extracts that item, and then returns that.  Then next time around
+when we ask for the next item, it does the same thing again.</p>
+
+<p>Plausible?  Maybe, but it does sound a bit pathological!</p>
+
+<p>Anyway, at the end of the day, I have a solid new heuristic of my own: if you want something
+to definitely be on some specific device, make sure that you nail it down there with
+<code>device_put</code>.  And then you won't have commitment issues like these.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
