@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>What the new Linux NFS mount option &#x27;fatal_neterrors&#x27; is | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>What the new Linux NFS mount option &#x27;fatal_neterrors&#x27; is</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-06-16T02:07:52Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/NFSMountOptionFatalNeterrors">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-bbdcfab1799d788b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">If you have NFS mounts on a client using a sufficiently recent kernel, such as that shipped with Ubuntu 26.04 LTS, and you inspect /proc/mounts (or &#x27;mount -t nfs&#x27; ), you&#x27;ll probably discover a new NFS mount option that is listed for your mounts. For example: [...]:/h/281 /h/281 nfs4 rw,[...],fatal_neterrors=none,[...] You might be curious what this option i…</div>
+        <div class="content">
+          <div class="wikitext"><p>If you have NFS mounts on a client using a sufficiently recent kernel,
+such as that shipped with Ubuntu 26.04 LTS, and you inspect
+/proc/mounts (or <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/MountIrritation">'mount -t nfs'</a>), you'll probably
+discover a new NFS mount option that is listed for your mounts. For
+example:</p>
+
+
+<blockquote><pre>
+[...]:/h/281 /h/281 nfs4 rw,[...],fatal_neterrors=none,[...]
+</pre>
+</blockquote>
+
+<p>You might be curious what this option is, especially if you have code
+that parses NFS (v4) options and sorts options into ones you care
+about and ones you don't (<a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/AutomounterReplacement">as we do</a>). Unfortunately, as I write this
+about a year after the option was added to the Linux kernel,
+'fatal_neterrors' isn't documented in any manual page that I can
+readily find. As far as I know, the only accessible documentation for
+it is in <a href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=487fae09d7e266a58a13784983cc1ef6a2076526">the commit that added it</a>,
+which I'm just going to quote:</p>
+
+<blockquote><p>NFS: Add a mount option to make ENETUNREACH errors fatal</p>
+
+<p>If the NFS client was initially created in a container, and that
+container is torn down, there is usually no possibility to go back and
+destroy any NFS clients that are hung because their virtual network
+devices have been unlinked.</p>
+
+<p>Add a flag that tells the NFS client that in these circumstances, it
+should treat ENETDOWN and ENETUNREACH errors as fatal to the NFS
+client.</p>
+
+<p>The option defaults to being on when the mount happens from inside a
+net namespace that is not "init_net".</p>
+</blockquote>
+
+<p>As you can see in that commit, currently the only two values you can
+see for this are '<code>fatal_neterrors=none</code>' or
+'<code>fatal_neterrors=ENETDOWN:ENETUNREACH</code>'. As a mount option that you
+provide manually, you can also ask for 'default' or
+'ENETUNREACH:ENETDOWN'.</p>
+
+<p>If I'm reading the tea leaves correctly, this commit first appeared in
+Linux 6.15.0 (and so a 'fatal_neterrors' option for NFS mounts
+first started being reported in /proc/mounts then). This specific
+commit seems to be merely one of a whole series of net/sunrpc and
+fs/nfs commits that make ENETDOWN and ENETUNREACH errors as 'fatal'
+under the right magic circumstances, and I think that by 'fatal' what
+it means is that any client NFS request fails immediately and isn't
+ever retried. I don't think it makes the NFS mount itself disappear.
+Hopefully it will allow you to unmount the now permanently
+non-functional NFS mount.</p>
+
+<p>(The current state of affairs is that all NFS mounts will report some
+value for the 'fatal_neterrors' option, although the value of
+'none' is effectively the pre-6.15 state of affairs.)</p>
+
+<p>PS: Probably the place where documentation will appear at some point
+is <a href="https://git.linux-nfs.org/?p=steved/nfs-utils.git;a=blob;f=utils/mount/nfs.man;hb=HEAD">the upstream source for nfs(5)</a>,
+which will then wind up on man7.org as <a href="https://www.man7.org/linux/man-pages/man5/nfs.5.html">nfs(5)</a>.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
