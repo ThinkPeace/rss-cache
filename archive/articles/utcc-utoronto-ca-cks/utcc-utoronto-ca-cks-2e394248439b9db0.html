@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why servers running Ubuntu can stall on boot for two minutes | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why servers running Ubuntu can stall on boot for two minutes</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-06-17T02:29:09Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/UbuntuNetplanWaitForCarrier">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-2e394248439b9db0.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Suppose, not hypothetically, that you have some standard physical servers. As is typical, the servers have more than one network interface (two is usually the basics even for 1U servers, and maybe you put in a 10G-T card in some), but you&#x27;re only using one network interface on one network; the others are just sort of there. Recently you&#x27;ve started putting U…</div>
+        <div class="content">
+          <div class="wikitext"><p>Suppose, not hypothetically, that you have some standard physical
+servers. As is typical, the servers have more than one network
+interface (two is usually the basics even for 1U servers, and maybe
+you put in a 10G-T card in some), but you're only using one network
+interface on one network; the others are just sort of there. Recently
+you've started putting Ubuntu 26.04 LTS on them, and to your surprise
+(and displeasure) these machines stall for two minutes on boot, which
+they report as waiting for <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a>.</p>
+
+<p>The direct culprit is that you haven't told <a href="https://netplan.io/">Canonical Netplan</a> to ignore the state of network carrier for all
+of the network interfaces that you aren't using and don't have plugged
+in to anything. This is the '<code>ignore-carrier</code>' property, listed in
+<a href="https://netplan.readthedocs.io/en/stable/netplan-yaml/#properties-for-all-device-types">Properties for all device types</a>,
+and you need to set it on every network interface that is listed in
+/etc/netplan/*.yaml. However, why this happens and how we got here
+is a little bit convoluted (and it can happen in versions other than
+26.04, under the right circumstances).</p>
+
+<p>Famously, Netplan doesn't actually configure your networks itself.
+Instead it creates a configuration for something else (a 'backend'),
+and on servers this is <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd.service.html">systemd-networkd</a>.
+For every network listed in your Netplan configuration, Netplan will
+write a '<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html">10-netplan-&lt;name>.network</a>'
+file to <code>/run/systemd/network/</code>, with the appropriate contents taken
+from whatever your configuration says. As sort of covered in
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online's documentation</a>
+(when carefully combined with the description of network states in
+<a href="https://www.freedesktop.org/software/systemd/man/latest/networkctl.html">networkctl</a>),
+this will cause <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> to wait for every
+such interface to have carrier (up to <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html#--timeout=SECS">its timeout</a>),
+unless the .network file specifies <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html#ConfigureWithoutCarrier="><code>ConfigureWithoutCarrier=yes</code></a>,
+which Netplan sets only if you put the <code>ignore-carrier</code> property on
+the interface in your Netplan configuration.</p>
+
+<p>(Under some circumstances Netplan will also write <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.link.html">.link</a>
+files for one or more interfaces.)</p>
+
+<p>At install time, the Ubuntu server installer gives you options for
+what to do with each network interface it detects. If you explicitly
+configure an IP address or set an interface to do DHCP (or the
+installer sets it to do DHCP and you don't explicitly turn that off),
+the interface will of course appear in your installed system's Netplan
+configuration because it has to. However, if you explicitly disable an
+interface (or in some versions of the installer, the installer
+disables it because it detected no carrier and/or no DHCP), the Ubuntu
+server installer has traditionally not written any information about
+that interface to your installed server Netplan configuration. Since
+these additional interfaces weren't mentioned in Netplan at all,
+Netplan never wrote out <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html">.network</a>
+files for them and <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> never waited for
+carrier for them. Your server's Netplan file contained only the
+interfaces you actually used and you were happy even if there were no
+'<code>ignore-carrier: true</code>' settings.</p>
+
+<p>What's changed in Ubuntu 26.04 is that the Ubuntu server installer
+appears to write out an '<code>accept-ra: false</code>' property for every
+interface it detects, even if you disabled the interface during
+network configuration in the installer. Since the installer itself now
+mentions every interface in your generated Netplan configuration,
+Netplan writes <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html">.network</a> files for all of them to
+<code>/run/systemd/network</code> and you wind up 'waiting' for carrier on every
+interface on boot, causing a two minute delay, which is the default
+timeout used by <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> (it's <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html#--timeout=SECS">the
+<code>--timeout</code> option's default value</a>).
+You can fix this either by setting '<code>ignore-carrier: true</code>' on every
+such interface or by deleting all of those interfaces from your
+Netplan configuration.</p>
+
+<p>(To confuse you, systemd will report during boot that
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> has no timeout and it's technically
+correct. What systemd really means is that the
+systemd-networkd-wait-online.service file doesn't specify a
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html#TimeoutStartSec="><code>TimeoutStartSec=</code></a>
+setting and as '<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html#Type="><code>Type=oneshot</code></a>
+service, it doesn't get a default one. Instead the timeout is inside
+the <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> program and is opaque to systemd
+(the PID 1 daemon that is trying to 'start' this weird service).)</p>
+
+<p>Because I had to wrangle this, here is how to list every network
+interface and then set them to ignore carrier, assuming you're using
+Ubuntu 26.04 where they are already all listed in your Netplan
+configuration:</p>
+
+
+<blockquote><pre>
+ifnames="$(ip --json link show | jq -r '.[] | select(.link_type == "ether") | .ifname')"
+for i in $ifnames; do
+    netplan set "ethernets.$i.ignore-carrier=true"
+done
+</pre>
+</blockquote>
+
+<p>This isn't perfect and will match some virtual interfaces, but I leave
+dealing with that as an exercise to the reader, along with excluding
+interfaces that currently have carrier. For <a href="https://support.cs.toronto.edu/">our</a> purposes at install time, this is
+good enough. And yes, we turn off detecting carrier even on our active
+interface because we would rather have the machine come up to the
+extent that maybe we can log in on the console or the like.</p>
+
+<p>(It would be nice to have a way to delete a particular interface
+entirely, but Netplan's command line interface doesn't provide any
+good way to do that.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

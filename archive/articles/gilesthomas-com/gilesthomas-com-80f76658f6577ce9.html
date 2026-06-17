@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flax debugging: making a hash of things | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Flax debugging: making a hash of things</h1>
+        <div class="meta">Giles&#x27; blog 2026-06-17T02:40:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/06/hashing-jax-parameters">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-80f76658f6577ce9.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I was debugging an issue with a JAX/Flax NNX training loop the other day, and found a neat little trick to help debug it. Specifically, I wanted to see if the issue was with my model, my loss function, my optimiser settings, or the &quot;plumbing&quot; of the training loop itself -- were gradients actually coming through and being applied to the parameters? I could p…</div>
+        <div class="content">
+          <p>I was debugging an issue with a JAX/Flax NNX training loop the other day, and found a neat
+little trick to help debug it.  Specifically, I wanted to see if the issue
+was with my model, my loss function, my optimiser settings, or the "plumbing" of the
+training loop itself -- were gradients actually coming through and being applied to the parameters?</p>
+
+<p>I could print out the loss and the gradients, but printing out the parameters to see
+if they were changing was unhelpful -- any given update might only change a small number
+of parameters, or might change them such a small amount that I'd not notice -- especially given
+that the model had 77 million of them!</p>
+
+<p>Let's take a look.</p>
+<h3 id="the-worlds-worst-llm">The world's worst LLM</h3>
+
+<p>I am building an LLM from scratch in JAX and Flax NNX, and at this stage I'm trying to
+get the training loop right.  As a simple test, I've just implemented the "shell" of
+the LLM -- the token embeddings on the input side, and the final linear layer for an
+output head, wired directly together.  My plan was to train that so that given a sequence, instead of predicting
+next tokens for each position, it would "predict" the sequence itself -- that is, I might
+train it with the input</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">The fat cat sat on the mat</span>
+</code></pre>
+</div>
+
+<p>...and the target</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">The fat cat sat on the mat</span>
+</code></pre>
+</div>
+
+<p>...rather than the normal setup for an LLM, where you feed it</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">The fat cat sat on the</span>
+</code></pre>
+</div>
+
+<p>...and give it targets of</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">fat cat sat on the mat</span>
+</code></pre>
+</div>
+
+<p>So, in LLM terms, I'd be training a model to project from vocab space to a learned embedding
+space where each token had a distinct-enough embedding for the output head to be able
+to reliably project back to logits in vocab space.  There's
+<a href="/2025/05/llm-from-scratch-15-from-context-vectors-to-logits">a bit of background here if that was all Greek to you</a>.</p>
+
+<p>Here's the core part of the code I was working with, the <code>train_step</code> function, which
+seems to be the traditional JAX name for the JITted part of your code that does the
+forward pass through the model, works out the gradients, and then applies them to update
+the model:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">train_step</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">):</span>
+    <span class="n">loss</span><span class="p">,</span> <span class="n">grads</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">value_and_grad</span><span class="p">(</span><span class="n">calculate_loss</span><span class="p">)(</span><span class="n">model</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">grads</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">loss</span>
+</code></pre>
+</div>
+
+<p>I'd based it on the <a href="https://flax.readthedocs.io/en/stable/#basic-usage">"Basic Usage" example</a> that's
+currently right there on the front page of the Flax site.  Seasoned Flax veterans will probably
+spot the issue right away, but it wasn't obvious to me -- so it was time to dig in.</p>
+
+<h3 id="dealing-with-loss">Dealing with loss</h3>
+
+<p>The problem was that loss was not dropping -- indeed, taken to two decimal places, it was stuck at 10.82. The digits
+to the right of that changed for each batch, but the first four did not.  Now, this model was
+using the GPT-2 tokeniser, and 10.82 is exactly the loss that you'd expect if the model
+was essentially guessing randomly -- if you convert it to
+<a href="/2025/10/llm-from-scratch-21-perplexed-by-perplexity">perplexity</a> by
+calculating <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msup><mi>e</mi><mrow><mn>10.82</mn></mrow></msup></mrow></math>, you get about 50,011 -- which is very close to the GPT-2
+vocab size of 50,257.  Perplexity is, loosely, the number of tokens that the model
+was trying to choose between for a typical input -- so a perplexity equal to the vocab size
+is what you'd expect of a random model that is getting it right about one in 50,257
+times.</p>
+
+<p>That said, getting that loss consistently was a solid validation of my loss function!
+It's vanishingly unlikely that it would have been getting that specific number so consistently
+if I'd made a mess of that.  The tiny variations I was seeing in the third and subsequent
+decimal places would make sense, as they could easily be due to the variations in the
+contents of the different batches.</p>
+
+<h3 id="gradient-descent-into-madness">Gradient descent into madness</h3>
+
+<p>So was it that the gradients were somehow zero, or NaNs, or something else that couldn't
+be usefully applied to the model by the optimiser?  I printed them out in the <code>train_step</code>
+function (removing the <code>jit</code> decorator, as otherwise the <code>print</code>s would only get executed
+in the initial JIT pass through the function to compile it -- not when it had actual data <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>).</p>
+
+<p>The result was values like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">State({</span>
+<span class="go">  &#39;output_head&#39;: {</span>
+<span class="go">    &#39;kernel&#39;: Param( # 38,597,376 (154.4 MB)</span>
+<span class="go">      value=Array([[-2.6879393e-06, -1.2799728e-04,  2.6441864e-09, ...,</span>
+<span class="go">              -1.0780521e-09, -1.9232946e-09,  1.2057198e-04],</span>
+<span class="go">             [ 7.2428256e-06, -9.0873800e-05,  1.9621261e-08, ...,</span>
+<span class="go">               1.9959407e-08,  2.0515712e-08, -1.1401048e-06],</span>
+<span class="go">             [-2.4080187e-05,  1.0717572e-04, -4.7910085e-09, ...,</span>
+<span class="go">              -7.3136892e-09, -5.4990306e-09,  1.4717734e-04],</span>
+<span class="go">             ...,</span>
+<span class="go">             [ 1.9500087e-05,  1.4264552e-05, -3.0880422e-08, ...,</span>
+<span class="go">              -3.0595814e-08, -3.7087858e-08, -1.2066610e-06],</span>
+<span class="go">             [ 1.8085115e-05,  7.6247423e-05, -3.0720415e-08, ...,</span>
+<span class="go">              -3.1052533e-08, -3.1693808e-08, -9.7857817e-05],</span>
+<span class="go">             [ 5.2281484e-06, -1.4398852e-04,  6.2573882e-08, ...,</span>
+<span class="go">               5.5977843e-08,  6.6571232e-08, -1.0639715e-05]], dtype=float32)</span>
+<span class="go">    )</span>
+<span class="go">  },</span>
+<span class="go">  ...</span>
+</code></pre>
+</div>
+
+<p>Those looked plausible enough -- pretty small, but not so tiny that I'd expect them
+to have no effect at all with my learning rate of 0.0014.  It was time to dig into
+the training loop's plumbing.</p>
+
+<h3 id="plumbing-the-depths">Plumbing the depths</h3>
+
+<p>The obvious suspect was the update step -- was that call to <code>optimizer.update</code> actually changing
+the parameters at all?  Flax's NNX API is a bit odd compared to the normal
+<a href="https://www.gilesthomas.com/2026/05/on-first-looking-into-jax">JAX functional way of doing things</a>.
+In vanilla JAX code you would expect to do something like this to apply gradients:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">new_parameters</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">p</span><span class="p">,</span> <span class="n">g</span><span class="p">:</span> <span class="n">p</span> <span class="o">-</span> <span class="n">g</span> <span class="o">*</span> <span class="n">learning_rate</span><span class="p">,</span>
+        <span class="n">old_parameters</span><span class="p">,</span>
+        <span class="n">grads</span><span class="p">,</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That is, you get the new parameters by applying a transformation to the old ones.</p>
+
+<p>NNX, by contrast, is more PyTorch-flavoured.  It updates the parameters in-place,
+using a function with a side effect of mutating one of its parameters:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">optimizer</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">grads</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...rather than something more functional like this imaginary API:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">model</span> <span class="o">=</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">grads</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>I could easily imagine that I'd got something wrong that would break that in-place update, as it has
+the feel of something that would have to be quite delicately implemented on top of a
+functional system like JAX.</p>
+
+<p>But how could I see whether the parameters were changing, when there were 77 million
+of them and they would be being updated (based on gradients like -2.6879393e-06 and
+a learning rate of 1.4e-3) in the ninth decimal place or beyond?  Printing the arrays out
+was a non-starter!</p>
+
+<h3 id="hashing-it-out">Hashing it out</h3>
+
+<p>After a little thought, I realised that the solution was to use hashes.  Even tiny
+changes in the parameters' values would change their hashes drastically.  So if the parameters
+were not being updated, as I suspected, I'd see constant hashes.  If they were being updated,
+even by a minuscule amount, then the hashes would change.</p>
+
+<p><a href="https://github.com/jax-ml/jax/discussions/8352">This GitHub discussion</a> pointed me
+in the right direction: if I could get the parameters as pure JAX arrays, I could do this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nb">print</span><span class="p">(</span><span class="nb">hash</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">some_array</span><span class="p">)</span><span class="o">.</span><span class="n">tobytes</span><span class="p">()))</span>
+</code></pre>
+</div>
+
+<p>...where <code>np</code> is just <code>numpy</code>.  That would produce a hash that was stable for the life of
+this run -- the same parameters would always have the same hash, and different ones would
+differ, just as we want.  It could vary from run to run (Python uses different hash seeds in
+each new interpreter), but that wouldn't matter for
+this kind of debugging.</p>
+
+<p>I wasn't sure what the structure of my Flax model's parameters was, but printing them out
+in the training loop told me:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Embed( # Param: 38,597,376 (154.4 MB)</span>
+<span class="go">  embedding=Param( # 38,597,376 (154.4 MB)</span>
+<span class="go">    value=Array(shape=(50257, 768), dtype=dtype(&#39;float32&#39;))</span>
+<span class="go">  ),</span>
+<span class="go">  ...</span>
+<span class="go">)</span>
+<span class="go">Linear( # Param: 38,597,376 (154.4 MB)</span>
+<span class="go">  kernel=Param( # 38,597,376 (154.4 MB)</span>
+<span class="go">    value=Array(shape=(768, 50257), dtype=dtype(&#39;float32&#39;))</span>
+<span class="go">  ),</span>
+<span class="go">  ...</span>
+<span class="go">)</span>
+</code></pre>
+</div>
+
+<p>So, guided by that, I added these lines to the training loop:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nb">print</span><span class="p">(</span><span class="nb">hash</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">token_embedding</span><span class="o">.</span><span class="n">embedding</span><span class="o">.</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="n">tobytes</span><span class="p">()))</span>
+<span class="nb">print</span><span class="p">(</span><span class="nb">hash</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">output_head</span><span class="o">.</span><span class="n">kernel</span><span class="o">.</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="n">tobytes</span><span class="p">()))</span>
+</code></pre>
+</div>
+
+<p>Obviously copying the arrays around and converting them like that would slow things
+down, but for debugging purposes, it looked solid.</p>
+
+<p>I kicked off the training loop, and the problem was clear:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">  0%|                         | 43/530640 [00:06&lt;13:39:02, 10.80it/s, loss=10.824, tps=43,576]</span>
+<span class="go">5694185712877458479</span>
+<span class="go">-5759723708627894111</span>
+<span class="go">  0%|                         | 43/530640 [00:06&lt;13:39:02, 10.80it/s, loss=10.824, tps=43,897]</span>
+<span class="go">5694185712877458479</span>
+<span class="go">-5759723708627894111</span>
+</code></pre>
+</div>
+
+<p>...and so on.  The hashes were not changing, so the model's parameters were not being
+updated, even by a tiny amount. Gotcha!</p>
+
+<p>The problem turned out, as I had suspected, to be related to the in-place updates that
+NNX does.  Like I said earlier, I'd based my training loop on the "Basic Usage" example on the Flax site --
+but I'd messed up one important thing.  I had this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">train_step</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">):</span>
+    <span class="n">loss</span><span class="p">,</span> <span class="n">grads</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">value_and_grad</span><span class="p">(</span><span class="n">calculate_loss</span><span class="p">)(</span><span class="n">model</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">grads</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">loss</span>
+</code></pre>
+</div>
+
+<p>...and they had this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@nnx</span><span class="o">.</span><span class="n">jit</span>  <span class="c1"># automatic state propagation</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">train_step</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+  <span class="n">loss_fn</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">model</span><span class="p">:</span> <span class="p">((</span><span class="n">model</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">-</span> <span class="n">y</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+  <span class="n">loss</span><span class="p">,</span> <span class="n">grads</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">value_and_grad</span><span class="p">(</span><span class="n">loss_fn</span><span class="p">)(</span><span class="n">model</span><span class="p">)</span>
+  <span class="n">optimizer</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">grads</span><span class="p">)</span>  <span class="c1"># in-place updates</span>
+  <span class="k">return</span> <span class="n">loss</span>
+</code></pre>
+</div>
+
+<p>You can see a number of differences -- for example, they're baking the inputs and targets into
+the lambda they're using for the loss function through a lexical closure, and that means
+that they're only passing in the model to the version of it wrapped in <code>value_and_grad</code>.  But
+none of that matters!   The real difference is actually nicely highlighted with a comment,
+but I'd completely managed to miss it.  Right at the start, where I had <code>@jax.jit</code>, they had this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@nnx</span><span class="o">.</span><span class="n">jit</span>  <span class="c1"># automatic state propagation</span>
+</code></pre>
+</div>
+
+<p>It 100% makes sense that in order to support this kind of non-functional, in-place
+updating of the model's parameters, you have to have a modified version of the JIT
+decorator.  And I was just using the standard, functional pure-JAX one.</p>
+
+<p>Fixing that fixed the problem:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">  0%|                         | 1/530640 [00:06&lt;903:18:25,  6.13s/it, loss=10.824, tps=1,003]</span>
+<span class="go">5024998356359528747</span>
+<span class="go">-4835662927486742764</span>
+<span class="go">  0%|                         | 2/530640 [00:06&lt;397:16:33,  2.70s/it, loss=10.785, tps=1,914]</span>
+<span class="go">6231090084827524676</span>
+<span class="go">8293831317336780907</span>
+<span class="go">  0%|                         | 3/530640 [00:06&lt;228:14:32,  1.55s/it, loss=10.741, tps=2,791]</span>
+<span class="go">7896237091035346857</span>
+<span class="go">-7117477486466304738</span>
+</code></pre>
+</div>
+
+<p>The hashes were changing!  And even better, if you scroll to the right you'll see
+that loss was slowly dropping.  After 10k or so iterations, I was seeing 0.000: I had my do-nothing "LLM"
+working.</p>
+
+<h3 id="wrapping-up">Wrapping up</h3>
+
+<p>A satisfying debugging journey -- and while I don't think I'll make this specific
+mistake in the future, I think that the parameter-hashing trick is actually a really useful
+trick for the toolbox.  If you're uncertain as to whether your parameters are being
+updated, just looking at them probably won't help.  But looking at their hashes can help
+you find out whether anything is changing.</p>
+
+<p>And I think that the pattern that I used to zoom in on it is a useful one, too.  I always
+track loss, so it's a good starting point (indeed, seeing that it wasn't falling was what
+told me that something was going wrong).  But checking that it has a sane -- or ideally, as
+in this case, a meaningful -- value is a nice sanity check that we have a working loss function
+and a model that isn't doing something completely pathological.  Moving on from there to
+checking that some kind of gradients are flowing through is a solid next move (and might
+become increasingly interesting with deeper models where <a href="/2026/02/llm-from-scratch-32b-interventions-gradient-clipping">they can vanish or explode</a>).
+Then finally we can check the parameters -- in particular, are they changing? <sup class="footnote-ref" id="fnref-2"><a href="#fn-2">2</a></sup></p>
+
+<p>Let's see how many new tricks I pick up as I work through this LLM project.</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>I always forget that <code>jax.debug.print</code> exists -- I could have used that instead,
+and kept the JIT.&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-2">
+<p>Something's slightly broken in my brain and I keep reading that as "is our parameters
+changing" <a href="https://www.goodreads.com/quotes/273762-rarely-is-the-question-asked-is-our-children-learning">in George W. Bush's voice</a>.  Maybe I can stop that from happening by inflicting it on
+my readers instead.  You're welcome.&#160;<a href="#fnref-2" class="footnoteBackLink" title="Jump back to footnote 2 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
