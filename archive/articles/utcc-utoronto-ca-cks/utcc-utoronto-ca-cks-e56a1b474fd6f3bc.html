@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to correctly not wait for network carrier in Netplan | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How to correctly not wait for network carrier in Netplan</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-06-18T02:02:05Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/UbuntuNetplanWaitForCarrierII">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-e56a1b474fd6f3bc.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Yesterday I wrote an entry about why servers running Ubuntu can stall on boot for two minutes ; the short version is that in 26.04, a network interface that either has no carrier or that has nothing else on it will cause systemd-networkd-wait-online to wait for two minutes in the hopes that this changes and the interface becomes healthy. My core diagnosis o…</div>
+        <div class="content">
+          <div class="wikitext"><p>Yesterday I wrote an entry about <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/UbuntuNetplanWaitForCarrier">why servers running Ubuntu can
+stall on boot for two minutes</a>; the short
+version is that in 26.04, a network interface that either has no
+carrier or that has nothing else on it will cause
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a>
+to wait for two minutes in the hopes that this changes and the
+interface becomes healthy. My core diagnosis of the trigger for the
+problem was correct, but I had the wrong fix because in my testing, I
+made a classic mistake that's only really possible with virtual
+networking for virtual machines. <a href="https://mastodon.social/@cks/116767157373743740">There's an often invisible
+difference between an isolated virtual network interface and one that
+has no carrier</a>, and
+I tested with an isolated interface, which stalls under some
+circumstances and fixed by some things, but not <a href="https://utcc.utoronto.ca/~cks/space/blog/linux/LibvirtInactiveNetInterfaces">a virtual machine
+network interface with no carrier</a>. The
+latter requires a more thorough fix.</p>
+
+<p>I will put the answer at the front: you need to set every disconnected
+interface in your Netplan configuration to '<code>optional: true</code>'. Setting
+'<code>ignore-carrier: true</code>' isn't necessarily sufficient unless the
+interface has carrier. If you're mangling your 26.04 Netplan
+configuration anyway, I suggest you also set '<code>accept-ra: false</code>' on
+every inactive interface (and maybe your active one too, unless you
+use IPv6 RAs). However, you should not set '<code>optional: true</code>' on your
+main interface.</p>
+
+<p>There are an assortment of things that will cause
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> to think that it should wait until a
+particular interface is configured. A probably incomplete list of them
+is having a static IP address specified for an interface, having
+DHCPv4 or DHCPv6 enabled on the interface, and having
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html#IPv6AcceptRA="><code>IPv6AcceptRA=yes</code></a>
+(to my surprise, although this is sort of covered in the
+documentation). Under normal circumstances, systemd-networkd will not
+do any of these things (or attempt them, for DHCP) if the interface
+has no carrier, which will cause the interface to not be configured.
+So it sounds like what you want is <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html#ConfigureWithoutCarrier="><code>ConfigureWithoutCarrier=yes</code></a>,
+so <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd.service.html">systemd-networkd</a>
+configures the interface even without carrier and
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> is happy. Unfortunately this has an
+important limitation spelled out in its documentation:</p>
+
+<blockquote><p>With this enabled, to make the interface enter the "configured"
+state, which is required to make systemd-networkd-wait-online work
+properly for the interface, all dynamic address configuration
+mechanisms like DHCP= and IPv6AcceptRA= (which is enabled by default
+in most cases) need to be disabled. [...]</p>
+</blockquote>
+
+<p>(Although it's not really clear from the documentation, as far as I
+can see <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html#IPv6AcceptRA="><code>IPv6AcceptRA=yes</code></a>
+is probably the default in many environments, as this manual page
+excerpt says.)</p>
+
+<p>To disable this behavior when you have
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html#ConfigureWithoutCarrier="><code>ConfigureWithoutCarrier=yes</code></a>, in theory I believe you also need
+to set <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html#RequiredForOnline="><code>RequiredForOnline=no</code></a>
+on the interface (or disable DHCP, IPv6 RA, and so on). Well, if
+you're working in a purely <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd.service.html">systemd-networkd</a>
+world, which we're not on Ubuntu. Instead we're working in the world
+of <a href="https://netplan.io/">Canonical Netplan</a>.</p>
+
+<p>Netplan doesn't simply run <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> and let it
+decide what to do and what interfaces to consider. Instead, Netplan
+writes a drop in configuration file,
+/run/systemd/generator.late/systemd-networkd-wait-online.service.d/10-netplan.conf,
+and that configuration file tells <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a>
+specifically what interfaces to wait for and what (minimum) states
+they can be in; this minimum state is normally 'degraded' (as reported
+by <a href="https://www.freedesktop.org/software/systemd/man/latest/networkctl.html">networkctl</a>.
+As far as I can see, Netplan will normally list and wait for every
+network interface that is mentioned in your Netplan configuration and
+that is not set as '<code>optional: yes</code>'. Also,
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> specifically waits for all of these
+interfaces to not be in the 'configuring' setup state (again, as
+reported by <a href="https://www.freedesktop.org/software/systemd/man/latest/networkctl.html">networkctl</a>, and as more or less documented in <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">its
+manual page</a>).</p>
+
+<p>If an interface has no carrier, it's permanently stuck in
+<a href="https://www.freedesktop.org/software/systemd/man/latest/networkctl.html">networkctl</a>'s 'no-carrier' state and will never reach the
+'degraded' state. If this interface is listed in your Netplan
+configuration, Netplan's <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a>
+configuration file will say it has to reach 'degraded', and so
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> will time out. This happens
+regardless of what other Netplan properties you have set for that
+no-carrier interface; if it's mentioned at all and is not '<code>optional:
+yes</code>', you will always have a two minute timeout on boot. This
+includes an interface with just a do-nothing property like '<code>renderer:
+networkd</code>'.</p>
+
+<p>If you specify '<code>ignore-carrier: true</code>' on an interface, Netplan will
+duly write <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html#ConfigureWithoutCarrier="><code>ConfigureWithoutCarrier=yes</code></a> to the applicable
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html">.network</a>
+file. If an interface actually has carrier, this will make an
+interface with '<code>accept-ra: true</code>' (or no mention of it) finish
+configuration immediately regardless of whether or not something
+responds; the interface will be "degraded" but also "configured" and
+the <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> configuration Netplan has created
+will consider it ready. This is unlike the standard behavior covered
+in the manual page quote above, because Netplan likes to surprise
+people.</p>
+
+<p>(If DHCP is on for the interface, <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd.service.html">systemd-networkd</a> won't complete
+configuration until and unless it gets a DHCP answer, and
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> will have to time out.)</p>
+
+<p>Setting '<code>ignore-carrier: true</code>' on an interface with a static IP in
+Netplan will allow that static IP to be configured even when there is
+no carrier, but it won't make that interface ready (by Netplan's
+standards) and so you'll still have that two minute timeout. The only
+way around the two minute timeout is to either not mention the
+interface at all in your Netplan configuration or to set it as
+'<code>optional: true</code>'. Both of these will cause Netplan to not list the
+interface as an interface that has to reach the "degraded" state and
+"configured" status in the <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a>
+configuration file it writes.</p>
+
+<p>(I don't think Netplan ever writes <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html#RequiredForOnline="><code>RequiredForOnline=no</code></a>
+into a systemd-networkd <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html">.network</a> file it creates.)</p>
+
+<p>If you set all interfaces in your Netplan setup to '<code>optional: true</code>',
+<a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> won't run at all under normal
+circumstances. This isn't obvious from the created configuration;
+Netplan will write a drop in configuration file for it that has no
+<code>ExecStart=</code> lines, which makes it seem like the standard .service
+file should take over and run <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> in the
+standard way. However, the drop in file that Netplan writes does have
+a conditional dependency on
+/run/systemd/generator/network-online.target.wants/systemd-networkd-wait-online.service
+being a symbolic link, and Netplan doesn't set up that symbolic link,
+so the whole service is skipped. Given this, I think you almost
+certainly shouldn't set '<code>optional: true</code>' on all interfaces, which
+means not setting it on your main one (the one you're actually using).</p>
+
+<p>(That <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd-networkd-wait-online.html">systemd-networkd-wait-online</a> doesn't run at all is obvious
+if you look at the logs, which will report that it's not running
+because its conditions aren't met.)</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
