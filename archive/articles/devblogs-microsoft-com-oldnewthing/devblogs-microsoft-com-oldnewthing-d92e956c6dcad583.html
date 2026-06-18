@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Windows stack limit checking retrospective, follow-up | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Windows stack limit checking retrospective, follow-up</h1>
+        <div class="meta">The Old New Thing 2026-06-17T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260617-00/?p=112436">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-d92e956c6dcad583.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Choosing the register to use to pass the desired stack allocation size. The post Windows stack limit checking retrospective, follow-up appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p><a href="https://aarongiles.com/"> Aaron Giles</a> worked on porting Windows to both ARM32 and AArch64, and he <a href="https://bsky.app/profile/did:plc:rozrlqzq7umwvv5etd7slmxz/post/3mhk2isogwc2q?ref_src=embed"> noted a missing detail</a> in my <a title="Windows stack limit checking retrospective: arm64, also known as AArch64" href="https://devblogs.microsoft.com/oldnewthing/20260320-00/?p=112154"> retrospective of stack limit checking on arm64</a>:</p>
+<blockquote class="bluesky-embed" data-bluesky-uri="at://did:plc:rozrlqzq7umwvv5etd7slmxz/app.bsky.feed.post/3mhk2isogwc2q" data-bluesky-cid="bafyreihi4tton7infgddx7csbqjm5xljewdwpfeoi27narlqdbfghlsp2a" data-bluesky-embed-color-mode="system">
+<p lang="en">Every once in a while Raymond Chen does an architectural comparison series and I get to see (a paraphrased version of) some code I wrote way back when. He&#8217;s right about why we passed stack size/16, but surprised he didn&#8217;t call out the unconventional x15 usage.</p>
+<p>— Aaron Giles (<a href="https://bsky.app/profile/did:plc:rozrlqzq7umwvv5etd7slmxz?ref_src=embed">@aarongiles.com</a>) <a href="https://bsky.app/profile/did:plc:rozrlqzq7umwvv5etd7slmxz/post/3mhk2isogwc2q?ref_src=embed"> Mar 20, 2026 at 8:08 PM</a></p></blockquote>
+<p></p>
+<p>I&#8217;m guessing that by &#8220;unconventional x15 usage&#8221;, Aaron means &#8220;Why is the parameter passed in the <code>x15</code> register? The AArch64 calling convention passes the first parameter in the <code>x0</code> register, so shouldn&#8217;t that parameter be in the <code>x0</code> register?&#8221;</p>
+<p>It seemed so obvious to me that I didn&#8217;t consider it worth mentioning.</p>
+<p>The function that needs to do a stack probe is in a bit of a bind: It has inbound parameters, some of which might be passed in registers. If the stack size parameter were passed like a normal parameter to the stack probe function, then the calling function has to save its original inbound parameters somewhere. But it can&#8217;t save them on the stack because it has to do a stack probe before it can use the stack.</p>
+<p>The solution is to give the stack probe function a custom calling convention that limits itself to scratch registers that are not used for receiving inbound parameters.</p>
+<table border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th>Architecture</th>
+<th>Used for<br />
+parameters</th>
+<th>Allocation<br />
+size</th>
+<th>Also modified</th>
+</tr>
+<tr>
+<td>8086</td>
+<td>&nbsp;</td>
+<td><tt>ax</tt></td>
+<td><tt>bx</tt>, <tt>dx</tt></td>
+</tr>
+<tr>
+<td>x86-32</td>
+<td><tt>ecx</tt></td>
+<td><tt>eax</tt></td>
+<td>&nbsp;</td>
+</tr>
+<tr>
+<td>MIPS</td>
+<td><tt>a0</tt>…<tt>a3</tt></td>
+<td><tt>t8</tt></td>
+<td>&nbsp;</td>
+</tr>
+<tr>
+<td>PowerPC</td>
+<td><tt>r3</tt>…<tt>r10</tt></td>
+<td><tt>r12</tt></td>
+<td><tt>r0</tt>, <tt>r11</tt></td>
+</tr>
+<tr>
+<td>Alpha AXP</td>
+<td><tt>a0</tt>…<tt>a5</tt></td>
+<td><tt>t12</tt></td>
+<td><tt>t8</tt>, <tt>t9</tt>, <tt>t10</tt></td>
+</tr>
+<tr>
+<td>x86-64</td>
+<td><tt>rcx</tt>, <tt>rdx</tt>, <tt>r8</tt>, <tt>r9</tt></td>
+<td><tt>rax</tt></td>
+<td><tt>r10</tt>, <tt>r11</tt></td>
+</tr>
+<tr>
+<td>AArch64</td>
+<td><tt>x0</tt>…<tt>x7</tt></td>
+<td><tt>x15</tt></td>
+<td><tt>x16</tt>, <tt>x17</tt></td>
+</tr>
+</tbody>
+</table>
+<p>The calling conventions for processor architectures designate certain registers as &#8220;super-volatile&#8221;, typically those used reserved for assembler temporaries or for facilitating function calls between modules. These registers are excellent candidates for use by the stack probe function since there is no way they could be used for normal parameter passing.</p>
+<p>For example, PowerPC uses <tt>r11</tt>, and AArch64 uses <tt>r16</tt> and <tt>r17</tt>, all of which are available for use in function glue stubs. Other opportunities were overlooked: MIPS and Alpha AXP could have used <tt>at</tt>, though I can see why they may have wanted to avoid using them because the assembler might use them implicitly when assembling pseudo-instructions.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260617-00/?p=112436">Windows stack limit checking retrospective, follow-up</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

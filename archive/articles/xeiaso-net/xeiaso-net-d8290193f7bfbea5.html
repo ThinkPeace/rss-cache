@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>I hate compilers | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>I hate compilers</h1>
+        <div class="meta">Xe Iaso&#x27;s blog 2026-06-18T00:00:00Z</div>
+        <div class="links">
+          <a href="https://xeiaso.net/notes/2026/anubis-wasm-vendor-binary/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xeiaso-net/xeiaso-net-d8290193f7bfbea5.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">You&#x27;d think that given the same bytes of input you&#x27;d get the same bytes of output. lol. lmao. No, you don&#x27;t. It&#x27;s complicated.</div>
+        <div class="content">
+          <p>Anubis is about to get <a href="https://github.com/TecharoHQ/anubis/pull/1684">WebAssembly-based proof of work checks</a> so that administrators can use a non-SHA256 proof of work method to protect their websites. Part of the implementation goals of this work is that the check logic is defined in <em>one</em> place on both client and server. The client and server will then hook into the WebAssembly in order to make sure they're running in lockstep.</p>
+        <p>However, one small problem comes up. What do you do when the client has WebAssembly disabled? I really don't want to de-facto lock people out of websites. Anubis exists in an impossible balance of user experience, administrator experience, and developer experience and any change to any of these factors disrupts the balance for other factors.</p>
+        <p>To work around this and also fulfill the goal of having check logic defined <em>once</em>, I decided to take inspiration from the legendary talk <a href="https://www.destroyallsoftware.com/talks/the-birth-and-death-of-javascript">The Birth and Death of JavaScript</a> and just recompile the WebAssembly to JavaScript. Sure, the resulting JavaScript will be slower than the equivalent WebAssembly (even more so because disabling WASM usually disables the JavaScript JIT, the thing that makes JavaScript fast), but it will finish <em>eventually</em>. Hopefully it will be more efficient than the existing JavaScript is on lower end hardware, but research is required.</p>
+        <p>Luckily enough, the tool I need (<code>wasm2js</code> from the <a href="https://github.com/WebAssembly/binaryen">binaryen project</a>) is packaged in Linux distributions. The bad news is that distributions ship ancient versions of it that don't get the same output as the version on my development machine's copy from <a href="https://brew.sh/">Homebrew</a>.</p>
+        <p>In order to really make sure that the output of this is deterministic (essential for reproducible builds), I need to bundle a copy of <code>wasm2js</code>. So I did that by building a version of <code>wasm2js</code> compiled to WebAssembly with <a href="https://github.com/WebAssembly/wasi-sdk">wasi-sdk</a>. The rest of the article is the tale of reproducibility woe that lead to the implementation I ended up with. Buckle up and enjoy the ride!</p>
+        <h2>Reproducible builds are surprisingly hard</h2>
+        <div class="flex flex-col space-y-0"><div class="flex space-x-2 bg-bg-soft dark:bg-bgDark-soft mx-auto min-h-fit
+        lg:w-[80ch] sm:w-[65ch] w-full
+        lg:p-4 p-2
+        // Base styles for all messages
+        mt-0 mb-0 rounded-none
+        // First message styles
+        first:mt-4 first:rounded-t-lg first:pb-2
+        // Last message styles
+        last:mb-4 last:rounded-b-lg last:pt-1
+        // Middle message top/bottom adjustment
+        [&amp;:not(:first-child)]:-mt-[1px] [&amp;:not(:first-child)]:py-1"><div class="h-16 w-16 shrink-0 not-prose"><img class="h-16 w-16 shrink-0 max-w-none object-contain rounded-xs" alt="Aoi is wut" loading="lazy" width="64" height="64" src="https://stickers.xeiaso.net/sticker/aoi/wut"/></div><div class="flex-1 min-w-0"><span class="font-semibold text-sm block mb-1"><a href="https://xeiaso.net/characters#aoi">Aoi</a></span><span class="mx-auto"></span><div class="text-fg-1 dark:text-fgDark-1 text-sm prose-p:my-2"><p>Back up a sec, this doesn't make sense to me. If you have <em>the same bytes of
+        input</em> to a compiler, you should get <em>the same bytes</em> of output assuming
+        that the compiler flags, target, and other platform details are controlled
+        for right? A compiler is just a deterministic function of input source code
+        becomes output bytecode, right?</p></div></div></div><div class="flex space-x-2 bg-bg-soft dark:bg-bgDark-soft mx-auto min-h-fit
+        lg:w-[80ch] sm:w-[65ch] w-full
+        lg:p-4 p-2
+        // Base styles for all messages
+        mt-0 mb-0 rounded-none
+        // First message styles
+        first:mt-4 first:rounded-t-lg first:pb-2
+        // Last message styles
+        last:mb-4 last:rounded-b-lg last:pt-1
+        // Middle message top/bottom adjustment
+        [&amp;:not(:first-child)]:-mt-[1px] [&amp;:not(:first-child)]:py-1"><div class="h-16 w-16 shrink-0 not-prose"><img class="h-16 w-16 shrink-0 max-w-none object-contain rounded-xs" alt="Numa is smug" loading="lazy" width="64" height="64" src="https://stickers.xeiaso.net/sticker/numa/smug"/></div><div class="flex-1 min-w-0"><span class="font-semibold text-sm block mb-1"><a href="https://xeiaso.net/characters#numa">Numa</a></span><span class="mx-auto"></span><div class="text-fg-1 dark:text-fgDark-1 text-sm prose-p:my-2"><p>lol you'd think, but no, it's not. In theory it is (and for small scale
+        compilers it definitely is), but in practice compilers are strange and
+        complicated beasts containing multitudes that no mere mortal can fully
+        comprehend on their own.</p></div></div></div></div>
+        <p>There are a shocking number of ways to accidentally create nondeterministic output when doing C/C++ development. One of the easiest is to use the builtin <code>__DATE__</code> and <code>__TIME__</code> macros to stamp a build with the time the compiler was executed at:</p>
+        <pre class="language-cpp"><code class="language-cpp code-highlight"><span class="code-line"><span class="token comment">// hello.cpp</span>
+        </span><span class="code-line">
+        </span><span class="code-line"><span class="token macro property"><span class="token directive-hash">#</span><span class="token directive keyword">include</span> <span class="token string">&lt;iostream></span></span>
+        </span><span class="code-line">
+        </span><span class="code-line"><span class="token keyword">int</span> <span class="token function">main</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">    std<span class="token double-colon punctuation">::</span>cout <span class="token operator">&lt;&lt;</span> <span class="token constant">__DATE__</span> <span class="token operator">&lt;&lt;</span> <span class="token string">&quot; &quot;</span> <span class="token operator">&lt;&lt;</span> <span class="token constant">__TIME__</span> <span class="token operator">&lt;&lt;</span> std<span class="token double-colon punctuation">::</span>endl<span class="token punctuation">;</span>
+        </span><span class="code-line">    <span class="token keyword">return</span> <span class="token number">0</span><span class="token punctuation">;</span>
+        </span><span class="code-line"><span class="token punctuation">}</span>
+        </span></code></pre>
+        <p>Building and running it once gets me this:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">$ make clean &amp;&amp; make hello.wasm &amp;&amp; wasmtime run -W exceptions=y ./hello.wasm
+        </span><span class="code-line">rm -f hello.o hello.wasm
+        </span><span class="code-line">wasi-sdk-33.0-x86_64-linux/bin/wasm32-wasip1-clang++ -O3 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false  -c hello.cpp -o hello.o
+        </span><span class="code-line">wasi-sdk-33.0-x86_64-linux/bin/wasm32-wasip1-clang++ -O3 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false  -fwasm-exceptions -lunwind --no-wasm-opt hello.o -o hello.wasm
+        </span><span class="code-line">Jun 18 2026 00:00:59
+        </span></code></pre>
+        <p>Another time it gets me this:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">$ make clean &amp;&amp; make hello.wasm &amp;&amp; wasmtime run -W exceptions=y ./hello.wasm
+        </span><span class="code-line">rm -f hello.o hello.wasm
+        </span><span class="code-line">wasi-sdk-33.0-x86_64-linux/bin/wasm32-wasip1-clang++ -O3 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false  -c hello.cpp -o hello.o
+        </span><span class="code-line">wasi-sdk-33.0-x86_64-linux/bin/wasm32-wasip1-clang++ -O3 -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false  -fwasm-exceptions -lunwind --no-wasm-opt hello.o -o hello.wasm
+        </span><span class="code-line">Jun 18 2026 00:01:11
+        </span></code></pre>
+        <p>Even though the source code had <em>the same bytes</em>, the output of the compiler was wildly different.</p>
+        <p>In order for users and packagers to trust the binaries of <code>wasm2js</code> I'm committing to the Anubis repo, I need to make sure that you can build the same version I built, down to <em>the same bytes</em>. For an added bonus, you should be able to build this on <em>your machine</em> and get the same bytes I got.</p>
+        <div class="flex space-x-2 bg-bg-soft dark:bg-bgDark-soft mx-auto min-h-fit
+        lg:w-[80ch] sm:w-[65ch] w-full
+        lg:p-4 p-2
+        // Base styles for all messages
+        mt-0 mb-0 rounded-none
+        // First message styles
+        first:mt-4 first:rounded-t-lg first:pb-2
+        // Last message styles
+        last:mb-4 last:rounded-b-lg last:pt-1
+        // Middle message top/bottom adjustment
+        [&amp;:not(:first-child)]:-mt-[1px] [&amp;:not(:first-child)]:py-1"><div class="h-16 w-16 shrink-0 not-prose"><img class="h-16 w-16 shrink-0 max-w-none object-contain rounded-xs" alt="Numa is smug" loading="lazy" width="64" height="64" src="https://stickers.xeiaso.net/sticker/numa/smug"/></div><div class="flex-1 min-w-0"><span class="font-semibold text-sm block mb-1"><a href="https://xeiaso.net/characters#numa">Numa</a></span><span class="mx-auto"></span><div class="text-fg-1 dark:text-fgDark-1 text-sm prose-p:my-2"><p>That sure does sound like a great ideal, it would be horrible if something
+        unforeseen came up to ruin it!</p></div></div></div>
+        <h2>Clang silently runs <code>wasm-opt</code> from <code>$PATH</code> behind your back</h2>
+        <p>Among other tools like <code>wasm2js</code>, binaryen has <a href="https://github.com/WebAssembly/binaryen/tree/main">a bunch of other useful tools</a> such as <code>wasm-opt</code>. <code>wasm-opt</code> optimizes WebAssembly compiler output to let you eke out more performance. This doesn't work in every circumstance, but when it does work it makes a <em>huge</em> difference. As such, clang shells out to <code>wasm-opt</code> when doing builds.</p>
+        <p>This normally makes sense, but in this case it caused builds to fail on my DGX Spark because its version of <code>wasm-opt</code> is too old:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">$ uname -m &amp;&amp; which wasm-opt &amp;&amp; wasm-opt --version
+        </span><span class="code-line">aarch64
+        </span><span class="code-line">/usr/bin/wasm-opt
+        </span><span class="code-line">wasm-opt version 108
+        </span></code></pre>
+        <p>Compared to my workstation which installs <code>wasm-opt</code> from <a href="https://brew.sh/">Homebrew</a>:</p>
+        <pre class="language-text"><code class="language-text code-highlight"><span class="code-line">$ uname -m &amp;&amp; which wasm-opt &amp;&amp; wasm-opt --version
+        </span><span class="code-line">x86_64
+        </span><span class="code-line">/home/linuxbrew/.linuxbrew/bin/wasm-opt
+        </span><span class="code-line">wasm-opt version 130
+        </span></code></pre>
+        <p>Turns out that wasi-sdk and binaryen rely on the <a href="https://github.com/WebAssembly/spec/blob/wasm-3.0/proposals/exception-handling/Exceptions.md">WebAssembly Exceptions extension</a>. This is a reasonable thing to assume given that wasi-sdk mostly assumes you're building things for web browsers and <a href="https://caniuse.com/wf-wasm-exception-handling">93.86% of browser users</a> have a browser engine new enough to support it. C++ is also one of the main places where exceptions are used, so I guess WebAssembly-native exception handling removes a lot of boilerplate here.</p>
+        <p>Both wasmtime and wazero require you to flag into exception support. This is fine; we can just pass <code>-W exceptions=y</code> to wasmtime and use a custom runner harness for wazero. The annoying part is what happens when my arm machine's anemic build of wasm-opt sees exception handling instructions, causing it to exit. This made the build fail.</p>
+        <p>The solution was to pass <code>--no-wasm-opt</code> at the linking step. This removed one angle of irreproducibility.</p>
+        <div class="flex space-x-2 bg-bg-soft dark:bg-bgDark-soft mx-auto min-h-fit
+        lg:w-[80ch] sm:w-[65ch] w-full
+        lg:p-4 p-2
+        // Base styles for all messages
+        mt-0 mb-0 rounded-none
+        // First message styles
+        first:mt-4 first:rounded-t-lg first:pb-2
+        // Last message styles
+        last:mb-4 last:rounded-b-lg last:pt-1
+        // Middle message top/bottom adjustment
+        [&amp;:not(:first-child)]:-mt-[1px] [&amp;:not(:first-child)]:py-1"><div class="h-16 w-16 shrink-0 not-prose"><img class="h-16 w-16 shrink-0 max-w-none object-contain rounded-xs" alt="Mara is hacker" loading="lazy" width="64" height="64" src="https://stickers.xeiaso.net/sticker/mara/hacker"/></div><div class="flex-1 min-w-0"><span class="font-semibold text-sm block mb-1"><a href="https://xeiaso.net/characters#mara">Mara</a></span><span class="mx-auto"></span><div class="text-fg-1 dark:text-fgDark-1 text-sm prose-p:my-2"><p>I guess in the future we could make it use the version of <code>wasm-opt</code> it just
+        built to optimize the output, but that may be a premature optimization for
+        now.</p></div></div></div>
+        <h2>Clang relies on address layout for ordering things</h2>
+        <p>The version of clang that I use to compile <code>wasm2js</code> has some address-sensitive code generation hiding in its exception handling path. Raw pointer values leak into the order a handful of <code>try_table</code> blocks come out in. This surfaces as every build differing from the next by about 29 bytes:</p>
+        <pre class="language-diff"><code class="language-diff code-highlight"><span class="code-line deleted"><span class="token deleted-sign deleted"><span class="token prefix deleted">-</span><span class="token line">002a9af0: 2802 0441 0647 0d00 1f40 0103 0820 0241  (..A.G...@... .A
+        </span></span></span><span class="code-line deleted"><span class="token deleted-sign deleted"><span class="token line"></span><span class="token prefix deleted">-</span><span class="token line">002a9b00: 206a 2103 2002 4138 6a20 0141 086a 10b5   j!. .A8j .A.j..
+        </span></span></span><span class="code-line deleted"><span class="token deleted-sign deleted"><span class="token line"></span><span class="token prefix deleted">-</span><span class="token line">002a9b10: 8881 8000 2104 0b1f 4001 0304 2003 2004  ....!...@... . .
+        </span></span></span><span class="code-line inserted"><span class="token deleted-sign deleted"><span class="token line"></span></span><span class="token inserted-sign inserted"><span class="token prefix inserted">+</span><span class="token line">002a9af0: 2802 0441 0647 0d00 1f40 0103 041f 4001  (..A.G...@....@.
+        </span></span></span><span class="code-line inserted"><span class="token inserted-sign inserted"><span class="token line"></span><span class="token prefix inserted">+</span><span class="token line">002a9b00: 0309 2002 4120 6a21 0320 0241 386a 2001  .. .A j!. .A8j .
+        </span></span></span><span class="code-line inserted"><span class="token inserted-sign inserted"><span class="token line"></span><span class="token prefix inserted">+</span><span class="token line">002a9b10: 4108 6a10 b588 8180 0021 040b 2003 2004  A.j......!.. . .
+        </span></span></span></code></pre>
+        <p>To make this easier to spot, here's a partial disassembly:</p>
+        <pre class="language-diff"><code class="language-diff code-highlight"><span class="code-line"><span class="token unchanged"><span class="token prefix unchanged"> </span><span class="token line"> i32.load  offset=4            ;; 28 02 04
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line"> i32.const 6                   ;; 41 06
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line"> i32.ne                        ;; 47
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line"> br_if     0                   ;; 0d 00
+        </span></span></span><span class="code-line deleted"><span class="token unchanged"><span class="token line"></span></span><span class="token deleted-sign deleted"><span class="token prefix deleted">-</span><span class="token line"> try_table (catch_all_ref 8)   ;; 1f 40 01 03 08
+        </span></span></span><span class="code-line inserted"><span class="token deleted-sign deleted"><span class="token line"></span></span><span class="token inserted-sign inserted"><span class="token prefix inserted">+</span><span class="token line"> try_table (catch_all_ref 4)   ;; 1f 40 01 03 04
+        </span></span></span><span class="code-line inserted"><span class="token inserted-sign inserted"><span class="token line"></span><span class="token prefix inserted">+</span><span class="token line"> try_table (catch_all_ref 9)   ;; 1f 40 01 03 09
+        </span></span></span><span class="code-line"><span class="token inserted-sign inserted"><span class="token line"></span></span><span class="token unchanged"><span class="token prefix unchanged"> </span><span class="token line">   local.get 2                 ;; 20 02
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.const 32                ;; 41 20
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.add                     ;; 6a
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   local.set 3                 ;; 21 03
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   local.get 2                 ;; 20 02
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.const 56                ;; 41 38
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.add                     ;; 6a
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   local.get 1                 ;; 20 01
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.const 8                 ;; 41 08
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.add                     ;; 6a
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   call 17461                  ;; 10 b5 88 81 80 00
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   local.set 4                 ;; 21 04
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line"> end                           ;; 0b
+        </span></span></span><span class="code-line deleted"><span class="token unchanged"><span class="token line"></span></span><span class="token deleted-sign deleted"><span class="token prefix deleted">-</span><span class="token line"> try_table (catch_all_ref 4)   ;; 1f 40 01 03 04
+        </span></span></span><span class="code-line"><span class="token deleted-sign deleted"><span class="token line"></span></span><span class="token unchanged"><span class="token prefix unchanged"> </span><span class="token line">   local.get 3                 ;; 20 03
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   local.get 4                 ;; 20 04
+        </span></span></span></code></pre>
+        <p>The computation is nearly identical, but the byte order is just different enough to also make the catch references differ. This also fires when you build this pinned version of wasm2js on arm64 machines because its pointer iteration order is different from it is on my workstation.</p>
+        <p>To work around this, I took two steps:</p>
+        <ol>
+        <li>Disable address-space randomization for this build using <code>setarch --addr-no-randomize</code>.</li>
+        <li>Create known good sha256 checksums for both x86_64 and arm64 via building this program on machines I trust.</li>
+        </ol>
+        <p>I also made a CI job ensure this:</p>
+        <pre class="language-yaml"><code class="language-yaml code-highlight"><span class="code-line"><span class="token punctuation">-</span> <span class="token key atrule">name</span><span class="token punctuation">:</span> Ensure reproducibility
+        </span><span class="code-line">  <span class="token key atrule">run</span><span class="token punctuation">:</span> <span class="token punctuation">|</span><span class="token scalar string">
+        </span></span><span class="code-line"><span class="token scalar string">    cd ./utils/wasm/wasm2js
+        </span></span><span class="code-line"><span class="token scalar string">    ./build.sh
+        </span></span><span class="code-line"><span class="token scalar string">    if sha256sum -c --status shasums.x86_64; then
+        </span></span><span class="code-line"><span class="token scalar string">      echo &quot;OK: rebuilt modules match the recorded x86_64 checksums&quot;
+        </span></span><span class="code-line"><span class="token scalar string">    elif sha256sum -c --status shasums.arm64; then
+        </span></span><span class="code-line"><span class="token scalar string">      echo &quot;OK: rebuilt modules match the recorded arm64 checksums&quot;
+        </span></span><span class="code-line"><span class="token scalar string">    else
+        </span></span><span class="code-line"><span class="token scalar string">      echo &quot;::error::rebuilt wasm2js/wasm-opt match neither recorded checksum set on ${{ matrix.runner }}&quot; >&amp;2
+        </span></span><span class="code-line"><span class="token scalar string">      sha256sum wasm-opt_130.wasm wasm2js_130.wasm
+        </span></span><span class="code-line"><span class="token scalar string">      exit 1
+        </span></span><span class="code-line"><span class="token scalar string">    fi</span>
+        </span></code></pre>
+        <p>To be extra sure, we have this job run on both x86_64 and arm64 hosts. I'd really love to have this be reproducible across hosts, but that's an upstream LLVM bug that I am not powerful enough to tackle. If you work on LLVM and are reading this, it would be nice to set a seed of some kind to ensure that this iteration order is fixed across architectures.</p>
+        <p>At the very least builds are deterministic <em>within</em> architectures. This may have to be good enough for now.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
