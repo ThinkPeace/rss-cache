@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Limiting web server bandwidth the brute force way | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Limiting web server bandwidth the brute force way</h1>
+        <div class="meta">Chris&#x27;s Wiki :: blog 2026-06-20T02:59:49Z</div>
+        <div class="links">
+          <a href="https://utcc.utoronto.ca/~cks/space/blog/web/ServerBruteForceBandwidthLimit">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/utcc-utoronto-ca-cks/utcc-utoronto-ca-cks-04e5c9525fb92a11.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A while back on the Fediverse, I mentioned something about our departmental web server : Wow, people do some extremely slow downloads from work&#x27;s main web server. We roll logs at midnight and Apache wrote the last log record to the old file at 03:58 (for a request that had started at 23:27). (For our sins we&#x27;ve become a load-bearing source of ML image train…</div>
+        <div class="content">
+          <div class="wikitext"><p>A while back on the Fediverse, <a href="https://mastodon.social/@cks/115851872715237648">I mentioned something about our
+departmental web server</a>:</p>
+
+<blockquote><p>Wow, people do some extremely slow downloads from work's main web
+server. We roll logs at midnight and Apache wrote the last log
+record to the old file at 03:58 (for a request that had started at
+23:27).</p>
+
+<p>(For our sins we've become a load-bearing source of ML image
+training data, for the "CIFAR" image dataset. We average 40
+Mbytes/sec outgoing web server bandwidth most days.)</p>
+</blockquote>
+
+<p>(This also got mentioned in passing in <a href="https://utcc.utoronto.ca/~cks/space/blog/web/OurWebServer24Hours-2026">my entry on 24 hours of that
+server's logs</a>. I call us 'load-bearing' not
+only because of how popular this dataset is but also because in the
+past the department has gotten plaintive emails from people about it
+when the dataset wasn't accessible.)</p>
+
+<p>Recently, so many requests started arriving that they overwhelmed our
+main departmental web server and we decided to deal with the problem
+by moving this data to another physical machine with its own,
+dedicated web server (and then using HTTP redirections to push
+'people', which is to say software, to fetch the data from that new
+web server).</p>
+
+<p>(As is so often the case at universities, this isn't an officially
+published dataset that had been given a permanent URL. Instead, it's
+part of the home page of a now-departed graduate student. All of this
+home page data normally lives in <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/OurWebHomeDirectories">a special set of filesystems on our
+NFS fileservers</a>, but this dataset
+was so popular that the web server's kernel always had it cached in
+RAM.)</p>
+
+<p>Now that the data is on its own server (which is still running Apache,
+because we use Apache for everything), this produced some interesting
+data, <a href="https://mastodon.social/@cks/116778251572665570">to wit</a>:</p>
+
+<blockquote><p>How our role as a load-bearing source of ML image training data is
+going: we had to move the data to a special web server just for it,
+and that web server has been saturating its 1G network link since
+midnight local time. It has almost 4,000 connections (the maximum
+currently allowed).</p>
+
+<p>In something that vaguely amazes me (because I'm sometimes stuck in
+the past), the machine is using under 10% CPU despite pushing wire
+rate TLS.</p>
+</blockquote>
+
+<p>(That's 10% CPU on 4 core HT machine, so out of 8 nominal CPUs. It's
+<a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/OurServerAges2026">a fairly old machine, a Dell R230</a>.)</p>
+
+<p>To be clear, that 4,000 connection limit isn't really a sensible one
+and you wouldn't normally do this for this sort of bulk server in our
+situation. At 4,000 connections, if we assume they're all downloading
+large multi-megabyte files (typically they are) and the available
+bandwidth is split evenly, each request is getting about 30 KBytes/sec
+of bandwidth. The reason we set such a high connection limit is
+because as far as I know, in Apache there's no way to reserve a
+certain number of connections for use by certain IP addresses, such as
+your monitoring system. We have a 4,000 connection limit to make it as
+unlikely as possible that <a href="https://utcc.utoronto.ca/~cks/space/blog/sysadmin/PrometheusGrafanaSetup-2019">our monitoring system</a> is frozen out and triggers
+alarms.</p>
+
+<blockquote><p>Naturally people are not getting their data very fast from our
+server, but that's not our problem. The current server stats say
+that since restart Tuesday morning the average reply size is 14.9
+MBytes and the average reply duration is a bit under four and a half
+minutes, which is an extremely unimpressive data rate.</p>
+
+<p>People in that current 4k requests thundering herd are getting their
+data even slower, of course.</p>
+</blockquote>
+
+<p>These are Apache's built in statistics, which report the state since
+server start. This server doesn't always have that many requests and
+run at wire saturation, although it's happened twice since Monday
+morning (and the first time was sustained for close to 32 hours). At
+quieter times the server can run at 'only' 70 to 80 MBytes/sec of
+outgoing traffic.</p>
+
+<p>You might be surprised that such a popular server only has 1G
+networking. Well, <a href="https://mastodon.social/@cks/116778272174315776">there's a good reason for that</a>:</p>
+
+<blockquote><p>Could we put a 10G-T network card in the current server for this
+dataset? Sure. And then we'd probably blow out all of our outgoing
+bandwidth to the university backbone. So no. That this server only
+has a 1G interface is a feature, not a bug.</p>
+</blockquote>
+
+<p>There are a whole host of ways to limit overall server bandwidth, but
+the absolutely simplest and most foolproof way is to put the server on
+a limited-speed network connection. With a 1G network interface, this
+server is physically incapable of generating more than about 120
+MBytes/sec of outgoing traffic. There are some side effects (logging
+in to the server and interacting with it is quite slow when it's
+running at saturation like this), but we can live with them.</p>
+
+<p>(There's 2.5G and 5G networking these days, but we don't have the
+applicable switches and network cards, and given why this 1G
+saturation traffic seems to happen, I'm not in any rush to increase
+this server over 1G.)</p>
+
+<h3>Sidebar: Where the traffic comes from</h3>
+
+<p>As of about 19:40 when I took the stats, there had been 332,000
+requests started since midnight local time, from 13,055 different IP
+addresses. The most prolific single requester is a single Google Cloud
+Platform IP that made 8,200 requests and probably received about 141
+gigabytes of response data. This is far more data than the CIFAR
+dataset contains, so this IP address was clearly re-fetching data it
+had already fetched. Unfortunately I believe GCP doesn't charge for
+ingress traffic. A cluster of Azure IPs in the same /24 made thousands
+of requests each and the subnet received an aggregate of 1.8 TBytes of
+responses.</p>
+
+<p>My suspicion is that these are processing jobs or training runs or the
+like being launched and re-launched repeatedly, with no effective
+local caching of the fetched data (either because the software doesn't
+cache at all or because everything is being done one at a time on
+ephemeral setups, so the just fetched and cached data is immediately
+discarded). In the past I've seen a similar pattern of high volume
+re-fetching from what was clearly a HPC cluster at a university.</p>
+
+<p>Overall, 36.25% of the requests are from Azure, 9.89% from GCP, 6.78%
+from Alibaba IP address space (AS45102), and then everything is under
+4% and I'm not going to bother writing it out.</p>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
