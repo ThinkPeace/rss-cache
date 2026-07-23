@@ -1,0 +1,2529 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Writing an LLM from scratch, part 34b -- from bigrams to GPT-2, one component at a time (in JAX) | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Writing an LLM from scratch, part 34b -- from bigrams to GPT-2, one component at a time (in JAX)</h1>
+        <div class="meta">Giles&#x27; blog 2026-07-08T18:45:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/07/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-7266b4efb0339df2.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">This post is the capstone of the most long-running series on my blog . In December 2024 (!), I started reading Sebastian Raschka &#x27;s book &quot; Build a Large Language Model (from Scratch) &quot;, and worked through it carefully. Being who I am, despite trying to apply a strict &quot;no side quests&quot; policy, I found myself zooming off and digging into all kinds of things. I…</div>
+        <div class="content">
+          <p>This post is the capstone of
+<a href="/llm-from-scratch">the most long-running series on my blog</a>.
+In December 2024 (!), I started
+reading <a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>",
+and worked through it carefully.  Being who I am, despite trying to apply a strict "no side quests"
+policy, I found myself zooming off and digging into all kinds of things.</p>
+
+<p>It's time to wrap it up.  I had decided that the endpoint would be to build and train an LLM from scratch just using my notes --
+no reference to the book, no reference to the model code I'd written when following the book.
+After an <a href="https://x.com/gpjt/status/1985434030880293004">X/Twitter</a> poll, I decided to
+use JAX for that, just to make sure that I really was building it from scratch and
+not regurgitating bits of PyTorch code like a bad coding LLM spitting out half-digested
+lumps of Stack Overflow.</p>
+
+<p>In my <a href="/2026/06/llm-from-scratch-34a-building-a-jax-training-loop-for-an-llm-training-run">last post</a>,
+I showed how I built a JAX training script that mirrored what I had built for the original
+PyTorch version of the model.  To test it as I went along, I used it to train a really dumb "LLM", which instead
+of trying to predict the next token for every token in an input sequence, instead
+predicted the input -- that is, if you fed it</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">The fat cat sat on the mat</span>
+</code></pre>
+</div>
+
+<p>It would return the same thing.  I called that an A-to-A model.</p>
+
+<p>In this post, I'll show you how I turned it into a GPT-2 model, and then trained
+it from scratch on my RTX 3090 (using the parameter counts for the original paper's "small" size).  What turned out
+really well with this is that I found a route that meant that almost every component I added
+made the model better!  That's not guaranteed -- sometimes different aspects of an AI model
+depend on each other, so adding A without also adding B makes things worse.  But (admittedly
+with a bit of backtracking in places) I was able to find a route that shows a nice clear progression.</p>
+
+<p>The final training run took 37 hours 15 minutes -- compared to 40 hours, 38 minutes for
+<a href="/2026/04/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation">an equivalent PyTorch model</a>.
+That is despite it being full-fat 32-bit -- the PyTorch one was using Automatic
+Mixed Precision (AMP), which allowed it to use 16-bit calculations in places where it would
+be relatively harmless in terms of loss.</p>
+
+<p>When asked to continue "Every effort moves you", it came back with a decent response:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Every effort moves you closer to your goals, but if you are unsure of what it takes, you don’t</span>
+</code></pre>
+</div>
+
+<p>The model got 3.418784 loss on my held-back test dataset, as compared to my PyTorch
+model's 3.538161, and even more impressively, it was better than the original GPT-2 small's
+result of 3.499677 on the same dataset!  However, just as <a href="/2026/04/llm-from-scratch-32l-interventions-instruction-fine-tuning-tests">I found previously</a>,
+the OpenAI weights still beat mine consistently in instruction fine-tuning challenges.</p>
+
+<p>Let's get started.</p>
+<h2 id="the-starting-point-a-to-a">The starting point -- A-to-A</h2>
+
+<p>At the end of the last post, we had a solid training loop, using all of the tricks
+I'd picked up with my PyTorch code.  The A-to-A model we were training with it looked
+like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">flax</span><span class="w"> </span><span class="kn">import</span> <span class="n">nnx</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">GPTModel</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">vocab_size</span><span class="p">,</span> <span class="n">context_length</span><span class="p">,</span>
+        <span class="n">d_emb</span><span class="p">,</span>
+        <span class="n">n_heads</span><span class="p">,</span> <span class="n">n_layers</span><span class="p">,</span>
+        <span class="n">qkv_bias</span><span class="p">,</span>
+        <span class="n">drop_rate</span><span class="p">,</span>
+        <span class="n">rngs</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Embed</span><span class="p">(</span>
+            <span class="n">num_embeddings</span><span class="o">=</span><span class="n">vocab_size</span><span class="p">,</span>
+            <span class="n">features</span><span class="o">=</span><span class="n">d_emb</span><span class="p">,</span>
+            <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_head</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span>
+            <span class="n">in_features</span><span class="o">=</span><span class="n">d_emb</span><span class="p">,</span>
+            <span class="n">out_features</span><span class="o">=</span><span class="n">vocab_size</span><span class="p">,</span>
+            <span class="n">use_bias</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">,</span>
+        <span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">input_embeddings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_head</span><span class="p">(</span><span class="n">input_embeddings</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That was based on my preferred model of <a href="/2025/09/how-do-llms-work">how LLMs work</a>, where at the top level
+for a model, we feed in a sequence of token IDs, then:</p>
+
+<ul>
+<li>Firstly, we convert them into embeddings, so we get a sequence of vectors, one for each token.  We do this by
+a lookup into a table, but we can see it conceptually as a projection via a matrix,
+from vocab space (where a particular token ID is a one-hot vector) to
+embedding space.</li>
+<li>Next, we do the magic with our Transformers layers, getting embeddings for the next token.
+After these layers, the embedding at position <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi></mrow></math> in the output sequence is for the predicted token to
+come after the token at position <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi></mrow></math> in the input sequence, considering that
+input token and all other tokens to its left.</li>
+<li>Finally, we project those back from embedding space to logits, this time actually using a real
+matrix (in the form of a linear layer), the output head.  The logits (after being run through
+softmax) represent the probabilities for each token of it being the next one.</li>
+</ul>
+
+<p>The A-to-A model basically skipped the second step completely: it would project to embedding space,
+then immediately project back to vocab space -- and after training, it was pretty
+good at mapping a sequence to itself.</p>
+
+<p>One interesting question is, if we train the same code, but this time try to get it
+to make next-token predictions, how good will it be at that?  Obviously it can't be
+as good as a full LLM.  But there are correlations between tokens; full stops will
+generally be followed by spaces, adjectives will normally be followed by other adjectives
+or nouns (at least in English), and so on.  It would be kind of like the predictive
+text systems on a phone, where (at least until recently) it would just use the last word you entered
+to generate a list of possible next words to select from.</p>
+
+<p>Old-school natural language processing has a name for this: bigrams.  The idea is that
+you can work out statistically what the most common two-word pairs are, which allows you
+to make a guess at a next word from a single one.  (There are also trigrams, where you
+look at the last two words when predicting the next, then 4-grams, 5-grams, and so on.)
+You'd build up a full probability table -- for every word in your vocab, you'd have
+the probability of every word coming next.</p>
+
+<p>So maybe even with that minimal model, we could get it to learn something similar to a set of token-level (rather than word-level) bigrams, which would
+then get the loss down.  Obviously it wouldn't be as good as a full bigram table --
+for our GPT-2 vocab size of 50,257, that would need <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>50</mn><mo>&#x0002C;</mo><msup><mn>257</mn><mn>2</mn></msup><mo>&#x0003D;</mo><mn>2</mn><mo>&#x0002C;</mo><mn>525</mn><mo>&#x0002C;</mo><mn>766</mn><mo>&#x0002C;</mo><mn>049</mn></mrow></math> parameters -- but perhaps it could approximate one.
+(For comparison, the model we're using has just an embedding table and an output head, each mapping between
+50,257 dimensions and 768, so that's <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>2</mn><mi>&#x000D7;</mi><mn>50</mn><mo>&#x0002C;</mo><mn>257</mn><mi>&#x000D7;</mi><mn>768</mn><mo>&#x02248;</mo><mn>77</mn><mtext>&#x000A0;million</mtext></mrow></math> parameters
+-- about 3% of the full table.)</p>
+
+<p>An uninitialised model would (hopefully) have a loss of about
+10.82, implying a
+<a href="https://www.gilesthomas.com/2025/10/llm-from-scratch-21-perplexed-by-perplexity">perplexity</a> equal to
+the vocab size.  If we can train our dumb model to get better loss than that, then
+we'd have the beginnings of an LLM.</p>
+
+<p>That was a simple test to run.  In my training code, I had a dataset class that looked like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">BigTrainDataset</span><span class="p">:</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">all_tokens</span><span class="p">,</span> <span class="n">seq_length</span><span class="p">,</span> <span class="n">microbatch_size</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">xs</span> <span class="o">=</span> <span class="n">all_tokens</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">microbatch_size</span><span class="p">,</span> <span class="n">seq_length</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ys</span> <span class="o">=</span> <span class="n">all_tokens</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">microbatch_size</span><span class="p">,</span> <span class="n">seq_length</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ix</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">xs</span><span class="p">[</span><span class="n">ix</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">ys</span><span class="p">[</span><span class="n">ix</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">xs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+</code></pre>
+</div>
+
+<p>That is, the inputs, the <code>xs</code>, were the same as the targets, the <code>ys</code>.  If we fed it</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">The fat cat sat on the mat</span>
+</code></pre>
+</div>
+
+<p>...then we'd be training it to output exactly the same thing.</p>
+
+<p>The modified version for a real LLM would involve feeding it something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">The fat cat sat on the</span>
+</code></pre>
+</div>
+
+<p>...and targeting this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go"> fat cat sat on the mat</span>
+</code></pre>
+</div>
+
+<p>That's a simple change -- that <code>__init__</code> method became this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="bp">self</span><span class="o">.</span><span class="n">xs</span> <span class="o">=</span> <span class="n">all_tokens</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">microbatch_size</span><span class="p">,</span> <span class="n">seq_length</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ys</span> <span class="o">=</span> <span class="n">all_tokens</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">microbatch_size</span><span class="p">,</span> <span class="n">seq_length</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>I did that, and kicked it off to train on the 92,209,152 tokens that I was (somewhat
+arbitrarily) using in the last post to test my training loop.  The loss chart looked like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/a-to-a-next-token-loss-chart.png" alt="Next token prediction loss chart for the bigram-style model" title="Next token prediction loss chart for the bigram-style model" /></p>
+
+<p>That was pretty promising!  Loss came down from roughly 10.82 down to a fairly stable
+6 or so by global step 768, and seemed to flatten out there.  It's possible that further
+training could have got it down a bit more, but I decided (again, somewhat arbitrarily) to
+use the average train loss in the checkpoint period ending at step 937 as my starting point.  If we could make changes
+that reduced that, then we'd be moving forward.  For this model, that value was
+5.909.</p>
+
+<p>So, what were the changes we needed to make to change our bigram-style model to a real,
+if small, LLM?</p>
+
+<h2 id="building-gpt-2-a-checklist">Building GPT-2: a checklist</h2>
+
+<p>Adapting from my <a href="/2025/09/how-do-llms-work">how LLMs work</a> post, a GPT-2-style LLM
+looks like this.  We receive our sequence of token IDs, and then:</p>
+
+<ul>
+<li>Convert them into embeddings. <strong>✔ ️done</strong></li>
+<li>Add on position embeddings.</li>
+<li>Run these embeddings through multiple successive Transformers blocks.</li>
+<li>Layer normalisation</li>
+<li>Project them back from embedding space to vocab space. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>Inside the Transformers blocks, we:</p>
+
+<ul>
+<li>Take a copy of the input sequence of embeddings</li>
+<li>Layer normalisation</li>
+<li>Run multi-head attention</li>
+<li>Add the copy back in so that the version that came out of MHA is something more like an "annotation" of the original</li>
+<li>Take a second copy of that one</li>
+<li>Layer normalisation again</li>
+<li>Run it through a simple neural network</li>
+<li>Add the results of that back in.</li>
+</ul>
+
+<p>So that gave me the checklist; looking at it, the most tempting next step was
+layer normalisation (henceforth LayerNorm).  It's used at the end of the core
+loop, and then twice in the Transformers blocks.</p>
+
+<p>What would happen if we coded it up, and then added it to the core only?</p>
+
+<h2 id="layernorm">LayerNorm</h2>
+
+<p>The purpose of <a href="/2025/07/llm-from-scratch-16-layer-normalisation">LayerNorm</a> is to stabilise
+training.  We constrain the values flowing through our model so that they have certain
+statistical properties that tend to make the whole thing more trainable.</p>
+
+<p>That would mean that if it did help with this model -- placed in between the embedding
+layer at the start, and the output head at the end -- then we'd hope for loss to go down
+faster, and ideally finish at a lower level.</p>
+
+<p>Time to code it up!</p>
+
+<p><a href="https://flax.readthedocs.io/en/stable/api_reference/flax.nnx/nn/normalization.html#flax.nnx.LayerNorm">NNX has its own LayerNorm implementation</a>,
+of course (as does <a href="https://docs.pytorch.org/docs/2.12/generated/torch.nn.LayerNorm.html">PyTorch</a>),
+but in the book, we implement it ourselves, and that felt like the correct path to
+take.</p>
+
+<p>Firstly, I implemented a dummy version:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LayerNorm</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">xs</span>
+</code></pre>
+</div>
+
+<p>...and updated the core <code>GPTModel</code> to create and call one:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">GPTModel</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="o">...</span>
+    <span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Embed</span><span class="p">(</span>
+                <span class="o">...</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_norm</span> <span class="o">=</span> <span class="n">LayerNorm</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_head</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span>
+                <span class="o">...</span>
+        <span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">input_embeddings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+
+        <span class="n">normalised</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_norm</span><span class="p">(</span><span class="n">input_embeddings</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_head</span><span class="p">(</span><span class="n">normalised</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>And kicked off a training run for a few seconds just to make sure that it hadn't
+broken anything and that loss dropped -- being my first NNX module-inside-a-module,
+I worried that there might have been something non-intuitive that I had to do to get it
+to work.  But everything seemed good -- loss was dropping, no errors.</p>
+
+<p>So, following <a href="/2025/07/llm-from-scratch-16-layer-normalisation">the notes I made when I first learned about LayerNorm</a>,
+I needed to make the values flowing through centred around zero by subtracting their
+mean, and then scale them to have a variance of one by dividing by the standard
+deviation (details in those notes).</p>
+
+<p>The shape of the <code>xs</code> I had coming into my <code>LayerNorm</code> class's <code>_call</code> was this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">xs.shape=(6, 1024, 768)</span>
+</code></pre>
+</div>
+
+<p>That was <code>(batch_size, seq_len, d_emb)</code>.  So we needed to do those operations strictly on the last axis,
+manipulating each embedding independently.</p>
+
+<p>JAX has a <a href="https://docs.jax.dev/en/latest/_autosummary/jax.numpy.std.html"><code>std</code> function</a>
+and a <a href="https://docs.jax.dev/en/latest/_autosummary/jax.numpy.mean.html#jax.numpy.mean"><code>mean</code> one</a>,
+both of which take an <code>axis</code> parameter.  The <code>Array</code> object repackaged those as
+methods, which was convenient, so I did a first cut test like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LayerNorm</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">xs</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">means</span> <span class="o">=</span> <span class="n">xs</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">means</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">stds</span> <span class="o">=</span> <span class="n">xs</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stds</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">xs</span>
+</code></pre>
+</div>
+
+<p>That printed out these results:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">xs.shape=(6, 1024, 768)</span>
+<span class="go">means.shape=(6, 1024)</span>
+<span class="go">stds.shape=(6, 1024)</span>
+</code></pre>
+</div>
+
+<p>...which looked plausible; one number for each embedding vector.  Could we
+broadcast them across the array?</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LayerNorm</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">xs</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">means</span> <span class="o">=</span> <span class="n">xs</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">means</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">stds</span> <span class="o">=</span> <span class="n">xs</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stds</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">normalized</span> <span class="o">=</span> <span class="p">(</span><span class="n">xs</span> <span class="o">-</span> <span class="n">means</span><span class="p">)</span> <span class="o">/</span> <span class="n">stds</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">normalized</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">normalized</span>
+</code></pre>
+</div>
+
+<p>This blew up:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">ValueError: Incompatible shapes for broadcasting: shapes=[(6, 1024, 768), (6, 1024)]</span>
+</code></pre>
+</div>
+
+<p>Fair enough.  But <code>mean</code> and <code>std</code> have a <code>keepdims</code> kwarg that looked like it would help:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LayerNorm</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">xs</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">means</span> <span class="o">=</span> <span class="n">xs</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">means</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">stds</span> <span class="o">=</span> <span class="n">xs</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stds</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">normalized</span> <span class="o">=</span> <span class="p">(</span><span class="n">xs</span> <span class="o">-</span> <span class="n">means</span><span class="p">)</span> <span class="o">/</span> <span class="n">stds</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">normalized</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">normalized</span>
+</code></pre>
+</div>
+
+<p>...and it did!</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">xs.shape=(6, 1024, 768)</span>
+<span class="go">means.shape=(6, 1024, 1)</span>
+<span class="go">stds.shape=(6, 1024, 1)</span>
+<span class="go">normalized.shape=(6, 1024, 768)</span>
+</code></pre>
+</div>
+
+<p>Excellent.  So the next step was to see if that would work even slightly.  Interestingly
+loss started off a bit higher at 11.29 after the first global step -- so adding in the
+LayerNorm had actually made the model <em>worse</em> than it was -- but it seemed to be falling
+rapidly.  Things weren't totally broken, at least.</p>
+
+<p>But there was more to LayerNorm than just zeroing the mean and scaling to the variance;
+we also needed to scale them up by a learnable amount, and then shift/bias them by adding
+on a different trainable amount.  More precisely, both of those trainable amounts were
+different for each of the (in this case) 768 embedding dimensions.</p>
+
+<p>We needed two learnable vectors of length <code>d_emb</code>.  I hadn't noted it down at the
+time but I figured (as it turned out, correctly) that a sensible starting point for
+those values would be all-zero for the bias, and all-one for the scale.</p>
+
+<p>From <a href="https://flax.readthedocs.io/en/stable/key_concepts.html#traced-vs-static-data">this help page</a>,
+the way you create a trainable array associated with an NNX module is this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">nnx</span><span class="o">.</span><span class="n">Param</span><span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="n">rngs</span><span class="o">.</span><span class="n">param</span><span class="p">(),</span> <span class="p">(</span><span class="n">dim</span><span class="p">,</span> <span class="n">dim</span><span class="p">)))</span>
+</code></pre>
+</div>
+
+<p>That code created a random vector, rather than the zeros/ones we needed, and we'd need to get
+the dimensions right.  Because of the "Incompatible shapes for broadcasting" error I'd
+just had, I was feeling a bit paranoid about the latter, so I chose a shape of <code>(1, 1, d_emb)</code>, and
+wrote this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LayerNorm</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Param</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">ones</span><span class="p">((</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">)))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bias</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Param</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">)))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">xs</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">means</span> <span class="o">=</span> <span class="n">xs</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">means</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">stds</span> <span class="o">=</span> <span class="n">xs</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stds</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">normalized</span> <span class="o">=</span> <span class="p">(</span><span class="n">xs</span> <span class="o">-</span> <span class="n">means</span><span class="p">)</span> <span class="o">/</span> <span class="n">stds</span>
+        <span class="n">jax</span><span class="o">.</span><span class="n">debug</span><span class="o">.</span><span class="n">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">normalized</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">scaled_and_biased</span> <span class="o">=</span> <span class="p">(</span><span class="n">normalized</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span><span class="p">)</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span>
+
+        <span class="k">return</span> <span class="n">scaled_and_biased</span>
+</code></pre>
+</div>
+
+<p>That looked pretty plausible, though in retrospect I think I was being overly cautious
+and didn't need the leading two axes for the scale and bias.</p>
+
+<p>The only thing I was unsure about was whether the <code>nnx.Param</code> wrappers
+I had put in were really making those arrays trainable.  I put some code in to print
+them out and kicked off a run for a few minutes, and confirmed that they were
+changing in ways that seem plausible -- small non-zero bias, scale close
+to but not equal to one.  That was all good!</p>
+
+<p>Next, I spotted one issue.  What if one of the standard deviations was zero?  That would
+lead to a divide-by-zero error here:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">normalized</span> <span class="o">=</span> <span class="p">(</span><span class="n">xs</span> <span class="o">-</span> <span class="n">means</span><span class="p">)</span> <span class="o">/</span> <span class="n">stds</span>
+</code></pre>
+</div>
+
+<p>Now, the standard deviation, if it's not zero, has to be positive --
+so adding on a small value would fix that <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="n">normalized</span> <span class="o">=</span> <span class="p">(</span><span class="n">xs</span> <span class="o">-</span> <span class="n">means</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">stds</span> <span class="o">+</span> <span class="mf">1e-5</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>With that in place, I felt that it was ready to go.  Time to do a full training
+run!</p>
+
+<p>I kicked that off, and it completed with this output:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-20 19:08:17.189721 Tokens seen: 92,209,152</span>
+<span class="go">2026-06-20 19:08:17.189724 Throughput: 95,383 tokens/second</span>
+<span class="go">2026-06-20 19:08:17.189734 Final train loss: 5.736</span>
+<span class="go">2026-06-20 19:08:17.189737 Done</span>
+</code></pre>
+</div>
+
+<p>Loss looked like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/llm-shell-only-next-token-loss-chart.png" alt="Next token prediction loss chart for embeddings-LayerNorm-output" title="Next token prediction loss chart for embeddings-LayerNorm-output" /></p>
+
+<p>Let's look at the results for the previous run without LayerNorm for comparison:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/a-to-a-next-token-loss-chart.png" alt="Next token prediction loss chart for the bigram-style model" title="Next token prediction loss chart for the bigram-style model" /></p>
+
+<p>You can see that the new run, the first one, drops faster.  It's harder to see from
+the chart, but it also finished up with a lower training loss at 937 (my relatively
+arbitrary metric): 5.734 rather than 5.909.</p>
+
+<p>That was interesting!  The new model was basically doing the same thing -- predicting
+the next token based only on the "current" token, but loss was lower.  My take is that
+if we had trained the non-LayerNorm model for longer, it might have managed to eventually
+grind out a better loss.  But LayerNorm was doing its job -- it was stabilising training,
+and as a result we converged faster.</p>
+
+<p>That was a win!  I decided to run it through my old smoke test from the PyTorch training runs, and see how it completed
+"Every effort moves you":</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Every effort moves you can be a few years.</span>
+<span class="go">-year-year-year-year-year-year-</span>
+</code></pre>
+</div>
+
+<p>It was kind of impressive that it managed to finish the first line before it got
+stuck in a loop -- but it was understandable that we couldn't expect anything
+good yet.  Each predicted token was based entirely on the token before it.</p>
+
+<p>What next?  Back to our checklist:</p>
+
+<ul>
+<li>Convert token IDs into embeddings. <strong>✔ ️done</strong></li>
+<li>Add on position embeddings.</li>
+<li>Run these embeddings through multiple successive Transformers blocks.</li>
+<li>Layer normalisation <strong>✔ ️done</strong></li>
+<li>Project them back from embedding space to vocab space. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>Inside the Transformers blocks, we:</p>
+
+<ul>
+<li>Take a copy of the input sequence of embeddings</li>
+<li>Layer normalisation</li>
+<li>Run multi-head attention</li>
+<li>Add the copy back in so that the version that came out of MHA is something more like an "annotation" of the original</li>
+<li>Take a second copy of that one</li>
+<li>Layer normalisation again</li>
+<li>Run it through a simple neural network</li>
+<li>Add the results of that back in.</li>
+</ul>
+
+<p>So, at this stage, for each input token we were predicting the next one based on
+the input token only -- like I said earlier, we were doing a somewhat roundabout
+way of building an approximation of a table of bigram probabilities.  What would happen if we started
+paying attention to the tokens to the left?  And what would be the simplest, dumbest
+way to do that?</p>
+
+<h2 id="a-single-layer-of-single-head-attention">A single layer of single-head attention</h2>
+
+<p>The real LLM has multiple layers of multi-head attention, each one also having a
+feed-forward network, some LayerNorms, and some shortcut connections.</p>
+
+<p>Single-head attention is easier to code, but even on its own, you'd expect it to be
+able to add some value.  Each token would get at least some information from the ones
+to the left.  And one layer, likewise, you'd expect might help a bit.  I suspected
+that it wouldn't work on its own -- I expected I'd need shortcut connections too --
+but decided to start with attention on its own.</p>
+
+<p>I modified the main class to have a single "Transformers" layer:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">GPTModel</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="o">...</span>
+    <span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Embed</span><span class="p">(</span>
+            <span class="o">...</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">transformers_layer</span> <span class="o">=</span> <span class="n">TransformersLayer</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_norm</span> <span class="o">=</span> <span class="n">LayerNorm</span><span class="p">(</span><span class="n">d_emb</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_head</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span>
+            <span class="o">...</span>
+        <span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">input_embeddings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+
+        <span class="n">transformed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">transformers_layer</span><span class="p">(</span><span class="n">input_embeddings</span><span class="p">)</span>
+
+        <span class="n">normalized</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_norm</span><span class="p">(</span><span class="n">transformed</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_head</span><span class="p">(</span><span class="n">normalized</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...where that layer was actually just single-head attention:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">TransformersLayer</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">attention</span> <span class="o">=</span> <span class="n">Attention</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">attention</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Next, it was time for the <code>Attention</code> class.
+I'm not going to write yet another attention explainer -- I think my <a href="/2025/09/how-do-llms-work">"How do LLMs work?"</a>
+one does a decent job of that, and <a href="/2025/05/llm-from-scratch-13-taking-stock-part-1-attention-heads-are-dumb">"The 'why' of attention, or: attention heads are dumb"</a>
+works well too.  So in the next bit I'll assume that you understand the basics.</p>
+
+<p>My first cut was basically just the maths (up to the causal mask) to get the
+attention scores:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Attention</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_emb</span> <span class="o">=</span> <span class="n">d_emb</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">Q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">K</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">V</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+
+        <span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">K</span><span class="o">.</span><span class="n">T</span>
+
+        <span class="n">omega</span> <span class="o">/=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_emb</span><span class="p">)</span>
+
+        <span class="n">causal_omega</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">tril</span><span class="p">(</span><span class="n">omega</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>It did the projections into query, key and value space, worked out the attention
+scores with the array multiplication, normalised it by dividing by the square root of the number of
+dimensions in the Q-K embedding space, and then zeroed out the scores where a
+token was attending to tokens in its "future".</p>
+
+<p>There were a couple of problems, though.  Firstly, that wouldn't work if we were
+working with batches, and secondly, zeroing out the non-causal scores wasn't quite
+correct.</p>
+
+<p>The batches first.  Our incoming <code>xs</code> here would have the shape
+<code>(batch_length, seq_len, d_emb)</code>.  After the projections to the Q-K embedding space,
+both <code>Q</code> and <code>K</code> would also be shaped <code>(batch_length, seq_len, d_emb)</code>.  Now, the
+<code>.T</code> property on the JAX array class just reverses the axes, so the code above
+would give us <code>K.T</code> with the shape <code>(d_emb, seq_len, batch_length)</code>.</p>
+
+<p>That would break!  Matrix multiplication in JAX expects all but the last two
+axes to represent batches, so we actually wanted <code>K.T</code> to have the shape
+`<code>(batch_length, d_emb, seq_len)</code>.  That meant that what we actually
+wanted was to just transpose the last two axes.</p>
+
+<p>The JAX <a href="https://docs.jax.dev/en/latest/_autosummary/jax.numpy.transpose.html"><code>transpose</code> function</a> takes
+an <code>axes</code> parameter that allows you to specify the specific re-ordering of the input
+axes that you want.  So I could rewrite the code like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">Q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">K</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">V</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+
+        <span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+
+        <span class="n">omega</span> <span class="o">/=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_emb</span><span class="p">)</span>
+
+        <span class="n">causal_omega</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">tril</span><span class="p">(</span><span class="n">omega</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>As <code>Q</code> would have the shape <code>(batch_length, seq_len, d_emb)</code>, and the transposed
+version of <code>K</code> would be <code>(batch_length, d_emb, seq_len)</code>, they'd be compatible for
+matrix multiplication and give us a result that was <code>(batch_length, seq_len, seq_len)</code>
+-- just what we wanted for attention scores.</p>
+
+<p>The next step was to fix the causal mask.  The next step in this
+attention mechanism was going to be running the causal attention scores
+in <code>causal_omega</code> through softmax over the last dimension, to convert them into
+attention weights.  Now, our current code was zeroing out unwanted acausal scores,
+but a zero still contributes to softmax.  If you want a particular value to come out of
+softmax guaranteed to be zero, you need to set it to minus infinity.</p>
+
+<p>I decided that the easiest way to do this was to create a causal mask -- a boolean
+array that matched the size of <code>omega</code>, but was full of <code>True</code>s:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">omega</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Then I could zero out (well, "false out") the cells in the mask related to unwanted future-facing
+scores, just like I was previously doing on the scores:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">tril</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and then I could apply that mask to omega with <a href="https://docs.jax.dev/en/latest/_autosummary/jax.numpy.where.html"><code>jnp.where</code></a>,
+telling it to create a new array, taking the value from <code>omega</code> where the mask
+had <code>True</code>, and <code>-jnp.inf</code> in places where it had <code>False</code>.</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">causal_omega</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">,</span> <span class="n">omega</span><span class="p">,</span> <span class="o">-</span><span class="n">jnp</span><span class="o">.</span><span class="n">inf</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That seemed solid, so I just needed to run the result through
+<a href="https://docs.jax.dev/en/latest/_autosummary/jax.nn.softmax.html"><code>jax.nn.softmax</code></a>,
+specifying that the last dimension was the one where it should apply the function,
+and that would give me the attention weights:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">attention_weights</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">causal_omega</span><span class="p">,</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Finally, I just needed to use those attention weights to get the attention output
+by mixing in appropriate portions of the projection of the inputs into value space,
+<code>V</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">return</span> <span class="n">attention_weights</span> <span class="o">@</span> <span class="n">V</span>
+</code></pre>
+</div>
+
+<p>As <code>attention_weights</code> was shaped <code>(batch_length, seq_len, seq_len)</code>, and <code>V</code> (like
+<code>Q</code> and <code>K</code>) was shaped <code>(batch_length, seq_len, d_emb)</code>, the batch axes were at the
+start where they belonged, and the matrix multiplication would work and return something
+shaped <code>(batch_length, seq_len, d_emb)</code>.</p>
+
+<p>With that, we were done!   The final single-head attention class looked like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Attention</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_emb</span> <span class="o">=</span> <span class="n">d_emb</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">Q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">K</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">V</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+
+        <span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+
+        <span class="n">omega</span> <span class="o">/=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_emb</span><span class="p">)</span>
+
+        <span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">omega</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+        <span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">tril</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">)</span>
+
+        <span class="n">causal_omega</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">,</span> <span class="n">omega</span><span class="p">,</span> <span class="o">-</span><span class="n">jnp</span><span class="o">.</span><span class="n">inf</span><span class="p">)</span>
+
+        <span class="n">attention_weights</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">causal_omega</span><span class="p">,</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">attention_weights</span> <span class="o">@</span> <span class="n">V</span>
+</code></pre>
+</div>
+
+<p>I kicked off a training run with that, and it did work, in that loss went down over
+the course of the run -- but at the end of the run, the loss at step 937 was 5.934 --
+significantly above the 5.734 I got on the previous run, with no attention.</p>
+
+<p>But that made sense!  As I'd said earlier, I suspected that this wouldn't help if
+we had no shortcut connection.</p>
+
+<p>Intuitively, if you want to work out what token should be at position <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi><mo>&#x0002B;</mo><mn>1</mn></mrow></math>, on average the
+most important other token you need to know about is probably whichever one is at position <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi></mrow></math>.
+Knowing about the tokens at <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi><mo>&#x02212;</mo><mn>1</mn></mrow></math>, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi><mo>&#x02212;</mo><mn>2</mn></mrow></math>, and so on, could well be helpful -- maybe
+<em>very</em> helpful -- but not at the cost of not knowing about the one at <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi></mrow></math>.</p>
+
+<p>Now, single attention heads are just simple pattern-matchers.  They can't learn complex
+rules, it's only by working together -- "horizontally", in multi-head attention or "vertically"
+across multiple layers -- that they can do complex things.</p>
+
+<p>What we were asking this head to do was to learn some way of gathering information
+about previous tokens, and also to keep the knowledge about the "current" one.  That's
+a tall order for a dumb attention head!</p>
+
+<p>In my mind, this is a large part of the benefit of shortcut connections.
+They are often presented as a way to make sure that during training,
+gradients flow smoothly from the output end of the model to the earlier layers.  But
+I prefer to think of them as preserving the original embeddings, so that each layer doesn't
+completely replace what came into it, but instead does something closer to adding on
+its own notes -- like <a href="/2025/08/llm-from-scratch-18-residuals-shortcut-connections-and-the-talmud">scholars adding commentary to a core text in the Talmud</a>.</p>
+
+<p>In the training run above, the attention head was trying to learn how to
+preserve the meaning of the embedding it was working on, while also merging in
+information from earlier ones.  If we added a shortcut connection, then it would
+only have to do the second of those two jobs.</p>
+
+<p>The code was simple: I updated the <code>TransformersLayer</code> module to do a shortcut
+connection:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">TransformersLayer</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">attention</span> <span class="o">=</span> <span class="n">Attention</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">shortcut</span> <span class="o">=</span> <span class="n">xs</span>
+        <span class="n">att</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">attention</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">shortcut</span> <span class="o">+</span> <span class="n">att</span>
+</code></pre>
+</div>
+
+<p>I kicked off a training run, and at the end it printed this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-23 03:51:18.086097 Tokens seen: 92,209,152</span>
+<span class="go">2026-06-23 03:51:18.086099 Throughput: 90,442 tokens/second</span>
+<span class="go">2026-06-23 03:51:18.086108 Final train loss: 5.570</span>
+<span class="go">2026-06-23 03:51:18.086121 Done</span>
+</code></pre>
+</div>
+
+<p>The loss chart looked like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/sha-with-shortcut-transformers-layer-loss-chart.png" alt="Next token prediction loss chart for one layer of SHA with shortcut" title="Next token prediction loss chart for one layer of SHA with shortcut" /></p>
+
+<p>And, importantly, that training loss at step 937 which I was using as a metric was
+5.553 -- a decent improvement over the previous best of 5.734.  Even a dumb single
+attention head was able to do something useful, if it had a shortcut connection.</p>
+
+<p>I decided to run another qualitative smoke test:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Every effort moves you can be able to get to get to get to get to get a lot of the way to get</span>
+</code></pre>
+</div>
+
+<p>I mean, it was repetitive, but it was actually getting noticeably closer to making
+sense!</p>
+
+<p>So that was excellent news.  What next?  Our checklist looked like this:</p>
+
+<ul>
+<li>Convert token IDs into embeddings. <strong>✔ ️done</strong></li>
+<li>Add on position embeddings.</li>
+<li>Run these embeddings through multiple successive Transformers blocks. <strong>part-done -- one layer only</strong></li>
+<li>Layer normalisation <strong>✔ ️done</strong></li>
+<li>Project them back from embedding space to vocab space. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>Inside the Transformers blocks, we:</p>
+
+<ul>
+<li>Take a copy of the input sequence of embeddings <strong>✔ ️done</strong></li>
+<li>Layer normalisation</li>
+<li>Run multi-head attention <strong>part-done -- single-head attention only</strong></li>
+<li>Add the copy back in so that the version that came out of MHA is something more like an "annotation" of the original <strong>✔ ️done</strong></li>
+<li>Take a second copy of that one</li>
+<li>Layer normalisation again</li>
+<li>Run it through a simple neural network</li>
+<li>Add the results of that back in.</li>
+</ul>
+
+<p>Now, our single attention layer was lacking something.  Without position embeddings,
+that layer has no idea what order the tokens before the one it's looking at come in.
+If it's considering the " cat" in</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">The fat cat</span>
+</code></pre>
+</div>
+
+<p>...it doesn't know if it's looking at "The fat cat" or "fat The cat".</p>
+
+<p>Position embeddings are simple, and might help, so that was the next step.</p>
+
+<h2 id="position-embeddings">Position embeddings</h2>
+
+<p>These were trivial to add.  We had this core code:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">GPTModel</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="o">...</span>
+    <span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Embed</span><span class="p">(</span>
+            <span class="o">...</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">transformers_layer</span> <span class="o">=</span> <span class="n">TransformersLayer</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_norm</span> <span class="o">=</span> <span class="n">LayerNorm</span><span class="p">(</span><span class="n">d_emb</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_head</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span>
+            <span class="o">...</span>
+        <span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">input_embeddings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+
+        <span class="n">transformed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">transformers_layer</span><span class="p">(</span><span class="n">input_embeddings</span><span class="p">)</span>
+
+        <span class="n">normalized</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_norm</span><span class="p">(</span><span class="n">transformed</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_head</span><span class="p">(</span><span class="n">normalized</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>So I just added a position encoding module in <code>__init__</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="bp">self</span><span class="o">.</span><span class="n">position_embedding</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Embed</span><span class="p">(</span>
+            <span class="n">num_embeddings</span><span class="o">=</span><span class="n">context_length</span><span class="p">,</span>
+            <span class="n">features</span><span class="o">=</span><span class="n">d_emb</span><span class="p">,</span>
+            <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">,</span>
+        <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and mixed it in with the token embeddings to create new, improved <code>input_embeddings</code> to be used
+in our "Transformers" layer:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="n">token_embeddings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">b</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="n">xs</span><span class="o">.</span><span class="n">shape</span>
+        <span class="n">position_embeddings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">position_embedding</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n</span><span class="p">))</span>
+        <span class="n">input_embeddings</span> <span class="o">=</span> <span class="n">token_embeddings</span> <span class="o">+</span> <span class="n">position_embeddings</span>
+</code></pre>
+</div>
+
+<p>I kicked off a training run with that:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-23 04:44:44.759768 Tokens seen: 92,209,152</span>
+<span class="go">2026-06-23 04:44:44.759771 Throughput: 88,618 tokens/second</span>
+<span class="go">2026-06-23 04:44:44.759779 Final train loss: 5.386</span>
+<span class="go">2026-06-23 04:44:44.759781 Done</span>
+</code></pre>
+</div>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/sha-with-position-embeddings-loss-chart.png" alt="Next token prediction loss chart for one layer of SHA with position embeddings" title="Next token prediction loss chart for one layer of SHA with position embeddings" /></p>
+
+<p>Pretty hard to distinguish from the previous one, but the metric I was tracking, that
+loss at step 937, had improved again!  We were down to 5.354 from 5.553 :-)</p>
+
+<p>A quick qualitative smoke test didn't show that improvement, though:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Every effort moves you can be able to get to get to get back to get back to get back to get back to</span>
+</code></pre>
+</div>
+
+<p>Pretty much indistinguishable to the previous one.  But still, Loss Number Went Down, and
+that's what was important at this stage.</p>
+
+<p>It was time to try the next step.  From the checklist:</p>
+
+<ul>
+<li>Convert token IDs into embeddings. <strong>✔ ️done</strong></li>
+<li>Add on position embeddings. <strong>✔ ️done</strong></li>
+<li>Run these embeddings through multiple successive Transformers blocks. <strong>part-done -- one layer only</strong></li>
+<li>Layer normalisation <strong>✔ ️done</strong></li>
+<li>Project them back from embedding space to vocab space. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>Inside the Transformers blocks, we:</p>
+
+<ul>
+<li>Take a copy of the input sequence of embeddings <strong>✔ ️done</strong></li>
+<li>Layer normalisation</li>
+<li>Run multi-head attention <strong>part-done -- single-head attention only</strong></li>
+<li>Add the copy back in so that the version that came out of MHA is something more like an "annotation" of the original <strong>✔ ️done</strong></li>
+<li>Take a second copy of that one</li>
+<li>Layer normalisation again</li>
+<li>Run it through a simple neural network</li>
+<li>Add the results of that back in.</li>
+</ul>
+
+<p>We had only one attention head right now.  Individually,
+<a href="/2025/05/llm-from-scratch-13-taking-stock-part-1-attention-heads-are-dumb">attention heads are dumb</a>,
+so switching to multi-head attention seemed like a good thread to pull.</p>
+
+<h2 id="multi-head-attention">Multi-head attention</h2>
+
+<p>At this point, my single-head attention code looked like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="n">Q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">K</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">V</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+
+        <span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+
+        <span class="n">omega</span> <span class="o">/=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_emb</span><span class="p">)</span>
+
+        <span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">omega</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+        <span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">tril</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">)</span>
+
+        <span class="n">causal_omega</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">,</span> <span class="n">omega</span><span class="p">,</span> <span class="o">-</span><span class="n">jnp</span><span class="o">.</span><span class="n">inf</span><span class="p">)</span>
+
+        <span class="n">attention_weights</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">causal_omega</span><span class="p">,</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">attention_weights</span> <span class="o">@</span> <span class="n">V</span>
+</code></pre>
+</div>
+
+<p>I decided to re-implement multi-head attention (which I'll call MHA from here onwards)
+from first principles rather than working strictly
+from my notes, and then to come back and check it.</p>
+
+<blockquote>
+  <p>If you're looking at your browser's scrollbar with horror ("<em>still</em> only
+  50%?!") and really don't want to read a full derivation of MHA, you can
+  <a href="#first-mha-code">skip straight to the first complete version of the code</a>.</p>
+</blockquote>
+
+<p>The point of MHA is that we're running multiple copies of the calculation above in
+parallel -- let's pin down the name of the number of copies as <code>n_heads</code>.  Now,
+we could naively implement it just by spinning off <code>n_heads</code> threads and running the
+existing code in each, but that wouldn't really take advantage of the GPU's inherent
+parallelism.</p>
+
+<p>I felt that we could rely on the fact that JAX's matrix multiplications treat all but the
+last two dimensions as "batches".  For example, if you have two arrays with shapes:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp gp-VirtualEnv">(a, b, c, ..., l, m, n)</span>
+</code></pre>
+</div>
+
+<p>and</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp gp-VirtualEnv">(a, b, c, ..., l, n, p)</span>
+</code></pre>
+</div>
+
+<p>...then you can multiply them.  A <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>m</mi><mi>&#x000D7;</mi><mi>n</mi></mrow></math> matrix multiplied by
+a <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi><mi>&#x000D7;</mi><mi>p</mi></mrow></math> one will be <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>m</mi><mi>&#x000D7;</mi><mi>p</mi></mrow></math>, so you'll get something that is</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp gp-VirtualEnv">(a, b, c, ..., l, m, p)</span>
+</code></pre>
+</div>
+
+<p>The other dimensions (so long as they match) will essentially act as
+an <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>a</mi><mi>&#x000D7;</mi><mi>b</mi><mi>&#x000D7;</mi><mi>c</mi><mi>&#x000D7;</mi><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mi>&#x000D7;</mi><mi>l</mi></mrow></math> batch.</p>
+
+<p>Now, right now we were just using a single batch dimension.  Let's look at the core
+multiplication in the attention mechanism, which works out <code>omega</code>, the attention scores.
+I had this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>Breaking that apart into two steps:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">K_transpose</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+<span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">K_transpose</span>
+</code></pre>
+</div>
+
+<p>We got <code>K</code> from this line:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">K</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Let's look at the shapes here.</p>
+
+<p><code>xs</code> is our input embeddings for this layer; its
+shape is <code>(batch_size, seq_len, d_emb)</code>.  Projecting it through <code>W_k</code>, which is
+shaped <code>(d_emb, d_emb)</code> gives us a shape for <code>K</code> of <code>(batch_size, seq_len, d_emb)</code> again.</p>
+
+<p><code>Q</code>, being a projection of <code>xs</code> through <code>W_q</code>, which is the same shape as <code>W_k</code>, will have
+the same shape as <code>K</code>.</p>
+
+<p>Now, that means that <code>K_transpose</code> is <code>(batch_size, d_emb, seq_len)</code>, and the calculation</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">K_transpose</span>
+</code></pre>
+</div>
+
+<p>...is doing a batched matrix multiplication getting us the <code>omega</code> that we want,
+shaped <code>(batch_size, seq_len, seq_len)</code>.</p>
+
+<p>But as I said above, there's no need to stop with just one batch dimension.  Let's say
+that we have <code>n_heads</code> heads, and that they each work with embeddings sized <code>d_head</code>.
+Imagine that we've already somehow done multiple projections into the key and query
+spaces for each of our <code>n_heads</code> heads, and that the results have somehow been put
+into arrays such that <code>Q</code> and <code>K</code> are shaped <code>(batch_size, n_heads, seq_len, d_head)</code>
+-- that is, we've gained an extra axis that keeps the projections for each head into its
+query-key space separate.</p>
+
+<p>We could use the fact that both of those two leading axes are basically just batch
+dimensions, and the existing single matrix multiplication
+will still work, with one tiny tweak: the current transpose is this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">K_transpose</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+<span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">K_transpose</span>
+</code></pre>
+</div>
+
+<p>...to swap around the last two axes of a three-axis array.  With one extra batch
+dimension, we'll need to take account of that and do this instead:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">K_transpose</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+<span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">K_transpose</span>
+</code></pre>
+</div>
+
+<p>That will be a multiplication of <code>Q</code>, shaped <code>(batch_size, n_heads, seq_len, d_head)</code>,
+with <code>K_transpose</code>, shaped <code>(batch_size, n_heads, d_head, seq_len)</code>, which
+gives us an <code>omega</code> of the right shape, <code>(batch_size, n_heads, seq_len, seq_len)</code>.</p>
+
+<p>So, if we can start treating the heads as just another batch dimension, things seem
+simpler, at least for the attention score calculation.
+Let's continue down through the single-head code, and then come back later to how we might
+get the inputs into that double-batched shape.</p>
+
+<p>The next line after the <code>omega</code> calculation just scales the attention scores by
+a scalar:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">omega</span> <span class="o">/=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_emb</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That looked fine, just a broadcast division-by-float.  We'd need to change that
+<code>self.d_emb</code> to be <code>d_head</code> in some manner, but that's all.</p>
+
+<p>Next:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">omega</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>The <code>jnp.ones_like</code> will give us an array that's <code>(batch_size, n_heads, seq_len, seq_len)</code>
+full of <code>True</code>s.  That seems reasonable.</p>
+
+<p>The next step:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">tril</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>What will that do?  Well, per <a href="https://docs.jax.dev/en/latest/_autosummary/jax.numpy.tril.html#jax.numpy.tril">the <code>tril</code> documentation</a>:</p>
+
+<blockquote>
+  <p>When <code>m.ndim &gt; 2</code>, <code>jnp.tril</code> operates batch-wise on the trailing axes.</p>
+</blockquote>
+
+<p>...which sounded good.  <code>batch_size</code> and <code>n_heads</code> would be treated as batch axes,
+which meant that the next line:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">causal_omega</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">,</span> <span class="n">omega</span><span class="p">,</span> <span class="o">-</span><span class="n">jnp</span><span class="o">.</span><span class="n">inf</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...would work.  Likewise, with the next line:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">attention_weights</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">causal_omega</span><span class="p">,</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...the axis to apply <code>softmax</code> to is explicitly stated as the last one, which is
+what we wanted.</p>
+
+<p>So at the end of all of those steps, we'd have <code>attention_weights</code> shaped
+<code>(batch_size, n_heads, seq_len, seq_len)</code>, where the last axis had been
+softmaxed (softmaxxed?).</p>
+
+<p>The next line looked a little trickier:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">return</span> <span class="n">attention_weights</span> <span class="o">@</span> <span class="n">V</span>
+</code></pre>
+</div>
+
+<p>In the single-head version we had <code>attention_weights</code> of shape <code>(batch_size, seq_len, seq_len)</code>,
+and V of shape <code>(batch_size, seq_len, d_emb)</code>, so multiplying them gives us <code>(batch_size, seq_len, d_emb)</code></p>
+
+<p>In the new MHA code so far, we had our <code>attention_weights</code> shaped <code>(batch_size, n_heads, seq_len, seq_len)</code>.
+So in order for the matrix multiplication to work, we'd need <code>V</code> to be shaped
+<code>(batch_size, n_heads, seq_len, d_head)</code>.  That would give us a result shaped
+as <code>(batch_size, n_heads, seq_len, d_head)</code>.</p>
+
+<p>And conveniently, we'd already decided that the correct shape for <code>Q</code> and for <code>K</code>
+was <code>(batch_size, n_heads, seq_len, d_head)</code>.  If we could use the same "magic" to
+do the projection into value space -- that is, to get <code>V</code> such that the heads formed
+a new batch-like axis like we had for <code>Q</code> and <code>K</code> -- then we'd be all set.</p>
+
+<p>So, at that point, I'd worked out the core of MHA.  If we could get all of the
+inputs into the shape <code>(batch_size, n_heads, seq_len, d_head)</code>, and somehow handle
+an output of the shape <code>(batch_size, n_heads, seq_len, d_head)</code>, then we could use
+MHA code something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="c1"># Q and K are (batch_size, n_heads, len_sequence, d_head)</span>
+        <span class="c1"># We need to convert K to (batch_size, n_heads, d_head, len_sequence)</span>
+        <span class="c1"># and then we get omega (batch_size, n_heads, len_sequence, len_sequence)</span>
+        <span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+
+        <span class="n">omega</span> <span class="o">/=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_head</span><span class="p">)</span>
+
+        <span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">omega</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+        <span class="c1"># tril treats all but the last two axes as batches so we&#39;re OK here.</span>
+        <span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">tril</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">)</span>
+
+        <span class="n">causal_omega</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">,</span> <span class="n">omega</span><span class="p">,</span> <span class="o">-</span><span class="n">jnp</span><span class="o">.</span><span class="n">inf</span><span class="p">)</span>
+
+        <span class="c1"># last axis is still OK.</span>
+        <span class="n">attention_weights</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">causal_omega</span><span class="p">,</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># attention_weights is (batch_size, n_heads, len_sequence, len_sequence)</span>
+        <span class="c1"># V is (batch_size, n_heads, len_sequence, d_head)</span>
+        <span class="c1"># So this will come out as (batch_size, n_heads, len_sequence, d_head)</span>
+        <span class="n">weighted</span> <span class="o">=</span> <span class="n">attention_weights</span> <span class="o">@</span> <span class="n">V</span>
+</code></pre>
+</div>
+
+<p>The next question was, how do we get our inputs into that shape?  We could
+run them all through separate per-head weights -- that is, have an array with one
+per head, like <code>W_q[0]</code>, <code>W_k[0]</code> and <code>W_v[0]</code> for the first one.  But that, again,
+felt like it would be failing to take advantage of the GPU properly.</p>
+
+<p>The solution was to think of how matrix multiplications work.  If you multiply two
+matrices, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>X</mi><mi>&#x000B7;</mi><mi>Y</mi></mrow></math>, the value in the result,
+in row <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>r</mi></mrow></math>, and column <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>c</mi></mrow></math>, is the dot product of row <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>r</mi></mrow></math> in <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>X</mi></mrow></math> and column <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>c</mi></mrow></math> in <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>Y</mi></mrow></math>.</p>
+
+<p>So, imagine if you wanted to multiply <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>X</mi></mrow></math> by <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi></mrow></math> different versions of <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>Y</mi></mrow></math>, let's
+call them <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>Y</mi><mn>0</mn></msub></mrow></math>, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>Y</mi><mn>1</mn></msub></mrow></math>, and so on up to <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>Y</mi><mi>n</mi></msub></mrow></math>.  If you imagine a new matrix, <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>Y</mi><mrow><mtext>all</mtext></mrow></msub></mrow></math>,
+which is basically all the <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>Y</mi><mi>x</mi></msub></mrow></math>s stacked side-by-side, then the dot-product understanding
+of multiplication makes it pretty clear that if you did <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>X</mi><mi>&#x000B7;</mi><msub><mi>Y</mi><mrow><mtext>all</mtext></mrow></msub></mrow></math>, you would get
+the results of all of those separate multiplications, also stacked side-by-side.
+I'll call that kind of matrix a "striped" one, for want of a better word.</p>
+
+<p>Now, when we project our inputs into the embedding spaces used for attention, we have
+code like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">Q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>We've initialised the weights, <code>W_k</code> in this case, as an <code>nnx.Linear</code>, so what is
+happening under the hood here is basically:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>Q</mi><mo>&#x0003D;</mo><mtext>xs</mtext><mi>&#x000B7;</mi><msub><mi>W</mi><mi>q</mi></msub></mrow></math>
+
+<p>That is, it is just a matrix multiplication. <sup class="footnote-ref" id="fnref-2"><a href="#fn-2">2</a></sup></p>
+
+<p>So if we imagine that <code>W_q</code> is one of those "striped" matrices, holding all of the
+separate matrices to do the projections for all of the heads in a single one
+shaped <code>(d_emb, n_heads * d_head)</code>, then we could stick with the current code --
+the</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">Q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Our input <code>xs</code> would be shaped <code>(batch_size, seq_len, d_emb)</code>, so the result would be
+<code>(batch_size, seq_len, n_heads * d_head)</code>, and would have the projections for each head in
+the same vertical stripes as the separate heads' projection weights.</p>
+
+<p>Now, like PyTorch, JAX allows you to <a href="https://docs.jax.dev/en/latest/_autosummary/jax.numpy.reshape.html">reshape</a> arrays.
+You can take one axis of length (say) <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>m</mi><mi>&#x000D7;</mi><mi>n</mi></mrow></math>, and split it into two of
+lengths <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>m</mi></mrow></math> and <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi></mrow></math> respectively -- or, conversely, you can combine two axes of
+length <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>m</mi></mrow></math> and <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi></mrow></math> to one of <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>m</mi><mi>&#x000D7;</mi><mi>n</mi></mrow></math>.</p>
+
+<p>If our data had the shape <code>(batch_size, seq_len, n_heads * d_head)</code>, we could reshape it like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">Q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_head</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>...and that would split things up.  So we'd have Q shaped as <code>(batch_size, seq_len, n_heads, d_head)</code>.</p>
+
+<p>That's almost what we wanted!  We needed <code>(batch_size, n_heads, seq_len, d_head)</code>,
+and a simple transpose could sort that out:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">Q</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+        <span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_head</span><span class="p">)</span>
+    <span class="p">),</span>
+    <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Likewise for <code>K</code> and <code>V</code>, and that was our inputs sorted.</p>
+
+<p>Moving on to the output; it came from this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">weighted</span> <span class="o">=</span> <span class="n">attention_weights</span> <span class="o">@</span> <span class="n">V</span>
+</code></pre>
+</div>
+
+<p>...and as we worked out above, it was shaped <code>(batch_size, n_heads, seq_len, d_head)</code>.</p>
+
+<p>I remembered that we wanted to run that through a single linear layer to combine
+all of the different heads' outputs into one.  It felt like the best way to do that
+would be to get it back into a "striped" layout: <code>(batch_size, seq_len, n_heads * d_head)</code>.
+This would be something like the inverse of the input-wrangling.</p>
+
+<p>That would
+need a reshape, but before I could do that, I'd need to get the axes that needed to be
+merged next to each other.  If the input to the linear layer was going to be
+<code>(batch_size, seq_len, n_heads * d_head)</code>, we'd need to convert it
+from <code>(batch_size, n_heads, seq_len, d_head)</code>
+to <code>(batch_size, seq_len, n_heads, d_head)</code> first:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">weighted</span><span class="p">,</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>... and then we could just reshape it to <code>batch_size, len_sequence, n_heads * d_head</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">striped_output</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span>
+    <span class="n">weighted</span><span class="p">,</span>
+    <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+    <span class="n">batch_size</span><span class="p">,</span> <span class="n">len_sequence</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_head</span>
+<span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Finally, we could run it through a linear layer, with <code>in_features</code> set to <code>n_heads * d_head</code>,
+and <code>out_features</code> set to <code>d_emb</code>.</p>
+
+<p>I put that all together, and decided to throw something extra into the mix.  I remembered that
+Raschka's code had various checks to make sure that <code>d_head * n_heads == d_emb</code>, which
+seemed a little artificial -- I'd read that this was true of GPT-2, but wasn't a necessary
+restriction for GPT-style models, which makes sense.  There's no obvious reason per se why
+the heads' embedding dimensions should sum up to the higher-level embedding dimensions.</p>
+
+<p>So I decided initially to just pass in
+<code>d_head</code> and <code>n_heads</code> to the constructor.  In my training script I could force them to match
+the GPT-2 model, but if I wanted to use the code later for something different, I could vary
+them.</p>
+
+<p>Then I remembered that although the dimensionality of the embedding spaces for the
+query and the key vectors have to match (because otherwise you can't multiply them
+to work out attention scores with <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003A9;</mi><mo>&#x0003D;</mo><mi>Q</mi><msup><mi>K</mi><mi>T</mi></msup></mrow></math>), the value vector's dimensionality
+can in theory be different.  So I decided to break <code>d_head</code> into two separate <code>d_qk</code> and
+<code>d_v</code> parameters.</p>
+
+<p><a id="first-mha-code"></a>
+The result was this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MultiHeadAttention</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_qk</span><span class="p">,</span> <span class="n">d_v</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span> <span class="o">=</span> <span class="n">n_heads</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_qk</span> <span class="o">=</span> <span class="n">d_qk</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_v</span> <span class="o">=</span> <span class="n">d_v</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_qk</span> <span class="o">*</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_qk</span> <span class="o">*</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_v</span> <span class="o">*</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_projection</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_v</span> <span class="o">*</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">batch_size</span><span class="p">,</span> <span class="n">len_sequence</span><span class="p">,</span> <span class="n">d_emb</span> <span class="o">=</span> <span class="n">xs</span><span class="o">.</span><span class="n">shape</span>
+
+        <span class="c1"># For each of the below:</span>
+        <span class="c1"># * The initial linear layer projects them to</span>
+        <span class="c1">#   (batch_size, len_sequence, d_X * n_heads)</span>
+        <span class="c1">#   where X is qk or v as appropriate.</span>
+        <span class="c1"># * The reshape makes them (batch_size, len_sequence, n_heads, d_X)</span>
+        <span class="c1"># * The transpose makes them (batch_size, n_heads, len_sequence, d_X)</span>
+        <span class="n">Q</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">len_sequence</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_qk</span><span class="p">)</span>
+            <span class="p">),</span>
+            <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">K</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">len_sequence</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_qk</span><span class="p">)</span>
+            <span class="p">),</span>
+            <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">V</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">len_sequence</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_v</span><span class="p">)</span>
+            <span class="p">),</span>
+            <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Q and K are (batch_size, n_heads, len_sequence, d_qk) per above</span>
+        <span class="c1"># We need to convert K to (batch_size, n_heads, d_qk, len_sequence)</span>
+        <span class="c1"># and then we get omega (batch_size, n_heads, len_sequence, len_sequence)</span>
+        <span class="n">omega</span> <span class="o">=</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">K</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+
+        <span class="n">omega</span> <span class="o">/=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_qk</span><span class="p">)</span>
+
+        <span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">omega</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+        <span class="c1"># tril treats all but the last two axes as batches so we&#39;re OK here.</span>
+        <span class="n">causal_mask</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">tril</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">)</span>
+
+        <span class="n">causal_omega</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">,</span> <span class="n">omega</span><span class="p">,</span> <span class="o">-</span><span class="n">jnp</span><span class="o">.</span><span class="n">inf</span><span class="p">)</span>
+
+        <span class="c1"># last axis is still OK.</span>
+        <span class="n">attention_weights</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">causal_omega</span><span class="p">,</span> <span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># attention_weights is (batch_size, n_heads, len_sequence, len_sequence)</span>
+        <span class="c1"># V is (batch_size, n_heads, len_sequence, d_v)</span>
+        <span class="c1"># So this will come out as (batch_size, n_heads, len_sequence, d_v)</span>
+        <span class="n">weighted</span> <span class="o">=</span> <span class="n">attention_weights</span> <span class="o">@</span> <span class="n">V</span>
+
+        <span class="c1"># Transpose to (batch_size, len_sequence, n_heads, d_v),</span>
+        <span class="c1"># then reshape to (batch_size, len_sequence, n_heads * d_v)</span>
+        <span class="n">striped_output</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span>
+            <span class="n">weighted</span><span class="p">,</span>
+            <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+            <span class="n">batch_size</span><span class="p">,</span> <span class="n">len_sequence</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_v</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Final linear layer to combine</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_projection</span><span class="p">(</span><span class="n">striped_output</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Unusually for a case where I went off the reservation like this, the whole thing
+with the embedding space dimensionality didn't cause any problems at all!  But there
+was one small bug in this code, which I didn't discover until later -- we'll come to
+it by the end of the post.</p>
+
+<p>At this point, I did another of my short training runs, and:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-23 17:51:32.094308 Tokens seen: 92,209,152</span>
+<span class="go">2026-06-23 17:51:32.094311 Throughput: 85,682 tokens/second</span>
+<span class="go">2026-06-23 17:51:32.094321 Final train loss: 5.358</span>
+<span class="go">2026-06-23 17:51:32.094323 Done</span>
+</code></pre>
+</div>
+
+<p>...with a loss chart that looked like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/mha-single-layer-loss-chart.png" alt="Next token prediction loss chart for one layer of MHA" title="Next token prediction loss chart for one layer of MHA" /></p>
+
+<p>The training loss at the 937th global step was 5.336, only a tiny bit better than
+the 5.354 with single-head attention.  That was quite possibly within the noise.
+Even though (due to the <code>d_head * n_heads == d_emb</code> restriction I was enforcing in
+my training script) the <code>W_q</code>, <code>W_k</code>, and <code>W_v</code> arrays were the same size, I was
+creating that <code>output_projection</code>, which would consume randomness and make things
+vary.</p>
+
+<p>If I were doing a proper scientific experiment to see if a single layer of MHA
+beat a single layer of single-head attention, I think I would have run both for
+more steps to see if the difference became more pronounced later.</p>
+
+<p>But for the purposes of this post, I decided to move on.  My checklist now looked like this:</p>
+
+<ul>
+<li>Convert token IDs into embeddings. <strong>✔ ️done</strong></li>
+<li>Add on position embeddings. <strong>✔ ️done</strong></li>
+<li>Run these embeddings through multiple successive Transformers blocks. <strong>part-done -- one layer only</strong></li>
+<li>Layer normalisation <strong>✔ ️done</strong></li>
+<li>Project them back from embedding space to vocab space. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>Inside the Transformers blocks, we:</p>
+
+<ul>
+<li>Take a copy of the input sequence of embeddings <strong>✔ ️done</strong></li>
+<li>Layer normalisation</li>
+<li>Run multi-head attention <strong>✔ ️done</strong></li>
+<li>Add the copy back in so that the version that came out of MHA is something more like an "annotation" of the original <strong>✔ ️done</strong></li>
+<li>Take a second copy of that one</li>
+<li>Layer normalisation again</li>
+<li>Run it through a simple neural network</li>
+<li>Add the results of that back in.</li>
+</ul>
+
+<p>Adding that simple neural network -- the FFN -- seemed like a good next step.</p>
+
+<h2 id="adding-the-ffn-to-the-transformers-block">Adding the FFN to the Transformers block</h2>
+
+<p>The <a href="/2025/08/llm-from-scratch-17-the-feed-forward-network">feed forward network</a>
+is simple; you take the output of the MHA block, run it through a biased
+linear layer to expand it from <code>d_emb</code> to <code>4 * d_emb</code>, then run it through the
+GELU activation function, then shrink it back down to <code>d_emb</code> with another linear
+layer.  I didn't really see any value in writing my own implementation of GELU,
+given that even in the book we were just given code for an approximation to type
+in.  So, using <a href="https://docs.jax.dev/en/latest/_autosummary/jax.nn.gelu.html"><code>jax.nn.gelu</code></a>, I
+wrote this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">TransformersLayer</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_qk</span><span class="p">,</span> <span class="n">d_v</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">attention</span> <span class="o">=</span> <span class="n">MultiHeadAttention</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_qk</span><span class="p">,</span> <span class="n">d_v</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ffn</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span>
+            <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span>
+                <span class="n">in_features</span><span class="o">=</span><span class="n">d_emb</span><span class="p">,</span>
+                <span class="n">out_features</span><span class="o">=</span><span class="n">d_emb</span> <span class="o">*</span> <span class="mi">4</span><span class="p">,</span>
+                <span class="n">use_bias</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span>
+            <span class="p">),</span>
+            <span class="n">jax</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">gelu</span><span class="p">,</span>
+            <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span>
+                <span class="n">in_features</span><span class="o">=</span><span class="n">d_emb</span> <span class="o">*</span> <span class="mi">4</span><span class="p">,</span>
+                <span class="n">out_features</span><span class="o">=</span><span class="n">d_emb</span><span class="p">,</span>
+                <span class="n">use_bias</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span>
+            <span class="p">),</span>
+        <span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">shortcut</span> <span class="o">=</span> <span class="n">xs</span>
+        <span class="n">att</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">attention</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">post_attention</span> <span class="o">=</span> <span class="n">shortcut</span> <span class="o">+</span> <span class="n">att</span>
+        <span class="n">fed_forward</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ffn</span><span class="p">(</span><span class="n">post_attention</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">fed_forward</span> <span class="o">+</span> <span class="n">post_attention</span>
+</code></pre>
+</div>
+
+<p>Note that I added in a shortcut connection around the FFN as well, so that it didn't
+overwrite what was there, but only "added on its notes".</p>
+
+<p>I kicked that off, and it ran for ten minutes or so, but then OOMed:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-23 18:20:01.376377 Saving checkpoint</span>
+<span class="go"> 51%|██████████████████████████████████████████████████████▊                                                    | 481/938 [10:20&lt;11:47,  1.55s/it, loss=5.758, tps=76,185]W0623 18:20:12.602631 2860192 bfc_allocator.cc:514] Allocator (GPU_0_bfc) ran out of memory trying to allocate 2.93GiB (rounded to 3149744640)requested by op</span>
+<span class="go">If the cause is memory fragmentation maybe the environment variable &#39;TF_GPU_ALLOCATOR=cuda_malloc_async&#39; will improve the situation.</span>
+</code></pre>
+</div>
+
+<p>Adding <code>TF_GPU_ALLOCATOR=cuda_malloc_async</code> didn't help.  I spent some time trying
+to dig into what might be causing it, but eventually noticed something interesting:
+in <code>nvtop</code>, the VRAM usage was consistently 75% throughout.</p>
+
+<p>Now I knew that JAX pre-allocates 75% of VRAM when it starts up, but I'd been assuming
+that it would try to grab more if it needed it.  It turned out I was wrong with that
+assumption -- it grabs 75%, but that's all you ever get!</p>
+
+<p>The solution turned out to be the <a href="https://docs.jax.dev/en/latest/gpu_memory_allocation.html"><code>XLA_PYTHON_CLIENT_MEM_FRACTION</code></a> environment variable.
+If you set that to, say, <code>0.90</code>, then JAX will pre-allocate 90% of the VRAM, and
+you can use all of that.  (You can also make it allocate as-needed with
+<code>XLA_PYTHON_CLIENT_PREALLOCATE=false</code>, and there are various other settings you
+can control with other environment variables on that linked page).</p>
+
+<p>Anyway, setting it to <code>0.90</code> to grab 90% of VRAM worked, and I was able to get
+a successful run:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-24 00:29:34.864880 Tokens seen: 92,209,152</span>
+<span class="go">2026-06-24 00:29:34.864882 Throughput: 77,596 tokens/second</span>
+<span class="go">2026-06-24 00:29:34.864900 Final train loss: 5.341</span>
+<span class="go">2026-06-24 00:29:34.864902 Done</span>
+</code></pre>
+</div>
+
+<p>The loss chart was this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/mha-single-layer-with-ffn-loss-chart.png" alt="Next token prediction loss chart for one layer of MHA plus FFN" title="Next token prediction loss chart for one layer of MHA plus FFN" /></p>
+
+<p>...and the training loss at global step 937 was 5.295, compared to the 5.336 from MHA alone.  Another
+tiny improvement, another one that could have been in the noise.  Again, if I were
+doing a proper experiment, I'd do a longer run, but for now, I decided to move on.</p>
+
+<p>The checklist looked like this:</p>
+
+<ul>
+<li>Convert token IDs into embeddings. <strong>✔ ️done</strong></li>
+<li>Add on position embeddings. <strong>✔ ️done</strong></li>
+<li>Run these embeddings through multiple successive Transformers blocks. <strong>part-done -- one layer only</strong></li>
+<li>Layer normalisation <strong>✔ ️done</strong></li>
+<li>Project them back from embedding space to vocab space. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>Inside the Transformers blocks, we:</p>
+
+<ul>
+<li>Take a copy of the input sequence of embeddings <strong>✔ ️done</strong></li>
+<li>Layer normalisation</li>
+<li>Run multi-head attention <strong>✔ ️done</strong></li>
+<li>Add the copy back in so that the version that came out of MHA is something more like an "annotation" of the original <strong>✔ ️done</strong></li>
+<li>Take a second copy of that one <strong>✔ ️done</strong></li>
+<li>Layer normalisation again</li>
+<li>Run it through a simple neural network <strong>✔ ️done</strong></li>
+<li>Add the results of that back in. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>Now, my gut instinct was that the layer normalisation inside the Transformers
+blocks was of most value as a way of stabilising training over deep networks.  And
+with one layer, it didn't seem like the right time to add it.  Instead, I decided
+to add on multiple layers.</p>
+
+<h2 id="multiple-layers">Multiple layers</h2>
+
+<p>For GPT-2 small, you have 12 layers.  That was already being passed in to my <code>GPTModel</code>'s
+<code>__init__</code> method as <code>n_layers</code>, so I just replaced this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">transformers_layer</span> <span class="o">=</span> <span class="n">TransformersLayer</span><span class="p">(</span>
+    <span class="n">d_emb</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_qk</span><span class="p">,</span> <span class="n">d_v</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span>
+<span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...with this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">transformers_layers</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">(</span>
+        <span class="n">TransformersLayer</span><span class="p">(</span>
+            <span class="n">d_emb</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_qk</span><span class="p">,</span> <span class="n">d_v</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span>
+        <span class="p">)</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_layers</span><span class="p">)</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and then just renamed it where it was called; this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">transformed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">transformers_layer</span><span class="p">(</span><span class="n">input_embeddings</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...became this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">transformed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">transformers_layers</span><span class="p">(</span><span class="n">input_embeddings</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>I kicked it off, and it completed!  However, the loss chart was telling:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/multiple-full-layers-no-pre-norm-loss-chart.png" alt="Next token prediction loss chart for multiple full Transformers layers, no LayerNorm" title="Next token prediction loss chart for multiple full Transformers layers, no LayerNorm" /></p>
+
+<p>Ouch.  Loss started dropping quite nicely, but then things got out of control and
+it settled down at a loss that was essentially that of a random model.  At step
+937, we were at 10.75, so just a hair less than the 10.82 that randomly guessing next
+tokens would give.</p>
+
+<p>Well, LayerNorm is specifically meant to stabilise training, and the checklist looked like this:</p>
+
+<ul>
+<li>Convert token IDs into embeddings. <strong>✔ ️done</strong></li>
+<li>Add on position embeddings. <strong>✔ ️done</strong></li>
+<li>Run these embeddings through multiple successive Transformers blocks. <strong>✔ ️done</strong></li>
+<li>Layer normalisation <strong>✔ ️done</strong></li>
+<li>Project them back from embedding space to vocab space. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>Inside the Transformers blocks, we:</p>
+
+<ul>
+<li>Take a copy of the input sequence of embeddings <strong>✔ ️done</strong></li>
+<li>Layer normalisation</li>
+<li>Run multi-head attention <strong>✔ ️done</strong></li>
+<li>Add the copy back in so that the version that came out of MHA is something more like an "annotation" of the original <strong>✔ ️done</strong></li>
+<li>Take a second copy of that one <strong>✔ ️done</strong></li>
+<li>Layer normalisation again</li>
+<li>Run it through a simple neural network <strong>✔ ️done</strong></li>
+<li>Add the results of that back in. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>...and the only remaining step was that LayerNorm in the Transformers blocks, so it was time to add it in!</p>
+
+<h2 id="adding-layernorm">Adding LayerNorm</h2>
+
+<p>As per the checklist, we do the LayerNorm after we've taken our copy for the shortcut
+connection, just before MHA, and then likewise after the second shortcut copy, before
+the FFN.  As I understand it, this was a GPT-2 innovation -- previously, people had
+done normalisation after those steps, but this pre-norm setup turned out to work better.</p>
+
+<p>The code changes were simple.  I added two <code>LayerNorm</code> modules to the
+<code>TransformersLayer</code> class, and then called them in the appropriate places (taking
+the opportunity to tidy up the variable naming in the forward pass while I was there):</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">TransformersLayer</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_qk</span><span class="p">,</span> <span class="n">d_v</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">attention_norm</span> <span class="o">=</span> <span class="n">LayerNorm</span><span class="p">(</span><span class="n">d_emb</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">attention</span> <span class="o">=</span> <span class="n">MultiHeadAttention</span><span class="p">(</span><span class="n">d_emb</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_qk</span><span class="p">,</span> <span class="n">d_v</span><span class="p">,</span> <span class="n">qkv_bias</span><span class="p">,</span> <span class="n">rngs</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">ffn_norm</span> <span class="o">=</span> <span class="n">LayerNorm</span><span class="p">(</span><span class="n">d_emb</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ffn</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span>
+            <span class="o">...</span>
+        <span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">shortcut</span> <span class="o">=</span> <span class="n">xs</span>
+        <span class="n">xs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">attention_norm</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">xs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">attention</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">xs</span> <span class="o">=</span> <span class="n">xs</span> <span class="o">+</span> <span class="n">shortcut</span>
+
+        <span class="n">shortcut</span> <span class="o">=</span> <span class="n">xs</span>
+        <span class="n">xs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ffn_norm</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="n">xs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ffn</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">xs</span> <span class="o">+</span> <span class="n">shortcut</span>
+</code></pre>
+</div>
+
+<p>I kicked it off and ran it, and got these results:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-24 03:07:51.128966 Tokens seen: 92,209,152</span>
+<span class="go">2026-06-24 03:07:51.128969 Throughput: 23,399 tokens/second</span>
+<span class="go">2026-06-24 03:07:51.128979 Final train loss: 5.359</span>
+<span class="go">2026-06-24 03:07:51.128981 Done</span>
+</code></pre>
+</div>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/multiple-full-layers-with-pre-norm-loss-chart.png" alt="Next token prediction loss chart for multiple full Transformers layers, with LayerNorm" title="Next token prediction loss chart for multiple full Transformers layers, with LayerNorm" /></p>
+
+<p>That certainly looked much healthier!</p>
+
+<p>However, when I looked at the loss at step 937, it was 5.311 -- a tiny bit higher
+than the single-layer MHA example, which got 5.295.</p>
+
+<p>I'd been willing to play a bit fast and loose with this loss number and allow myself
+to accept a win when the loss went down a tiny bit, even if it was such a small
+amount that it could have been within the noise.  But <em>increasing</em> loss -- even if
+it could <em>also</em> be within the noise -- was a step too far.</p>
+
+<p>I decided that in this specific case, I'd be strict and test the hypothesis that
+longer training runs would demonstrate an improvement between one single layer without
+pre-norm, and multiple layers with pre-norm.</p>
+
+<p>I had to remember that these training runs would not be comparable with the earlier ones.
+In the training script, I <a href="/2026/06/llm-from-scratch-34a-building-a-jax-training-loop-for-an-llm-training-run#learning-rate-scheduling">had a learning rate schedule like this</a>:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34a-building-a-jax-training-loop-for-an-llm-training-run/learning-rate-chart.png" alt="The learning rate chart for the first scheduled learning rate run" title="The learning rate chart for the first scheduled learning rate run" /></p>
+
+<p>That straight-line warmup period and the following cosine decay were 5% and 95% of the training
+run respectively, which meant that (for example) global step 937 of the short runs we had
+been doing would be at a completely different point in the schedule than the same step
+would in these longer runs.</p>
+
+<p>However, they would be comparable to each other, and that was what mattered.</p>
+
+<p>After some humming and hawing, I decided that a full Chinchilla-optimal (for the
+full model) training run over 3,260,190,720 tokens, rounded up to fit into a round
+number of global steps, would be a nice experiment.  I
+expected it to run comfortably overnight for the single-layer run, and take a bit less
+than two days for the multi-layer one.  So I kicked off the first.</p>
+
+<p>Just over 11 hours later:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-24 16:39:52.178045 Tokens seen: 3,260,252,160</span>
+<span class="go">2026-06-24 16:39:52.178049 Throughput: 81,733 tokens/second</span>
+<span class="go">2026-06-24 16:39:52.178058 Final train loss: 4.324</span>
+<span class="go">2026-06-24 16:39:52.178061 Done</span>
+</code></pre>
+</div>
+
+<p>Here's the loss chart:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/mha-single-layer-with-ffn-extended-run-loss-chart.png" alt="Next token prediction loss chart for one layer of MHA plus FFN, extended run" title="Next token prediction loss chart for one layer of MHA plus FFN, extended run" /></p>
+
+<p>The last checkpointing period in that run ended at global step 33,164, and the
+training loss then was 4.165 -- indeed, it had been at around 4.17 for quite some
+time, though the trend still seemed to be a tiny bit downward.</p>
+
+<p>So then I kicked off a run of the full version -- multiple layers, with pre-norm
+in the Transformers blocks.  Just over 37 hours later:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-26 06:55:39.956609 Tokens seen: 3,260,252,160</span>
+<span class="go">2026-06-26 06:55:39.956614 Throughput: 24,151 tokens/second</span>
+<span class="go">2026-06-26 06:55:39.956625 Final train loss: 3.637</span>
+<span class="go">2026-06-26 06:55:39.956629 Done</span>
+</code></pre>
+</div>
+
+<p>The "Final train loss" line at the end said it all, really!  But here's the loss chart:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/full-llm-full-train-loss-chart.png" alt="Next token prediction loss chart for the full LLM, no dropout" title="Next token prediction loss chart for the full LLM, no dropout" /></p>
+
+<p>...and the loss at step 33,164 was 3.399.  Definitely quite an improvement over the
+4.165 that a single layer got.</p>
+
+<p>Again, at some point I might do the equivalent tests for the earlier results where
+improvements appear to be pretty much in the noise.  It would be good to be sure that
+the changes really did have the impact I think they did.</p>
+
+<p>But for now: our checklist was looking like this:</p>
+
+<ul>
+<li>Convert token IDs into embeddings. <strong>✔ ️done</strong></li>
+<li>Add on position embeddings. <strong>✔ ️done</strong></li>
+<li>Run these embeddings through multiple successive Transformers blocks. <strong>✔ ️done</strong></li>
+<li>Layer normalisation <strong>✔ ️done</strong></li>
+<li>Project them back from embedding space to vocab space. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>Inside the Transformers blocks, we:</p>
+
+<ul>
+<li>Take a copy of the input sequence of embeddings <strong>✔ ️done</strong></li>
+<li>Layer normalisation <strong>✔ ️done</strong></li>
+<li>Run multi-head attention <strong>✔ ️done</strong></li>
+<li>Add the copy back in so that the version that came out of MHA is something more like an "annotation" of the original <strong>✔ ️done</strong></li>
+<li>Take a second copy of that one <strong>✔ ️done</strong></li>
+<li>Layer normalisation again <strong>✔ ️done</strong></li>
+<li>Run it through a simple neural network <strong>✔ ️done</strong></li>
+<li>Add the results of that back in. <strong>✔ ️done</strong></li>
+</ul>
+
+<p>Everything was checked off.  So was this journey over?</p>
+
+<p>Well, there was one thing that the original PyTorch code had that my new code didn't:
+dropout.</p>
+
+<h2 id="dropout">Dropout</h2>
+
+<p>I'd found in my lengthy <a href="/2026/02/llm-from-scratch-32a-interventions-baseline-model">interventions experiments</a> that
+dropout seemed to make models worse.  It was, I felt, a smart idea back in the days
+when people had little data and did multiple epochs, each sweeping over everything,
+but it made less sense nowadays with single-epoch training runs over very large datasets.
+(Though I do have <a href="/2025/03/dropout-and-mandatory-vacation">some intuitive ideas about why it could still help</a>.)</p>
+
+<p>Still, it would be good to show that it harmed loss for this model as well.</p>
+
+<p>Checking my notes, I found that there were four places where dropout was applied:</p>
+
+<ul>
+<li>Once in the main body, just after we've worked out the embeddings.</li>
+<li>Twice in the transformers block: once after attention (but before the
+shortcut is mixed back in), and once after the FFN (ditto)</li>
+<li>Inside multi-head attention, on the attention weights (<a href="/2025/03/llm-from-scratch-10-dropout">which surprised me</a>).</li>
+</ul>
+
+<p>The changes are tiny and rather dotted around the
+code, so rather than showing you isolated bits of code, if you'd like to see it you
+can take a look at <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/5fe6e745b55a33a3b55d3d7ce39f480e29ed0d77/gpt.py">the code at this point</a>
+and search for "dropout".</p>
+
+<p>When I started running that, I got an error when saving the first checkpoint:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">TypeError: JAX array with PRNGKey dtype cannot be converted to a NumPy array. Use jax.random.key_data(arr) if you wish to extract the underlying integer array.</span>
+</code></pre>
+</div>
+
+<p>This was happening deep inside the bowels of Safetensors, but it made a lot of sense.
+The <code>nnx.Dropout</code> object needs to keep track of the state of the random number generator,
+and that meant that the <code>to_flat_state</code> function that <a href="/2026/06/flax-and-safetensors">I was using</a>
+might return a structure that had something that contained that state, and was not
+compatible with Safetensors.</p>
+
+<p>I decided that I'd cheat a little bit here.  If I skipped the dropout layers when
+I saved my checkpoints, like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="k">for</span> <span class="n">tuple_key</span><span class="p">,</span> <span class="n">array</span> <span class="ow">in</span> <span class="n">flat_state</span><span class="p">:</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="s2">&quot;.&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">tuple_key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s2">&quot;dropout&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">key</span><span class="p">:</span>
+            <span class="n">simple_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">array</span>
+</code></pre>
+</div>
+
+<p>...then I'd be able to save them.  This would have a problem -- if I restarted from
+a checkpoint, the dropout pattern after the restart would mirror the dropout pattern
+from the start of the training run, because the random seed it started with would not
+have come from the checkpoint, but just the initialisation code.</p>
+
+<p>I felt that this would not have a serious impact, though, and given that I'd not had
+to restart from checkpoints so far, I (wrongly, as it turned out) decided it wouldn't
+matter.</p>
+
+<p>I kicked off the run, and... after four hours, it OOMed.  I cursed, decided that I'd
+nurse this run through anyway (despite my dropout checkpointing concerns), and kicked it off again.</p>
+
+<p>Three hours later, it OOMed again.  I happened to be away from home at the time, logging in to
+my machine remotely (thanks, <a href="https://tailscale.com/">Tailscale</a>!), and
+on looking at <code>nvtop</code>, I realised that the X window system on my machine was using a
+gig or so of VRAM.</p>
+
+<p>I was running the training run in a <code>tmux</code> session, which meant
+that I could kill X and not lose state, so I did that, and adjusted the
+<code>XLA_PYTHON_CLIENT_MEM_FRACTION</code> environment variable I was using -- it had been
+0.90, so I bumped it up to 0.95.  I kicked it off again, and...</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-28 22:06:47.669676 Tokens seen: 2,640,052,224</span>
+<span class="go">2026-06-28 22:06:47.669683 Throughput: 23,019 tokens/second</span>
+<span class="go">2026-06-28 22:06:47.669691 Final train loss: 3.776</span>
+<span class="go">2026-06-28 22:06:47.669694 Done</span>
+</code></pre>
+</div>
+
+<p>Note that the tokens seen only relates to the period since the restart, which is why it was
+lower.</p>
+
+<p>One more loss chart:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/full-llm-full-train-with-dropout-loss-chart.png" alt="Next token prediction loss chart for the full LLM, with dropout" title="Next token prediction loss chart for the full LLM, with dropout" /></p>
+
+<p>...and the training loss at step 33,164 was 3.524, higher enough than the 3.399 I got
+without dropout that I was comfortable that it wasn't in the noise.  That was very reassuring.</p>
+
+<p>Once again, if this was a proper scientific experiment I'd fix the issue with saving
+dropout, and run it completely from scratch -- or, at least, run it all the way through
+from scratch without restarts, even
+if I had to try several times to get it done.</p>
+
+<p>But I don't think that "replaying" dropout would make the loss any worse.  And for this
+experiment, I felt this was enough.</p>
+
+<p>So: checklist complete.  GPT-2 model coded up.  It was time for some evals!</p>
+
+<h2 id="evals-first-try-and-fixing-an-mha-bug">Evals, first try -- and fixing an MHA bug</h2>
+
+<p>I wanted to evaluate these models against the ones I got using the old PyTorch code:
+specifically, the <a href="/2026/04/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation">last local training run</a>
+that used exactly the same training hyperparameters, and only differed in that
+it was trained using AMP -- 32-bit floats in general, but using 16-bit where the
+framework thought it would not be harmful.</p>
+
+<p>In order to do <em>exactly</em> the same evals, I decided it would be easiest to write a
+conversion script to take the Safetensors files written to my JAX checkpoints, and write
+out new files that were compatible with the PyTorch model code -- then I'd be able to
+use the original PyTorch eval code.  I
+<a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/fd170272e54844229642619b9c69993f0f18778f/convert_model_to_pytorch.py">put something together</a>,
+converted my last two models -- the full runs with and without dropout -- and tried to
+load them up.</p>
+
+<p>Unfortunately there was an error:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">RuntimeError: Error(s) in loading state_dict for GPTModel:</span>
+<span class="go">    Missing key(s) in state_dict: &quot;trf_blocks.0.att.out_proj.bias&quot;, &quot;trf_blocks.1.att.out_proj.bias&quot;, &quot;trf_blocks.10.att.out_proj.bias&quot;, &quot;trf_blocks.11.att.out_proj.bias&quot;, &quot;trf_blocks.2.att.out_proj.bias&quot;, &quot;trf_blocks.3.att.out_proj.bias&quot;, &quot;trf_blocks.4.att.out_proj.bias&quot;, &quot;trf_blocks.5.att.out_proj.bias&quot;, &quot;trf_blocks.6.att.out_proj.bias&quot;, &quot;trf_blocks.7.att.out_proj.bias&quot;, &quot;trf_blocks.8.att.out_proj.bias&quot;, &quot;trf_blocks.9.att.out_proj.bias&quot;</span>
+</code></pre>
+</div>
+
+<p>You might remember that back when I went through multi-head attention, I mentioned
+that I'd made a mistake.  Somehow, I'd misremembered, and thought that the output projection -- the one
+that mixes together all of the different heads' outputs -- was a linear layer without
+bias, despite <a href="/2025/04/llm-from-scratch-12-multi-head-attention">my original notes</a> being
+perfectly clear that it <em>did</em> have bias.</p>
+
+<p>The good news was that if I disabled bias in the PyTorch code, I could load the
+safetensors files that I had.  So the two models I'd trained so far were not useless,
+and could actually work as a kind of natural experiment into the benefits of having
+that bias there.</p>
+
+<p>But anyway, in order to do things properly, I was going to need to fix the bug and
+train yet another model.</p>
+
+<h2 id="adding-bias-to-the-mha-output-projections">Adding bias to the MHA output projections</h2>
+
+<p>The fix was simple, I just replaced this (in <code>MultiHeadAttention</code>):</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">output_projection</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_v</span> <span class="o">*</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...with this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">output_projection</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_v</span> <span class="o">*</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">d_emb</span><span class="p">,</span> <span class="n">use_bias</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Then it was time to kick off yet another training run.  After another 37 hours:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-07-05 10:09:22.147819 Tokens seen: 3,260,252,160</span>
+<span class="go">2026-07-05 10:09:22.147823 Throughput: 24,072 tokens/second</span>
+<span class="go">2026-07-05 10:09:22.147832 Final train loss: 3.650</span>
+<span class="go">2026-07-05 10:09:22.147834 Done</span>
+</code></pre>
+</div>
+
+<p>...with this loss chart:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax/full-llm-full-train-with-mha-output-bias-loss-chart.png" alt="Next token prediction loss chart for the full LLM, no dropout, with MHA output bias" title="Next token prediction loss chart for the full LLM, no dropout, with MHA output bias" /></p>
+
+<p>...and the training loss at step 33,164 was 3.398 -- almost exactly the same as the
+3.399 that I got in the no-dropout training run without MHA bias above!</p>
+
+<p>Well, now it really was time for the evals.</p>
+
+<h2 id="evals-take-two">Evals, take two</h2>
+
+<p>I updated <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/9ab47bc589973b3d8d18a5248b405ef3f17f09fe/convert_model_to_pytorch.py">my conversion script</a>
+to handle the bias on the MHA output projections, and used it to convert the three
+models -- the un-biased ones, with and without dropout, and the biased one, without -- to
+the PyTorch format, then ran the loss test that I had been using to compare the old models
+on each.</p>
+
+<p>Here are the results, compared to the previous models, and OpenAI's:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+</tr>
+<tr>
+  <td><strong>JAX, with MHA bias, no dropout</strong></td>
+  <td>3.418784</td>
+</tr>
+<tr>
+  <td><strong>JAX, no MHA bias, no dropout</strong></td>
+  <td>3.420089</td>
+</tr>
+<tr>
+  <td><strong>JAX, no MHA bias, with dropout</strong></td>
+  <td>3.476802</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+</tr>
+</tbody>
+</table>
+
+<p>That was a pretty amazing result -- I'd clearly proven that JAX trains much better
+models than PyTorch!  3.5% better in the best case.</p>
+
+<p>Well, OK, no.</p>
+
+<p>My guess is that the difference was probably something
+like better luck with the initial weights on the JAX side, plus
+<a href="/2026/04/llm-from-scratch-32h-interventions-full-fat-float32">the improvement from not using AMP</a>.
+Anyway, the important thing was that the JAX models were in the same kind of loss
+range as the PyTorch ones -- and while a 3.5% improvement in loss was more variation
+than I'd been expecting, it was definitely the right ballpark.</p>
+
+<p>Now, one thing I had found in the past was that the OpenAI weights -- and some of
+my own models, like the Fineweb-Edu ones -- were
+<a href="/2026/04/llm-from-scratch-32l-interventions-instruction-fine-tuning-tests">consistently better</a>
+at an instruction fine-tuning test than their test loss scores would indicate.  Would that hold here?</p>
+
+<p>The IFT eval code fine-tuned
+each model on the <a href="https://crfm.stanford.edu/2023/03/13/alpaca.html">Alpaca</a> dataset until
+validation loss started rising, then used the model prior to the start of the rise to
+generate responses for a test set.  These were saved, and then run past an OpenAI model
+so that they could be compared with each other:</p>
+
+<pre><code>You are judging the comparative capabilities of a number of different LLM
+models.  They have been trained to follow instructions.
+
+The input was this:
+
+`
+{input}
+`
+
+An example correct output is this:
+
+`
+{correct_output}
+`
+
+Please produce a score of between 0 and 100 for each model, and respond
+with a JSON structure like this (note that the number of models may differ
+from this example):
+
+`
+{
+    "Model 1": {"score": XXX, "comments": "optional comments"},
+    "Model 2": {"score": YYY, "comments": "optional comments"},
+    "Model 3": {"score": ZZZ, "comments": "optional comments"}
+}
+`
+
+...where the XXX, YYY and ZZZ are the scores for the respective models.
+You can optionally add the "comments" field if you want to explain your
+reasoning.
+
+Here are the models' responses:
+
+# Model 1
+
+{model 1 response}
+
+
+# Model 2
+
+{model 2 response}
+
+
+# Model 3
+
+{model 3 response}
+</code></pre>
+
+<p>...with the model order randomly changed for each query to avoid any position bias.</p>
+
+<p>The methodology seemed solid, but I was uncertain about the "train until loss starts rising", as
+it meant that different models had wildly different amounts of fine-tuning -- between
+two and seven epochs.</p>
+
+<p>On the one hand it felt "unfair" to certain models that they'd get less training than
+others.  On the other hand, if the less-trained models had been trained past the point
+where their validation loss started rising, then assuming that loss would continue to
+rise, further training would actually be a disadvantage rather than an advantage.</p>
+
+<p>I decided to stick with the original plan, and train until validation loss started rising.  I did, however, switch the judge model
+from the GPT 5.4 that I used in my last IFT test to GPT 5.5.  Here are the results:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>IFT epochs</th>
+  <th>IFT score</th>
+  <th>IFT rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>2</td>
+  <td>41.62</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td><strong>JAX, with MHA bias, no dropout</strong></td>
+  <td>3.418784</td>
+  <td>4</td>
+  <td>19.25</td>
+  <td>4</td>
+</tr>
+<tr>
+  <td><strong>JAX, no MHA bias, no dropout</strong></td>
+  <td>3.420089</td>
+  <td>3</td>
+  <td>14.66</td>
+  <td>11</td>
+</tr>
+<tr>
+  <td><strong>JAX, no MHA bias, with dropout</strong></td>
+  <td>3.476802</td>
+  <td>4</td>
+  <td>12.94</td>
+  <td>15</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>2</td>
+  <td>26.73</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>4</td>
+  <td>17.79</td>
+  <td>6</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>4</td>
+  <td>10.29</td>
+  <td>16</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td>7</td>
+  <td>20.71</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>6</td>
+  <td>15.11</td>
+  <td>9</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>4</td>
+  <td>14.74</td>
+  <td>10</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>4</td>
+  <td>13.25</td>
+  <td>14</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>4</td>
+  <td>14.50</td>
+  <td>12</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>4</td>
+  <td>16.03</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>7</td>
+  <td>13.73</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>7</td>
+  <td>16.70</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>7</td>
+  <td>18.68</td>
+  <td>5</td>
+</tr>
+</tbody>
+</table>
+
+<p>More interesting datapoints!  As before, you can see that low loss is not particularly
+well-correlated with a high score on this instruction fine-tuning test.  The OpenAI weights
+continue to lead the pack, and while one of our new JAX models did quite well, it's
+still beaten by the Cloud FineWeb, 8x A100 40 GiB model.</p>
+
+<p>But what was important here, just as with the loss, was that the new JAX models landed
+in the same ballpark as the PyTorch ones.  They did, and so I could be confident that
+they were doing essentially the same thing.</p>
+
+<p>And that meant that, after 18 months, I had reached the end of my LLM from scratch
+journey.</p>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>It's been <a href="/llm-from-scratch">a long trek</a>.</p>
+
+<p>I <a href="/2024/12/llm-from-scratch-1">started reading</a> "Build a Large Language Model (from Scratch)"
+on 22 December 2024.  I was planning to breeze through over the Christmas break,
+but somehow it morphed into being a curriculum onto which I could hang projects
+to learn the fundamentals of LLMs, beyond what was in the book.</p>
+
+<p>In May 2025, I had my first real conceptual breakthrough when I realised that
+<a href="/2025/05/llm-from-scratch-13-taking-stock-part-1-attention-heads-are-dumb">attention heads are (individually) dumb</a>,
+and as I continued, the second big one came later on in the same month, when the concept of
+embeddings as being <a href="/2025/05/llm-from-scratch-15-from-context-vectors-to-logits">projections between vocab space and embedding space</a>
+(and the converse projection in the other direction that happens in the LLM's output head)
+became clear.</p>
+
+<p>In August I had the first moment where I felt that the standard teaching approach to
+LLMs might not be the full story; shortcut connections are normally explained as
+a way to fix vanishing gradients, while I felt that a better way to see them was a
+way to allow attention and the FFN to "annotate" the existing information, similarly
+to how Jewish scholars have <a href="/2025/08/llm-from-scratch-18-residuals-shortcut-connections-and-the-talmud">annotated the original text of the Talmud</a>.
+(The results in this post seem to point in that direction, given how even a single
+layer of attention was massively helped by adding them.)</p>
+
+<p>By early December, I had essentially finished the book, and felt I wanted to try
+to <a href="/2025/12/llm-from-scratch-28-training-a-base-model-from-scratch">train my first base model from scratch on my RTX 3090</a>.
+It worked, and wasn't far off the quality of the original GPT-2 small.   I was really surprised
+that I could do that with consumer hardware, and became interested (perhaps obsessively so)
+with whether I could match OpenAI's weights.</p>
+
+<p>In January 2026, I <a href="/2026/01/llm-from-scratch-29-ddp-training-a-base-model-in-the-cloud">trained a model using DDP on Lambda Labs</a>,
+and then spent the following months training model after model, trying to work
+out which interventions -- learning rate scheduling, gradient clipping, etc -- would
+improve the loss.  I wrapped that up in <a href="/2026/04/llm-from-scratch-32m-interventions-conclusion">late April</a>,
+with the interesting finding that although I'd been able to get the test loss pretty
+low, that didn't seem to map cleanly to performance in my instruction fine-tuning
+tests.  In other words, Loss Number Goes Down is an interesting technical game to play,
+but doesn't cleanly map to real-world performance.</p>
+
+<p>The final step was this post, and <a href="/2026/06/llm-from-scratch-34a-building-a-jax-training-loop-for-an-llm-training-run">the previous one</a>
+-- could I, using my notes, implement GPT-2 completely from scratch in JAX without referencing
+the book?</p>
+
+<p>And as you've read, the answer was a definite yes!</p>
+
+<p>Of course, as with any long-running project, there are some loose ends -- from this
+post alone, there's the interesting fact that JAX trained faster than PyTorch (perhaps
+<code>torch.compile</code> could close the gap?) and had a larger possible batch size for full-fat 32-bit.
+And the fact that fixing the multi-head attention bias bug didn't seem to help with the
+loss much was interesting too.</p>
+
+<p>But those are really details, and there's so much beyond them to learn.  Longer-context LLMs: position embedding improvements like RoPE,
+efficiency tricks like flash attention and attention variants like DSA.  Mixture
+of experts models.  How do optimisers really work?  (<a href="https://x.com/mgostIH/status/2024087619756318866">Do they work?</a>)
+And plenty more.</p>
+
+<p>So it's time to draw a line under this series, and start thinking about what comes next.
+It's been a blast; if you've been reading along, I hope it's been as useful (and fun) to read as it was to
+write.</p>
+
+<p>And as always, comments, questions and corrections very welcome below.</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>On looking back at Raschka's code, after having worked through all of this,
+there's a slight difference.  I do this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">normalized</span> <span class="o">=</span> <span class="p">(</span><span class="n">xs</span> <span class="o">-</span> <span class="n">means</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">stds</span> <span class="o">+</span> <span class="mf">1e-5</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...whereas he does this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">norm_x</span> <span class="o">=</span> <span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="n">mean</span><span class="p">)</span> <span class="o">/</span> <span class="n">torch</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">var</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">eps</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Now, the standard deviation is the square root of the variance, so if you ignore
+the small numbers -- <code>1e-5</code> in my case, and <code>self.eps</code> in his -- the calculations
+are the same.  But there is a difference once those are taken account of.
+I don't think it's large enough to have any serious effect in these runs, though.&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-2">
+<p>In PyTorch, linear layers are stored as the transpose of the matrix that
+would allow you to do that, so it would be:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>Q</mi><mo>&#x0003D;</mo><mtext>xs</mtext><mi>&#x000D7;</mi><msup><mrow><msub><mi>W</mi><mi>q</mi></msub></mrow><mi>T</mi></msup></mrow></math>
+
+<p>Also, note that for simplicity (heh) I'm disregarding bias in this discussion.&#160;<a href="#fnref-2" class="footnoteBackLink" title="Jump back to footnote 2 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

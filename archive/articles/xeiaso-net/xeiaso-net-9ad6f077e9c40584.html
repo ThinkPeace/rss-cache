@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Presigned URLs are technically a security vuln | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Presigned URLs are technically a security vuln</h1>
+        <div class="meta">Xe Iaso&#x27;s blog 2026-07-14T00:00:00Z</div>
+        <div class="links">
+          <a href="https://www.tigrisdata.com/blog/presigned-urls-security-vuln/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xeiaso-net/xeiaso-net-9ad6f077e9c40584.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A presigned URL is a replay attack you did on purpose. Replayable auth tokens are the textbook way to create vulnerable systems, but Tigris ships them as a first-class feature with presigned URLs and so does every other object storage system on the planet. However this isn&#x27;t an oversight because presigned URLs turn a weakness into a feature. Replay attacks…</div>
+        <div class="content">
+          <p>A presigned URL is a replay attack you did on purpose.</p>
+        <p>Replayable auth tokens are the textbook way to create vulnerable systems, but
+        Tigris ships them as a first-class feature with presigned URLs and so does every
+        other object storage system on the planet. However this isn't an oversight
+        because presigned URLs turn a weakness into a feature.</p>
+        <h2>Replay attacks are a real problem and the classic fix is miserable</h2>
+        <p>When you authenticate a request with Amazon's SigV4 protocol for Tigris, your
+        client boils down the request to a canonical form: a SHA256 hash of the
+        request's method, path, query parameters, signed headers and a SHA256 hash of
+        the payload. It runs the result of that through HMAC with a signing key derived
+        from your secret access key. Nothing secret ever crosses the wire. The server
+        derives the same key as the client, does the same canonical form transformation,
+        and compares the result.</p>
+        <p>Being able to make a valid signature proves that the request came from someone
+        holding the secret access key, but it proves nothing about <em>when</em> that request
+        was made. A signature that was made a year ago would still be valid today or any
+        other time you send it, so in theory an attacker could warehouse your signed
+        requests only to replay them en masse later. Imagine sitting on a pile of signed
+        &quot;create EC2 instance&quot; calls only to spam them all out at a later date. You would
+        be a twirling moustache villain able to spawn dozens of servers at a moment's
+        notice.</p>
+        <p>Traditionally the fix is to bake a nonce (number used once) into the signature
+        (sorry to any British readers in the audience). This makes every signature
+        differ because that nonce differs.</p>
+        <p>However with great power comes great responsibility and making sure that
+        something used once is only used once is a surprisingly hard distributed systems
+        problem. You can't verify that something is only used once locally. Say you
+        store them all for a 15 minute smear window at a low request rate like 10,000
+        Bq. That's 9 million live nonces, and every frontend node needs to have a
+        consistent view of the whole set as it churns.</p>
+        <p>You have made your fast authentication check slow from having to ensure things
+        are only used once.</p>
+        <p>What you want instead is something that changes constantly without coordination
+        and invalidates those old signatures for free. For an added bonus you want this
+        to also be in the standard library of every programming language.</p>
+        <h2>Sign the clock</h2>
+        <p>There's exactly one value that changes constantly, (mostly) monotonically, and
+        is already actively coordinated across all elements of the stack: the clock.
+        Your OS already keeps time in sync with the public NTP pool (or a private NTP
+        pool if you are cool enough to have radioactive PCI cards laying around).
+        Without an accurate view of time you can't make TLS connections, which means you
+        can't make API calls to Tigris at all, so the auth layer gets to assume a
+        working clock exists.</p>
+        <p>SigV4 signs the current time into the request. If an attacker gets their greasy
+        hacker paws on a signature, they have about 15 minutes to use it before it
+        becomes a digital paperweight. If time is an input to the signature and the time
+        changes enough to invalidate the signature, the signature is null and void. Sure
+        in theory a sufficiently funded attacker could create a black hole in your
+        datacentre and disrupt temporal flow, but at that point the planet is probably
+        toast which makes the attack profile moot. Commit mass object storage fraud with
+        this one neat trick! The department of temporal investigations will have hated
+        it!</p>
+        <p>This makes your verification stay stateless. Everything gets checked against the
+        system clock the server already needs and you can give clients a 15 minute
+        signature smear window as a grace period for old or delayed clients (exponential
+        backoff is a good thing and Tigris will reward you for doing it).</p>
+        <p>Of course the real thing keeping the signatures safe on the wire is TLS (HTTPS).
+        If that is broken we have bigger problems and object storage fraud is the least
+        of our problems.</p>
+        <p>Time is the only nonce you need because both sides already agree on it anyways.</p>
+        <h2>Some thorns have roses</h2>
+        <p>Presigned URLs take the replay tolerance that SigV4 spends all this effort
+        nerfing and then buffs it into the feature. The entire auth dance gets flattened
+        into URL parameters that any HTTP client can use, be it a browser, curl, Go's
+        net/http, or something you made by bit-banging HTTP over a socket. Here's a real
+        presigned URL I sundered into visibility:</p>
+        <pre><code class="code-highlight"><span class="code-line">https://xe-sophia-base.t3.tigrisfiles.io/moby-dick.txt
+        </span><span class="code-line">?X-Amz-Algorithm=AWS4-HMAC-SHA256
+        </span><span class="code-line">&amp;X-Amz-Credential=tid_ubYBNEYAmTciLVwszw_QrUXDmtcyQisryryGfxgznDsCnOvNqh/20260714/auto/s3/aws4_request
+        </span><span class="code-line">&amp;X-Amz-Date=20260714T043308Z
+        </span><span class="code-line">&amp;X-Amz-Expires=3600
+        </span><span class="code-line">&amp;X-Amz-SignedHeaders=host
+        </span><span class="code-line">&amp;X-Amz-Signature=0dcaf4972911527a7582ff36ea457e9760a8efccb6655a178685aaa281637a36
+        </span></code></pre>
+        <p>Here are the parts (forgive the AI looking listicle because this is genuinely
+        the best way to format this):</p>
+        <ul>
+        <li><strong>X-Amz-Algorithm</strong>: the signature scheme. Effectively always
+        <code>AWS4-HMAC-SHA256</code>.</li>
+        <li><strong>X-Amz-Credential</strong>: the access key ID plus the credential scope — date,
+        region, service, and the literal terminator <code>aws4_request</code>. The signing key is
+        derived by chaining HMAC through exactly those parts, so a signature is only
+        ever valid for that day, that region, that service.</li>
+        <li><strong>X-Amz-Date</strong>: the second the URL was born, in UTC.</li>
+        <li><strong>X-Amz-Expires</strong>: how many seconds it gets to live, chosen by the signer.</li>
+        <li><strong>X-Amz-SignedHeaders</strong>: which HTTP headers are folded into the signature.
+        Usually just <code>host</code>, because you can't force whoever you hand a URL to into
+        sending exotic headers.</li>
+        <li><strong>X-Amz-Signature</strong>: 64 hex characters of HMAC-SHA256 over the canonical
+        request — the method, the path, every parameter above, the signed headers, and
+        the payload hash. Change any of them and the math stops agreeing.</li>
+        </ul>
+        <p>All of these are normally HTTP headers in standard SigV4 requests.</p>
+        <pre><code class="code-highlight"><span class="code-line">GET /moby-dick.txt HTTP/1.1
+        </span><span class="code-line">Host: xe-sophia-base.t3.tigrisfiles.io
+        </span><span class="code-line">X-Amz-Date: 20260714T043308Z
+        </span><span class="code-line">X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        </span><span class="code-line">Authorization: AWS4-HMAC-SHA256
+        </span><span class="code-line">Credential=tid_ubYBNEYAmTciLVwszw_QrUXDmtcyQisryryGfxgznDsCnOvNqh/20260714/auto/s3/aws4_request
+        </span><span class="code-line">SignedHeaders=host;x-amz-content-sha256;x-amz-date
+        </span><span class="code-line">Signature=0dcaf4972911527a7582ff36ea457e9760a8efccb6655a178685aaa281637a36
+        </span></code></pre>
+        <p>Note that this request is not a legal request, it's an example to illustrate the
+        point, here be dragons, etc etc etc.</p>
+        <p>It's best to think about this presigned URL as a capability grant. Whoever holds
+        it gets to make exactly one (1) kind of API call with one (1) HTTP method
+        against one (1) object in one (1) bucket. They can do this as many times as they
+        want until the presigned URL expires. The signature covers the method, the path,
+        and the signed headers so a user can't take a presigned request for GETting a
+        copy of Moby Dick from a development environment and weaponize it into a way to
+        delete everything in your production bucket.</p>
+        <p>Possession is authorization until the clock says no.</p>
+        <h2>What it costs you</h2>
+        <p>Capability grants like this can have some sharp edges. There is no real way to
+        revoke any individual presigned URL short of killing the access key it was
+        signed with. When that key dies, everything it signed dies too. This includes
+        any URLs you may have wanted. This cuts both ways and it kinda has to unless you
+        make a new keypair per presigned request, which is probably out of scope.</p>
+        <p>Expiry has fine print too. A presigned request can live anywhere from one (1)
+        second to one (1) week (seven (7) periods of twenty-four (24) hours).</p>
+        <p>There's no limit to the number of times a client can use a presigned request. If
+        you give a mouse permission to GET one cookie, they can GET that same cookie
+        over and over. You end up having to pay for the GetObject calls in the end, so
+        keep that in mind.</p>
+        <p>URLs also leak, but these URLs are born to die. Presigned URLs will end up in
+        API responses, chat messages, GitHub comments, and your browser history. The
+        tradeoff is acceptable because all the links self-destruct, but it's a tradeoff
+        you need to keep in mind when you design your services, not a panacea for access
+        control.</p>
+        <p>Presigned URLs sound like a great way to prevent hotlinking. At some level they
+        are (a few of my services use them as such), but what they actually do is put a
+        lifetime on hotlinking. This makes things annoying enough that it usually gets
+        people to stop.</p>
+        <h2>The hole in the fence is the gate</h2>
+        <p>SigV4 makes a lot of API authentication challenges so much easier. It spent most
+        of its innovation budget on making signatures die quickly because replay attacks
+        are the classic way that signed requests go wrong. Presigned URLs looked at that
+        property, shrugged, flipped it on its head, and made it into a feature.</p>
+        <p>The thing that looked like a problem becomes a fundamental construct to build
+        your apps upon.</p>
+        <p>Want to hand out links that expire themselves? Tigris supports presigned URLs
+        out of the box with the same SigV4 dance you already know, on globally
+        distributed, S3-compatible object storage. <a href="https://www.tigrisdata.com/docs/objects/presigned/">Read the
+        docs</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

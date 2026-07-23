@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The case of the mysterious changes to integers when there shouldn’t have been any code generation effect | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The case of the mysterious changes to integers when there shouldn’t have been any code generation effect</h1>
+        <div class="meta">The Old New Thing 2026-07-10T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260710-00/?p=112514">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-c274ccce40cb6697.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Decoding where those integer came from. The post The case of the mysterious changes to integers when there shouldn’t have been any code generation effect appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>A colleague made some code changes that should not have had any effect on the generated binary. Specifically, they migrated from <a href="https://github.com/tpn/winsdk-10/blob/9b69fd26ac0c7d0b83d378dba01080e93349c2ed/Include/10.0.16299.0/km/ndis.h#L1153"> the <code>NDIS_<wbr />STRING_<wbr />CONST</code> macro</a> to <a href="https://github.com/tpn/winsdk-10/blob/9b69fd26ac0c7d0b83d378dba01080e93349c2ed/Include/10.0.14393.0/shared/ntdef.h#L2037"> the more type-safe <code>RTL_<wbr />CONSTANT_<wbr />STRING</code> macro</a>. The two macros produce the same results at the end of the day, so the expectation was that this would not result in any change to the binary.</p>
+<p>But they found a change to the binary.</p>
+<p>Specifically, four functions changed, and what is particularly strange is that none of them involved the macro changes. Three of the functions are in one source file, and the fourth is in a source file that wasn&#8217;t even touched!</p>
+<p>The changes looked like this:</p>
+<table class="cp3" border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th>Before</th>
+<th>After</th>
+</tr>
+<tr>
+<td colspan="2" align="center"><tt>contoso!Evt­Wdf­Widget­Context­Cleanup</tt></td>
+</tr>
+<tr>
+<td><tt>mov rax, [contoso!WdfFunctions_01031]</tt><br />
+<tt>lea rcx, [??_C@__0DK@MPBCIIPN@...]</tt><br />
+<tt>mov [rsp+20h], rcx</tt><br />
+<tt>mov r9d, <span>62Bh</span></tt><br />
+<tt>mov r8d, 52467443h</tt><br />
+<tt>mov rcx, [contoso!WdfDriverGlobals]</tt><br />
+<tt>mov rdx, rbx</tt><br />
+<tt>mov rax, [rax+670h]</tt><br />
+<tt>call __guard_dispatch_call</tt></td>
+<td><tt>mov rax, [contoso!WdfFunctions_01031]</tt><br />
+<tt>lea rcx, [??_C@__0DK@MPBCIIPN@...]</tt><br />
+<tt>mov [rsp+20h], rcx</tt><br />
+<tt>mov r9d, <span>62Ah</span></tt><br />
+<tt>mov r8d, 52467443h</tt><br />
+<tt>mov rcx, [contoso!WdfDriverGlobals]</tt><br />
+<tt>mov rdx, rbx</tt><br />
+<tt>mov rax, [rax+670h]</tt><br />
+<tt>call __guard_dispatch_call</tt></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><tt>contoso!Function2</tt></td>
+</tr>
+<tr>
+<td><tt>mov rax, [contoso!WdfFunctions_01031]</tt><br />
+<tt>lea rcx, [??_C@__0DK@MPBCIIPN@...]</tt><br />
+<tt>mov [rsp+20h], rcx</tt><br />
+<tt>mov r9d, <span>616h</span></tt><br />
+<tt>mov rcx, [contoso!WdfDriverGlobals]</tt><br />
+<tt>mov r8d, 52467443h</tt><br />
+<tt>mov rdx, rdi</tt><br />
+<tt>mov rax, [rax+668h]</tt><br />
+<tt>call __guard_dispatch_call</tt></td>
+<td><tt>mov rax, [contoso!WdfFunctions_01031]</tt><br />
+<tt>lea rcx, [??_C@__0DK@MPBCIIPN@...]</tt><br />
+<tt>mov [rsp+20h], rcx</tt><br />
+<tt>mov r9d, <span>615h</span></tt><br />
+<tt>mov rcx, [contoso!WdfDriverGlobals]</tt><br />
+<tt>mov r8d, 52467443h</tt><br />
+<tt>mov rdx, rdi</tt><br />
+<tt>mov rax, [rax+668h]</tt><br />
+<tt>call __guard_dispatch_call</tt></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><tt>contoso!Function3</tt></td>
+</tr>
+<tr>
+<td><tt>mov rax, [contoso!WdfFunctions_01031]</tt><br />
+<tt>lea rcx, [??_C@__0DK@MPBCIIPN@...]</tt><br />
+<tt>mov [r11-20h], rcx</tt><br />
+<tt>xor r8d, r8d</tt><br />
+<tt>mov rcx, [contoso!WdfDriverGlobals]</tt><br />
+<tt>mov r9d, <span>35Dh</span></tt><br />
+<tt>mov rax, [rax+0DB0h]</tt><br />
+<tt>call __guard_dispatch_call</tt></td>
+<td><tt>mov rax, [contoso!WdfFunctions_01031]</tt><br />
+<tt>lea rcx, [??_C@__0DK@MPBCIIPN@...]</tt><br />
+<tt>mov [r11-20h], rcx</tt><br />
+<tt>xor r8d, r8d</tt><br />
+<tt>mov rcx, [contoso!WdfDriverGlobals]</tt><br />
+<tt>mov r9d, <span>35Ch</span></tt><br />
+<tt>mov rax, [rax+0DB0h]</tt><br />
+<tt>call __guard_dispatch_call</tt></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><tt>contoso!Function4</tt></td>
+</tr>
+<tr>
+<td><tt>mov rax, [contoso!WdfFunctions_01031]</tt><br />
+<tt>lea rcx, [??_C@__0DK@MPBCIIPN@...]</tt><br />
+<tt>mov rdx, [rbp+8]</tt><br />
+<tt>mov r9d, <span>377h</span></tt><br />
+<tt>mov [rsp+20h], rcx</tt><br />
+<tt>mov r8d, 49507443h</tt><br />
+<tt>mov rcx, [contoso!WdfDriverGlobals]</tt><br />
+<tt>mov rax, [rax+0DB8h]</tt><br />
+<tt>call __guard_dispatch_call</tt></td>
+<td><tt>mov rax, [contoso!WdfFunctions_01031]</tt><br />
+<tt>lea rcx, [??_C@__0DK@MPBCIIPN@...]</tt><br />
+<tt>mov rdx, [rbp+8]</tt><br />
+<tt>mov r9d, <span>376h</span></tt><br />
+<tt>mov [rsp+20h], rcx</tt><br />
+<tt>mov r8d, 49507443h</tt><br />
+<tt>mov rcx, [contoso!WdfDriverGlobals]</tt><br />
+<tt>mov rax, [rax+0DB8h]</tt><br />
+<tt>call __guard_dispatch_call</tt></td>
+</tr>
+</tbody>
+</table>
+<p>In all of the cases, the change is that a single integer changed to a value one smaller.</p>
+<p>My colleague asked an LLM to explain this change, and it suggested that the changes were related to control flow guard metadata. Does this make sense?</p>
+<p>It didn&#8217;t make sense to me, on two points. First, for the guard dispatch call, the only parameter to control flow guard is the <tt>rax</tt> register, which is the function being checked. All the other registers contain the parameters to the called function. Since the changes are to the <tt>r9d</tt> register, they are not related to control flow guard.</p>
+<p>Second, the control flow guard metadata is not stored in code. It&#8217;s stored <a title="What to do when you have a crash in the runtime control flow guard check" href="https://devblogs.microsoft.com/oldnewthing/20251029-00/?p=111738"> as a data block inside the binary</a>.</p>
+<p>So what are we seeing?</p>
+<p>I took a look a <code>Evt­Wdf­Widget­Context­Cleanup</code>.</p>
+<pre>void EvtWdfWidgetContextCleanup(_In_ WDFOBJECT Object)
+{
+    auto widgetContext = GetContextFromWidgetHandle(Object);
+    if (widgetContext-&gt;NeedsDereference)
+    {
+        widgetContext-&gt;NeedsDereference = FALSE;
+        WdfObjectDereferenceWithTag(Object, CONTOSO_WIDGET_TAG);
+    }
+}
+</pre>
+<p>The compiler points to the <code>Wdf­Object­Dereference­With­Tag</code> as the location of the change. And we see that <a href="https://github.com/microsoft/Windows-Driver-Frameworks/blob/b6191d9543441329154da32f7ab9bdd97228dd3c/src/publicinc/wdf/kmdf/1.31/wdfobject.h#L848-L849"> it is defined as a macro</a>:</p>
+<pre>#define WdfObjectDereferenceWithTag(Handle, Tag) \
+        WdfObjectDereferenceActual(Handle, Tag, __LINE__, __FILE__)
+</pre>
+<p>which is itself <a href="https://github.com/microsoft/Windows-Driver-Frameworks/blob/b6191d9543441329154da32f7ab9bdd97228dd3c/src/publicinc/wdf/kmdf/1.31/wdfobject.h#L701-L715"> an inline function: </a></p>
+<pre>_IRQL_requires_max_(DISPATCH_LEVEL)
+VOID
+FORCEINLINE
+WdfObjectReferenceActual(
+    _In_
+    WDFOBJECT Handle,
+    _In_opt_
+    PVOID Tag,
+    _In_
+    LONG Line,
+    _In_z_
+    PCCH File
+    )
+{
+    ((PFN_WDFOBJECTREFERENCEACTUAL) WdfFunctions[WdfObjectReferenceActualTableIndex])
+        (WdfDriverGlobals, Handle, Tag, Line, File);
+}
+</pre>
+<p>The last little detail is that <a href="https://github.com/microsoft/Windows-Driver-Frameworks/blob/b6191d9543441329154da32f7ab9bdd97228dd3c/src/publicinc/wdf/umdf/1.31/wdf.h#L60"> <code>WdfFunctions</code> is a macro that expands to <code>WdfFunctions_01031</code></a>. The WDF header files give each version a unique name so that mismatched versions lead to a linker error rather than undefined behavior at runtime.</p>
+<p>Now we can see how this code maps to the compiler output.</p>
+<pre>    mov rax, [contoso!WdfFunctions_01031]   ; WdfFunctions
+    lea rcx, [??_C@__0DK@MPBCIIPN@...]      ; Address of something
+    mov [rsp+20h], rcx                      ; is the File parameter
+    mov r9d, 62Bh                           ; Line parameter
+    mov r8d, 52467443h                      ; Tag parameter
+    mov rcx, [contoso!WdfDriverGlobals]     ; hard-coded parameter
+    mov rdx, rbx                            ; Handle parameter
+    mov rax, [rax+670h]                     ; Load the function pointer
+    call __guard_dispatch_call              ; Validate and call¹
+</pre>
+<p>So the value that changed is the <i>line number</i>.</p>
+<p>I went back to the pull request and observed that the pull requested deleted a line from the source file.</p>
+<pre>#include &lt;strsafe.h&gt;
+<span>#include "stringutils.h"</span>
+</pre>
+<p>Part of the pull request included deleting the no-longer-needed header because it contained a private definition of the <code>NDIS_<wbr />STRING_<wbr />CONST</code> macro, which the code no longer uses.</p>
+<p>Deleting a line from the source file causes all the line numbers to shift by one!</p>
+<p>So what they were seeing was just a change to the line numbers. No change in functionality.</p>
+<p>If they really wanted to make this a &#8220;no binary effect&#8221; change, they could replace the <code>#include "stringutils.h</code> with a comment or just leave it as a blank line.</p>
+<p>Or they could just accept that line numbers can change when you change lines.</p>
+<p><b>Bonus chatter</b>: But wait, I said that three of the changes were in one file, the one with the deleted line, but a fourth was in a file that didn&#8217;t change at all. What&#8217;s that about?</p>
+<p>The fourth function contained a call to a function in the modified file, and link-time code generation decided to inline that call. The changed line number propagated into the inline function and resulted in a code generation change in a file that wasn&#8217;t even affected by the pull request.</p>
+<p>¹ Recall that <a title="The other kind of control flow guard check: The combined validate and call" href="https://devblogs.microsoft.com/oldnewthing/20260708-00/?p=112510"> in the validate-and-call pattern</a>, the function pointer is passed in the <code>rax</code> register, and everthing else is set up as if you were calling the function yourself.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260710-00/?p=112514">The case of the mysterious changes to integers when there shouldn&#8217;t have been any code generation effect</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

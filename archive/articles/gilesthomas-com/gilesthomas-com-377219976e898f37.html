@@ -1,0 +1,1753 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Writing an LLM from scratch, part 34a -- building a JAX training loop for an LLM training run | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Writing an LLM from scratch, part 34a -- building a JAX training loop for an LLM training run</h1>
+        <div class="meta">Giles&#x27; blog 2026-06-30T19:00:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/06/llm-from-scratch-34a-building-a-jax-training-loop-for-an-llm-training-run">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-377219976e898f37.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">For over a year, I&#x27;ve been using Sebastian Raschka &#x27;s book &quot; Build a Large Language Model (from Scratch) &quot; -- and the multitude of side-projects that have branched out from reading it -- as something like a curriculum for learning about modern AI. The one final task I had set myself was to build and train an LLM from scratch just using my notes -- no refere…</div>
+        <div class="content">
+          <p>For over a year, I've been using <a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>" --
+and the multitude of side-projects that have branched out from reading it -- as
+something like a curriculum for learning about modern AI.  The one final task
+I had set myself was to build and train an LLM from scratch just using my notes --
+no reference to the book, no reference to the model code I'd written following the book.</p>
+
+<p>As an output, I wanted something as good as my best PyTorch model based on Raschka's
+code -- a base model, trained on 3.2B tokens, that my (admittedly limited) evals
+ranked as being close to the original GPT-2 small's quality.</p>
+
+<p>I wanted to use a different framework, just to make sure I wasn't parroting code that I'd
+somehow memorised, so I
+<a href="https://x.com/gpjt/status/1985434030880293004">asked people on Twitter</a> which
+one I should use, and the winner was <a href="/2026/05/on-first-looking-into-jax">JAX</a>.</p>
+
+<p>I took a slightly different route to Raschka's book;
+he takes an inside-out perspective, explaining things like attention, gradually building
+up a complete GPT-2-style model, and then building
+a training loop on top of it.  I wanted to go
+outside-in: I'd put together a training harness to train the simplest-possible
+model with an API similar to a real LLM, get that working to my satisfaction, and then
+add features to that simple model, one by one, until it had the full architecture in place.
+The plan (which actually worked out nicely!) was that I'd be able to show
+how each change improved things.</p>
+
+<p>That's all done now, and I'm posting about it in two parts; in this one, I'll explain
+how I built the training harness, and in the next, I'll show the actual building and
+training of the LLM.</p>
+
+<p>So let's get started!</p>
+<h3 id="which-framework-on-top-of-jax">Which framework on top of JAX?</h3>
+
+<p>JAX itself has a relatively minimal API, and doesn't include standard
+neural network components like linear layers.  Likewise it doesn't have any built-in
+optimisers, data loaders or similar ML utilities.</p>
+
+<p>Now, I could have decided to build my LLM using just pure JAX, like
+<a href="/2026/05/on-first-looking-into-jax">I previously did with a toy XOR model</a>.  But
+I felt that it would be better to build this in the style that real-world JAX code
+is written, which would mean using some of the <a href="https://docs.jax.dev/en/latest/#ecosystem">many utility libraries</a>.</p>
+
+<p>On the JAX site itself, there was a useful-looking link:
+"If you’re looking to use JAX to train neural networks, check out the <a href="https://docs.jaxstack.ai/en/latest/getting_started.html">JAX AI Stack</a>!"
+On the linked page, it made it clear that the two core parts of that stack were:</p>
+
+<ul>
+<li><a href="https://flax.readthedocs.io/en/stable/">Flax NNX</a> for neural network components.</li>
+<li><a href="https://optax.readthedocs.io/en/latest/">Optax</a> for optimisation.</li>
+</ul>
+
+<p>I took a look at both, and they seemed pretty easy to grasp.
+Indeed, at first glance, I felt that NNX looked pretty PyTorch-like!  In their tutorial
+example, the only real obvious difference
+was the JAX-y derivative-style gradient calculation and the way that random numbers were
+handled.  And even the random numbers were handled in a less pure-functional way
+than pure JAX -- instead of having to mess around with splitting keys, you could just
+pass in what appeared to be a stateful variable that somehow split itself internally
+as needed.</p>
+
+<p>So, NNX and Optax were the frameworks I'd use.  Rather than grinding through the
+tutorials, I decided that I'd just dive right in, and try to pick things up as I went
+along.</p>
+
+<p>How hard could it be...?</p>
+
+<h3 id="the-a-to-a-language-model-and-the-training-loop">The A-to-A language model and the training loop</h3>
+
+<p>To build a functioning training loop, I needed a minimal model to train -- not an
+actual LLM, but something that behaved at least a bit like one.  It would take in
+a sequence of tokens, and spit out logits for each token.</p>
+
+<p>In my preferred model of <a href="/2025/09/how-do-llms-work">how LLMs work</a>, at the top level
+for a model, we feed in a sequence of token IDs, then:</p>
+
+<ul>
+<li>Firstly, we convert them into embeddings, so we get a series of vectors.  We do this by
+a lookup into a table, but we can see it conceptually as a projection via a matrix,
+from vocab space (where a particular token ID is a one-hot vector) to an
+embedding space.</li>
+<li>Next, we do the magic with our Transformers layers, getting embeddings for the next token.
+The embedding at position <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi></mrow></math> in the output sequence, after these layers, is for the predicted token to
+come after the token at position <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi></mrow></math> in the input sequence, considering that
+input token and all other tokens to its left.</li>
+<li>Finally, we project those back from embedding space to logits, this time actually using a real
+matrix (in the form of a linear layer).  The logits (after being run through
+softmax) represent the probabilities for each token of it being the next one.</li>
+</ul>
+
+<p>All of that suggested to me that the dumbest "LLM" I could write just to get started
+would be one that just projected token IDs into embedding space, and then projected
+back to vocab space.  No Transformer layers at all.</p>
+
+<p>I'd then train it so that instead of trying to predict the next token, it would
+try to "predict" what was fed into it in the first place.  In other words, you'd feed
+the training loop this input:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">The fat cat sat on the mat</span>
+</code></pre>
+</div>
+
+<p>...and this target</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">The fat cat sat on the mat</span>
+</code></pre>
+</div>
+
+<p>...rather than the normal setup for an LLM, where you feed it</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">The fat cat sat on the</span>
+</code></pre>
+</div>
+
+<p>...and give it targets of</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">fat cat sat on the mat</span>
+</code></pre>
+</div>
+
+<p>If I could get that to work -- and it felt like the kind of thing where you'd be able
+to get the loss down to near-zero without a huge amount of training -- then I could be
+reasonably sure that I had a working training loop. <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup></p>
+
+<p>I decided to call this an A-to-A model.
+Coding up the model itself was ridiculously simple: it looked like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">flax</span><span class="w"> </span><span class="kn">import</span> <span class="n">nnx</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">GPTModel</span><span class="p">(</span><span class="n">nnx</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">vocab_size</span><span class="p">,</span> <span class="n">context_length</span><span class="p">,</span>
+        <span class="n">emb_dim</span><span class="p">,</span>
+        <span class="n">n_heads</span><span class="p">,</span> <span class="n">n_layers</span><span class="p">,</span>
+        <span class="n">qkv_bias</span><span class="p">,</span>
+        <span class="n">drop_rate</span><span class="p">,</span>
+        <span class="n">rngs</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Embed</span><span class="p">(</span>
+            <span class="n">num_embeddings</span><span class="o">=</span><span class="n">vocab_size</span><span class="p">,</span>
+            <span class="n">features</span><span class="o">=</span><span class="n">emb_dim</span><span class="p">,</span>
+            <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_head</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span>
+            <span class="n">in_features</span><span class="o">=</span><span class="n">emb_dim</span><span class="p">,</span>
+            <span class="n">out_features</span><span class="o">=</span><span class="n">vocab_size</span><span class="p">,</span>
+            <span class="n">use_bias</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">rngs</span><span class="o">=</span><span class="n">rngs</span><span class="p">,</span>
+        <span class="p">)</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">input_embeddings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">token_embedding</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_head</span><span class="p">(</span><span class="n">input_embeddings</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>There's as much boilerplate in there -- for the parameters that I knew that the model
+would need when I built out the full LLM -- as there is actual code doing stuff!</p>
+
+<p>But the training loop was a bit more fun.</p>
+
+<h3 id="porting-over-the-basics">Porting over the basics</h3>
+
+<p>As I said, my plan here was to make sure my understanding of the internals of LLMs
+was correct by rebuilding one just from my notes.  That "notes only" restriction
+didn't apply to the training loop itself, so I allowed myself to crib a bit from
+the PyTorch <a href="https://github.com/gpjt/ddp-base-model-from-scratch/tree/main">DistributedDataParallel code</a>
+that I'd been using to train the original model in the cloud.</p>
+
+<p>The first version that I used is <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/train.py">here</a>.
+Let's start at the bottom, where we have <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/train.py#L393">the <code>main</code> function</a>.</p>
+
+<p>It starts with some boilerplate to handle the concept of "runs".  This is a pattern
+I've found myself using in most of my projects.  When working on a model, it's useful to
+be able to do multiple training runs, changing things each time.  You want to keep the checkpoints,
+metadata and training charts for each one for future reference.</p>
+
+<p>So in my repo, I'll
+have a "runs" directory, and in there subdirectories for each training run I want to track.</p>
+
+<p>In those subdirectories, there are JSON files -- one to configure the model,
+<a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/runs/a-to-a/model.json"><code>model.json</code></a>,
+and one to configure the training hyperparameters and similar stuff,
+<a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/runs/a-to-a/train.json"><code>train.json</code></a>.
+(It's worth noting that at this stage, a bunch of those hyperparameters were unused;
+I kept them in there out of laziness, as I knew I'd need them later.)
+So we start our <code>main</code> function by loading those.</p>
+
+<p>Our next step is to completely ignore one of the training
+hyperparameters, <code>gradient_accumulation_steps</code>.  I definitely wanted to do
+<a href="/2026/04/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation">gradient accumulation</a>,
+but decided to leave it for later.  Better to get a solid, simpler training
+run done first, I felt.</p>
+
+<p>Next, we download the dataset we're going to use to our local disk with <code>download_dataset</code>
+(which will only download if there's not an up-to-date copy already there).</p>
+
+<p>The next step is to call <code>load_dataset</code> to load it into RAM.  You can see that there's
+another hard-coded variable there, <code>world_size</code>.  This is a holdover from the multi-GPU
+DistributedDataParallel code that this was all based on; in this blog post I'm only
+covering the code for single-GPU training, but I decided to leave the DDP stuff in there
+for dataset-wrangling purposes, hardcoded
+to one GPU, so that it would be easier to re-introduce if I later decide to implement
+something similar in JAX.</p>
+
+<p>Let's take a look at <code>load_dataset</code> and its related stuff.
+If you go up to <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/train.py#L39">line 39</a>
+you'll see the code.  Firstly, there's a <code>BigTrainDataset</code> that keeps track of our
+training data.  If you look closely, you might spot one oddity in that class.  We have this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="bp">self</span><span class="o">.</span><span class="n">xs</span> <span class="o">=</span> <span class="n">all_tokens</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">microbatch_size</span><span class="p">,</span> <span class="n">seq_length</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ys</span> <span class="o">=</span> <span class="n">all_tokens</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">microbatch_size</span><span class="p">,</span> <span class="n">seq_length</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Remember that at this stage, the plan was to train the model to map tokens to themselves
+rather than to make next-token predictions.  So the targets are the same as the inputs, not
+the more normal next token, which would look like (and, in the next post, will look like) this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="bp">self</span><span class="o">.</span><span class="n">xs</span> <span class="o">=</span> <span class="n">all_tokens</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">microbatch_size</span><span class="p">,</span> <span class="n">seq_length</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ys</span> <span class="o">=</span> <span class="n">all_tokens</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">microbatch_size</span><span class="p">,</span> <span class="n">seq_length</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Next, we have a <code>load_dataset</code> function to load the appropriate subset of
+the data from the copy on the local disk
+into one of those <code>BigTrainDataset</code> objects.
+I hit an out-of-memory issue when I ran the first version of this.
+It was trying to load the data into my GPU's VRAM -- JAX's default behaviour if you
+have a GPU, and the CUDA version of JAX is installed -- and there was too much to fit in there.
+After a bit of digging around
+<a href="/2026/06/jax-backends-and-devices">I learned how to change the JAX default device</a>
+so that it would be loaded into normal system RAM.</p>
+
+<p>Unfortunately, once I'd done that, I found that iterating through it was super-slow --
+it took about 1.2 seconds to get one training batch of 6,144 tokens out of the array,
+which meant that I'd have a limit of 5,120 tokens/second of training from that alone.
+I eventually learned that the data had been loaded into the main RAM, but was being
+copied up to the GPU for processing because it had not been <em>committed</em> to the main RAM --
+<a href="/2026/06/jax-commitment-issues">details here</a>.  Fixing that (with an explicit
+call to <code>jax.device_put</code>) meant that getting a single training batch from the dataset
+and putting it onto the GPU took less than 0.001s, which was much better.</p>
+
+<p>So that was many hours of work that all got packed into lines 55 to 58 of the code:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">cpu0</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">devices</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">with</span> <span class="n">jax</span><span class="o">.</span><span class="n">default_device</span><span class="p">(</span><span class="n">cpu0</span><span class="p">):</span>
+        <span class="n">full_dataset</span> <span class="o">=</span> <span class="n">load_file</span><span class="p">(</span><span class="n">dataset_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">split</span><span class="si">}</span><span class="s2">.safetensors&quot;</span><span class="p">)[</span><span class="s2">&quot;tokens&quot;</span><span class="p">]</span>
+    <span class="n">full_dataset</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">device_put</span><span class="p">(</span><span class="n">full_dataset</span><span class="p">,</span> <span class="n">cpu0</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>The remainder of the logic in <code>load_dataset</code> is just to make sure that we have a
+dataset that is exactly the right size for the world size (even though that's always
+one right now), the microbatch size, the gradient accumulation steps, and the sequence
+length that we're working with,</p>
+
+<p>Let's <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/train.py#L433">go back to the <code>main</code> function</a>
+again.  Having loaded our dataset, we create our model, passing in the model configuration
+stuff and also the (currently unused) dropout rate training hyperparameter, then we create a Flax NNX optimiser which
+wraps an Optax one.  This was essentially a copy/paste from the Flax tutorial,
+except we're configuring the optimiser with learning rate and weight decay
+hyperparameters from the training config:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Optimizer</span><span class="p">(</span>
+        <span class="n">model</span><span class="p">,</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">adamw</span><span class="p">(</span>
+            <span class="n">learning_rate</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">],</span>
+            <span class="n">weight_decay</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;weight_decay&quot;</span><span class="p">],</span>
+        <span class="p">),</span>
+        <span class="n">wrt</span><span class="o">=</span><span class="n">nnx</span><span class="o">.</span><span class="n">Param</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Finally, we call <code>train</code> to kick off our training loop, passing in some appropriate stuff.  Let's
+<a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/train.py#L307">go to that function</a> next.</p>
+
+<p>We start off with a bit of housekeeping, then go into the main loop.  You can see
+that it's kind of gesturing at gradient accumulation:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="k">for</span> <span class="n">global_step</span> <span class="ow">in</span> <span class="n">progress_bar</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">accumulation_step</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">gradient_accumulation_steps</span><span class="p">):</span>
+</code></pre>
+</div>
+
+<p>...but if you look at the actual body of that loop, it's not doing anything of the
+sort.  It's just getting training batches, putting them on the GPU, doing a full
+training step, and keeping track of some metrics:</p>
+
+<div class="codehilite">
+<pre><span></span><code>            <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span> <span class="o">=</span> <span class="n">train_dataset</span><span class="p">[((</span><span class="n">global_step</span> <span class="o">*</span> <span class="n">gradient_accumulation_steps</span><span class="p">)</span> <span class="o">+</span> <span class="n">accumulation_step</span><span class="p">)</span> <span class="o">*</span> <span class="n">world_size</span> <span class="o">+</span> <span class="n">rank</span><span class="p">]</span>
+            <span class="n">inputs</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">device_put</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">model_device</span><span class="p">)</span>
+            <span class="n">targets</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">device_put</span><span class="p">(</span><span class="n">targets</span><span class="p">,</span> <span class="n">model_device</span><span class="p">)</span>
+
+            <span class="n">train_loss</span> <span class="o">=</span> <span class="n">train_step</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+            <span class="n">train_losses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">train_loss</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+
+            <span class="n">microbatch_size</span><span class="p">,</span> <span class="n">sequence_length</span> <span class="o">=</span> <span class="n">inputs</span><span class="o">.</span><span class="n">shape</span>
+            <span class="n">tokens_seen_this_rank</span> <span class="o">+=</span> <span class="n">microbatch_size</span> <span class="o">*</span> <span class="n">sequence_length</span>
+</code></pre>
+</div>
+
+<p>So, we're just doing a traditional batch-by-batch training loop without gradient
+accumulation right now.  But some of the infrastructure is there, because it was
+the next thing I wanted to add after I'd got the basic loop working.</p>
+
+<p>The rest of the <code>train</code> function is just housekeeping and checkpointing; we'll come back
+to the checkpointing shortly, but first let's take a look at the <code>train_step</code> function
+that actually trains the model on a set of inputs and targets, and its associated <code>calculate_loss</code>
+function -- they're <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/train.py#L292">just above <code>train</code></a>.</p>
+
+<p>Now, as you might remember from <a href="/2026/05/on-first-looking-into-jax">my first JAX post</a>,
+the best way to JIT a training loop
+is at as high a level as possible.  So when I first coded this, I integrated that into the traditionally-named
+<code>train_step</code> function like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="nd">@jax</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">train_step</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">):</span>
+    <span class="n">loss</span><span class="p">,</span> <span class="n">grads</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">value_and_grad</span><span class="p">(</span><span class="n">calculate_loss</span><span class="p">)(</span><span class="n">model</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">grads</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">loss</span>
+</code></pre>
+</div>
+
+<p>When I actually came around to run it the first time, loss wasn't falling at all,
+and after banging my head against it for a while, I
+<a href="/2026/06/hashing-jax-parameters">realised I should have used <code>nnx.jit</code> rather than <code>jax.jit</code></a>,
+fixed that,
+and kicked it off again.  Loss started falling immediately.  D'oh!</p>
+
+<p>Now let's take a look at loss.  <a href="/2025/10/llm-from-scratch-20-starting-training-cross-entropy-loss">Cross entropy loss</a>
+was clearly what I would need to train an LLM, and also felt like the right thing for the
+A-to-A model.</p>
+
+<p>Optax has five loss functions that are related to cross entropy; three of them looked
+a bit more complicated than I needed:</p>
+
+<ul>
+<li><code>poly_loss_cross_entropy</code>,</li>
+<li><code>safe_softmax_cross_entropy</code>, and</li>
+<li><code>sigmoid_binary_cross_entropy</code>.</li>
+</ul>
+
+<p>So it was a choice between</p>
+
+<ul>
+<li><a href="https://optax.readthedocs.io/en/latest/api/generated/optax.losses.softmax_cross_entropy.html#optax.losses.softmax_cross_entropy"><code>softmax_cross_entropy</code></a> and</li>
+<li><a href="https://optax.readthedocs.io/en/latest/api/generated/optax.losses.softmax_cross_entropy_with_integer_labels.html#optax.losses.softmax_cross_entropy_with_integer_labels"><code>softmax_cross_entropy_with_integer_labels</code></a>.</li>
+</ul>
+
+<p>The latter was the right one -- <code>softmax_cross_entropy</code> expects the labels (that is,
+the target token IDs) to be
+one-hot vectors, while <code>softmax_cross_entropy_with_integer_labels</code>, as it says in
+the function name, expects integer labels, which is what we have.</p>
+
+<p>That sounded pretty similar to PyTorch's <a href="https://docs.pytorch.org/docs/2.12/generated/torch.nn.functional.cross_entropy.html"><code>cross_entropy</code></a>,
+but there was an important difference.  For normal use (if you're not using K-dimensional
+loss, whatever that might be) PyTorch expects that the inputs are either just a one-dimensional
+tensor of <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>c</mi></mrow></math> logits, or at worst a <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>b</mi><mi>x</mi><mi>c</mi></mrow></math> matrix, where <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>b</mi></mrow></math> is the batch size.</p>
+
+<p>I had noted when working through this section of Raschka's book that the
+code we wrote flattened things out.  So a batch of six sequences, each
+1,024 tokens long, with a vocab size of 50,257, would give us a logits tensor
+shaped like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp gp-VirtualEnv">(6, 1024, 50257)</span>
+</code></pre>
+</div>
+
+<p>The first axis is the batches, the second is the length of the sequences -- remember,
+we have logits for every input token in the sequence, with next-token predictions
+for that token in the context of all of the other ones to its left.  And the last
+axis, with a size equal to our tokeniser's vocabulary size, is the logits themselves.</p>
+
+<p>After flattening, it looked like a "batch" of <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>6</mn><mo>&#x0002A;</mo><mn>1024</mn><mo>&#x0003D;</mo><mn>6144</mn></mrow></math> logits
+vectors:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp gp-VirtualEnv">(6144, 50257)</span>
+</code></pre>
+</div>
+
+<p>Likewise our targets -- the token IDs we wanted our model to be predicting --
+were batched, and there was one per token in each sequence, so that tensor was</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp gp-VirtualEnv">(6, 1024)</span>
+</code></pre>
+</div>
+
+<p>Flattened, it looked like a "batch" of <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>6</mn><mo>&#x0002A;</mo><mn>1024</mn><mo>&#x0003D;</mo><mn>6144</mn></mrow></math> targets:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp gp-VirtualEnv">(6144,)</span>
+</code></pre>
+</div>
+
+<p>Finally, the PyTorch function returned a scalar value -- wrapped in a PyTorch <code>Tensor</code> object,
+of course, so that it could participate in the backward pass, but a single number.</p>
+
+<p>But I'd forgotten about all of that when I was writing this part of the JAX code, and just fed
+the inputs and the targets straight in to the JAX function.  The result was
+interesting.  I started with this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>     <span class="n">loss</span> <span class="o">=</span> <span class="n">optax</span><span class="o">.</span><span class="n">losses</span><span class="o">.</span><span class="n">softmax_cross_entropy_with_integer_labels</span><span class="p">(</span>
+         <span class="n">logits</span><span class="p">,</span> <span class="n">targets</span>
+     <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>And printing out the shapes of each variable gave this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">logits.shape=(6, 1024, 50257)</span>
+<span class="go">targets.shape=(6, 1024)</span>
+<span class="go">loss.shape=(6, 1024)</span>
+</code></pre>
+</div>
+
+<p>It had returned a cross entropy number for every element in every sequence, across all
+of the batches!</p>
+
+<p>What's interesting
+is that the <a href="https://optax.readthedocs.io/en/latest/api/generated/optax.losses.softmax_cross_entropy_with_integer_labels.html#optax.losses.softmax_cross_entropy_with_integer_labels">docs for <code>softmax_cross_entropy_with_integer_labels</code></a>
+imply that it has the same restrictions as PyTorch's -- it expects a single batch axis
+in the tensors that are passed in.  Perhaps they're out of date?  Or perhaps Optax
+just assumes that you know that in JAX "a batch axis" should be read as "as many batch axes as you want"?
+Well, anyway -- it worked, and I checked that the numbers were solid.</p>
+
+<p>Now, of course, we can't ask JAX for gradients using that <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>6</mn><mi>&#x000D7;</mi><mn>1024</mn></mrow></math> matrix -- the loss function needs
+to return a scalar -- but the <code>mean</code> function on a JAX array does exactly what we need.
+So I had a solid loss calculation, which you can see in <code>calculate_loss</code>:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">calculate_loss</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">):</span>
+    <span class="n">logits</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">optax</span><span class="o">.</span><span class="n">losses</span><span class="o">.</span><span class="n">softmax_cross_entropy_with_integer_labels</span><span class="p">(</span>
+        <span class="n">logits</span><span class="p">,</span> <span class="n">targets</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">loss</span>
+</code></pre>
+</div>
+
+<p>So that's covered our loss function and the JITted <code>train_step</code> that uses it.</p>
+
+<p>The only remaining code that I haven't gone over in this version of the <code>train.py</code> script
+is the stuff immediately above <code>calculate_loss</code> -- <code>get_training_data</code> and
+<code>generate_training_charts</code>.  These are both called as part of the housekeeping
+code I glossed over in the <code>train</code> function, after we take checkpoints.</p>
+
+<p>They just redraw a plot of the
+loss and other training metrics, using stuff that's stored in the metadata of all of the checkpoints so far.
+That means that there's a nice graphical way to keep track of a training run.  Fairly
+dull stuff, so there's no need to go
+through them, but it is worth taking a look at the checkpointing code
+itself.</p>
+
+<p>You can see the version I was working with at this point <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/checkpointing.py">here</a>.
+It's not really much of a checkpoint; I was saving the model itself and
+the metadata needed for that charting code, but not the optimiser, which would be
+needed for a real checkpoint.  After all, the purpose of a checkpoint is to be able
+to pick things up again if your training loop crashes, and you can't do that without
+the optimiser's state.  Still, it was enough to get started with.</p>
+
+<p>That said, one wrinkle I encountered when writing that simple checkpointing code was
+that it was a tad tricky to save them in Safetensors format --
+<a href="/2026/06/flax-and-safetensors">you can see the details here</a>.</p>
+
+<p>So, that was my initial training code.  It was time to let it rip: could I train
+my dumb "LLM" to map from A to A?</p>
+
+<h3 id="the-first-a-to-a-run">The first A-to-A run</h3>
+
+<p>As I mentioned earlier, the very first run didn't converge at all -- loss started
+at about 10.82, which was promising (it's exactly what you'd expect for a randomly-initialised
+network trying to predict GPT-2 tokens -- see <a href="/2026/06/hashing-jax-parameters">here</a> for
+details), but then it remained there.</p>
+
+<p>But when I fixed the "<code>jax.jit</code> should be <code>nnx.jit</code>" issue,
+it started dropping.  After 92,160,000 tokens seen, it seemed to have hit zero (at least to the three DPs I was printing), so
+I baked that into <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/runs/a-to-a/train.json"><code>train.json</code></a>
+and did another training run fixed to that number of tokens.  After about 14 minutes, it finished:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Training complete in 843.547 seconds</span>
+<span class="go">Tokens seen: 92,160,000</span>
+<span class="go">Throughput: 109,253 tokens/second</span>
+<span class="go">Final train loss: 0.000</span>
+<span class="go">2026-06-17 19:29:31.667194 Done</span>
+</code></pre>
+</div>
+
+<p>A very promising final loss, even though that was just whatever we got on the last
+batch!  The actual loss chart looked like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34a-building-a-jax-training-loop-for-an-llm-training-run/a-to-a-loss-chart.png" alt="A-to-A loss chart" title="A-to-A loss chart" /></p>
+
+<p>If you're used to the loss charts in my previous posts, there's something to highlight
+here: I've switched the Y axis over to being log, so those bumps near the end are actually
+tiny deviations away from 0.001.</p>
+
+<p>I think it's worth showing what the model actually did at this point.  It was actually
+somewhat later that I wrote some code to load up the model checkpoints from these training
+runs and do some smoke tests, but I'll show you some results now.</p>
+
+<p>I wrote some code based on <a href="/2026/06/flax-and-safetensors">my JAX safetensors post</a>
+to load up a model's parameters from a checkpoint's <code>model.safetensors</code> file:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">load_model</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">file</span><span class="p">):</span>
+    <span class="n">model_state_simple_dict</span> <span class="o">=</span> <span class="n">load_file</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+    <span class="n">dict_flat_state</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">array</span> <span class="ow">in</span> <span class="n">model_state_simple_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">elements</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+        <span class="n">list_key</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">element</span> <span class="ow">in</span> <span class="n">elements</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">list_key</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">element</span><span class="p">))</span>
+            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+                <span class="n">list_key</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">element</span><span class="p">)</span>
+        <span class="n">dict_flat_state</span><span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">list_key</span><span class="p">)]</span> <span class="o">=</span> <span class="n">array</span>
+
+    <span class="n">new_flat_state</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">from_flat_state</span><span class="p">(</span><span class="n">dict_flat_state</span><span class="p">)</span>
+    <span class="n">nnx</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">new_flat_state</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and then wrote two test scripts.</p>
+
+<p>Firstly, was it really mapping
+from A to A?  I wanted to be sure that the loss number was actually reflecting what I
+wanted it to reflect.  I wrote
+<a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/62291c4f42dbbd93f105283449f4a94d5665e5d2/test_a_to_a.py">a simple script</a>
+that took a Safetensors file on the command line, and ran the first verse of
+<em>The Rime of the Ancient Mariner</em> (chosen because it uses oldish English so there
+are some odd tokens in it) through the LLM it loaded from that file.</p>
+
+<p>Here's what the model at the end of the run came up with:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp">giles@perry:~/Dev/jax-gpt2-from-scratch (main)$ </span>uv<span class="w"> </span>run<span class="w"> </span>test_a_to_a.py<span class="w"> </span>runs/a-to-a/checkpoints/best/model.safetensors
+<span class="go">Input:</span>
+<span class="go">---</span>
+
+<span class="go">It is an ancient Mariner,</span>
+<span class="go">And he stoppeth one of three.</span>
+<span class="go">&#39;By thy long grey beard and glittering eye,</span>
+<span class="go">Now wherefore stopp&#39;st thou me?</span>
+
+<span class="go">---</span>
+
+<span class="go">Output:</span>
+<span class="go">---</span>
+
+<span class="go">It is an ancient Mariner,</span>
+<span class="go">And he stoppeth one of three.</span>
+<span class="go">&#39;By thy long grey beard and glittering eye,</span>
+<span class="go">Now wherefore stopp&#39;st thou me?</span>
+
+<span class="go">---</span>
+</code></pre>
+</div>
+
+<p>That's great!  It could certainly handle the mapping.  Out of interest, I decided to
+see how quickly it had learned to get that right.  The average training loss in
+that "best" checkpoint at the end of the training run was 0.0001, so how did the
+mapping improve, and what was the loss, near the start of the training run?</p>
+
+<p>For the first checkpoint, when we'd just run one batch through, we
+had an average training loss of 10.8242.  With the model parameters that were
+saved then, we get this output:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp">giles@perry:~/Dev/jax-gpt2-from-scratch (main)$ </span>uv<span class="w"> </span>run<span class="w"> </span>test_a_to_a.py<span class="w"> </span>runs/a-to-a/checkpoints/20260617Z185827-iteration-0/model.safetensors
+<span class="go">Input:</span>
+<span class="go">---</span>
+
+<span class="go">It is an ancient Mariner,</span>
+<span class="go">And he stoppeth one of three.</span>
+<span class="go">&#39;By thy long grey beard and glittering eye,</span>
+<span class="go">Now wherefore stopp&#39;st thou me?</span>
+
+<span class="go">---</span>
+
+<span class="go">Output:</span>
+<span class="go">---</span>
+<span class="go">LOADRecommend ptwtacid cheek lunch KaLOAD blondrient Sole Broken engages CrimsplitrelyLOAD Consortium hopefully Fisheries qualardiestern565Financial gallery talked KaLOADhuge admit disappeared SoleERT Heardearth showcasingurancesLOAD</span>
+<span class="go">---</span>
+</code></pre>
+</div>
+
+<p>As you'd expect from that loss, it's total token salad.</p>
+
+<p>Now let's take a look at the next checkpoint, taken after 375 "global steps" -- that is,
+6,000 batches.  In that one, the average train loss since that first
+checkpoint was 2.9323.  But that hides something important -- the maximum loss, near the
+start, was (as you would expect) 10.78524, not much less than the average loss in the
+previous checkpoint.  But the minimum (which we can safely assume was towards the end
+of this checkpointing period) was 0.54155, so we can reasonably assume that the model
+improved <em>very</em> rapidly at this point.  And the A-to-A test bears this out:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp">giles@perry:~/Dev/jax-gpt2-from-scratch (main)$ </span>uv<span class="w"> </span>run<span class="w"> </span>test_a_to_a.py<span class="w"> </span>runs/a-to-a/checkpoints/20260617Z185848-iteration-375/model.safetensors
+<span class="go">Input:</span>
+<span class="go">---</span>
+
+<span class="go">It is an ancient Mariner,</span>
+<span class="go">And he stoppeth one of three.</span>
+<span class="go">&#39;By thy long grey beard and glittering eye,</span>
+<span class="go">Now wherefore stopp&#39;st thou me?</span>
+
+<span class="go">---</span>
+
+<span class="go">Output:</span>
+<span class="go">---</span>
+
+<span class="go">It is an ancient Mariner,</span>
+<span class="go">And he stoppeth one of three.</span>
+<span class="go">&#39;By thy long grey beard and glittering eye,</span>
+<span class="go">Now wherefore stopp&#39;st thou me?</span>
+
+<span class="go">---</span>
+</code></pre>
+</div>
+
+<p>So, we can see that the bulk of the improvement happened right at the start!  It
+was able to pass the A-to-A test for that fairly unusual sequence after just 6,001
+total batches of 6 1,024-token sequences.</p>
+
+<p>The rest
+of the training run was perhaps just grinding out improvement on rarer tokens, and
+perhaps making it more certain about already-correct predictions.  After all, the
+test script was simply printing the most likely token for each position, so at this state
+it might have been predicting some of those tokens as 51% probability.  That would have meant
+a penalty in the loss function, even if the answer was actually correct.</p>
+
+<p>So that was an interesting script; I wanted to do another -- the standard smoke test that I've been using, based on Raschka's prompt:
+how does the model complete "Every effort moves you" when asked to continue the sentence?
+<a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/62291c4f42dbbd93f105283449f4a94d5665e5d2/test_generation.py">Here's the script</a>,
+and here's what it generated:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gp">giles@perry:~/Dev/jax-gpt2-from-scratch (main)$ </span>uv<span class="w"> </span>run<span class="w"> </span>test_generation.py<span class="w"> </span>runs/a-to-a/checkpoints/best/model.safetensors
+<span class="go">Every effort moves you you you you you you you you you you you you you you you you you you you you you</span>
+</code></pre>
+</div>
+
+<p>That makes perfect sense.  In order to generate the next token in an autoregressive loop, we're looking at the
+logits for the last one in the prompt.  When it first runs, the last token is
+" you", and our model is trained to map A to A, so its result is " you".  We append
+that to the prompt, run it through again, the last token is still " you", so of course it "predicts" the token " you"
+again.  And so on.</p>
+
+<p>So these results were both good news!  The A-to-A mapping was working, and was converging
+rapidly in terms of loss -- and even more rapidly in terms of our poetic test.</p>
+
+<p>So, what was next?  I wanted the
+training loop to be as similar as possible to the code I used for my
+<a href="/2026/04/llm-from-scratch-32l-interventions-instruction-fine-tuning-tests">best locally-trained PyTorch model</a>.
+That used three things I had not built into the training loop at this stage:
+learning rate scheduling, gradient clipping, and gradient accumulation.  The PyTorch code also had the ability to restart
+from a checkpoint -- not super-important in a 14-minute training run like this one,
+but I figured it would become important later.  After all, the PyTorch runs on my
+local machine had taken almost two days, and if something went wrong halfway through (cat
+jumping onto PC power button, etc) then I really wouldn't want to start from scratch.</p>
+
+<p>I decided to handle gradient accumulation first.</p>
+
+<h3 id="gradient-accumulation">Gradient accumulation</h3>
+
+<p>In PyTorch, doing <a href="/2026/04/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation">gradient accumulation</a>
+is pretty simple: the core of a typical training loop
+without it might look something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_function</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>We start off by clearing out any gradients that are stashed on the model's parameters,
+then do a forward pass, work out the loss, do a backward pass to put new gradients
+on the parameters, and then step the optimiser to apply those gradients.</p>
+
+<p>Accumulating gradients just means changing it to something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">gradient_accumulation_steps</span><span class="p">):</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_function</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+        <span class="p">(</span><span class="n">loss</span> <span class="o">/</span> <span class="n">gradient_accumulation_steps</span><span class="p">)</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>That is, we do a forward and a backward pass <code>gradient_accumulation_steps</code> times.  Because
+we're not zeroing out existing gradients between them, the parameters will accumulate
+gradients over time -- each backward pass will add its contribution onto what is already
+there.  Each time, we
+divide the loss by <code>gradient_accumulation_steps</code>, so that the gradients
+that are put on the parameters are that much smaller, which
+means that by the end of our loop we've got gradients that are the average of what
+we'd have got if we'd done all of these microbatches in one big batch.  Finally,
+once we've exited the loop, we
+step the optimiser to apply those averaged gradients.</p>
+
+<p>When I started thinking about implementing this in JAX, I noticed that
+<a href="https://optax.readthedocs.io/en/latest/_collections/examples/gradient_accumulation.html">Optax has a help page on how to do it</a>,
+but then I had one of those brilliant
+shower thoughts that one sometimes has.  I should have learned by my age that they
+rarely work out well, but this time I decided to give it a go rather than doing
+things the official way.</p>
+
+<p>My brilliant idea was that with some finessing, we could put the whole gradient
+accumulation loop inside JITted code.  From what I'd learned so far, the higher up
+in our code we put the JIT decorator -- that is, the more of the training loop it
+covered -- the faster it would be.  In itself, that wasn't a bad idea.</p>
+
+<p>But my first
+implementation was less smart:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">calculate_loss</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">):</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">microbatch_inputs</span><span class="p">,</span> <span class="n">microbatch_targets</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">):</span>
+        <span class="n">logits</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">microbatch_inputs</span><span class="p">)</span>
+        <span class="n">loss</span> <span class="o">+=</span> <span class="n">optax</span><span class="o">.</span><span class="n">losses</span><span class="o">.</span><span class="n">softmax_cross_entropy_with_integer_labels</span><span class="p">(</span>
+            <span class="n">logits</span><span class="p">,</span> <span class="n">microbatch_targets</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">loss</span>
+
+
+<span class="nd">@nnx</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">train_step</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">):</span>
+    <span class="n">loss</span><span class="p">,</span> <span class="n">grads</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">value_and_grad</span><span class="p">(</span><span class="n">calculate_loss</span><span class="p">)(</span><span class="n">model</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">grads</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">loss</span>
+</code></pre>
+</div>
+
+<p>The <code>inputs</code> were  full-step arrays (eg. shaped (16, 6, 1024) for
+16 gradient-accumulation steps over 6 microbatches of 1024 sequences), and the targets
+likewise.  That seemed very clever!  But in retrospect, it was obviously doomed to failure, and
+when I ran it, I ran out of VRAM.</p>
+
+<p>The point of gradient accumulation is that what you accumulate over time is, well,
+gradients.  So you have to do a full forward pass and then a backward pass over the model
+for each microbatch, letting gradients build up, and then apply those in one go, like
+the PyTorch code did.</p>
+
+<p>Unfortunately what I was doing with my code was essentially all of the forward passes,
+one by one, letting the activations and JAX's internal structures representing what
+calculations had been done accumulate -- not the gradients -- and then doing a single
+backward pass across all of that.  Mathematically it made sense -- I would have got
+the right effect if I'd had enough VRAM -- but it wasn't much more memory-efficient than just doing a single
+batch of <code>gradient_accumulation_steps * batch_size</code> sequences.  Immediate CUDA OOM.</p>
+
+<p>My second attempt was a bit more sensible and ran OK without the JIT:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="c1">#@nnx.jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">train_step</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">):</span>
+    <span class="n">loss_list</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">grads_list</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">microbatch_inputs</span><span class="p">,</span> <span class="n">microbatch_targets</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">):</span>
+        <span class="n">microbatch_loss</span><span class="p">,</span> <span class="n">microbatch_grads</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">value_and_grad</span><span class="p">(</span><span class="n">calculate_loss</span><span class="p">)(</span><span class="n">model</span><span class="p">,</span> <span class="n">microbatch_inputs</span><span class="p">,</span> <span class="n">microbatch_targets</span><span class="p">)</span>
+        <span class="n">loss_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">microbatch_loss</span><span class="p">)</span>
+        <span class="n">grads_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">microbatch_grads</span><span class="p">)</span>
+
+    <span class="n">average_grads</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">tree</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="o">*</span><span class="n">items</span><span class="p">:</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">items</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span>
+        <span class="o">*</span><span class="n">grads_list</span>
+    <span class="p">)</span>
+
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">average_grads</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">loss_list</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>You can see that now I was doing both the forward and the backward pass within the
+loop, and then working out the mean gradients with that <code>jax.tree.map</code>, then
+passing those average gradients to the optimizer.</p>
+
+<p>It all made sense, and seemed to work when I ran it:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Training complete in 1,146.173 seconds</span>
+<span class="go">Tokens seen: 92,209,152</span>
+<span class="go">Throughput: 80,450 tokens/second</span>
+<span class="go">Final train loss: 0.001</span>
+<span class="go">2026-06-18 19:00:25.739249 Done</span>
+</code></pre>
+</div>
+
+<p>...and it wasn't as much slower as I would expect given the lack of JITting: 1,146
+seconds versus 843.</p>
+
+<p>It was interesting that the final train loss was higher than the run without gradient
+accumulation, but larger effective batch sizes are not always a better thing: it depends
+very much on the model you're training and the data.  The batch size and number of gradient
+accumulation steps I was using were ones I had optimised for the full 163M-parameter
+GPT-2-style LLM, not for this model.  So it was OK if it was a bit worse.</p>
+
+<p>Anyway, I tried adding the <code>@nnx.jit</code> to that function, and ran it:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 20.71GiB. [tf-allocator-allocation-error=&#39;&#39;] [executable_name=&#39;jit_train_step&#39;]</span>
+</code></pre>
+</div>
+
+<p>Ouch.  And looking at the traceback, it appeared that it was the actual JITting that
+was running out of VRAM.  Something to do with loop unrolling, perhaps?  I dug around
+for a while, trying to use JAX's <a href="https://docs.jax.dev/en/latest/_autosummary/jax.lax.fori_loop.html"><code>fori_loop</code></a>
+rather than a normal Python one, but to no avail -- I would always run out of
+GPU memory.</p>
+
+<p>Eventually, after a few hours, the alarm bells on my side quest detector had become
+too loud to ignore.  Reluctantly, I gave up on hand-rolling my own gradient accumulation,
+and implemented it <a href="https://optax.readthedocs.io/en/latest/_collections/examples/gradient_accumulation.html">the Optax way</a>.</p>
+
+<p>That was actually really nice and simple.  The <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/52d8b1f86f69ba2e91c016b12c5c6e25e78400a3/train.py">code is here</a>,
+but the change is tiny and simple to explain.  Remember that we had this code to set up the
+optimizer:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Optimizer</span><span class="p">(</span>
+        <span class="n">model</span><span class="p">,</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">adamw</span><span class="p">(</span>
+            <span class="n">learning_rate</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">],</span>
+            <span class="n">weight_decay</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;weight_decay&quot;</span><span class="p">],</span>
+        <span class="p">),</span>
+        <span class="n">wrt</span><span class="o">=</span><span class="n">nnx</span><span class="o">.</span><span class="n">Param</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That creates a Flax NNX optimiser, which uses an Optax AdamW optimiser under the hood.</p>
+
+<p>The Optax way to do gradient accumulation is to wrap the optimiser in a
+<a href="https://optax.readthedocs.io/en/latest/api/generated/optax.MultiSteps.html"><code>MultiSteps</code></a>
+helper, which -- with the NNX optimiser wrapping the result -- looks like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Optimizer</span><span class="p">(</span>
+        <span class="n">model</span><span class="p">,</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">MultiSteps</span><span class="p">(</span>
+            <span class="n">optax</span><span class="o">.</span><span class="n">adamw</span><span class="p">(</span>
+                <span class="n">learning_rate</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">],</span>
+                <span class="n">weight_decay</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;weight_decay&quot;</span><span class="p">],</span>
+            <span class="p">),</span>
+            <span class="n">every_k_schedule</span><span class="o">=</span><span class="n">gradient_accumulation_steps</span>
+        <span class="p">),</span>
+        <span class="n">wrt</span><span class="o">=</span><span class="n">nnx</span><span class="o">.</span><span class="n">Param</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>The <code>MultiSteps</code> wrapper is really neat.  It has the same interface as a regular
+optimiser, so its <code>update</code> method can be called with a set of gradients.  But instead
+of applying them, it just accumulates them until a particular number of calls to <code>update</code>
+have been made, at which
+it actually does apply the mean of the accumulated gradients, and resets its counter
+so that it starts accumulating again.</p>
+
+<p>That's actually a really nice API.  And it actually meant that I would have been able
+to simplify the training loop.  Remember, we had this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="k">for</span> <span class="n">global_step</span> <span class="ow">in</span> <span class="n">progress_bar</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">accumulation_step</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">gradient_accumulation_steps</span><span class="p">):</span>
+            <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span> <span class="o">=</span> <span class="n">train_dataset</span><span class="p">[((</span><span class="n">global_step</span> <span class="o">*</span> <span class="n">gradient_accumulation_steps</span><span class="p">)</span> <span class="o">+</span> <span class="n">accumulation_step</span><span class="p">)</span> <span class="o">*</span> <span class="n">world_size</span> <span class="o">+</span> <span class="n">rank</span><span class="p">]</span>
+            <span class="n">inputs</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">device_put</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">model_device</span><span class="p">)</span>
+            <span class="n">targets</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">device_put</span><span class="p">(</span><span class="n">targets</span><span class="p">,</span> <span class="n">model_device</span><span class="p">)</span>
+
+            <span class="n">train_loss</span> <span class="o">=</span> <span class="n">train_step</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">)</span>
+            <span class="n">train_losses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">train_loss</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+
+            <span class="n">microbatch_size</span><span class="p">,</span> <span class="n">sequence_length</span> <span class="o">=</span> <span class="n">inputs</span><span class="o">.</span><span class="n">shape</span>
+            <span class="n">tokens_seen_this_rank</span> <span class="o">+=</span> <span class="n">microbatch_size</span> <span class="o">*</span> <span class="n">sequence_length</span>
+</code></pre>
+</div>
+
+<p>The loop-within-a-loop was needed by the PyTorch code, because we needed to do the
+optimizer step at the end to apply the accumulated gradients.  But with the Optax
+wrapper, we could have just iterated over our samples in one top-level loop, relying
+on the <code>MultiSteps</code> to make its updates every <code>gradient_accumulation_steps</code> iterations.</p>
+
+<p>However, I decided to leave it in -- keeping track of the training in terms of global steps
+meant that the training output with my JAX model would be easier to compare to the PyTorch
+versions.  Perhaps if I'd been building the training loop completely from scratch I would
+have chosen differently.</p>
+
+<p>Anyway, with that code change in, I ran it, and:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Training complete in 836.409 seconds</span>
+<span class="go">Tokens seen: 92,209,152</span>
+<span class="go">Throughput: 110,244 tokens/second</span>
+<span class="go">Final train loss: 0.001</span>
+<span class="go">2026-06-18 20:56:15.220326 Done</span>
+</code></pre>
+</div>
+
+<p>I had the same loss at the end as the by-hand un-JITted version, which was reassuring.  And it was slightly faster
+than the non-gradient-accumulating version, but it's a small enough difference that
+it was probably just in the noise.</p>
+
+<p>So that was gradient accumulation!  <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/52d8b1f86f69ba2e91c016b12c5c6e25e78400a3/train.py">Here's the code with that added</a>.</p>
+
+<p>Next, I wanted to get charting and scheduling of the learning rate, and gradient clipping working.</p>
+
+<h3 id="charting-the-learning-rate">Charting the learning rate</h3>
+
+<p>Scheduling the learning rate means that we'll be changing it over the course of
+the run -- like this example from one of my PyTorch training runs:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation/interventions-learning-rate-chart.png" alt="The learning rate chart for the local interventions train" title="The learning rate chart for the local interventions train" /></p>
+
+<p>Having a chart like that one is really useful, as it allows you to sanity-check that
+the changes you are making to the learning rate really are the right ones.  So I wanted to add the charting first,
+and then the scheduling.  The boilerplate code to actually generate the chart, given
+learning rate numbers in the checkpoints' metadata, was already there, so I had to
+work out how to extract the current value of the learning rate from the optimiser and
+then save it into the checkpoints.</p>
+
+<p><a href="https://optax.readthedocs.io/en/latest/getting_started.html#accessing-learning-rate">This was the obvious starting point</a>.
+Optax optimisers themselves don't store the learning rate, but if you create them
+like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">optax</span><span class="o">.</span><span class="n">inject_hyperparams</span><span class="p">(</span><span class="n">optax</span><span class="o">.</span><span class="n">adam</span><span class="p">)(</span><span class="o">...</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...where the <code>...</code> in the brackets is the normal stuff that you'd pass in to the
+optimizer when creating it, then you can extract the learning rate later.</p>
+
+<p>However, the code on that help page was using the Optax optimiser directly, whereas my one in the training code
+was wrapped inside a <code>MultiSteps</code>, which was in turn wrapped inside an NNX <code>Optimizer</code> object,
+like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Optimizer</span><span class="p">(</span>
+        <span class="n">model</span><span class="p">,</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">MultiSteps</span><span class="p">(</span>
+            <span class="n">optax</span><span class="o">.</span><span class="n">adamw</span><span class="p">(</span>
+                <span class="n">learning_rate</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">],</span>
+                <span class="n">weight_decay</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;weight_decay&quot;</span><span class="p">],</span>
+            <span class="p">),</span>
+            <span class="n">every_k_schedule</span><span class="o">=</span><span class="n">gradient_accumulation_steps</span>
+        <span class="p">),</span>
+        <span class="n">wrt</span><span class="o">=</span><span class="n">nnx</span><span class="o">.</span><span class="n">Param</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Still, the solution seemed reasonably clear.  I could use the <code>inject_hyperparameters</code> trick
+on the <code>adamw</code> that I was creating, and then pass it in to be wrapped like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optax_optimizer</span> <span class="o">=</span> <span class="n">optax</span><span class="o">.</span><span class="n">inject_hyperparams</span><span class="p">(</span><span class="n">optax</span><span class="o">.</span><span class="n">adamw</span><span class="p">)(</span>
+        <span class="n">learning_rate</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">],</span>
+        <span class="n">weight_decay</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;weight_decay&quot;</span><span class="p">],</span>
+    <span class="p">)</span>
+    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Optimizer</span><span class="p">(</span>
+        <span class="n">model</span><span class="p">,</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">MultiSteps</span><span class="p">(</span>
+            <span class="n">optax_optimizer</span><span class="p">,</span>
+            <span class="n">every_k_schedule</span><span class="o">=</span><span class="n">gradient_accumulation_steps</span>
+        <span class="p">),</span>
+        <span class="n">wrt</span><span class="o">=</span><span class="n">nnx</span><span class="o">.</span><span class="n">Param</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>The next question was how to actually read the learning rate from that optimiser.</p>
+
+<p>The sample code in the Optax docs looked like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">optimizer</span> <span class="o">=</span> <span class="n">optax</span><span class="o">.</span><span class="n">inject_hyperparams</span><span class="p">(</span><span class="n">optax</span><span class="o">.</span><span class="n">adamw</span><span class="p">)(</span><span class="n">learning_rate</span><span class="o">=</span><span class="n">schedule</span><span class="p">)</span>
+
+<span class="n">params</span> <span class="o">=</span> <span class="n">initial_params</span>
+<span class="n">state</span> <span class="o">=</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s1">&#39;initial learning rate:&#39;</span><span class="p">,</span> <span class="n">state</span><span class="o">.</span><span class="n">hyperparams</span><span class="p">[</span><span class="s1">&#39;learning_rate&#39;</span><span class="p">])</span>
+
+<span class="n">_</span><span class="p">,</span> <span class="n">state</span> <span class="o">=</span> <span class="n">fit</span><span class="p">(</span><span class="n">initial_params</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s1">&#39;final learning rate:&#39;</span><span class="p">,</span> <span class="n">state</span><span class="o">.</span><span class="n">hyperparams</span><span class="p">[</span><span class="s1">&#39;learning_rate&#39;</span><span class="p">])</span>
+</code></pre>
+</div>
+
+<p>Again, that was using the Optax optimiser directly, rather than trying to use one that was
+inside an NNX one.  However, in <a href="https://flax.readthedocs.io/en/stable/api_reference/flax.nnx/training/optimizer.html">the docs for NNX's optimiser</a>
+I noticed that it exposes its wrapped Optax one's state as <code>opt_state</code>.  I put in
+some temporary debug code to print that, and saw that it was the <code>MultiSteps</code>' state,
+which made sense -- and that, in turn, contained the state of the wrapped <code>adamw</code> one
+as <code>inner_opt_state</code>.</p>
+
+<p>That <code>inner_opt_state</code> had a field called <code>hyperparameters</code>, which
+was a dictionary that included <code>learning_rate</code> as a key.</p>
+
+<p>Finally, the value that that key pointed to was a <code>Variable</code> object.  To get the actual
+value from there, you need to call its <code>get_value()</code> to get the actual value,
+which is a JNP array, so we needed to call <code>item()</code> on it.</p>
+
+<p>All of that led to the following abomination unto God, mankind, and
+<a href="https://en.wikipedia.org/wiki/Law_of_Demeter">the Law of Demeter</a>:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">current_learning_rate</span> <span class="o">=</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">opt_state</span><span class="o">.</span><span class="n">inner_opt_state</span><span class="o">.</span><span class="n">hyperparams</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get_value</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>Eurgh.  I mean, really, eurgh.</p>
+
+<p>Well, anyway, I put code to do that into the <code>train</code> function and save
+the number as part of the metadata.  I did a partial training run, just for long enough
+to confirm that the learning rate chart was being generated, and had a flat line on
+it at 0.0014, the constant learning rate I was using at that point.</p>
+
+<p>I can't say I was very proud of it, though.</p>
+
+<h3 id="learning-rate-scheduling">Learning rate scheduling</h3>
+
+<p>To recap, the learning rate schedule that I wanted was this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation/interventions-learning-rate-chart.png" alt="The learning rate chart for the local interventions train" title="The learning rate chart for the local interventions train" /></p>
+
+<p>That's formed of two phases: an initial warmup, where the learning rate started at
+0.00001 times the desired peak value, and then rose linearly to the peak, followed
+by a cosine wave to decay it to 0.1 times the peak.</p>
+
+<p>In PyTorch I had had to
+<a href="/2026/03/llm-from-scratch-32e-interventions-learning-rate#chaining-learning-rate-schedulers">use different learning rate scheduler objects to handle each phase, with a <code>SequentialLR</code> wrapper to bolt them together</a>:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="n">warmup_scheduler</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">lr_scheduler</span><span class="o">.</span><span class="n">LinearLR</span><span class="p">(</span>
+            <span class="n">optimizer</span><span class="p">,</span>
+            <span class="n">start_factor</span><span class="o">=</span><span class="mf">0.00001</span><span class="p">,</span>
+            <span class="n">end_factor</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+            <span class="n">total_iters</span><span class="o">=</span><span class="n">warmup_steps</span>
+        <span class="p">)</span>
+        <span class="n">cosine_scheduler</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">lr_scheduler</span><span class="o">.</span><span class="n">CosineAnnealingLR</span><span class="p">(</span>
+            <span class="n">optimizer</span><span class="p">,</span>
+            <span class="n">T_max</span><span class="o">=</span><span class="n">decay_steps</span><span class="p">,</span>
+            <span class="n">eta_min</span><span class="o">=</span><span class="n">learning_rate</span> <span class="o">/</span> <span class="mi">10</span>
+        <span class="p">)</span>
+        <span class="n">scheduler</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">lr_scheduler</span><span class="o">.</span><span class="n">SequentialLR</span><span class="p">(</span>
+            <span class="n">optimizer</span><span class="p">,</span>
+            <span class="n">schedulers</span><span class="o">=</span><span class="p">[</span><span class="n">warmup_scheduler</span><span class="p">,</span> <span class="n">cosine_scheduler</span><span class="p">],</span>
+            <span class="n">milestones</span><span class="o">=</span><span class="p">[</span><span class="n">warmup_steps</span><span class="p">],</span>
+        <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>However, it's a common pattern in training loops, and conveniently Optax provides a
+<a href="https://optax.readthedocs.io/en/latest/api/generated/optax.schedules.warmup_cosine_decay_schedule.html"><code>warmup_cosine_decay_schedule</code></a>
+class that does all of that for you.</p>
+
+<p>The only oddity in it is that <code>decay_steps</code> is kind of misnamed; it's actually total steps,
+including the warmup.  So I wound up writing this code:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">total_steps</span> <span class="o">=</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">train_dataset</span><span class="p">)</span> <span class="o">//</span> <span class="n">world_size</span><span class="p">)</span> <span class="o">//</span> <span class="n">gradient_accumulation_steps</span>
+    <span class="n">warmup_steps</span> <span class="o">=</span> <span class="p">(</span><span class="n">total_steps</span> <span class="o">*</span> <span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;warmup_period_percent&quot;</span><span class="p">])</span> <span class="o">//</span> <span class="mi">100</span>
+    <span class="n">learning_rate</span> <span class="o">=</span> <span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">]</span>
+    <span class="n">schedule</span> <span class="o">=</span> <span class="n">optax</span><span class="o">.</span><span class="n">warmup_cosine_decay_schedule</span><span class="p">(</span>
+        <span class="n">init_value</span><span class="o">=</span><span class="n">learning_rate</span> <span class="o">*</span> <span class="mf">0.00001</span><span class="p">,</span>
+        <span class="n">peak_value</span><span class="o">=</span><span class="n">learning_rate</span><span class="p">,</span>
+        <span class="n">warmup_steps</span><span class="o">=</span><span class="n">warmup_steps</span><span class="p">,</span>
+        <span class="n">decay_steps</span><span class="o">=</span><span class="n">total_steps</span><span class="p">,</span>  <span class="c1"># !!</span>
+        <span class="n">end_value</span><span class="o">=</span><span class="n">learning_rate</span> <span class="o">/</span> <span class="mi">10</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">optax_optimizer</span> <span class="o">=</span> <span class="n">optax</span><span class="o">.</span><span class="n">inject_hyperparams</span><span class="p">(</span><span class="n">optax</span><span class="o">.</span><span class="n">adamw</span><span class="p">)(</span>
+        <span class="n">learning_rate</span><span class="o">=</span><span class="n">schedule</span><span class="p">,</span>
+        <span class="n">weight_decay</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;weight_decay&quot;</span><span class="p">],</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>I did a training run with that, and it completed with this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-19 00:17:25.777629 Tokens seen: 92,209,152</span>
+<span class="go">2026-06-19 00:17:25.777633 Throughput: 106,225 tokens/second</span>
+<span class="go">2026-06-19 00:17:25.777644 Final train loss: 0.006</span>
+<span class="go">2026-06-19 00:17:25.777646 Done</span>
+</code></pre>
+</div>
+
+<p>The loss was a bit worse again, but just as with the gradient accumulation steps,
+the learning rate schedule I had specified was specifically designed for training
+a real (if small) LLM, not for this toy A-to-A task that I was using to test the training
+loop.  The important thing was the learning rate chart, and it looked like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34a-building-a-jax-training-loop-for-an-llm-training-run/learning-rate-chart.png" alt="The learning rate chart for the first scheduled learning rate run" title="The learning rate chart for the first scheduled learning rate run" /></p>
+
+<p>Perfect!  <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/f89d8d86cecf7e6f9d3bb24186df16218c583500/train.py">Here's the code at this point</a>.</p>
+
+<p>There were two boxes left to check before I had a training loop I could actually use
+to build the LLM: gradient clipping and the ability to restart from a checkpoint.  I decided to
+do gradient clipping first.</p>
+
+<h3 id="gradient-clipping">Gradient clipping</h3>
+
+<p><a href="/2026/02/llm-from-scratch-32b-interventions-gradient-clipping">Gradient clipping</a> is where
+for each update, you look for gradients that are suspiciously large, and cut them off so that they don't make
+excessive changes to the model.</p>
+
+<p>The <a href="https://optax.readthedocs.io/en/latest/getting_started.html#weight-decay-schedules-and-clipping">Optax docs</a>
+made it look pretty simple:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">optimizer</span> <span class="o">=</span> <span class="n">optax</span><span class="o">.</span><span class="n">chain</span><span class="p">(</span>
+  <span class="n">optax</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="mf">1.0</span><span class="p">),</span>
+  <span class="n">optax</span><span class="o">.</span><span class="n">adamw</span><span class="p">(</span><span class="n">learning_rate</span><span class="o">=</span><span class="n">schedule</span><span class="p">),</span>
+<span class="p">)</span>
+</code></pre>
+</div>
+
+<p>So, you use an <code>optax.chain</code> to chain together first a thing that does clipping,
+and then the actual optimiser -- presumably the first thing in the chain sees the
+gradients and does stuff to them, and then the second receives whatever the first has
+returned.</p>
+
+<p>Now, the question was, should we do the chain outside or inside the MultiSteps?  That is,
+should we clip gradients each time before we step the MultiSteps optimiser, or do we accumulate
+them and clip the average before we step the inner AdamW one?</p>
+
+<p>Looking at <a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/main/ddp_train.py#L354">the old PyTorch code</a>,
+I was running the gradient accumulation loop, and then
+clipping at the end.  So the gradient clipping was happening to the accumulated
+gradients.</p>
+
+<p>That actually felt less intuitively good than the alternative, but I decided that
+we should try to mirror what the PyTorch code is doing.  So:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optax_optimizer</span> <span class="o">=</span> <span class="n">optax</span><span class="o">.</span><span class="n">chain</span><span class="p">(</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;clipping_max_norm&quot;</span><span class="p">]),</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">inject_hyperparams</span><span class="p">(</span><span class="n">optax</span><span class="o">.</span><span class="n">adamw</span><span class="p">)(</span>
+            <span class="n">learning_rate</span><span class="o">=</span><span class="n">schedule</span><span class="p">,</span>
+            <span class="n">weight_decay</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;weight_decay&quot;</span><span class="p">],</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>So, the <code>adamw</code> optimiser would receive clipped gradients.  Because it was wrapped
+in the <code>MultiSteps</code>, it was receiving the accumulated gradients every time that object
+hit its <code>every_k_schedule</code> limit.</p>
+
+<p>Unfortunately there was still a problem: that change meant that the optimiser that we were reading the learning rate from with
+this horrendous code in the <code>train</code> function:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">current_learning_rate</span> <span class="o">=</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">opt_state</span><span class="o">.</span><span class="n">inner_opt_state</span><span class="o">.</span><span class="n">hyperparams</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get_value</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>...would now be inside yet another level of nesting -- the <code>chain</code> object.  So, of course, when I ran it,
+it blew up with an error:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">AttributeError: &#39;tuple&#39; object has no attribute &#39;hyperparams&#39;</span>
+</code></pre>
+</div>
+
+<p>I used some debug prints to work out what was going on, and determined that the
+state of the <code>chain</code> object was a tuple, the first element being an essentially-empty
+state for the clipper, and the second being the hyperparameter-injected state for the
+<code>adamw</code>.</p>
+
+<p>So that meant that the new correct code to get the learning
+rate would be this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">current_learning_rate</span> <span class="o">=</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">opt_state</span><span class="o">.</span><span class="n">inner_opt_state</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">hyperparams</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get_value</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+</code></pre>
+</div>
+
+<p>Note that we've gained that <code>[1]</code> to do the lookup into the <code>chain</code>'s tuple state.
+I remember coming across a comment saying "forgive us for our trespasses in this method"
+in a codebase long ago, and I know well how the author felt.</p>
+
+<p>I did have an idea of how to at least limit the blast radius a bit, though.  At this
+point in the code, I had the complex optimiser setup in the <code>main</code> function, and the
+learning-rate-getting abomination in <code>train</code>.  I decided instead to define a function
+called <code>get_learning_rate</code> right next to the optimiser setup, and pass that in to <code>train</code>.
+So the horror was still there, but at least it was all in one place, like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optax_optimizer</span> <span class="o">=</span> <span class="n">optax</span><span class="o">.</span><span class="n">chain</span><span class="p">(</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;clipping_max_norm&quot;</span><span class="p">]),</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">inject_hyperparams</span><span class="p">(</span><span class="n">optax</span><span class="o">.</span><span class="n">adamw</span><span class="p">)(</span>
+            <span class="n">learning_rate</span><span class="o">=</span><span class="n">schedule</span><span class="p">,</span>
+            <span class="n">weight_decay</span><span class="o">=</span><span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;weight_decay&quot;</span><span class="p">],</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Optimizer</span><span class="p">(</span>
+        <span class="n">model</span><span class="p">,</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">MultiSteps</span><span class="p">(</span>
+            <span class="n">optax_optimizer</span><span class="p">,</span>
+            <span class="n">every_k_schedule</span><span class="o">=</span><span class="n">gradient_accumulation_steps</span>
+        <span class="p">),</span>
+        <span class="n">wrt</span><span class="o">=</span><span class="n">nnx</span><span class="o">.</span><span class="n">Param</span>
+    <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_learning_rate</span><span class="p">():</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="n">optimizer</span>
+            <span class="o">.</span><span class="n">opt_state</span>
+            <span class="o">.</span><span class="n">inner_opt_state</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="o">.</span><span class="n">hyperparams</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">]</span>
+            <span class="o">.</span><span class="n">get_value</span><span class="p">()</span>
+            <span class="o">.</span><span class="n">item</span><span class="p">()</span>
+        <span class="p">)</span>
+
+    <span class="n">log</span><span class="p">(</span><span class="s2">&quot;Start train&quot;</span><span class="p">)</span>
+    <span class="n">start_global_step</span> <span class="o">=</span> <span class="mi">0</span>  <span class="c1">## checkpointing</span>
+    <span class="n">train</span><span class="p">(</span>
+        <span class="n">run_dir</span><span class="p">,</span>
+        <span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span>
+        <span class="n">get_learning_rate</span><span class="p">,</span>
+        <span class="n">train_dataset</span><span class="p">,</span>
+        <span class="n">rank</span><span class="p">,</span> <span class="n">world_size</span><span class="p">,</span>
+        <span class="n">gradient_accumulation_steps</span><span class="p">,</span>
+        <span class="n">start_global_step</span><span class="p">,</span>
+        <span class="n">train_conf</span><span class="p">[</span><span class="s2">&quot;checkpoint_interval&quot;</span><span class="p">],</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...where <code>train</code> called <code>get_learning_rate</code> where it needed it.</p>
+
+<p>I was just about to kick this off, but by chance happened to take a closer look at
+<a href="https://optax.readthedocs.io/en/latest/api/generated/optax.clip.html">the documentation for <code>clip</code></a>,
+and spotted that it said</p>
+
+<blockquote>
+  <p>Clips updates element-wise, to be in <code>[-max_delta, +max_delta]</code></p>
+</blockquote>
+
+<p>That rung a bell!  When I was <a href="/2026/02/llm-from-scratch-32b-interventions-gradient-clipping">originally looking into gradient clipping</a>
+for the PyTorch training loop, I noted that that is a perfectly valid way to do
+gradient clipping, but it's not the way I ultimately chose.
+Instead, I was clipping based on the L2 norm.</p>
+
+<p>The JAX training code was meant to work the same way as the PyTorch code, so that was
+a good catch; I switched over from using <code>optax.clip</code> to using
+<a href="https://optax.readthedocs.io/en/latest/api/generated/optax.clip_by_global_norm.html"><code>optax.clip_by_global_norm</code></a>,
+and then kicked off another training run:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">2026-06-19 01:22:41.964291 Tokens seen: 92,209,152</span>
+<span class="go">2026-06-19 01:22:41.964295 Throughput: 105,022 tokens/second</span>
+<span class="go">2026-06-19 01:22:41.964308 Final train loss: 0.006</span>
+<span class="go">2026-06-19 01:22:41.964311 Done</span>
+</code></pre>
+</div>
+
+<p>Everything looked fine; my guess was that the final loss was so similar because
+a simple task like A-to-A mapping, with such a shallow network, would be unlikely
+to cause gradients to explode.</p>
+
+<p>But it would be nice to be sure.  Was there some way I could track the gradients
+and see if clipping had had to cut in?</p>
+
+<p>One neat thing we had in the PyTorch code was that we could track gradient
+norms pre-clipping:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">pre_clip_norm</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">clip_grad_norm_</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">clipping_max_norm</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+    <span class="n">grad_norms</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pre_clip_norm</span><span class="p">)</span>
+    <span class="n">clipped_steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pre_clip_norm</span> <span class="o">&gt;</span> <span class="n">clipping_max_norm</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Unfortunately, <code>clip_by_global_norm</code> and the general Optax API doesn't provide any way to access
+the pre-clipping norms: the <code>ClipByGlobalNormState</code> that was the zeroth element
+of the state of the <code>chain</code> that we were reading in the horrendous learning rate-reading code
+is an alias of <code>EmptyState</code>.</p>
+
+<p>I considered using <a href="https://optax.readthedocs.io/en/latest/api/generated/optax.tree_utils.tree_norm.html"><code>optax.tree_utils.tree_norm</code></a>
+to work out the norms directly, and logging that, but that would be tricky -- because
+the gradients we were applying the clipping to were not the ones that were generated
+in the <code>train_step</code> function, but instead the ones that had accumulated inside the
+<code>MultiSteps</code> object over multiple gradient accumulation steps.</p>
+
+<p>This sounded like a lot of work for a not-enormous benefit, so I decided to leave
+it out for this project.</p>
+
+<p>There was, however, one small change that I wanted to make while I was messing around
+with gradients -- what to do if non-finite numbers crept into them.</p>
+
+<p>Back when I was first looking into gradient clipping, I was
+<a href="/2026/02/llm-from-scratch-32b-interventions-gradient-clipping#chasing-infinity">somewhat horrified to realise</a>
+that the scaler object I was using to tell PyTorch to train in 16-bit for things
+where it felt it would help (Automated Mixed Precision, or AMP), was silently dropping
+any updates with non-finite gradients, and if you didn't use AMP, such gradients
+would be happily applied to your model, most likely completely breaking it by setting
+parameters to non-finite values.</p>
+
+<p>This felt like the wrong place for that kind of logic to go -- I felt that
+it should belong to the optimiser, or at least in some other part of the stack that
+wasn't specifically related to the totally orthogonal task of mixed-precision
+training.</p>
+
+<p>I checked what JAX's default behaviour with non-finite gradients was, and it turned out
+to be to just apply them -- but, with Optax, it actually <em>was</em> something you could fix at the
+optimiser level.  If you wrap an Optax optimiser with
+<a href="https://optax.readthedocs.io/en/latest/api/generated/optax.apply_if_finite.html#optax.apply_if_finite"><code>apply_if_finite</code></a>,
+it will only apply finite gradients, so we could add it to the optimiser setup like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">nnx</span><span class="o">.</span><span class="n">Optimizer</span><span class="p">(</span>
+        <span class="n">model</span><span class="p">,</span>
+        <span class="n">optax</span><span class="o">.</span><span class="n">apply_if_finite</span><span class="p">(</span>
+            <span class="n">optax</span><span class="o">.</span><span class="n">MultiSteps</span><span class="p">(</span>
+                <span class="n">optax_optimizer</span><span class="p">,</span>
+                <span class="n">every_k_schedule</span><span class="o">=</span><span class="n">gradient_accumulation_steps</span>
+            <span class="p">),</span>
+            <span class="n">max_consecutive_errors</span><span class="o">=</span><span class="n">math</span><span class="o">.</span><span class="n">inf</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">wrt</span><span class="o">=</span><span class="n">nnx</span><span class="o">.</span><span class="n">Param</span>
+    <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>I set <code>max_consecutive_errors</code> to infinity to mirror the PyTorch code's behaviour.</p>
+
+<p>Now, obviously, this required yet another level of indirection in the learning-rate-getting
+function from hell:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="k">def</span><span class="w"> </span><span class="nf">get_learning_rate</span><span class="p">():</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="n">optimizer</span>
+            <span class="o">.</span><span class="n">opt_state</span>
+            <span class="o">.</span><span class="n">inner_state</span>
+            <span class="o">.</span><span class="n">inner_opt_state</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="o">.</span><span class="n">hyperparams</span><span class="p">[</span><span class="s2">&quot;learning_rate&quot;</span><span class="p">]</span>
+            <span class="o">.</span><span class="n">get_value</span><span class="p">()</span>
+            <span class="o">.</span><span class="n">item</span><span class="p">()</span>
+        <span class="p">)</span>
+</code></pre>
+</div>
+
+<p>If you're keeping track, it's the <code>.inner_state</code> in there.  Heigh ho.</p>
+
+<p>So, it was time to run it again:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">Training complete in 892.715 seconds</span>
+<span class="go">2026-06-19 02:27:16.657056 Tokens seen: 92,209,152</span>
+<span class="go">2026-06-19 02:27:16.657059 Throughput: 103,291 tokens/second</span>
+<span class="go">2026-06-19 02:27:16.657070 Final train loss: 0.006</span>
+<span class="go">2026-06-19 02:27:16.657072 Done</span>
+</code></pre>
+</div>
+
+<p>That looked OK -- no change from before.  <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/fdfcd8d6369822a98380446dca5e5dd7fc503b10/train.py">Here's the code</a>.</p>
+
+<p>Now, it was time to take the last step
+to finish the training loop: the ability to restart from a checkpoint.</p>
+
+<h3 id="restarting-from-a-checkpoint">Restarting from a checkpoint</h3>
+
+<p>At this point, <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/be561ce6f948d9941f242fad17e08c3746eb0e38/checkpointing.py">the checkpointing code</a>
+was pretty basic -- it would save the model as a Safetensors file, along with some
+metadata like the min, max and average loss since the previous checkpoint, the number
+of the global step that we were on, and whether or not this was the best checkpoint
+(in terms of average training loss) so far.</p>
+
+<p>In order to restore from a checkpoint, we'd need more information.  In the old PyTorch
+code, we needed three extra things on top of the model and the metadata:</p>
+
+<ul>
+<li>The scaler that we used to do automated mixed-precision training.  This JAX loop
+was not going to do that, so it was not necessary here.</li>
+<li>The learning rate scheduler.  This was built into the optimiser for JAX, so I
+didn't think it was needed.</li>
+<li>The optimiser itself.  This was important, and we definitely did need to save it.</li>
+</ul>
+
+<p>So that was the job: save the optimiser in <code>save_checkpoint</code>, and then implement
+a <code>load_checkpoint</code> so that we can restart from one.  I could then try kicking off
+a training run, waiting for a bit, killing it, then restarting from the most recent
+checkpoint.  The loss and learning rate charts would tell me whether or not the restart
+really had picked up from where it had left off.</p>
+
+<p>Initially I was thinking that I would just use pickle to save the optimiser, but
+that felt like a problem waiting to happen.  Pickle has issues when you change
+Python versions or versions of installed packages, which never <em>feels like</em> it's
+going to be a problem, but all-too-frequently turns out to break stuff in reality. <sup class="footnote-ref" id="fnref-2"><a href="#fn-2">2</a></sup></p>
+
+<p>Using Safetensors looked a bit tricky -- it had been <a href="/2026/06/flax-and-safetensors">hard</a>
+to get it to work with Flax models, even though it had explicit support.</p>
+
+<p>Now, the recommended library for checkpointing in JAX code is called
+<a href="https://orbax.readthedocs.io/en/latest/index.html">Orbax</a>.   I'd looked into it
+before, and it looked a bit heavyweight, so I'd moved on.  But digging in a little
+more, I found that it had what looked like <a href="https://orbax.readthedocs.io/en/latest/guides/checkpoint/v1/checkpointing_pytrees.html">a simple API for saving PyTrees</a>,
+which bypassed the complexity.</p>
+
+<p>Getting it working was still a bit tricky, though.</p>
+
+<p>Firstly, in the docs, they give this example:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">orbax.checkpoint.experimental.v1</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ocp</span>
+
+<span class="o">...</span>
+
+<span class="n">ocp</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">pytree</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>I tried that in the <code>save_checkpoint</code> function with code like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">ocp</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">checkpoint_dir</span> <span class="o">/</span> <span class="s2">&quot;optimizer&quot;</span><span class="p">,</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">opt_state</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and got the error</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">AttributeError: module &#39;orbax.checkpoint.experimental.v1&#39; has no attribute &#39;save&#39;</span>
+</code></pre>
+</div>
+
+<p>Huh.  Digging into the library from the command line showed that the function
+was actually called <code>save_pytree</code>.  Not super-promising if the docs don't
+match the API (though to be fair, it does say <code>experimental</code> right there in the
+package name).</p>
+
+<p>Anyway, changing that appeared to work:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="n">ocp</span><span class="o">.</span><span class="n">save_pytree</span><span class="p">(</span><span class="n">checkpoint_dir</span> <span class="o">/</span> <span class="s2">&quot;optimizer&quot;</span><span class="p">,</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">opt_state</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and then next to the 295 MB file called <code>model.safetensors</code>
+in my checkpoint directories, there was a 353 MB directory called <code>optimizer</code>.  In PyTorch-land
+the optimiser had always been double the size of the model <sup class="footnote-ref" id="fnref-3"><a href="#fn-3">3</a></sup>, but given the wildly different
+file formats in play, I was comfortable enough that it was order-of-magnitude the same
+as the model and somewhat bigger.  Perhaps Orbax was doing some kind of compression or something
+like that.</p>
+
+<p>Next, it was time to write <code>load_checkpoint</code>.  I started off by writing the <code>load_model</code>
+function to load up the safetensors file -- that's the one I showed earlier, back
+when I showed how the original A-to-A model learned how to map a poem to itself,
+and that if you asked it how to complete "Every effort moves you", it would respond
+with " you you you you you" and so on.</p>
+
+<p>Once I had that, I created a <code>load_checkpoint</code>, which called <code>load_model</code>, and then loaded up the
+metadata and worked out what our best loss so far had been (which is necessary when
+continuing from a checkpoint so that, as you continue training, you can work out
+whether each new global step has had a loss that is better than the current best).
+That was simple enough:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">checkpoint_dir</span> <span class="o">/</span> <span class="s2">&quot;meta.json&quot;</span><span class="p">,</span> <span class="s2">&quot;r&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">meta</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="n">restart_global_step</span> <span class="o">=</span> <span class="n">meta</span><span class="p">[</span><span class="s2">&quot;global_step&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
+
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">checkpoints_dir</span> <span class="o">/</span> <span class="s2">&quot;best&quot;</span> <span class="o">/</span> <span class="s2">&quot;meta.json&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">best_loss</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)[</span><span class="s2">&quot;avg_train_loss&quot;</span><span class="p">]</span>
+</code></pre>
+</div>
+
+<p>Restoring the optimiser turned out to be a bit trickier.  Firstly, of
+course, just like with saving, the Orbax function was called <code>load_pytree</code> rather than the documented
+<code>load</code>.  The next part was working out how to load it in a fashion that the optimiser
+would accept.</p>
+
+<p>If you load a checkpointed PyTree like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">ocp</span><span class="o">.</span><span class="n">load_pytree</span><span class="p">(</span><span class="n">checkpoint_dir</span> <span class="o">/</span> <span class="s2">&quot;optimizer&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Then what you get back is a "basic" PyTree -- it will consist of lists, dictionaries,
+tuples, basic Python types like strings, and JAX arrays.  The problem is that the
+optimiser's state is formed of objects that can be mapped to such things -- for example,
+an object can be mapped to a dictionary where each field is an item in the dict -- but
+aren't actually those specific types of objects.</p>
+
+<p>So if you do this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">optimizer</span><span class="o">.</span><span class="n">opt_state</span> <span class="o">=</span> <span class="n">ocp</span><span class="o">.</span><span class="n">load_pytree</span><span class="p">(</span><span class="n">checkpoint_dir</span> <span class="o">/</span> <span class="s2">&quot;optimizer&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...you get an error, something like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">AttributeError: &#39;list&#39; object has no attribute &#39;items&#39;</span>
+</code></pre>
+</div>
+
+<p>...and likewise if you use the <code>nnx.update</code> function I was using in the <code>load_model</code> code:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">nnx</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">optimizer</span><span class="o">.</span><span class="n">opt_state</span><span class="p">,</span> <span class="n">ocp</span><span class="o">.</span><span class="n">load_pytree</span><span class="p">(</span><span class="n">checkpoint_dir</span> <span class="o">/</span> <span class="s2">&quot;optimizer&quot;</span><span class="p">))</span>
+</code></pre>
+</div>
+
+<p>...you'll get a slightly different but equally confusing error.</p>
+
+<p>After a certain amount of floundering around, limited by the lack of documentation
+(and it not seeming to match the API that I was seeing) I had the bright idea of
+looking at <code>load_pytree</code>'s docstring, and that turned out to be excellent.  In IPython:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">In [1]: import orbax.checkpoint.experimental.v1 as ocp</span>
+
+<span class="go">In [2]: ocp.load_pytree?</span>
+<span class="go">Signature:</span>
+<span class="go">ocp.load_pytree(</span>
+<span class="go">    path: &#39;path_types.PathLike&#39;,</span>
+<span class="go">    abstract_pytree: &#39;AbstractPyTree | CheckpointMetadata[AbstractPyTree] | None&#39; = None,</span>
+<span class="go">    *,</span>
+<span class="go">    checkpointable_name: &#39;str | None&#39; = &#39;AUTO&#39;,</span>
+<span class="go">) -&gt; &#39;tree_types.PyTreeOf[tree_types.Leaf]&#39;</span>
+<span class="go">Docstring:</span>
+<span class="go">Loads a PyTree.</span>
+
+<span class="go">Loads from a ``PyTree`` checkpoint. A ``PyTree`` checkpoint must be a path</span>
+<span class="go">containing a subdirectory with the name provided by ``checkpointable_name``,</span>
+<span class="go">with default value ``AUTO``. See ``checkpointable_name`` for more details.</span>
+
+<span class="go">This function must be called on all available controller processes.</span>
+
+<span class="go">The operation blocks until complete. For improved performance, consider using</span>
+<span class="go">:py:func:``.load_pytree_async`` instead.</span>
+
+<span class="go">If ``abstract_pytree`` is not provided, the ``PyTree`` will be loaded exactly as</span>
+<span class="go">saved.</span>
+
+<span class="go">IMPORTANT: Loading is more brittle and error-prone when not providing</span>
+<span class="go">``abstract_pytree``. Always provide ``abstract_pytree`` if possible. Note that</span>
+<span class="go">you can always obtain the tree structure from a saved checkpoint using</span>
+<span class="go">:py:func:``.pytree_metadata``.</span>
+
+<span class="go">Providing the ``abstract_pytree`` guarantees two things:</span>
+
+<span class="go">1. The restored tree will exactly match the structure of ``abstract_pytree`` (or</span>
+<span class="go">raise an error if it is impossible to guarantee this). For example, if</span>
+<span class="go">``abstract_pytree`` is a custom object registered as a ``PyTree``, the checkpoint</span>
+<span class="go">will be restored as the same object, if possible.</span>
+
+<span class="go">2. The leaves of the restored tree will be restored with the properties</span>
+<span class="go">indicated by the abstract leaves. For example, if a leaf in ``abstract_pytree``</span>
+<span class="go">is a ``jax.ShapeDtypeStruct``, the restored leaf will be a ``jax.Array`` with the</span>
+<span class="go">same shape and ``dtype``. Each ``AbstractLeaf`` has a corresponding ``Leaf``</span>
+<span class="go">that is restored. See ``orbax.checkpoint.v1.tree`` for a table</span>
+<span class="go">of standard supported leaf types.</span>
+
+<span class="go">...</span>
+</code></pre>
+</div>
+
+<p>The solution was obviously that <code>abstract_pytree</code>.  When you provide it, it's used
+as a template.  If in the abstract PyTree it finds a <code>Foo</code> object, and in the
+loaded PyTree there is a dictionary in the same position with keys <code>bar</code>, <code>baz</code> and
+<code>quz</code>, it will create a <code>Foo</code> object, setting those fields to those values.</p>
+
+<p>That means that you have something with the right structure to apply, so I wound
+up with this relatively simple code to load checkpoint into the optimiser:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">optimizer</span><span class="o">.</span><span class="n">opt_state</span> <span class="o">=</span> <span class="n">ocp</span><span class="o">.</span><span class="n">load_pytree</span><span class="p">(</span><span class="n">checkpoint_dir</span> <span class="o">/</span> <span class="s2">&quot;optimizer&quot;</span><span class="p">,</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">opt_state</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>We're using the existing state of the optimiser as a template to tell Orbax how to
+structure the loaded one.</p>
+
+<p>I kicked off a training run, hit control-C halfway through, then restarted it
+from the checkpoint, and the final loss chart looked like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34a-building-a-jax-training-loop-for-an-llm-training-run/loss-chart-interrupted.png" alt="The loss chart for the interrupted and restarted run" title="The loss chart for the interrupted and restarted run" /></p>
+
+<p>...and the learning rate chart like this:</p>
+
+<p><img src="/post-assets/llm-from-scratch-34a-building-a-jax-training-loop-for-an-llm-training-run/learning-rate-chart-interrupted.png" alt="The learning rate chart for the interrupted and restarted run" title="The learning rate chart for the interrupted and restarted run" /></p>
+
+<p>Perfect!  The interrupt was at about global step 400, and the loss continued to go down properly, and the learning rate followed
+its schedule perfectly.</p>
+
+<p>Here's <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/8fd178251853aaa96e31164519ea79c89088df67/checkpointing.py">the checkpoint-loading code</a>
+and <a href="https://github.com/gpjt/jax-gpt2-from-scratch/blob/8fd178251853aaa96e31164519ea79c89088df67/train.py">the training script</a>.</p>
+
+<h3 id="time-to-build-a-model">Time to build a model!</h3>
+
+<p>So with that, phase one was done.  I had a training script.  It was massively overengineered
+for training this little A-to-A model, but just right for training a small LLM
+from scratch.</p>
+
+<p>And now it was time to do that -- and that's what I'll cover in the next post.</p>
+
+<p><a href="/2026/07/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax">Here's a link to the next (and final!) post in this series</a>.</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>If you're thinking "why not just have it return one-hot vectors based on the
+input tokens", remember that I needed <em>something</em> in the model to train, so that I
+could confirm that loss was going down.  A pure "identity" model without the embedding
+space would have nothing to learn, so wouldn't be able to provide that.&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-2">
+<p>It was a surprisingly large source of tech support queries on PythonAnywhere.
+Someone would train a model with (say) Python 3.11.1, and then try to run it on
+our servers using 3.11.2, and discover that they couldn't load up their checkpoints.
+This confused them and they wondered if it was something to do with our platform.
+I even had a quicktext response to send with a rundown on how Pickle works so that
+I didn't have to keep typing the same explanation.  This may have biased me more
+against Pickle than I should rationally be.&#160;<a href="#fnref-2" class="footnoteBackLink" title="Jump back to footnote 2 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-3">
+<p>AdamW stores two numbers per parameter to keep track of its optimisation state,
+so 2x the model size is exactly what you'd expect if both files were in the same
+format.&#160;<a href="#fnref-3" class="footnoteBackLink" title="Jump back to footnote 3 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

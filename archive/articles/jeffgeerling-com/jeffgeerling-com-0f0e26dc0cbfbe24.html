@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quickly apply LUTs (color grading) with ffmpeg | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Quickly apply LUTs (color grading) with ffmpeg</h1>
+        <div class="meta">Jeff Geerling 2026-06-26T02:23:00Z</div>
+        <div class="links">
+          <a href="https://www.jeffgeerling.com/blog/2026/apply-lut-color-grade-with-ffmpeg/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jeffgeerling-com/jeffgeerling-com-0f0e26dc0cbfbe24.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">This is a quick post, mostly for my own reference. I&#x27;ve avoided LUTs and &#x27;Log&#x27; video footage for years 1 , mostly because of the extra tiny bit of workflow involved. Like RAW photos, &#x27;Log&#x27; footage retains the video sensor&#x27;s full dynamic range, so you can pull more color and luminance information out of the footage later. But unlike photography, where RAW ha…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>Quickly apply LUTs (color grading) with ffmpeg</h1>
+    <p>This is a quick post, mostly for my own reference.</p>
+    <p>I've avoided LUTs and 'Log' video footage for years<a href="https://www.jeffgeerling.com#fn:1">1</a>, mostly because of the extra tiny bit of workflow involved. Like RAW photos, 'Log' footage retains the video sensor's full dynamic range, so you can pull more color and luminance information out of the footage later.</p>
+    <p>But unlike photography, where RAW has been a thing for decades, and many workflows 'just work' without me having to 'grade' every individual photo, in video precious few consumer apps handle Log footage gracefully. You generally end up with a muddy grey mess.</p>
+    <p>I don't want to launch DaVinci Resolve or Final Cut Pro to process every video I shoot. Especially if I am recording in Log for a particular reason, but forget to switch back to 'normal' mode and shoot more clips later.</p>
+    <graphic src="https://www.jeffgeerling.com/blog/2026/apply-lut-color-grade-with-ffmpeg/osmo-graded-ungraded-lut.jpg" alt="Jeff graded and ungraded"/>
+    <p>The difference is stark<a href="https://www.jeffgeerling.com#fn:2">2</a>, as illustrated by this clip (above) I was shooting with my kids around the house with my <a href="https://amzn.to/4evPnld">DJI Osmo Pocket 4</a>. I just picked it up and was testing it, and I realized I still had it in '10-bit D-Log' mode after I imported the footage to my computer.</p>
+    <p>I didn't want to go through launching Final Cut Pro just to grade a half-dozen clips to put them into our family video library, so I turned to <pre>ffmpeg</pre>, after seeing <a href="https://discuss.pixls.us/t/assistance-with-luts-designed-for-another-color-space-such-as-log/26275/10">this mention of the built-in  lut3d filter</a>.</p>
+    <h2>ffmpeg for LUTs</h2>
+    <p>The full <pre>ffmpeg</pre> command I'm using is:</p>
+    <pre>
+      <pre>ffmpeg \
+  -i /Users/jgeerling/Downloads/DJI_20000219193052_0005_D.MP4 \
+  -vf "lut3d=osmo-vivid.cube" \
+  -c:v hevc_videotoolbox \
+  -profile:v main10 \
+  -b:v 30M \
+  -pix_fmt p010le \
+  -tag:v hvc1 \
+  -c:a copy \
+  DJI_0005_D_converted.mp4
+</pre>
+    </pre>
+    <p>Some of those flags will only work on a Mac, where Apple's hardware H.265 video encoder is present. The main thing is <pre>-vf "lut3d=osmo-vivid.cube"</pre>, which is the path to a <pre>.cube</pre> file for your specific camera/footage.</p>
+    <p>In this case, I'm using the <a href="https://www.dji.com/uk/downloads/softwares/osmo-pocket-4-dlog-to-rec709-lut-vivid">DJI Osmo Pocket 4 'vivid' LUT</a><a href="https://www.jeffgeerling.com#fn:3">3</a>.</p>
+    <p>If you'd like to modify the <pre>ffmpeg</pre> flags to target your own hardware's H.264 or H.265 acceleration, just grab the command above and run it through your favorite LLM. After a couple decades using <pre>ffmpeg</pre>, it still feels like AP Calculus 2 trying to remember all the various flags and abbreviations :D</p>
+    <p>I'd love there to be a standard for 'LUT sidecars'. Apple, BlackMagic, Sony, and others do embed LUT data in video files... but there's no standard, so you need DaVinci Resolve for Blackmagic camera clips, QuickTime for iPhone clips... and in the end, most non-pro apps will just show a muddy video file if you don't process it like I'm doing with <pre>ffmpeg</pre>. Sigh.</p>
+    <h2>Batch-converting Log footage with ffmpeg</h2>
+    <p>Given a particular .cube file, here's how you can apply the LUT to all the MP4 files in a given folder:</p>
+    <pre>
+      <pre>#!/bin/bash
+CUBE="osmo-vivid.cube"
+DIR="video_files"
+
+files=("$DIR"/*.MP4)
+total=${#files[@]}
+count=0
+
+for input in "${files[@]}"; do
+    [ -e "$input" ] || continue
+    ((count++))
+    echo "Processing file $count of $total: $(basename "$input")"
+    
+    ffmpeg -i "$input" -vf "lut3d=$CUBE" -c:v hevc_videotoolbox -profile:v main10 -b:v 30M -pix_fmt p010le -tag:v hvc1 -c:a copy "${input%.MP4}_converted.mp4"
+done
+</pre>
+    </pre>
+    <p>Put the path to your <pre>.cube</pre> file in <pre>CUBE</pre>, and the path to a directory with a bunch of ungraded .MP4 files in <pre>DIR</pre>. Save the script, make it executable, and run it!</p>
+    <ul>
+      <li>
+        <p>Does that make me a luttite?</p>
+        <a href="https://www.jeffgeerling.com#fnref:1">↩︎</a>
+      </li>
+      <li>
+        <p>Sorry about the face jump-scare, I was trying to find a frame to illustrate this blog post, and this was the best I could come up with because everything else had my kids in it, and they get to decide when they start appearing online!</p>
+        <a href="https://www.jeffgeerling.com#fnref:2">↩︎</a>
+      </li>
+      <li><p>Annoyingly, LUTs for the Pocket 4 cannot be downloaded directly from the US website due to</p><a href="https://uavcoach.com/dji-ban/">DJI import restrictions</a>, thus I'm linking to the UK site here.<a href="https://www.jeffgeerling.com#fnref:3">↩︎</a></li>
+    </ul>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

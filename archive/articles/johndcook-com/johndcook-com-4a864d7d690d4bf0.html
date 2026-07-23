@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Does additional data always reduce posterior variance? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Does additional data always reduce posterior variance?</h1>
+        <div class="meta">John D. Cook 2026-07-04T02:50:36Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/07/03/does-additional-data-always-reduce-posterior-variance/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-4a864d7d690d4bf0.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A discussion over lunch today brought up the fact that additional data does not always decrease the size of a confidence interval. This post will look at this from a Bayesian perspective. In general, new information reduces your uncertainty regarding whatever you’re estimating. The posterior distribution becomes more concentrated as more data are collected.…</div>
+        <div class="content">
+          <p>A discussion over lunch today brought up the fact that additional data does not always decrease the size of a confidence interval. This post will look at this from a Bayesian perspective.</p>
+<p>In general, new information reduces your uncertainty regarding whatever you&#8217;re estimating. The posterior distribution becomes more concentrated as more data are collected.</p>
+<p>That&#8217;s what happens &#8220;in general&#8221; but does it necessarily happen every time you get new data? Conceivably if you get surprising data, data that is very unlikely given your current prior, posterior uncertainty might increase.</p>
+<h2>Beta-binomial model</h2>
+<p>To show that this is the case, suppose the probability of success in some binary trial has parameter θ and that θ has a beta prior. You could imagine this prior to be the posterior after having made some number of previous observations. Can a new observation increase the posterior variance in θ? If so, under what conditions?</p>
+<p>The variance of a beta(<em>a</em>, <em>b</em>) random variable is</p>
+<p><em>ab</em> / (<em>a</em> + <em>b</em>)²(<em>a</em> + <em>b</em> + 1).</p>
+<p>After observing a successful trial, the posterior distribution on θ is beta(<em>a</em> + 1, <em>b</em>). We can calculate the ratio of the posterior variance to the prior variance and ask under what circumstances, if any, the ratio is greater than 1.</p>
+<p>If 2<em>a</em> ≥ <em>b</em> the posterior variance will be strictly less than the prior variance. This says if the prior mean odds against a success are no more than 2 : 1, observing a success will reduce the variance. (So will observing a failure.) But for any value of <em>b</em>, you can find a small enough value of <em>a</em> that observing a success will increase the variance.</p>
+<h2>Normal-normal model</h2>
+<p>Whether an observation can increase the posterior variance depends on the data model. If your data have a normal likelihood function with known variance and a normal prior on the mean θ, the posterior variance is always less than the prior observation, and it reduces by the same amount, independent of the observation <em>x</em>. If <em>x</em> is very unlikely <em>a priori</em> then it will pull the posterior mean toward itself more than an observation that is more concordant with the prior would have, but the change in the posterior variance is the same.</p>
+<h2>Proof of beta theorem</h2>
+<p>Here is a proof in Lean 4 of the statement above that if 2<em>a</em> ≥ <em>b</em> the posterior variance will be strictly less than the prior variance.</p>
+<pre>import Mathlib
+
+set_option linter.style.header false
+
+noncomputable def f (a b : ℝ) : ℝ := a * b / ((a + b) ^ 2 * (a + b + 1))
+
+theorem f_ratio_lt_one' (a b : ℝ) (ha : 0 &lt; a) (hb : 0 &lt; b) (hab : b ≤ 2 * a) :
+    f (a + 1) b / f a b &lt; 1 := by
+  have hs : 0 &lt; a + b := by linarith
+  have h2ab : 0 ≤ 2 * a - b := by linarith
+  have hprod : 0 ≤ (a + b) * (2 * a - b) := mul_nonneg hs.le h2ab
+  -- key polynomial inequality (∗)
+  have key : (a + 1) * (a + b) ^ 2 &lt; a * ((a + b + 1) * (a + b + 2)) := by
+    nlinarith [hprod, ha]
+  -- nonzero facts needed to clear denominators
+  have ha' : a ≠ 0 := ne_of_gt ha
+  have hb' : b ≠ 0 := ne_of_gt hb
+  have hs' : a + b ≠ 0 := ne_of_gt hs
+  have hs1' : a + b + 1 ≠ 0 := by positivity
+  have hs2' : a + b + 2 ≠ 0 := by positivity
+  have ha1' : a + 1 ≠ 0 := by positivity
+  -- express the ratio as a single closed-form fraction
+  have hratio : f (a + 1) b / f a b
+      = ((a + 1) * (a + b) ^ 2) / (a * ((a + b + 1) * (a + b + 2))) := by
+    unfold f
+    have e : a + 1 + b = a + b + 1 := by ring
+    rw [e]
+    field_simp
+    ring
+  rw [hratio, div_lt_one (by positivity)]
+  exact key
+</pre>The post <a href="https://www.johndcook.com/blog/2026/07/03/does-additional-data-always-reduce-posterior-variance/">Does additional data always reduce posterior variance?</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Expert-aware quantisation: near-Q4 quality at near-Q2 size? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Expert-aware quantisation: near-Q4 quality at near-Q2 size?</h1>
+        <div class="meta">Martin Alderson 2026-06-22T00:00:00Z</div>
+        <div class="links">
+          <a href="https://martinalderson.com/posts/expert-aware-quantisation/?utm_source=rss&amp;utm_medium=rss&amp;utm_campaign=feed">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/martinalderson-com/martinalderson-com-5cadff03f4167bde.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Profiling a MoE model to find which experts matter for a specific task, then quantising the cold ones hard. The result: near-Q4 quality at near-Q2 size for local models.</div>
+        <div class="content">
+          <p>While researching and writing my last article on <a href="https://martinalderson.com/posts/a-brief-history-of-kv-cache-compression-developments/">the history of KV cache compression</a>, it occurred to me while there has been so much implemented research on KV cache efficiency, actual <em>model weights</em> quantisation is still pretty blunt.</p>
+<p>This makes sense - at large scale with many tens of thousands of GPUs the weights <em>themselves</em> aren't a huge efficiency bottleneck for the most part, and KV cache starts dominating memory usage.</p>
+<p>But, for us lowly serfs who don't have access to a warehouse full of HBM memory, it is a problem. The key constraint for local models is (mostly) just loading the weights into something fast enough.</p>
+<h2>Profiling</h2>
+<p>I spend <em>a lot</em> of time profiling applications to improve their performance, and a couple of months ago I built a <a href="https://martinalderson.com/posts/moe-expert-routing-visualization/">tool</a> to do the same for MoE models.</p>
+<p>This got me thinking. What if instead of just quantising the <em>entire</em> model to a certain level - the blunt hammer I mentioned - we instead profile the model <em>first</em> and then quantise the &quot;cold&quot; experts <em>selectively</em>, for that specific set of tasks?</p>
+<p>For this research I profiled Qwen3.6 35B-A3B on C++ programming tasks. There's an important nuance worth flagging up front: this particular model is <em>very</em> well load-balanced, so when it's <em>reading</em> code it spreads the work across its experts almost evenly (a per-layer Gini coefficient near 0 - basically uniform). The selectivity only shows up when it's <em>generating</em> code.</p>
+<p>And there it concentrates hard. Running a handful of C++ generation prompts through, the per-layer Gini coefficient jumps to 0.61 - meaning the top 32 of the 256 experts handle ~50% of the routing during code generation, versus the 12.5% you'd expect at random. That concentration is exactly what we can exploit: if only a subset of experts really matter for the task, we can keep <em>those</em> at high precision and crush the rest.</p>
+<p>Once we've got these traces showing which experts are hot (used a lot for the specific domain) vs cold (not used), we can then move on to the next step.</p>
+<h2>Model neurosurgery</h2>
+<p>This took (Claude Code) a fair while - ironically I suspect Fable would have been perfect for this kind of task.</p>
+<p>The core idea was to allow llama.cpp to read different levels of quantisation per expert, which had a fair few issues. Eventually though, it figured it out (running autonomously for a good 90 minutes!).</p>
+<p>It also wrote a script to take the profiling data and do quantisation per expert.</p>
+<h2>Results</h2>
+<p>All numbers below are perplexity (lower is better) measured on CPU. &quot;Reading code&quot; is a held-out chunk of real C++ source; &quot;writing code&quot; is a set of the model's own C++ generations. The tiered models keep a &quot;hot&quot; set of 64 experts (out of 256) at high precision and drop the other 192 &quot;cold&quot; experts to 2-bit.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Size</th>
+<th>PPL - reading</th>
+<th>PPL - writing</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Q8 (baseline)</td>
+<td>35GB</td>
+<td>1.568</td>
+<td>n/a *</td>
+</tr>
+<tr>
+<td>uniform Q4</td>
+<td>20GB</td>
+<td>1.582</td>
+<td>1.449</td>
+</tr>
+<tr>
+<td>Q8-hot / Q2-cold (profiled)</td>
+<td>18GB</td>
+<td>1.620</td>
+<td>1.456</td>
+</tr>
+<tr>
+<td>Q8-hot / Q2-cold (random)</td>
+<td>18GB</td>
+<td>1.667</td>
+<td>1.492</td>
+</tr>
+<tr>
+<td><strong>Q4-hot / Q2-cold (profiled)</strong></td>
+<td><strong>14GB</strong></td>
+<td><strong>1.635</strong></td>
+<td><strong>1.477</strong></td>
+</tr>
+<tr>
+<td>Q4-hot / Q2-cold (random)</td>
+<td>14GB</td>
+<td>1.684</td>
+<td>1.511</td>
+</tr>
+<tr>
+<td>uniform Q2</td>
+<td>13GB</td>
+<td>2.103</td>
+<td>1.977</td>
+</tr>
+</tbody>
+</table>
+<p><small>* The &quot;writing code&quot; eval was generated by the Q8 model, so scoring Q8 against it would be circular - it's left out.</small></p>
+<p>A few things jump out.</p>
+<p>First, the baseline. Full-fat Q8 (35 GB) scores 1.568 reading C++, and a &quot;blunt&quot; Q2 quantisation of <em>everything</em> (13 GB) jumps to 2.103 - a big drop in quality for less than half the size. (Perplexity is roughly &quot;how surprised the model is at each token&quot; - so going from 1.57 to 2.10 is the model getting noticeably dumber, not lobotomised, but clearly worse.)</p>
+<p>Now the actual experiment. I A/B tested the tiered approach two ways: <em>random</em> - pick the hot experts arbitrarily, as a control - versus <em>profiled</em> - keep the experts our profiling flagged as hot for C++ and crush the cold ones. The profiled version wins every single time: across two precision tiers and both eval sets, that's four out of four. With Q8 hot / Q2 cold (18 GB), random tiering scores 1.667 while the profiled version recovers nearly half of that gap back towards Q8, landing at 1.620. So the core idea works - <em>which</em> experts you protect matters, and the profile tells you which ones.</p>
+<p>But here's the catch I have to be honest about: <em>uniform Q4 is really good.</em> On code, 4-bit is almost lossless - Q4 (20 GB) scores 1.582, basically tying Q8. So the fancy Q8-hot/Q2-cold model, despite all the cleverness, doesn't actually beat just using Q4 everywhere at a similar size.</p>
+<p>The win shows up when you go <em>smaller</em> than Q4. I built a <em>Q4-hot / Q2-cold</em> version - 4-bit for the hot experts, 2-bit for the cold ones - which comes in at <em>14 GB, just 1 GB more than the blunt Q2 model.</em> And it scores <em>1.635 reading and 1.477 writing</em> - recovering ~90% of the quality gap between Q2 and Q4 for that single extra gigabyte. That's the real result: <em>near-Q4 quality at near-Q2 size</em>, by spending your bits on the experts that actually matter for the task.</p>
+<h2>Conclusion</h2>
+<p>This is absolutely nowhere near production ready and needs a lot of work from someone that knows the llama.cpp codebase far better than me. I only ran this on CPU which is (very) slow, my eval sets are small, and there's no doubt the vibe coded implementation Claude came up with could be improved further.</p>
+<p>There's loads of interesting angles to continue researching on this. I tried a couple of tiers here (Q8/Q2 and Q4/Q2), but there's no reason you couldn't go further - pushing the cold experts down to sub-2-bit (IQ1/IQ2) would drop the model <em>below</em> the uniform-Q2 size while keeping the hot experts sharp. You could imagine a whole gradient: hottest experts at high precision, then incrementally more aggressive quantisation as experts get colder.</p>
+<p>There's also the question of <em>how many</em> experts you keep sharp. I protected 64 of the 256 here, which turns out to be pretty generous - generous enough that even picking those 64 <em>at random</em> recovers around 80% of the Q2-to-Q4 gap by itself. That's less surprising than it first looks: an MoE layer's output is a weighted sum of its active experts, so keeping any quarter of them accurate anchors the result no matter which quarter you pick. Profiling buys the last ~10% by making sure the experts that <em>actually fire</em> are the protected ones. Where I'd expect it to really pull away is at <em>small</em> hot sets - keep only 16 experts sharp and random selection would mostly be protecting cold experts and fall apart, while the profile tells you exactly which handful matter. That's the experiment I'd run next: it should shrink the model <em>and</em> widen the profiled-vs-random gap, which is where this whole approach earns its keep.</p>
+<p>But in the end I think this is a really interesting approach. If we could get mass-scale profiling data from <em>real world</em> llama.cpp executions, it may allow a really big jump in quality. I can see a world where the harness detects what domain the task is in, downloads a quantised model for <em>that specific domain</em> and then runs prompts through it. This really takes advantage that storage is <em>cheap</em> (relatively speaking) and RAM is <em>expensive</em>. So having a bunch of different quantisation variants - of the same model - on disk is pretty doable.</p>
+<h2>Prior art</h2>
+<p>I should add that there is a fair bit of prior art in this space. The closest I found, DynaExq, does something very similar dynamically at serving time from router traces - but I couldn't find anyone doing it as a static, domain-profiled quantisation you ship as a single GGUF. Here are some links that I read up on while doing this:</p>
+<p><em>Closest prior art (variable precision per expert):</em></p>
+<ul>
+<li><a href="https://arxiv.org/abs/2511.15015">DynaExq</a> - a serving system with a &quot;hotness-aware precision controller&quot; that reads router traces to keep hot experts at higher precision and crush the cold ones, done dynamically at runtime.</li>
+<li><a href="https://arxiv.org/abs/2410.06270">Mixture-Compressor</a> - folds expert activation frequency directly into a per-expert bit-width allocation.</li>
+<li><a href="https://arxiv.org/abs/2509.02512">MoPEQ</a> - assigns per-expert bits by sensitivity and <em>explicitly</em> avoids using activation frequency to do it - a nice counterpoint to the approach here.</li>
+</ul>
+<p><em>Foundational quantisation:</em></p>
+<ul>
+<li><a href="https://arxiv.org/abs/2306.00978">AWQ</a>, <a href="https://arxiv.org/abs/2210.17323">GPTQ</a>, <a href="https://arxiv.org/abs/2211.10438">SmoothQuant</a> and <a href="https://arxiv.org/abs/2306.03078">SpQR</a> - the lineage of protecting the salient weights and crushing the rest. SpQR in particular is basically the within-tensor version of what I'm doing across experts.</li>
+<li><a href="https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md">llama.cpp's importance matrix (imatrix) and k-quants</a> - already uses calibration-data importance to steer per-weight quantisation. This is really just pushing that same idea up to per-expert granularity.</li>
+</ul>
+<p><em>On-device routing in the wild:</em></p>
+<ul>
+<li><a href="https://machinelearning.apple.com/research/introducing-apple-foundation-models">Apple's on-device and server foundation models</a> - their ~3B on-device model uses a mixed 2-bit/4-bit scheme (~3.7 bits per weight) with LoRA adapters to claw back quality, then routes harder requests to the cloud. Not far off the &quot;small quantised model for the task at hand&quot; idea.</li>
+</ul>
+<p>If you're working on these kind of optimisations I'd love to hear from you - please feel free to reach out on my <a href="https://martinalderson.com/contact/">contact page</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

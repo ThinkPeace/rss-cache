@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Making an agile version of a Windows Runtime delegate in C++/WinRT, part 3 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Making an agile version of a Windows Runtime delegate in C++/WinRT, part 3</h1>
+        <div class="meta">The Old New Thing 2026-07-22T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260722-00/?p=112552">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-e7ddf752e82b0d38.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The object that actively refuses to be marshaled. The post Making an agile version of a Windows Runtime delegate in C++/WinRT, part 3 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, we <a title="Making an agile version of a Windows Runtime delegate in C++/WinRT, part 2" href="https://devblogs.microsoft.com/oldnewthing/20260721-00/?p=112550"> made a small but significant optimization to making an agile version of a Windows Runtime delegate</a>. But there&#8217;s another case we missed.</p>
+<p>That case is an object that implements the <code>INo­Marshal</code> interface, which means &#8220;Do not marshal this object.&#8221; For these objects, the <code>Ro­Get­Agile­Reference</code> function fails to create an agile reference and returns <code>CO_<wbr />E_<wbr />NOT_<wbr />SUPPORTED</code>. This function is what powers the <code>agile_<wbr />ref</code> class, so if you ask for an <code>agile_<wbr />ref</code> to an object that refuses to be marshaled, you get an <code>CO_<wbr />E_<wbr />NOT_<wbr />SUPPORTED</code> exception.</p>
+<p>The catch is that this error is produced at the creation of the agile reference. If in practice all your uses of the agile reference are from the original context, you never actually needed to marshal the object, but too bad, you get the error anyway.</p>
+<p>So let&#8217;s teach our agile delegate wrapper about delegates that deny marshalability: If the wrapper is invoked on the same context that the original delegate belongs to, then everything is fine. But if you try to invoke the wrapper from another context, then you get the <code>CO_<wbr />E_<wbr />NOT_<wbr />SUPPORTED</code> exception.</p>
+<p>Here&#8217;s our first try. (Foreshadowing: Since I call this a &#8220;first try&#8221;, that suggests we&#8217;re going to have a second try.)</p>
+<pre>// Don't use this yet - read to the end of the series
+
+template&lt;typename Delegate&gt;
+Delegate make_agile_delegate(Delegate const&amp; d)
+{
+    if (d.try_as&lt;::IAgileObject&gt;()) {
+        return d;
+    }
+
+    <span>if (d.try_as&lt;::INoMarshal&gt;()) {                                                                </span>
+    <span>    return [d, context = winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext)](auto&amp;&amp;...args) {</span>
+    <span>        if (context == winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext)) {                 </span>
+    <span>            d(std::forward&lt;decltype(args)&gt;(args)...);                                          </span>
+    <span>        } else {                                                                               </span>
+    <span>            throw winrt::hresult_error(CO_E_NOT_SUPPORTED);                                    </span>
+    <span>        }                                                                                      </span>
+    <span>    };                                                                                         </span>
+    <span>}                                                                                              </span>
+
+    return [agile = winrt::agile_ref(d)](auto&amp;&amp;...args) {
+        return agile.get()(std::forward&lt;decltype(args)&gt;(args)...);
+    };
+}
+</pre>
+<p>If the object has the <code>INo­Marshal</code> marker interface, then we capture the original context into our wrapper delegate. At invoke time, the wrapper checks whether the invoke context equals the captured context. If so, then all is good, and we call the original delegate. Otherwise, we throw the exception that <code>Ro­Get­Agile­Reference</code> uses to say &#8220;Sorry, I can&#8217;t marshal this object.&#8221;</p>
+<p>If we take a universal reference to the <code>Delegate</code>, we gain the ability to <code>std::move()</code> out of the inbound delegate if it is an rvalue reference.</p>
+<pre>template&lt;typename Delegate&gt;
+<span>std::remove_reference_t&lt;Delegate&gt;</span> make_agile_delegate(Delegate&amp;&amp; d)
+{
+    if (d.try_as&lt;::IAgileObject&gt;()) {
+        return d;
+    }
+
+    if (d.try_as&lt;::INoMarshal&gt;()) {
+        return [<span>d = std::forward&lt;Delegate&gt;(d)</span>,
+                context = winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext)](auto&amp;&amp;...args) {
+            if (context == winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext)) {
+                d(std::forward&lt;decltype(args)&gt;(args)...);
+            } else {
+                throw winrt::hresult_error(CO_E_NOT_SUPPORTED);
+            }
+        };
+    }
+
+    return [agile = winrt::agile_ref(d)](auto&amp;&amp;...args) {
+        return agile.get()(std::forward&lt;decltype(args)&gt;(args)...);
+    };
+}
+</pre>
+<p>Next time, we&#8217;ll look at a small optimization we can make to this implementation to reduce the amount of work needed to check the context at invoke time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260722-00/?p=112552">Making an agile version of a Windows Runtime delegate in C++/WinRT, part 3</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

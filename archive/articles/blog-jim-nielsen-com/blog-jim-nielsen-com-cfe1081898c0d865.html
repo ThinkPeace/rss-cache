@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Making a Shuffle Button | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Making a Shuffle Button</h1>
+        <div class="meta">Jim Nielsen’s Blog 2026-07-05T19:00:00Z</div>
+        <div class="links">
+          <a href="https://blog.jim-nielsen.com/2026/notes-shuffle/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/blog-jim-nielsen-com/blog-jim-nielsen-com-cfe1081898c0d865.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I made some updates to my notes blog , including a change to how my “Shuffle” feature worked. Figured I’d blog about it. Shuffle? On a Blog? At the time of this writing, I have 974 “notes” that I’ve published. For fun, I have a “shuffle” button that digs up a random note from the past. I like to press it from time to time and re-encounter some insight from…</div>
+        <div class="content">
+          <p>I made some updates to <a href="https://notes.jim-nielsen.com" >my notes blog</a>, including a change to how my “Shuffle” feature worked.</p>
+<p>Figured I’d blog about it.</p>
+<h2 id="shuffle-on-a-blog">Shuffle? On a Blog?</h2>
+<p>At the time of this writing, I have 974 “notes” that I’ve published. </p>
+<p>For fun, I have a “shuffle” button that digs up a random note from the past. I like to press it from time to time and re-encounter some insight from the past.</p>
+<p>It’s like going through an old album, pulling out a random photo, and thinking, “Oh yeah, I remember this! Good times.”</p>
+<p>Like old photos, there’s also the occasional “that didn’t age so well”. </p>
+<p>But I find it fun to randomly dig up old insights from others and continue to be inspired.</p>
+<h2 id="how-did-it-work-before">How Did It Work Before?</h2>
+<p>Since my site is built and hosted as static files without a runtime server, this feature required JavaScript to work.</p>
+<p>Every page had a snippet like this:</p>
+<pre><code class="language language-html"><span class="hljs-comment">&lt;!-- In the site navigation --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">button</span> <span class="hljs-attr">id</span>=<span class="hljs-string">&quot;js-shuffle&quot;</span>&gt;</span>Shuffle<span class="hljs-tag">&lt;/<span class="hljs-name">button</span>&gt;</span>
+
+<span class="hljs-comment">&lt;!-- Way down at the end of the HTML --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">script</span>&gt;</span>
+  // All 974 note IDs injected by my SSG
+  const noteIds = [&#x27;id-1&#x27;, &#x27;id-2&#x27;, id-3&#x27;, &#x27;id-4&#x27;, &#x27;...&#x27;];
+  document.querySelector(&quot;#js-shuffle&quot;)
+    .addEventListener(&#x27;click&#x27;, () =&gt; {
+      // randomly grab an item in `noteIds`
+      const randomId = &#x27;...&#x27;;
+      window.location.href = `/n/${randomId}/`
+    })
+<span class="hljs-tag">&lt;/<span class="hljs-name">script</span>&gt;</span>
+</code></pre>
+<p>Essentially: inject every note ID into every HTML page and, when the shuffle button is clicked, randomly grab one and navigate the user to it.</p>
+<p>Not the most elegant thing, but it worked.</p>
+<p>The problem was that every time I published a new post, every single page had to be re-uploaded to Netlify because every file’s hash would change and its etag/cache was invalidated.</p>
+<p>This made my builds slow. It also made it difficult, from a development perspective, to ensure refactors didn’t result in unexpected changes to output (using <a href="https://weborigami.org/builtins/dev/changes" ><code>Dev.changes</code> from my SSG web origami</a>).</p>
+<p>So I decided to make a change.</p>
+<h3 id="what-about-a-no-js-approach">What About a No-JS Approach?</h3>
+<p>Because I love to see if I can make things work without JavaScript, I had the thought to randomly write the <code>href</code> at build time using my SSG, which would result in output like this:</p>
+<pre><code class="language language-html"><span class="hljs-comment">&lt;!-- /notes/1 --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">a</span> <span class="hljs-attr">href</span>=<span class="hljs-string">&quot;/notes/3&quot;</span>&gt;</span>Shuffle<span class="hljs-tag">&lt;/<span class="hljs-name">a</span>&gt;</span>
+
+<span class="hljs-comment">&lt;!-- /notes/2 --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">a</span> <span class="hljs-attr">href</span>=<span class="hljs-string">&quot;/notes/1&quot;</span>&gt;</span>Shuffle<span class="hljs-tag">&lt;/<span class="hljs-name">a</span>&gt;</span>
+
+<span class="hljs-comment">&lt;!-- /notes/3 --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">a</span> <span class="hljs-attr">href</span>=<span class="hljs-string">&quot;/notes/2&quot;</span>&gt;</span>Shuffle<span class="hljs-tag">&lt;/<span class="hljs-name">a</span>&gt;</span>
+</code></pre>
+<p>And every time I re-build my site, just have this logic run on the static site generator so that it’s different <code>href</code> for every page, every time.</p>
+<p>Pros:</p>
+<ul>
+<li>Doesn’t require JavaScript</li>
+<li>Doesn’t require a server (request-time logic)</li>
+</ul>
+<p>Cons:</p>
+<ul>
+<li>File hashes change across builds (even if there’s no new content or template changes, every HTML page now has a different <code>href</code> for the shuffle link <em>for every build</em>). This makes deployments <em>way</em> slower because Netlify has to redeploy <em>every</em> file on <em>every</em> build. Plus Etags change so caching is basically ineffectual.</li>
+</ul>
+<p>I decided I didn’t want to do this, so on to JavaScript!</p>
+<h2 id="how-does-it-work-now">How Does It Work Now?</h2>
+<p>My first thought was to create a single JSON file that contained all my note IDs. Then when the “Shuffle” button gets clicked, I fetch that, grab a random ID, and navigate the user, e.g.</p>
+<pre><code class="language language-html"><span class="hljs-comment">&lt;!-- In the site navigation --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">button</span> <span class="hljs-attr">id</span>=<span class="hljs-string">&quot;js-shuffle&quot;</span>&gt;</span>Shuffle<span class="hljs-tag">&lt;/<span class="hljs-name">button</span>&gt;</span>
+
+<span class="hljs-comment">&lt;!-- Way down at the end of the HTML --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">script</span> <span class="hljs-attr">type</span>=<span class="hljs-string">&quot;module&quot;</span>&gt;</span><span class="language-javascript">
+  <span class="hljs-keyword">const</span> noteIds = <span class="hljs-keyword">await</span> <span class="hljs-title function_">fetch</span>(<span class="hljs-string">&quot;/notes.json&quot;</span>).<span class="hljs-title function_">then</span>(...);
+  <span class="hljs-comment">// Handler code for when button is clicked</span>
+  <span class="hljs-comment">// grab a note ID &amp; navigate to that location</span>
+</span><span class="hljs-tag">&lt;/<span class="hljs-name">script</span>&gt;</span>
+</code></pre>
+<p>This would work. It localizes the caching issue to a single file, so only one file has to be invalidated/re-uploaded across builds.</p>
+<p>But in playing with it a little more, I decided to try something a little more...unconventional.</p>
+<p>I’ve written before about having <a href="https://blog.jim-nielsen.com/2025/lots-of-little-html-pages/" >lots of little HTML pages</a> and I thought, “Can I put this functionality in a single HTML page rather than a JSON file?”</p>
+<p>And what I ended up with was a link, e.g.</p>
+<p><code>&lt;a href=&quot;/shuffle/&quot;&gt;Shuffle&lt;/a&gt;</code></p>
+<p>That when clicked navigates the user to a new page. That page has all the JS logic embedded in it, e.g.</p>
+<pre><code class="language language-html"><span class="hljs-comment">&lt;!-- In the site navigation --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">span</span>&gt;</span>Shuffling...<span class="hljs-tag">&lt;/<span class="hljs-name">span</span>&gt;</span>
+
+<span class="hljs-comment">&lt;!-- In the body of the page --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">noscript</span>&gt;</span>JS is required to use the Shuffle functionality<span class="hljs-tag">&lt;/<span class="hljs-name">nocript</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">script</span>&gt;</span>
+  // All 974 note IDs injected by my SSG
+  const noteIds = [&#x27;id-1&#x27;, &#x27;id-2&#x27;, id-3&#x27;, &#x27;id-4&#x27;, &#x27;...&#x27;];\
+
+  // A slight delay so user sees &quot;Shuffling...&quot; effect
+  setTimeout(() =&gt; {
+    // randomly grab an item in `noteIds`
+    const randomId = &#x27;...&#x27;;
+    window.location.href = `/n/${randomId}/`
+  }, 300);
+<span class="hljs-tag">&lt;/<span class="hljs-name">script</span>&gt;</span>
+</code></pre>
+<p>There are a few things I like about the experience this implementation provides.</p>
+<p>First: shuffle is a <em>route</em>, so I can navigate to it directly without using the GUI, e.g. <a href="https://notes.jim-nielsen.com/shuffle/" >notes.jim-nielsen.com/shuffle</a></p>
+<p>Second: I handle the UI/X with a slight delay to make it appear like something is happening when you click the button. If you click the button and it immediately jumps to the next, randomized page, it almost seems to happen too fast. Like you’re left with this feeling of “What just happened?”</p>
+<p>But in this scenario, it navigates you to the “Shuffle” page, the button you just clicked turns into a spinner + text indicating something is happening, and there’s a slight (intentional) delay before the JS executes and sends you to a randomized note.</p>
+<p>I know it’s a bit weird. “Introduce artificial slowness? Are you crazy?” But I like it. It feels like the shuffle feature on an old music player.</p>
+<p>I remember one of my CD players had a “Shuffle” feature. When I’d click the button, it would display “Shuffling…” on the little black and white screen and you’d encounter this brief state where (I presume) the lens inside the hardware would move along the physical track to the spot where it would start reading a new, random song from the CD.</p>
+<p>The hardware constraints necessitated this kind of an experience, but I always liked it because it felt like the CD player was “thinking” about what track to pick next. This state clearly conveyed to me that my intent to shuffle was received and being followed. I liked that feedback, and it’s exactly what I wanted to do on my notes site (even though it was completely unnecessary).</p>
+<p class="image-container"><img src="https://cdn.jim-nielsen.com/blog/2026/shuffle-routes.png" width="1146" height="892" alt="Screenshot of three routes side-by-side indicating a shuffle-like navigation between them." data-og-image />
+
+</p><p>I like having that brief moment of feedback where it’s very clear that your intention was received and being followed, vs. having it happen so fast you can’t even perceive precisely what happened.</p>
+<p>Here’s a video to show it in action:</p>
+<p><video controls src="https://cdn.jim-nielsen.com/blog/2026/shuffle-recording.mp4" width="301" height="655"></video></p>
+<h2 id="why">Why?</h2>
+<p>I know that’s a lot of information for something so small — and, arguably, unnecessary.</p>
+<p>But I still enjoy writing about how I make decisions when I build things for myself.</p>
+<p>Hence this post.</p>
+
+    <hr />
+    
+
+    <p>
+      Reply via:
+      
+
+      <a
+        href="mailto:jimniels%2Bblog@gmail.com?subject=Re:%20blog.jim-nielsen.com/2026/notes-shuffle/"
+        >Email</a
+      >
+      · <a href="https://mastodon.social/@jimniels">Mastodon</a> ·
+
+      <a href="https://bsky.app/profile/jim-nielsen.com">Bluesky</a>
+    </p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The case of the invalid function pointer when shutting down the display control panel | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The case of the invalid function pointer when shutting down the display control panel</h1>
+        <div class="meta">The Old New Thing 2026-07-15T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260715-00/?p=112535">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-1139b48e58e53e41.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Watching the bits disappear. The post The case of the invalid function pointer when shutting down the display control panel appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>The number one crash in the display control panel looks like this:</p>
+<pre>rax=ffffffff924bbde0 rbx=0000000000000001 rcx=0000000000030440
+rdx=0000000000000002 rsi=0000000000030440 rdi=0000000080006011
+rip=00007ffac835cd1e rsp=000000155e48e3f8 rbp=000000155e48e749
+ r8=0000000000000000  r9=0000000000000000 r10=007fffffffe41b69
+r11=00007df502390000 r12=0000000000000000 r13=0000000000000000
+r14=0000000000000002 r15=0000000000000000
+iopl=0         nv up ei pl nz na pe nc
+cs=0033  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00010206
+ntdll!LdrpDispatchUserCallTarget+0xe:
+00007fff`924acd1e mov     r11,qword ptr [r11+r10*8] ds:04007df5`0159db48=????????????????
+0:000&gt; k
+Call Site
+ntdll!LdrpDispatchUserCallTarget+0xe
+user32!UserCallWinProcCheckWow+0x2bd
+user32!DispatchClientMessage+0x9c
+user32!__fnDWORD+0x33
+ntdll!KiUserCallbackDispatcherContinue
+win32u!ZwUserDestroyWindow+0x14
+comctl32!_RealPropertySheet+0x36d
+comctl32!_PropertySheet+0x47
+Display!PropertySheetW+0x5d
+Display!AdvancedSettingSheetHelper+0x3be
+Display!ShowAdapterSettings+0x89
+rundll32!CallRunDllFunction+0x1c
+rundll32!wWinMain+0x2bf
+rundll32!__wmainCRTStartup+0x1c9
+kernel32!BaseThreadInitThunk+0x14
+ntdll!RtlUserThreadStart+0x21
+</pre>
+<p>From the stack, we see that we have a display adapter settings property sheet. We are destroying it, and we crash trying to validate the window procedure address.</p>
+<p>We saw some time ago that <a title="The other kind of control flow guard check: The combined validate and call" href="https://devblogs.microsoft.com/oldnewthing/20260708-00/?p=112510"> you can pull out the bad address by inspection</a>.</p>
+<pre>0:000&gt; u .-e .
+ntdll!LdrpDispatchUserCallTarget:
+00007fff`924acd10 mov     r11,qword ptr [ntdll+0x001813a8]
+00007fff`924acd17 mov     r10,rax
+00007fff`924acd1a shr     r10,9
+00007fff`924acd1e mov     r11,qword ptr [r11+r10*8]
+</pre>
+<p>The register that is the source of the shift is <code>rax</code>, so that&#8217;s the function pointer. And from the register dump, we see that the address is</p>
+<pre>rax=ffffffff924bbde0
+</pre>
+<p>Yeah, that address doesn&#8217;t look like a valid function pointer.</p>
+<p>On 64-bit systems, user-mode pointers have low addresses (which start with <code>0000</code>), and kernel-mode pointers have high addresses (which start with <code>ffff</code>). So this function pointer is clearly invalid for user mode.</p>
+<p>Maybe we can fix it so it&#8217;s valid again. Let&#8217;s see what code addresses are valid in this process.</p>
+<pre>0:000&gt; lm
+start             end                 module name
+00000001`80000000 00000001`80043000   contoso
+00007ff6`44570000 00007ff6`44587000   rundll32
+00007fff`6a4f0000 00007fff`6a6b7000   d3d9
+00007fff`6e600000 00007fff`6e6a9000   comctl32_7fff6e600000
+00007fff`6f5d0000 00007fff`6f5e5000   pcacli
+00007fff`753b0000 00007fff`753c1000   sfc_os
+...
+00007fff`91020000 00007fff`910f0000   comdlg32
+00007fff`912b0000 00007fff`915e6000   combase
+00007fff`91600000 00007fff`91794000   user32
+00007fff`917a0000 00007fff`91852000   kernel32
+00007fff`918e0000 00007fff`91989000   SHCore
+00007fff`91990000 00007fff`91ae6000   ole32
+00007fff`91af0000 00007fff`91b16000   gdi32
+00007fff`91b20000 00007fff`91bc3000   advapi32
+00007fff`91bd0000 00007fff`91c67000   sechost
+00007fff`91c70000 00007fff`91cc2000   shlwapi
+00007fff`91cd0000 00007fff`91ced000   imagehlp
+00007fff`91d50000 00007fff`921c0000   setupapi
+00007fff`92220000 00007fff`92355000   msctf
+00007fff`92420000 00007fff`92610000   ntdll
+...
+</pre>
+<p>Ny suspicion is that the function pointer got truncated to a 32-bit value, and then was sign-extended back up to a 64-bit value. So we are looking for valid function pointers of the form <code>xxxxxxxx`924bbde0</code>. In the above list of valid code addresses, the only ones that have the lower bits in the <code>92xxxxxx</code> range all have a high 32 bits of <code>00007fff</code>, so let&#8217;s plug that in and see if we get a window procedure.</p>
+<pre>0:000&gt; ln 7fff924bbde0
+(00007fff`924bbde0)   ntdll!NtdllButtonWndProc_A   |  (00007fff`924bbdf0)   ntdll!NtdllButtonWndProc_W
+</pre>
+<p>Jackpot.</p>
+<p>So the caller probably subclassed a window, and then tried to restore the original window procedure, but messed up and restored only the bottom 32 bits.</p>
+<p>But who could that be?</p>
+<pre>0:000&gt; k
+Call Site
+ntdll!LdrpICallHandler+0xf
+ntdll!RtlpExecuteHandlerForException+0xf
+ntdll!RtlDispatchException+0x219
+ntdll!KiUserExceptionDispatch+0x2e
+ntdll!LdrpDispatchUserCallTarget+0xe
+user32!UserCallWinProcCheckWow+0x2bd
+user32!DispatchClientMessage+0x9c
+user32!__fnDWORD+0x33
+ntdll!KiUserCallbackDispatcherContinue
+win32u!ZwUserDestroyWindow+0x14
+comctl32!_RealPropertySheet+0x36d
+comctl32!_PropertySheet+0x47
+Display!PropertySheetW+0x5d
+Display!AdvancedSettingSheetHelper+0x3be
+Display!ShowAdapterSettings+0x89
+rundll32!CallRunDllFunction+0x1c
+rundll32!wWinMain+0x2bf
+rundll32!__wmainCRTStartup+0x1c9
+kernel32!BaseThreadInitThunk+0x14
+ntdll!RtlUserThreadStart+0x21
+</pre>
+<p>This is a property sheet, so we should be able to extract the pages of the property sheet. (Note: Requires internal Microsoft symbols, so you won&#8217;t be able to do this at home.)</p>
+<pre>0:000&gt; .frame d
+09 00000017`85a7e820 00007fff`86e60349 Display!AdvancedSettingSheetHelper+0x3be
+0:000&gt; dv
+     hwndParent = &lt;value unavailable&gt;
+            psh = struct _PROPSHEETHEADERW_V2
+      szMonitor = wchar_t [140] "Generic PnP Monitor"
+         rPages = struct _PSP *[100]
+        iResult = 0n0
+</pre>
+<p><a title="How to Register and Implement a Property Sheet Handler for a Control Panel Application" href="https://learn.microsoft.com/windows/win32/shell/how-to-register-and-implement-a-property-sheet-handler-for-a-control-panel-application"> The desktop background control panel is extensible</a>, and the way that a plug-in adds a page to the desktop background control panel is by handling the <a href="https://learn.microsoft.com/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellpropsheetext-addpages">IShellPropSheetExt::<wbr />AddPages</a> method and calling the provided &#8220;page adding function&#8221; with a <code>HPROPSHEETPAGE</code>. What that function does is add the <code>HPROPSHEETPAGE</code> to the pages in the property sheet. (We can see that there&#8217;s room for 100 of them in the <code>rPages</code>.)</p>
+<p>And the <code>psh</code> is the <code>PROPSHEETHEADER</code>.</p>
+<pre>0:000&gt; ?? psh
+struct _PROPSHEETHEADERW_V2
+   +0x000 dwSize           : 0x60
+   +0x004 dwFlags          : 0x2000001
+   +0x008 hwndParent       : 0x00000000`000401aa HWND__
+   +0x010 hInstance        : 0x00007fff`86e50000 HINSTANCE__
+   +0x018 hIcon            : (null)
+   +0x020 pszCaption       : 0x00000017`85a7f100  "Generic PnP Monitor and Contoso Chipset"
+   +0x028 nPages           : <span>4</span>
+   +0x030 nStartPage       : 0
+   +0x038 ppsp             : 0x00000017`85a7ec70 _PROPSHEETPAGEW
+   +0x038 phpage           : 0x00000017`85a7ec70  -&gt; 0x000001d5`4e1aac90 _PSP
+</pre>
+<p>We see that there are four pages, so we can inspect the first four <code>HPROPSHEETPAGE</code>s in <code>rPages</code>.</p>
+<p>And hey look, we have an array of <code>HPROPSHEETPAGE</code> structures</p>
+<pre>0:000&gt; ?? psh.phpage[0]
+struct _PSP * 0x000001d5`4e1aac90
+0:000&gt; ?? psh.phpage[1]
+struct _PSP * 0x000001d5`4e19e470
+0:000&gt; ?? psh.phpage[2]
+struct _PSP * 0x000001d5`4e19e520
+0:000&gt; ?? psh.phpage[3]
+struct _PSP * 0x000001d5`4e1d26d0
+</pre>
+<p>The <code>HPROPSHEETPAGE</code> is an opaque structure, but we can dump it and look for interesting things, for entertainment purposes only.</p>
+<pre>0:000&gt; dps 0x000001d5`4e1aac90 l4
+000001d5`4e1aac90  000001d5`4e1aac60
+000001d5`4e1aac98  00000000`00000000
+000001d5`4e1aaca0  00004088`00000068
+000001d5`4e1aaca8  00007fff`88d70000 deskadp
+0:000&gt; dps 0x000001d5`4e19e470 l4
+000001d5`4e19e470  000001d5`4e19e440
+000001d5`4e19e478  00000000`00000000
+000001d5`4e19e480  00004088`00000068
+000001d5`4e19e488  00007fff`893e0000 deskmon
+0:000&gt; dps 0x000001d5`4e19e520 l4
+000001d5`4e19e520  000001d5`4e19e4f0
+000001d5`4e19e528  00000000`00000000
+000001d5`4e19e530  000040c8`00000068
+000001d5`4e19e538  00007fff`86e30000 colorui
+0:000&gt; dps 0x000001d5`4e1d26d0 l4
+000001d5`4e1d26d0  000001d5`4e1bcb30
+000001d5`4e1d26d8  000001d5`4e1d26a0
+000001d5`4e1d26e0  0000008a`00000068
+000001d5`4e1d26e8  00000001`80000000 contoso
+</pre>
+<p>There are a bunch of <code>HMODULE</code>s here, which are probably the modules that the property sheet page came from. The first three come with Windows. The last one apparently is Contoso. Let&#8217;s focus on at last one.</p>
+<p>After the first two values (which look like pointers), we have <code>0x00000068</code> which is not-coincidentally <code>sizeof(PROPSHEETPAGE)</code>, so I&#8217;m going to guess that this is where the system stores the <code>PROPSHEETPAGE</code> that the handle was created from.</p>
+<p><b>Note</b>: Note that this is an implementation detail and should be used only for debugging purposes. Please don&#8217;t write programs that rely on this, because it can change.¹</p>
+<pre>0:000&gt; dt comctl32!_PROPSHEETPAGEW  000001d5`4e1d26e0
+   +0x000 dwSize           : 0x68
+   +0x004 dwFlags          : 0x8a
+   +0x008 hInstance        : 0x00000001`80000000 HINSTANCE__
+   +0x010 pszTemplate      : 0x00000000`00000589  "--- memory read error at address 0x00000000`00000589 ---"
+   +0x010 pResource        : 0x00000000`00000589 DLGTEMPLATE
+   +0x018 hIcon            : 0x00000000`000503b9 HICON__
+   +0x018 pszIcon          : 0x00000000`000503b9  "--- memory read error at address 0x00000000`000503b9 ---"
+   +0x020 pszTitle         : 0x000001d5`4e19cde0  "?????"
+   +0x028 pfnDlgProc       : <span>0x00000001`800047ac</span> contoso+0x47ac
+   +0x030 lParam           : 0n2015682301296
+   +0x038 pfnCallback      : (null)
+   +0x040 pcRefParent      : (null)
+   +0x048 pszHeaderTitle   : (null)
+   +0x050 pszHeaderSubTitle : (null)
+   +0x058 hActCtx          : (null)
+   +0x060 hbmHeader        : (null)
+   +0x060 pszbmHeader      : (null)
+</pre>
+<p>The dialog procedure is <code>0x00000001`800047ac</code>. I&#8217;m hoping I can reverse-engineer it enough to see the place where it subclassed the button incorrectly.</p>
+<pre>00000001`800047ac mov     [rsp+8],rbx
+00000001`800047b1 mov     [rsp+10h],rbp
+00000001`800047b6 mov     [rsp+18h],rsi
+00000001`800047bb push    rdi
+00000001`800047bc sub     rsp,30h
+00000001`800047c0 mov     rdi,r9                ; rdi = r9 = lParam
+00000001`800047c3 mov     rbp,r8                ; rbp = r8 = wParam
+00000001`800047c6 mov     esi,edx               ; esi = edx = message
+00000001`800047c8 mov     rbx,rcx               ; rbx = rcx = hdlg
+00000001`800047cb cmp     edx,110h              ; Q: WM_INITDIALOG?
+00000001`800047d1 jne     00000001`800047e2     ; N: Skip
+00000001`800047d3 mov     r8,[r9+30h]           ; Y: r8 = ((PROPSHEETPAGE*)r9)-&gt;lParam
+00000001`800047d7 mov     edx,0FFFFFFEBh        ; edx = -21
+                                                ; ecx = hdlg (unchanged)
+00000001`800047dc call    [00000001`8002b4a0]   ; mystery function 1
+
+00000001`800047e2 mov     edx,0FFFFFFEBh        ; edx = -21
+00000001`800047e7 mov     rcx,rbx               ; rcx = hdlg
+00000001`800047ea call    [00000001`8002b480]   ; mystery function 2
+00000001`800047f0 test    rax,rax               ; Q: Failed?
+00000001`800047f3 je      00000001`8000480b     ; Y: Bail out
+00000001`800047f5 mov     r9,rbp                ; param4 = wParam
+00000001`800047f8 mov     r8d,esi               ; param3 = message
+00000001`800047fb mov     rdx,rbx               ; param2 = hdlg
+00000001`800047fe mov     rcx,rax               ; param1 = from mystery function 2
+00000001`80004801 mov     [rsp+20h],rdi         ; param5 = lParam
+00000001`80004806 call    00000001`800045fc     ; mystery function 3
+00000001`8000480b mov     rbx,[rsp+40h]         ; restore registers
+00000001`80004810 mov     rbp,[rsp+48h]
+00000001`80004815 mov     rsi,[rsp+50h]
+00000001`8000481a add     rsp,30h
+00000001`8000481e pop     rdi
+00000001`8000481f ret                            ; done
+</pre>
+<p>We know that the <code>lParam</code> parameter to the <code>WM_<wbr />INIT­DIALOG</code> message is the value passed as the &#8220;parameter&#8221; to functions like <code>CreateDialogParam</code>, and specifically for property sheets, it&#8217;s a pointer to a <code>PROPSHEETPAGE</code>. And we saw from the structure dump above that offset <code>0x30</code> is the <code>lParam</code>.</p>
+<p>From the structure of this function, it&#8217;s clear that the magic value <code>-21</code> is <code>GWLP_<wbr />USERDATA</code>, mystery function 1 is <code>SetWindowLongPtr</code>, and mystery function 2 is <code>GetWindowLongPtr</code>. This is a standard pattern for dialog box functions, and it&#8217;s common to use a wrapper function.</p>
+<p>The real dialog procedure is the third mystery function, so let&#8217;s look at that.</p>
+<pre>00000001`800045fc mov     [rsp+8],rbx
+00000001`80004601 mov     [rsp+10h],rbp
+00000001`80004606 mov     [rsp+18h],rsi
+00000001`8000460b push    rdi
+00000001`8000460c push    r12
+00000001`8000460e push    r13
+00000001`80004610 sub     rsp,20h
+00000001`80004614 mov     rsi,[rsp+60h]     ; rsi = lParam
+00000001`80004619 mov     rbp,r9            ; rbp = wParam
+00000001`8000461c mov     ebx,r8d           ; ebx = message
+00000001`8000461f mov     r13,rdx           ; r13 = hdlg
+00000001`80004622 mov     rdi,rcx           ; rdi = this
+00000001`80004625 cmp     r8d,2Bh           ; Q: WM_DRAWITEM?
+00000001`80004629 jne     00000001`80004685 ; N: Skip
+</pre>
+<p>After the initial register spilling and saving, it checks if the message is <code>0x2B</code>: <code>WM_DRAWITEM</code>. That&#8217;s not particularly interesting to us, so let&#8217;s assume it&#8217;s not.</p>
+<pre>00000001`80004685 sub     ebx,2             ; Q: WM_DESTROY?
+00000001`80004688 je      00000001`8000470f
+</pre>
+<p>Ooh, the <code>WM_<wbr />DESTROY</code> message is interesting. It&#8217;s probably going to restore the original window procedure in its <code>WM_<wbr />DESTROY</code> handler, and that&#8217;s where we hope to find the truncation.</p>
+<pre>00000001`8000470f mov     rcx,[rdi+110h]        ; rcx = something
+00000001`80004716 movsxd  rbx,dword ptr [00000001`80039c50] ; rbx = something
+00000001`8000471d mov     edx,668h              ; ecx = some number
+00000001`80004722 call    [00000001`8002b4e0]   ; mystery function 4
+00000001`80004728 mov     r8,rbx                ; r8 = something
+00000001`8000472b mov     edx,0FFFFFFFCh        ; edx = -12
+00000001`80004730 mov     rcx,rax               ; rcx = function 4 retval
+00000001`80004733 call    [00000001`8002b4a0]   ; mystery function 1 again
+</pre>
+<p>On receipt of the <code>WM_<wbr />DESTROY</code> message, the code starts by getting something out of the <code>this</code> pointer (which we saw in the prologue was saved in <code>rdi</code>), and loads some other thing from a global variable.</p>
+<p>Next, it calls mystery function <code>00000001`8002b4e0</code> with <code>0x668</code> as the second parameter. Not sure what that is, but we&#8217;ll keep it in mind.</p>
+<p>Next, we set up for another function call, and this one we recognize: <code>00000001`8002b4a0</code> is the import address table entry for <code>SetWindowLongPtr</code>. We saw it in the static dialog procedure.</p>
+<p>The parameters are the window handle that was obtained from mystery function 4, the constant <code>-12</code>, and the 32-bit value we loaded from <code>00000001`80039c50</code>. The mystery function 4 was probably <code>Get­Dlg­Item</code>. And since we figured out that the function being called is <code>SetWindowLongPtr</code>, the value <code>-12</code> is <code>GWLP_WNDPROC</code>.</p>
+<p>The value being set is the third parameter, which was loaded by <code>movsxd dword ptr</code>, which is a 32-bit to 64-bit sign-extended load. This is a problem because the window procedure is a 64-bit value.</p>
+<p>I bet they loaded the value incorrectly.</p>
+<pre>0:000&gt; dp 00000001`80039c50 l1
+00000001`80039c50  00007fff`924bbde0
+</pre>
+<p>Hey look, it&#8217;s the full 64-bit pointer we were supposed to have used, except we messed up and truncated the pointer.</p>
+<p>The C++ source code probably looked like this:</p>
+<pre>SetWindowLongPtr(GetDlgItem(m_hdlg, 0x668),
+    GWLP_WNDPROC, (LONG)g_originalWndProc);
+</pre>
+<p>The cast to <code>LONG</code> is what&#8217;s doing the truncation and sign extension. It should be a cast to <code>LONG_PTR</code>.</p>
+<p>We can patch this into the binary after looking at the processor instruction encoding documentation.</p>
+<p>The original instruction was</p>
+<pre>00000001`80004716 48631d33550300  movsxd  rbx,dword ptr [00000001`80039c50]
+</pre>
+<p>The documentation says that the encoding for <code>movxsd r64, r/m32</code> is &#8220;REX.W + 63 /r&#8221;.</p>
+<p>What we want is <code>mov rbx, [00000001`80039c50]</code>, and the documentation says that the encoding for <code>mov r64, r/m64</code> is &#8220;REX.W + 8B /r&#8221;.</p>
+<p>So let&#8217;s patch the <code>63</code> to <code>8b</code>.</p>
+<pre>0:000&gt; eb 00000001`80004717 8b
+0:000&gt; u 00000001`80004716 l1
+00000001`80004716 488b1d33550300  mov     rbx,qword ptr [00000001`80039c50]
+</pre>
+<p>This is literally a one-byte bug fix.</p>
+<p>Next time, we&#8217;ll speculate on how this bug arose.</p>
+<p><b>Bonus reading</b>: <a title="The decoy display control panel" href="https://devblogs.microsoft.com/oldnewthing/20060410-17/?p=32703"> The decoy control panel</a>.</p>
+<p>¹ Back in the late 1990&#8217;s, we discovered a program that reverse-engineered the internal data structures of the Windows 95 property sheet manager to the point where instead of passing an <code>HPROPSHEETPAGE</code> that was created by the <code>Create­Property­Sheet­Page</code> function, it created fake <code>HPROPSHEETPAGE</code>s that it had constructed manually in memory. This made adding support for Unicode property sheets that much harder because the internal structure of <code>HPROPSHEETPAGE</code>s changed in order to support both ANSI and Unicode property sheet pages, and they were passing the old version. The property sheet manager has to recognize that it is being given a fake <code>HPROPSHEETPAGE</code> and convert it on the fly to a real one.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260715-00/?p=112535">The case of the invalid function pointer when shutting down the display control panel</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

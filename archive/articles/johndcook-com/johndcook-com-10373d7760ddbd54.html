@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fitting a regular expression to a list of words | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Fitting a regular expression to a list of words</h1>
+        <div class="meta">John D. Cook 2026-07-19T19:30:17Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/07/19/fitting-a-regex/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-10373d7760ddbd54.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Suppose you want to search for a list of words. If you’re using grep, you can add the -f flag provide a file of regular expressions, and you can add the -F to tell it that the regular expressions are in fact just words. I did something like this a couple days ago when searching […] The post Fitting a regular expression to a list of words first appeared on J…</div>
+        <div class="content">
+          <p>Suppose you want to search for a list of words. If you&#8217;re using grep, you can add the <code>-f</code> flag provide a file of regular expressions, and you can add the <code>-F</code> to tell it that the regular expressions are in fact just words. I did something like this <a href="https://www.johndcook.com/blog/2026/07/17/regex-speed-error/">a couple days ago</a> when searching for diagnosis codes.</p>
+<pre>grep -w -F -o -f icd10codes.txt notes.txt</pre>
+<p>Now you might want to combine your list of words into a singular regular expression, for efficiency or possibly for some other reason. Apparently ripgrep does this because when I tried replacing grep with ripgrep in the command above I got an error saying &#8220;Compiled regex exceeds size limit of 104857600 bytes.&#8221;</p>
+<h2>Beating brute force</h2>
+<p>Say you wanted to search for the strings &#8220;bluecross&#8221;, &#8220;blueshield&#8221;, and &#8220;bluey&#8221;. You could simply form the brute force regular expression</p>
+<pre>bluecross|blueshied|bluey</pre>
+<p>but that doesn&#8217;t take advantage of the fact that all three strings begin with &#8220;blue.&#8221; A smaller regular expression would be</p>
+<pre>blue(shield|cross|y)</pre>
+<p>Finding the shortest regular expression that matches a list of words is a hard problem, but finding a regular expression that&#8217;s shorter than brute force is not. The Python package <a href="https://github.com/ermanh/trieregex">trieregex</a> will do this. According to the documentation,</p>
+<blockquote><p>trieregex creates efficient regular expressions (regexes) by storing a list of words in a trie structure, and translating the trie into a more compact pattern.</p></blockquote>
+<p>Let&#8217;s try our blue example with trieregex.</p>
+<pre>import re
+from trieregex import TrieRegEx as TRE
+
+words = ['bluecross', 'blueshield', 'bluey']
+tre = TRE(*words) 
+print(tre.regex())
+</pre>
+<p>This produces the same regular expression as above, except it adds <code>?:</code> to make the parentheses non-capturing.</p>
+<pre>blue(?:shield|cross|y)</pre>
+<h2>Prefixes versus suffixes</h2>
+<p>The library builds a trie data structure using common prefixes. That works well in the example above, but the result is disappointing when we have common suffixes rather than common prefixes. The following code</p>
+<pre>words = ['javascript', 'typescript']
+tre = TRE(*words) 
+print(tre.regex())
+</pre>
+<p>produces the regular expression</p>
+<pre>(?:javascript|typescript)</pre>
+<p>which is no better than brute force, whereas we might have hoped for</p>
+<pre>(?:java|type)script</pre>
+<h2>HCPCS examples</h2>
+<p>As mentioned at the top of the post, ripgrep failed to search on a list of ICD-10 codes. The list of HCPCS codes is about 10x smaller, and more compressible. Ripgrep was able to fit all HCPCS codes into a single regex and was able to search the test file much faster than grep. The command</p>
+<pre>grep -w -F -o -f hcpcs.txt notes.txt</pre>
+<p>took 73.426 seconds to execute, while the command</p>
+<pre>rg -w -F -o -f hcpsc.txt notes.txt</pre>
+<p>took 0.078 seconds, three orders of magnitude faster.</p>
+<p>The following code will read a list of HCPCS codes from a file and create a regular expression.</p>
+<pre>tre = TRE()
+with open('hcpcs.txt', 'r') as file:
+    for line in file:
+        tre.add(line.strip())
+print(len(tre.regex()))
+</pre>
+<p>This shows that the resulting regular expression has 17,198 characters. The file of codes has 8725 five-character codes, so the regex compresses the code characters by roughly a ratio of 5 to 2.</p>The post <a href="https://www.johndcook.com/blog/2026/07/19/fitting-a-regex/">Fitting a regular expression to a list of words</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

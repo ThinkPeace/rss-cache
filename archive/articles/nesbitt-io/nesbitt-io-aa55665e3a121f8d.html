@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plumbing Homebrew into the vulnerability ecosystem | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Plumbing Homebrew into the vulnerability ecosystem</h1>
+        <div class="meta">Andrew Nesbitt 2026-07-17T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/07/17/plumbing-homebrew-into-the-vulnerability-ecosystem.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-aa55665e3a121f8d.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">One command, six repos, three standards bodies, an advisory database, and a version comparator written in the wrong language.</div>
+        <div class="content">
+          <p>Back in January I <a href="/2026/01/08/brew-vulns-cve-scanning-for-homebrew">released brew-vulns</a>, a gem that added CVE scanning to Homebrew. It shelled out to <code class="language-plaintext highlighter-rouge">brew info --json=v2</code>, derived a source repository URL and version tag for each installed formula, and queried <a href="https://osv.dev">osv.dev</a> for anything known against that repo at that version. As of Homebrew 6.0.11 that command is built in and the gem is deprecated. Getting useful answers out of <code class="language-plaintext highlighter-rouge">brew vulns</code> in between meant changing what data Homebrew publishes about its own packages, registering Homebrew with the specs that vulnerability tooling is built on, standing up an advisory database, and porting Homebrew’s version comparison to Python so osv.dev can order our releases.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ brew vulns
+Checking 142 packages for vulnerabilities...
+(18 packages skipped - no supported source URL)
+
+openssl@3 (3.4.1)
+  CVE-2024-13176 (medium) - Timing side-channel in ECDSA signature...
+    Fixed in: 3.4.2
+
+Found 1 vulnerability in 1 package
+
+10 resolved by formula patches (not counted; pass --no-ignore-patches to include):
+  glibc: CVE-2024-2961, CVE-2024-33599, CVE-2024-33600, CVE-2025-0395, ...
+</code></pre></div></div>
+
+<p>About a month after the first release Mike McQuaid invited me to transfer the repo into the Homebrew org, and from then on it was being run against all of homebrew-core rather than just my laptop. That’s roughly 8,400 formulae, enough real data to find edge cases fixtures never do. OSV records with malformed <code class="language-plaintext highlighter-rouge">affected</code> ranges were passing versions through silently, so <a href="https://github.com/Homebrew/homebrew-brew-vulns/pull/62">range evaluation became fail-closed</a>. Vulnerability summaries occasionally contain terminal escape sequences and needed sanitising before printing. One pathological query could pull unbounded pages from the OSV API, so both pagination and the thread pool that fetches vulnerability detail got hard caps, and CI users needed a <a href="https://github.com/Homebrew/homebrew-brew-vulns/pull/79">distinct exit code</a> for “the scan errored” as opposed to “the scan found something”.</p>
+
+<h3 id="formula-patches">Formula patches</h3>
+
+<p>Hundreds of formulae in homebrew-core ship with at least one patch applied on top of the upstream tarball, and some of those patches fix CVEs, so the bottle a user installs is not affected even when the upstream version number falls inside an advisory’s range. A query keyed on repo and version reports those as open regardless. There was also no programmatic way to find out which formulae carried patches at all: <code class="language-plaintext highlighter-rouge">brew info --json</code> didn’t serialise the patch list, formulae.brew.sh didn’t show it, and formulae loaded from the API had an empty one, leaving a grep over a full homebrew-core checkout as the only option.</p>
+
+<p>I opened a <a href="https://github.com/orgs/Homebrew/discussions/6869">discussion</a> proposing two changes to Homebrew itself: add patches to the JSON output, and let a patch declare which CVEs it resolves. Mike said yes to both more or less immediately. Patches <a href="https://github.com/Homebrew/brew/pull/22459">went into <code class="language-plaintext highlighter-rouge">Formula#to_hash</code></a> the same day, which surfaced 1,191 of them across 809 formulae, 972 with an external URL and 219 embedded in the formula file as <code class="language-plaintext highlighter-rouge">__END__</code> data. The <code class="language-plaintext highlighter-rouge">patch do</code> DSL then <a href="https://github.com/Homebrew/brew/pull/22466">gained <code class="language-plaintext highlighter-rouge">resolves</code> and <code class="language-plaintext highlighter-rouge">type</code></a>:</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">patch</span> <span class="k">do</span>
+  <span class="n">url</span> <span class="s2">"https://deb.debian.org/.../libquicktime_1.2.4-12.debian.tar.xz"</span>
+  <span class="n">sha256</span> <span class="s2">"..."</span>
+  <span class="n">type</span> <span class="ss">:backport</span>
+  <span class="n">resolves</span> <span class="s2">"CVE-2016-2399"</span><span class="p">,</span> <span class="s2">"CVE-2017-9122"</span>
+  <span class="n">apply</span> <span class="s2">"patches/CVE-2016-2399.patch"</span><span class="p">,</span> <span class="s2">"patches/CVE-2017-9122_et_al.patch"</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<p>The vocabulary matches CycloneDX’s <a href="https://cyclonedx.org/docs/1.6/json/#components_items_pedigree_patches"><code class="language-plaintext highlighter-rouge">pedigree.patches</code></a> so SBOM tooling can read it without translation, and CVE ids are auto-inferred from the patch URL and <code class="language-plaintext highlighter-rouge">apply</code> filenames, which meant glibc, unzip, zip and libquicktime populated without any formula edits.</p>
+
+<p>That change sat in review for close to a month and shipped in Homebrew 6.0.4, at which point brew-vulns could <a href="https://github.com/Homebrew/homebrew-brew-vulns/pull/92">consume it</a>: any OSV result whose id or alias matches a <code class="language-plaintext highlighter-rouge">resolves</code> entry is reported as patched, excluded from the exit code, and marked <code class="language-plaintext highlighter-rouge">analysis.state: resolved</code> in CycloneDX output. Bo Anderson later <a href="https://github.com/Homebrew/brew/pull/23114">mapped <code class="language-plaintext highlighter-rouge">resolves</code> through the API layer</a> so it survives the JSON round-trip when formulae are loaded without a local homebrew-core checkout.</p>
+
+<h3 id="annotation-backfill">Annotation backfill</h3>
+
+<p>With the DSL merged, the <a href="https://github.com/Homebrew/homebrew-brew-vulns/issues/95">next job</a> was populating it across those 1,191 existing patches. Of the 972 external ones, 497 point at GitHub commit URLs (in principle queryable in OSV by commit hash), 272 point at raw files hosted in homebrew-core itself, 42 come from Debian, and the rest scatter across MacPorts, FreeBSD ports, Fedora, Gentoo and gists. <a href="https://github.com/p-linnane">Patrick Linnane</a> sampled 59 of the GitHub-commit patches and found zero that referenced a CVE; homebrew-core’s patches are almost entirely build and portability fixes, and a heuristic that greps formula source for CVE strings risks marking things patched that aren’t, since several of the CVE mentions in core are comments about <em>un</em>fixed issues.</p>
+
+<p>So the approach flipped from annotating every patch by URL heuristic to running the scanner over every patched formula and only annotating where a real finding gets suppressed. That pass covered the 484 patched formulae with a resolvable source repo and turned up nine with open OSV findings; in every case the shipped patch was a build fix unrelated to the CVE, so zero new annotations came out of it.</p>
+
+<p>A wider sweep querying OSV by commit hash for the GitHub-commit patches, reading DEP-3 headers on the Debian tarballs, and grepping local patch bodies found exactly one more: <code class="language-plaintext highlighter-rouge">nvi</code> carries a Debian regex patch that fixes <a href="https://github.com/Homebrew/homebrew-core/pull/290337">CVE-2015-2305</a>. Along the way, extending the scanner’s <a href="https://github.com/Homebrew/homebrew-brew-vulns/pull/97">homepage fallback</a> to cover formulae hosted outside GitHub, GitLab and Codeberg also turned up an unrelated data bug where <code class="language-plaintext highlighter-rouge">libart</code>’s homepage field pointed at <a href="https://github.com/Homebrew/homebrew-core/pull/290393">a completely different project</a>.</p>
+
+<p>The glibc formula’s Debian patch tarball resolves ten CVEs, and querying OSV by the sourceware.org repo URL returns exactly one of them. The other nine exist in OSV only as records auto-converted from NVD, and those conversions carry no <code class="language-plaintext highlighter-rouge">affected[].package</code> data: you can <code class="language-plaintext highlighter-rouge">GET /v1/vulns/CVE-2024-2961</code> and read the record, but no query by package, purl or repository will ever return it. All of libquicktime’s patched CVEs were in the same state. So even a scanner with perfect repo-URL derivation has a recall ceiling set by how much of NVD has been enriched with package data upstream, and for the C libraries Homebrew ships a lot of, the answer is not much.</p>
+
+<p>By this point Homebrew had structured <code class="language-plaintext highlighter-rouge">resolves</code> data, version history and patch metadata for every formula, which together are enough to act as an OSV data source. I <a href="https://github.com/Homebrew/homebrew-brew-vulns/pull/99">added an <code class="language-plaintext highlighter-rouge">--osv-export</code> flag</a> to the tap that walks every formula’s <code class="language-plaintext highlighter-rouge">resolves</code> list and emits one OSV-schema JSON record per CVE, under a <code class="language-plaintext highlighter-rouge">Homebrew</code> ecosystem with <code class="language-plaintext highlighter-rouge">pkg:brew/&lt;name&gt;</code> package URLs, <code class="language-plaintext highlighter-rouge">BREW-&lt;formula&gt;-&lt;CVE&gt;</code> ids, and the resolving patch details carried in <code class="language-plaintext highlighter-rouge">ecosystem_specific</code>. A demo repository held the initial 26 records with schema validation running in CI, and any OSV-aware tool reading that feed could answer whether a given Homebrew package version was affected by a given CVE without going near the upstream repo.</p>
+
+<h3 id="spec-registrations">Spec registrations</h3>
+
+<p>For anyone else’s tooling to read those records, two specs needed a Homebrew entry and osv.dev needed code to handle it. The <a href="https://github.com/package-url/purl-spec">package-url spec</a> defines the <code class="language-plaintext highlighter-rouge">pkg:</code> identifier format that OSV, CycloneDX, SPDX and most SBOM tooling use to name packages, and it maintains a registry of allowed types. A <code class="language-plaintext highlighter-rouge">pkg:brew</code> type had been <a href="https://github.com/package-url/purl-spec/issues/254">proposed in 2023</a> by William Woodruff and again by others afterwards, and it finally <a href="https://github.com/package-url/purl-spec/pull/796">landed</a> via Rui Chen earlier this year. One wrinkle specific to Homebrew is that formula names can contain <code class="language-plaintext highlighter-rouge">@</code> for version-pinned variants like <code class="language-plaintext highlighter-rouge">openssl@3</code> and <code class="language-plaintext highlighter-rouge">python@3.12</code>, and <code class="language-plaintext highlighter-rouge">@</code> is also purl’s version separator, so <code class="language-plaintext highlighter-rouge">pkg:brew/openssl@3</code> is ambiguous and the <code class="language-plaintext highlighter-rouge">@</code> in the name has to be <a href="https://github.com/Homebrew/homebrew-brew-vulns/pull/101">percent-encoded</a> as <code class="language-plaintext highlighter-rouge">pkg:brew/openssl%403</code>.</p>
+
+<p>The <a href="https://github.com/ossf/osv-schema">OSV schema</a> keeps its own registry of ecosystem names and id prefixes, and records that use an unregistered one fail validation. Registering <a href="https://github.com/ossf/osv-schema/pull/576"><code class="language-plaintext highlighter-rouge">Homebrew</code> and the <code class="language-plaintext highlighter-rouge">BREW-</code> prefix</a> was straightforward, as was <a href="https://github.com/ossf/osv-schema/pull/580">documenting the database URL and how Homebrew versions sort</a>, which any tool evaluating an <code class="language-plaintext highlighter-rouge">affected</code> range needs to implement.</p>
+
+<p>Getting osv.dev itself to ingest the feed is the piece <a href="https://github.com/google/osv.dev/issues/5659">still in progress</a>. Two additions are needed per ecosystem in the osv.dev importer: a purl-to-package mapping, which for <code class="language-plaintext highlighter-rouge">pkg:brew</code> is a couple of lines, and a version comparator so that range queries like “is <code class="language-plaintext highlighter-rouge">6.0_7</code> inside <code class="language-plaintext highlighter-rouge">introduced: 0, fixed: 6.0_8</code>” can be evaluated server-side. Homebrew versions are the upstream version string with an optional <code class="language-plaintext highlighter-rouge">_N</code> revision suffix that increments when a formula changes without an upstream release, and the upstream strings are whatever each project uses, semver or otherwise. The comparator is therefore a Python port of Homebrew’s Ruby <code class="language-plaintext highlighter-rouge">Version#&lt;=&gt;</code> logic, which runs to a couple of hundred lines of edge cases. The <a href="https://github.com/google/osv.dev/pull/5660">draft PR</a> is open; until it merges and ingestion is enabled, <code class="language-plaintext highlighter-rouge">brew vulns</code> can’t query <code class="language-plaintext highlighter-rouge">{ecosystem: "Homebrew"}</code> over the API and has to fetch the advisory database’s static JSON directly instead.</p>
+
+<h3 id="advisory-database">Advisory database</h3>
+
+<p>I transferred the demo repository into the Homebrew org once the schema registration merged, initially as <code class="language-plaintext highlighter-rouge">Homebrew/homebrew-advisory-database</code>. That name lasted about a day: the <code class="language-plaintext highlighter-rouge">homebrew-</code> prefix is how the <code class="language-plaintext highlighter-rouge">setup-homebrew</code> CI action identifies taps, and CI runs started failing on an attempt to tap a directory full of JSON files, so it became <a href="https://github.com/Homebrew/advisory-database"><code class="language-plaintext highlighter-rouge">Homebrew/advisory-database</code></a> and every reference to the old name across brew and the repo’s own workflows <a href="https://github.com/Homebrew/brew/pull/23117">had to follow</a>.</p>
+
+<p>The repo holds one JSON file per advisory, currently 33 across six formulae (glibc, libquicktime, lrzsz, nvi, unzip, zip), all generated from <code class="language-plaintext highlighter-rouge">resolves</code> annotations. A daily GitHub Actions workflow regenerates them, and because the org’s branch ruleset requires pull requests on <code class="language-plaintext highlighter-rouge">main</code> the workflow <a href="https://github.com/Homebrew/advisory-database/pull/7">opens a PR</a> instead of pushing. Regeneration originally ran <code class="language-plaintext highlighter-rouge">gem install brew-vulns</code> followed by <code class="language-plaintext highlighter-rouge">brew vulns --osv-export</code>, which meant the tap couldn’t be archived until brew had a native replacement; that arrived as <a href="https://github.com/Homebrew/brew/pull/23106"><code class="language-plaintext highlighter-rouge">brew generate-vulns-advisories</code></a>, a hidden dev command, and the <a href="https://github.com/Homebrew/advisory-database/pull/4">workflow switched over</a>.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">fixed</code> boundary in each record needed more care than “whatever version ships today”. If unzip’s formula gained a CVE-2014-8139 patch at revision <code class="language-plaintext highlighter-rouge">6.0_6</code> and the current revision is <code class="language-plaintext highlighter-rouge">6.0_8</code>, a record saying <code class="language-plaintext highlighter-rouge">fixed: 6.0_8</code> wrongly flags <code class="language-plaintext highlighter-rouge">6.0_6</code> and <code class="language-plaintext highlighter-rouge">6.0_7</code> as vulnerable. The generator now <a href="https://github.com/Homebrew/brew/pull/23115">walks homebrew-core’s git history</a> via <code class="language-plaintext highlighter-rouge">FormulaVersions</code> to find the first revision where the resolving patch appeared, and <a href="https://github.com/Homebrew/brew/pull/23112">merges into existing records</a> rather than overwriting them so a hand-corrected boundary or a curated record survives the next nightly run. The <a href="https://github.com/Homebrew/advisory-database/blob/main/CONTRIBUTING.md">contributing guide</a> covers the curated path for cases the generator can’t express, using a <code class="language-plaintext highlighter-rouge">BREW-0000-0000</code> placeholder id that a maintainer replaces on merge.</p>
+
+<h3 id="merging-into-homebrewbrew">Merging into Homebrew/brew</h3>
+
+<p>Around this point I was added as a Homebrew maintainer, which made the next stretch a lot smoother since it involved landing a run of interdependent changes across brew, homebrew-core and the advisory database in quick succession. The scanner <a href="https://github.com/Homebrew/brew/pull/23080">moved into <code class="language-plaintext highlighter-rouge">Library/Homebrew/cmd/vulns.rb</code></a> with a supporting <code class="language-plaintext highlighter-rouge">vulns/</code> module directory, following the same pattern as <code class="language-plaintext highlighter-rouge">brew livecheck</code>, and the <a href="https://github.com/Homebrew/homebrew-brew-vulns/issues/111">tracking issue</a> has the full design doc listing everything that changed on the way in.</p>
+
+<p>User-facing commands in brew’s <code class="language-plaintext highlighter-rouge">cmd/</code> directory can’t lazy-load gem groups (a RuboCop cop enforces it), which was the biggest constraint on the port: anything the command needs has to be in the vendored bundle already or reimplemented, and adding five gems to every Homebrew install for one subcommand wasn’t going to fly. The tap depended on <a href="https://rubygems.org/gems/purl"><code class="language-plaintext highlighter-rouge">purl</code></a>, <a href="https://rubygems.org/gems/vers"><code class="language-plaintext highlighter-rouge">vers</code></a>, <a href="https://rubygems.org/gems/cvss-suite"><code class="language-plaintext highlighter-rouge">cvss-suite</code></a>, <a href="https://rubygems.org/gems/sbom"><code class="language-plaintext highlighter-rouge">sbom</code></a> and <a href="https://rubygems.org/gems/sarif-ruby"><code class="language-plaintext highlighter-rouge">sarif-ruby</code></a>, and all five went.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">sbom</code> and <code class="language-plaintext highlighter-rouge">sarif-ruby</code> gems were only used for <code class="language-plaintext highlighter-rouge">--cyclonedx</code> and <code class="language-plaintext highlighter-rouge">--sarif</code> output, so those flags are dropped for now and will return as direct JSON emission validated against the published schemas. The <code class="language-plaintext highlighter-rouge">purl</code> gem was used exactly once, to extract the ecosystem token from an OSV record’s <code class="language-plaintext highlighter-rouge">affected.package.purl</code> field, and since the merged code only evaluates <code class="language-plaintext highlighter-rouge">SEMVER</code> ranges locally that lookup is never reached.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">vers</code> gem became a small <code class="language-plaintext highlighter-rouge">Homebrew::Vulns::Semver</code> module implementing strict SemVer 2.0 comparison. Homebrew’s own <code class="language-plaintext highlighter-rouge">Version</code> class isn’t a drop-in here: it sorts <code class="language-plaintext highlighter-rouge">1.0.0-alpha.1</code> above <code class="language-plaintext highlighter-rouge">1.0.0-alpha.beta</code> where the SemVer spec says numeric prerelease identifiers sort below alphanumeric ones, and it compares <code class="language-plaintext highlighter-rouge">+build</code> metadata where SemVer says build metadata is ignored for ordering. Getting either wrong turns a range boundary into a false positive or negative.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">cvss-suite</code> gem became <code class="language-plaintext highlighter-rouge">Homebrew::Vulns::CVSS</code>, which implements the CVSS v3.0/v3.1 base-score formula and buckets the result. CVSS v4.0 scoring requires a roughly 270-entry MacroVector lookup table plus interpolation between entries, so v4 vectors currently fall through to the next <code class="language-plaintext highlighter-rouge">severity</code> entry on the record; almost every record with a v4 vector also carries a v3 one, so in practice little is lost.</p>
+
+<p>The tap’s <code class="language-plaintext highlighter-rouge">--all</code> flag was going to become <code class="language-plaintext highlighter-rouge">--eval-all</code> to match other brew commands, until <code class="language-plaintext highlighter-rouge">--eval-all</code> was replaced across brew with a tap-trust mechanism while the PR was in review, so with no arguments <code class="language-plaintext highlighter-rouge">brew vulns</code> now scans every formula from a trusted tap and falls back to installed formulae otherwise. The tap also always read the current formula definition for the source URL and version, so an old installed keg would be checked against whatever version the formula had since been bumped to. The built-in command reads the <a href="https://github.com/Homebrew/brew/pull/23140">installed keg’s SPDX SBOM</a> instead, and if an outdated keg predates SBOM generation the scan warns and exits nonzero rather than reporting a version it never checked.</p>
+
+<p>All of that shipped together in Homebrew 6.0.11, and the tap is now <a href="https://github.com/Homebrew/homebrew-brew-vulns/pull/112">a deprecation stub</a> pointing at the built-in command.</p>
+
+<h3 id="coverage">Coverage</h3>
+
+<p>The command as shipped queries OSV’s GIT ecosystem by repo URL, which covers about 73% of homebrew-core (6,210 of 8,492 formulae); the other 2,282 have no derivable GitHub, GitLab or Codeberg URL and are skipped, with a count reported at the end of the run. Closing that gap means finding other keys that join a formula to an advisory, and doing the joining once at authoring time in the advisory database rather than on every user’s machine. That way <code class="language-plaintext highlighter-rouge">brew vulns</code> stays at a single batched API call however many matching strategies feed the database behind it.</p>
+
+<p>Of the skipped formulae, 322 have a <code class="language-plaintext highlighter-rouge">stable.url</code> pointing at a language package registry (145 PyPI, 144 npm, plus Maven, Hackage, CPAN, crates and a few others), and a URL like <code class="language-plaintext highlighter-rouge">files.pythonhosted.org/.../foo-1.2.tar.gz</code> encodes enough to build a <code class="language-plaintext highlighter-rouge">pkg:pypi/foo@1.2</code> purl and query OSV’s PyPI ecosystem directly. The same applies to the 12,283 <code class="language-plaintext highlighter-rouge">resource</code> blocks across homebrew-core, which are vendored dependencies inside formulae; about 91% of those are registry URLs (over 10,000 PyPI alone) and none are scanned today.</p>
+
+<p>That leaves roughly 1,960 formulae hosted on SourceForge, GNU mirrors, gnome.org download servers, Debian archives and the like, with no direct package identifier at all. For those the join goes through <a href="https://repology.org">Repology</a>, which already indexes Homebrew alongside every major Linux distro: look up the formula name, get back the Debian, Alpine and openSUSE source-package names for the same upstream, query OSV’s distro ecosystems for those, and collect the CVE aliases.</p>
+
+<p>Repology’s <a href="https://dumps.repology.org/">bulk dumps</a> turned out to be 10GB+ PostgreSQL restores rather than anything directly loadable, so the <a href="https://github.com/Homebrew/advisory-database/pull/11">index builder</a> paginates the API instead, about 43 pages at one request per second, and writes a distilled <code class="language-plaintext highlighter-rouge">formula -&gt; {distro -&gt; srcname}</code> map into the advisory repo. Name matching needs normalisation (<code class="language-plaintext highlighter-rouge">postgresql@16</code> maps to Repology’s <code class="language-plaintext highlighter-rouge">postgresql</code>, <code class="language-plaintext highlighter-rouge">libmatio</code> maps to <code class="language-plaintext highlighter-rouge">matio</code>, and Repology sometimes lists a Debian binary package where the OSV feed keys on the source package), and corrections to Repology’s project grouping go upstream to <a href="https://github.com/repology/repology-rules">repology-rules</a> instead of into a local override layer.</p>
+
+<p>OSV has no CPAN, CTAN or LuaRocks ecosystem, and 61 formulae vendor at least one CPAN module, so that path reads the <a href="https://github.com/briandfoy/cpan-security-advisory">cpan-security-advisory</a> database directly. Between the registry URLs, the Repology mapping and the CPAN feed, roughly 96% of homebrew-core ends up with at least one automated join key, with a few hundred formulae left over that will need a hand-curated mapping file in the advisory repo.</p>
+
+<h3 id="next">Next</h3>
+
+<p>The scan output can surface in more of Homebrew than a dedicated subcommand. Running the scanner once inside <code class="language-plaintext highlighter-rouge">brew generate-formula-api</code> and attaching a <code class="language-plaintext highlighter-rouge">vulnerabilities</code> field to each formula’s JSON would put open findings on <a href="https://formulae.brew.sh">formulae.brew.sh</a> formula pages and in <code class="language-plaintext highlighter-rouge">brew info</code> without a live query, since both already read that JSON. From there <code class="language-plaintext highlighter-rouge">brew install</code> could warn when the version being installed has an open advisory, and <code class="language-plaintext highlighter-rouge">brew upgrade</code> could list which CVEs each pending bump resolves alongside the version change, so the security case for an upgrade is visible when you’re deciding whether to run it.</p>
+
+<p>Every installed keg already carries an SPDX SBOM listing its dependencies with versions, and the built-in command reads that SBOM for the top-level source URL now, so the inventory for scanning a formula’s whole dependency tree is already on disk and the remaining work is the same matching problem as everything above. Casks are harder because a large share of them package closed-source applications, with no upstream repo to query and no visible dependency list to walk. The <a href="/2026/07/01/the-cra-is-not-about-open-source">EU Cyber Resilience Act</a> will change that from outside Homebrew: vendors selling into Europe will have to produce SBOMs for their products, and as those start to appear for the apps that casks install, scanning a cask’s dependency tree becomes the same job as scanning a keg’s.</p>
+
+<p>On the maintainer side, a <a href="https://github.com/Homebrew/homebrew-core">homebrew-core</a> PR that bumps a formula is the natural place to report which CVEs the bump closes, which are still open at the new version, and which affect any vendored <code class="language-plaintext highlighter-rouge">resource</code> blocks. Running the full matcher against the one changed formula is cheap enough to sit inside <code class="language-plaintext highlighter-rouge">brew test-bot</code> alongside the existing audit checks. Anything it finds that isn’t already a <code class="language-plaintext highlighter-rouge">BREW-*</code> record is a candidate for the advisory database, giving it a second feed driven by formula changes as well as the nightly advisory sweep. Restoring <code class="language-plaintext highlighter-rouge">--sarif</code> and <code class="language-plaintext highlighter-rouge">--cyclonedx</code> output brings back the code-scanning and SBOM integrations for downstream projects that want to scan their own Brewfiles in CI.</p>
+
+<p>Underneath all of that, <a href="https://github.com/google/osv.dev/pull/5660">osv.dev ingestion</a> is still the gate for querying <code class="language-plaintext highlighter-rouge">{ecosystem: "Homebrew"}</code> directly rather than fetching the advisory JSON, and CVSS v4 scoring still needs its lookup table before v4-only records get a severity label.</p>
+
+<p>Thanks to <a href="https://github.com/MikeMcQuaid">Mike McQuaid</a> and Patrick for all the help getting this over the line so far, and to the rest of the Homebrew maintainers for reviews across an unreasonable number of pull requests. If you’re on Homebrew 6.0.11 or later <code class="language-plaintext highlighter-rouge">brew vulns</code> is already there; the <a href="https://github.com/Homebrew/advisory-database">advisory database</a> and the <a href="https://github.com/orgs/Homebrew/discussions/6869">discussion thread</a> that most of this fell out of are good places to follow along.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

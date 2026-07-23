@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Regular expression speed and error rates | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Regular expression speed and error rates</h1>
+        <div class="meta">John D. Cook 2026-07-17T11:26:19Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/07/17/regex-speed-error/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-21fc0c311ddbde3c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Seven years ago I wrote a post about regular expressions to match diagnosis codes. I wanted to revisit that post looking at speed and error rates. Regular expressions usually do not exactly match what you’re looking for and nothing else. They have error false positives and false negatives. But they also have advantages, and context […] The post Regular expr…</div>
+        <div class="content">
+          <p><a href="https://www.johndcook.com/blog/2019/05/05/regex_icd_codes/">Seven years ago</a> I wrote a post about regular expressions to match diagnosis codes. I wanted to revisit that post looking at speed and error rates.</p>
+<p>Regular expressions usually do not exactly match what you&#8217;re looking for and nothing else. They have error false positives and false negatives. But they also have advantages, and context determines whether the advantages make the error rates tolerable.</p>
+<p>The post mentioned above gave the following regular expression for ICD-10 diagnosis codes.</p>
+<pre>    [A-TV-Z][0-9][0-9AB]\.?[0-9A-TV-Z]{0,4}</pre>
+<p>As cryptic as this may look at first glance, it&#8217;s straight-forward to interpret. It says that an ICD-10 code</p>
+<ol>
+<li>Begins with a capital letter, excluding U</li>
+<li>Followed by a digit</li>
+<li>Followed by a digit or A or B</li>
+<li>Optionally followed by a period</li>
+<li>Followed by up to 4 digits or capital letters, excluding U.</li>
+</ol>
+<h2>Speed</h2>
+<p>Now suppose you want to scan a text document for ICD-10 codes. One approach would be to use the regex above. Another would be to compare every alphanumeric sequence in the document to a list of ICD-10. Currently this list has 74,719 codes. </p>
+<p>I tested both approaches on a 800kb text file. The regex search</p>
+<pre>    egrep -o '[A-TV-Z][0-9][0-9AB]\.?[0-9A-TV-Z]{0,4}' notes.txt</pre>
+<p>took 18 milliseconds. Searching against the list of codes</p>
+<pre>    grep -w -F -o -f icd10codes.txt notes.txt</pre>
+<p>took 386 seconds, about six and a half minutes or five orders of magnitude longer.</p>
+<h2>Error rates</h2>
+<p>The regex</p>
+<pre>    [A-TV-Z][0-9][0-9AB]\.?[0-9A-TV-Z]{0,4}</pre>
+<p>had a false negative rate of zero at the time it was written. I tested the regex against the current list of codes with the following command.</p>
+<pre>    egrep -v '[A-TV-Z][0-9][0-9AB]\.?[0-9A-TV-Z]{0,4}' icd10codes.txt</pre>
+<p>The <code>-v</code> flag reverses the sense of the search, reporting lines that do not match the regular expression. This returned three matches: U070, U071, and U099. So 3 out of 74,719 valid ICD-10 codes were reported as invalid.</p>
+<p>Codes beginning with U are designated for provisional/emergency/special purposes, but these three have become essentially permanent. A change in the application of the ICD-10 standard caused an error in the regular expression. </p>
+<p>But the change would also have caused an error in code that did an exhaustive search against the list of ICD-10 codes at the time. In fact, every new code not starting with U would also be reported in error. So the regex is actually more future-proof than an exhaustive search. Presumably the simplified regex</p>
+<pre>    [A-Z][0-9][0-9AB]\.?[0-9A-Z]{0,4}</pre>
+<p>will remain valid for the foreseeable future.</p>
+<p>We&#8217;ve looked at false negatives. What about false positives? That depends on context. The false positive rate when searching medical notes is low: a word matching the regex above in a medical record is most likely an ICD-10 code. But the number of conceivable false positives is enormous. If you were searching a file of randomly generated alphanumeric text, the regex matches would overwhelmingly be false positives [1].</p>
+<p>The number of strings matching</p>
+<pre>    [A-Z][0-9][0-9AB]\.?[0-9A-Z]{0,4}</pre>
+<p>would be</p>
+<p>26 × 10 × 12 × (1 + 36 + 36<sup>2</sup> + 36<sup>3</sup> + 36<sup>4</sup>) = 5,390,127,600.</p>
+<p>Out of over five billion strings matching the regular expression, only around 75,000 are valid ICD-10 codes. So a naive theoretical calculation would say the false positive rate is 99.9986%, whereas in practice the false positive rate is very low, though there&#8217;s no way to say <em>a priori</em> exactly how low.</p>
+<h2>Related posts</h2>
+<ul>
+<li class='link'><a href='https://www.johndcook.com/blog/2022/09/23/hcpcs-codes/'>HCPCS (“hick pics”) codes</a></li>
+<li class='link'><a href='https://www.johndcook.com/blog/2024/06/26/npi-number/'>NPI numbers and checksum</a></li>
+<li class='link'><a href='https://www.johndcook.com/blog/expert-hipaa-deidentification/'>HIPAA expert determination</a></li>
+</ul>
+<p>[1] You could argue that all positives would be false positives in this context because you&#8217;re looking at noise. You couldn&#8217;t find an ICD code, though you could find a string of characters that coincides with an ICD code. That may sound like a pedantic distinction, but it matters in the context of evaluating deidentification quality: you want to find instances of PHI, not instances of strings that match the character pattern of PHI.</p>The post <a href="https://www.johndcook.com/blog/2026/07/17/regex-speed-error/">Regular expression speed and error rates</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
