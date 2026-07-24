@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Making an agile version of a Windows Runtime delegate in C++/WinRT, part 4 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Making an agile version of a Windows Runtime delegate in C++/WinRT, part 4</h1>
+        <div class="meta">The Old New Thing 2026-07-23T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260723-00/?p=112560">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-6ff634734c56d318.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Optimizing the context check. The post Making an agile version of a Windows Runtime delegate in C++/WinRT, part 4 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, we wrote a wrapper delegate that <a title="Making an agile version of a Windows Runtime delegate in C++/WinRT, part 4" href="https://devblogs.microsoft.com/oldnewthing/20260722-00/?p=112552"> checked whether the context it was being invoked from matched the context it was captured from</a>.</p>
+<pre>    if (d.try_as&lt;::INoMarshal&gt;()) {
+        return [d = std::forward&lt;Delegate&gt;(d),
+                context = winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext)](auto&amp;&amp;...args) {
+            if (context == winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext)) {
+                d(std::forward&lt;decltype(args)&gt;(args)...);
+            } else {
+                throw winrt::hresult_error(CO_E_NOT_SUPPORTED);
+            }
+        };
+    }
+</pre>
+<p>We did this by comparing context objects.</p>
+<p>This obtains the current object context in order to compare it with the original one, and that means an internal <code>Add­Ref</code>, and then we have to explicitly <code>Release</code> it.</p>
+<p>But there&#8217;s a way to do this without having to obtain any objects.</p>
+<p>The <code>Co­Get­Context­Token</code> function gives you an integer that uniquely identifies a live context object. You can then compare integers instead of having to compare COM objects.</p>
+<p>Note that the context must be live. Once you allow the context to destruct, the value might be reused. (You&#8217;re already used to this. Process and thread IDs work the same way: They remain unique as long as they are running or you still have a reference to them by a <code>HANDLE</code>.)</p>
+<p>Since we are keeping the context alive by the <code>IContext­Callback</code> returned by <code>Co­Get­Object­Context</code>, we can pair that with a context token to make for faster checks in the future.</p>
+<pre><span>ULONG_PTR get_context_token()                       </span>
+<span>{                                                   </span>
+<span>    ULONG_PTR token;                                </span>
+<span>    winrt::check_hresult(CoGetContextToken(&amp;token));</span>
+<span>    return token;                                   </span>
+<span>}                                                   </span>
+
+    if (d.try_as&lt;::INoMarshal&gt;()) {
+        return [d = std::forward&lt;Delegate&gt;(d),
+                context = winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext),
+                <span>token = get_context_token()</span>](auto&amp;&amp;...args) {
+            if (<span>token == get_context_token()</span>) {
+                d(std::forward&lt;decltype(args)&gt;(args)...);
+            } else {
+                throw winrt::hresult_error(CO_E_NOT_SUPPORTED);
+            }
+        };
+    }
+</pre>
+<p>Are we done?</p>
+<p>Of course not!</p>
+<p>There&#8217;s a flaw in the above code. More next time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260723-00/?p=112560">Making an agile version of a Windows Runtime delegate in C++/WinRT, part 4</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
