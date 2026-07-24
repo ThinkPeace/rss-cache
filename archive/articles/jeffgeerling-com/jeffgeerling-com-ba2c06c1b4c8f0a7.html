@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Adding a backup Internet WAN on my OPNsense Router | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Adding a backup Internet WAN on my OPNsense Router</h1>
+        <div class="meta">Jeff Geerling 2026-07-23T21:00:00Z</div>
+        <div class="links">
+          <a href="https://www.jeffgeerling.com/blog/2026/opnsense-backup-internet-gateway/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jeffgeerling-com/jeffgeerling-com-ba2c06c1b4c8f0a7.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">AKA &quot;Spectrum has gone down two weeks in a row and I&#x27;m sick of it&quot;. I&#x27;ve been borrowing a portable 5G gateway from my Dad for a few weeks, for testing... and two weeks in a row, I&#x27;ve used it as a backup Internet option, since my Spectrum Business cable Internet has gone down. And yes, I&#x27;d get AT&amp;T Fiber if I had the option, sadly they don&#x27;t yet provide serv…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>Adding a backup Internet WAN on my OPNsense Router</h1>
+    <p>AKA "Spectrum has gone down two weeks in a row and I'm sick of it".</p>
+    <p>I've been borrowing a portable 5G gateway from my Dad for a few weeks, for testing... and two weeks in a row, I've used it as a backup Internet option, since my Spectrum Business cable Internet has gone down.</p>
+    <graphic src="https://www.jeffgeerling.com/blog/2026/opnsense-backup-internet-gateway/spectrum-cable-modem-online-offline.jpg" alt="Spectrum Business Cable Modem offline"/>
+    <p>And yes, I'd get AT&amp;T Fiber if I had the option, sadly they don't yet provide service at my studio. So I'm stuck with only one high speed wired provider. I may add on my own 5G backup Internet connection in the future, but we're getting off track.</p>
+    <p>The first outage, I unplugged my Cable modem from my ETH1 port, and plugged in the 5G gateway. I then rebooted the router, and also my main Mac (it's DHCP and DNS caching seems very aggressive, at least for Safari's networking stack).</p>
+    <p>That works, but it's quite inconvenient, because I had to keep checking on Spectrum's Internet status, then when it was finally back up, I had to walk back and re-plug my cable modem into my router, and reboot everything again.</p>
+    <p>Wouldn't it be easier if I could just... do it in software?</p>
+    <h2>OPNsense and dual WAN</h2>
+    <graphic src="https://www.jeffgeerling.com/blog/2026/opnsense-backup-internet-gateway/opnsense-wan2-port.jpg" alt="OPNsense router WAN2 port on back"/>
+    <p>My plan was to plug the 5G gateway into 'ETH2' (the third Ethernet port on my OPNsense box; ETH0 went to my LAN, ETH1 was for the Cable modem, and ETH2 and ETH3 are available—all are 2.5 Gbps ports).</p>
+    <p>'ETH2' was device 'igc2', so I logged into OPNsense, and under Interfaces &gt; Assignments, I assigned new interface 'igc2' named 'WAN2'.</p>
+    <graphic src="https://www.jeffgeerling.com/blog/2026/opnsense-backup-internet-gateway/opnsense-1-igc2-assignment.png" alt="OPNsense Interface igc2 assignment"/>
+    <p>Then I clicked on WAN2 in the sidebar, and changed the following settings:</p>
+    <ul>
+      <li>Enable (checked)</li>
+      <li>IPv4 Configuration Type: DHCP</li>
+    </ul>
+    <p>Click 'Save', then 'Apply Changes' (at the top), then go to System &gt; Gateways &gt; Configuration, and make sure your new WAN2 gateway has appeared there.</p>
+    <p>(Since I don't want automatic failover, I won't set up any specific rules / monitors here, but you can figure that out on your own if you want that.)</p>
+    <p>Go to Firewall &gt; NAT &gt; Outbound and make sure you have 'Automatic outbound NAT' set up. If it is not set up, you may need to add a rule for the WAN2 interface.</p>
+    <h2>Failover</h2>
+    <graphic src="https://www.jeffgeerling.com/blog/2026/opnsense-backup-internet-gateway/opnsense-2-gateway-configuration.png" alt="OPNsense Interface Gateway configuration page"/>
+    <p>To actually failover to WAN2:</p>
+    <ul>
+      <li>Visit System &gt; Gateways &gt; Configuration</li>
+      <li>Edit WAN2_DHCP, and set the Priority to "1" (and make sure it is not 'Disabled')</li>
+      <li>Edit WAN_DHCP, and set the Priority to "2"</li>
+      <li>Click 'Apply' and wait a few seconds</li>
+    </ul>
+    <p>I usually use <pre>curl icanhazip.com</pre> or visit <a href="https://fast.com/">fast.com</a> to determine which connection my computer's actually using at any given moment.</p>
+    <p>To switch back, set WAN2_DHCP to "2" (or more), and WAN_DHCP to "1" (making sure it is not 'Disabled'), and click 'Apply' again.</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
