@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Excel column numbering | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Excel column numbering</h1>
+        <div class="meta">John D. Cook 2026-07-25T13:37:30Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/07/25/excel-column-numbering/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-4aaf46aa831e4184.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I was working with a wide spreadsheet from a client the other day and I had to convert between Excel column labels and column numbers. I had never paid attention to how Excel labels columns and implicitly thought it was base 26 using letters rather than digits. But then I realized that’s not right. Excel […] The post Excel column numbering first appeared on…</div>
+        <div class="content">
+          <p>I was working with a wide spreadsheet from a client the other day and I had to convert between Excel column labels and column numbers. I had never paid attention to how Excel labels columns and implicitly thought it was base 26 using letters rather than digits. But then I realized that&#8217;s not right.</p>
+<p>Excel labels columns A through Z, then AA trough AZ, then BA through BZ, etc. If this is base 26, then does A correspond to 0? That could work for A through Z, but then what about AA? Then you&#8217;d have to say the first A corresponds to 26 but the second A corresponds to 0.</p>
+<p>Does Z correspond to 0? If so then the column numbers would be 1 through 25, followed by 0, then 27. And it would mean that columns ZA through ZZ are the same as A through Z.</p>
+<p>In fact nothing in Excel column labeling corresponds to 0. The labels cannot be interpreted as a positional number system.</p>
+<p>There&#8217;s a name for this kind of number system: bijective base 26. The idea is ancient, but the name was coined recently. It has also been called 26-adic numbering. For most of history it didn&#8217;t have a name. The concept extends generally to bijective base <em>b</em> for any positive integer <em>b</em>. Bijective base 1 is simply tally marks.</p>
+<p>The motivation behind the name bijective base <em>b</em> is that there is a bijection (a one-to-one correspondence) between these symbols and positive integers; there&#8217;s nothing like leading zeros that would keep the mapping from being a bijection, unlike say 7 and 07 representing the same number.</p>
+<p>Before 2007, an Excel file could have a maximum of 2<sup>8</sup> = 256 columns, and so the largest column label was IV. (The 9th letter is I and the 22nd letter is V, so IV corresponds to 9*26 + 22 = 256.)</p>
+<p>Then in 2007 the column limit was increased to 2<sup>14</sup> = 16,384 and the largest column label is XFD (24*26&sup2; + 6*26 + 4).</p>
+<p>Converting from column labels to integers is easy; going the other way is a little more complicated.</p>
+<pre>
+letter_to_ordinal = lambda c: ord(c) - ord('A') + 1
+ordinal_to_letter = lambda n: chr(ord('A') + n - 1)
+
+def label_to_num(label):
+    label = label.upper()
+    n = 0
+    for c in label:
+        n = n * 26 + letter_to_ordinal(c)
+    return n
+
+
+def num_to_label(n):
+    letters = []
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        letters.append(ordinal_to_letter(remainder + 1))
+    return ''.join(reversed(letters))
+</pre>
+<p>The following code verifies the assertions above about the maximum number of Excel columns over time.</p>
+<pre>
+assert(num_to_label(256) == "IV")
+assert(label_to_num("IV") == 256)
+
+assert(num_to_label(2**14) == "XFD")
+assert(label_to_num("XFD") == 2**14)
+</pre>
+<p>The conversion routines are not limited to actual Excel labels but work for arbitrarily large integers and bijective base 26 representations. For example, the following code shows that the bijective base 26 representation of Avogadro&#8217;s number is MUAEKAUDYDXEWOSDD.</p>
+<pre>
+avogadro = 602_214_076_000_000_000_000_000
+assert(label_to_num(num_to_label(avogadro)) == avogadro)
+print(num_to_label(avogadro))
+</pre>
+<h2>Related posts</h2>
+<ul>
+<li class='link'><a href='https://www.johndcook.com/radix_conversion.html'>Radix conversion calclator</a></li>
+<li class='link'><a href='https://www.johndcook.com/blog/2020/03/16/round-trip-radix-conversion/'>When is floating point radix conversion exact?</a></li>
+<li class='link'><a href='https://www.johndcook.com/blog/2019/09/07/excel-r-bom/'>Excel, R, and Unicode</a></li>
+</ul>The post <a href="https://www.johndcook.com/blog/2026/07/25/excel-column-numbering/">Excel column numbering</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
