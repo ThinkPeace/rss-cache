@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Making an agile version of a Windows Runtime delegate in C++/WinRT, part 6 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Making an agile version of a Windows Runtime delegate in C++/WinRT, part 6</h1>
+        <div class="meta">The Old New Thing 2026-07-27T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260727-00/?p=112566">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-acc33ce02a1d12eb.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Exception-safety, the invisible bug. The post Making an agile version of a Windows Runtime delegate in C++/WinRT, part 6 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>It looked like we were done when we <a title="Making an agile version of a Windows Runtime delegate in C++/WinRT, part 5" href="https://devblogs.microsoft.com/oldnewthing/20260724-00/?p=112562"> fixed the problem of releasing a non-marshalable delegate on the correct thread</a>.</p>
+<p>But we missed something.</p>
+<p>Again.</p>
+<pre>    if (d.try_as&lt;::INoMarshal&gt;()) {
+        void* p;
+        if constexpr (std::is_reference_v&lt;Delegate&gt;) {
+            p = winrt::detach_abi(d);
+        } else {
+            winrt::copy_to_abi(d, p);
+        }
+        return
+            [p = std::unique_ptr&lt;void, in_context_deleter&gt;(p),
+            token = get_context_token()](auto&amp;&amp;...args) {
+                if (token == get_context_token()) {
+                    std::remove_reference_t&lt;Delegate&gt; d;
+                    winrt::copy_from_abi(d, p.get());
+                    d(std::forward&lt;decltype(args)&gt;(args)...);
+                } else {
+                    throw winrt::hresult_error(CO_E_NOT_SUPPORTED);
+                }
+            };
+    }
+</pre>
+<p>The first part gets a raw ABI pointer, either by moving it out of the inbound delegate if we can, else by copying it from the inbound delegate. The reference count is owned by the raw pointer.</p>
+<p>The second part wraps the raw ABI pointer inside a <code>std::<wbr />unique_ptr</code> with our custom deleter. The unique pointer now owns the reference count, and the custom deleter will release it.</p>
+<p>The problem is that one of the requirements for a custom deleter is that if you use the <code>unique_ptr(p)</code> constructor, the custom deleter must not throw an exception at construction.</p>
+<blockquote class="q">
+<p><b>[unique.ptr.single.ctor]</b></p>
+<pre>constexpr explicit unique_ptr(type_identity_t&lt;pointer&gt; p) noexcept;
+</pre>
+<p>Constraints: <code>is_<wbr />pointer_<wbr />v&lt;deleter_<wbr />type&gt;</code> is <code>false</code> and <code>is_<wbr />default_<wbr />constructible_<wbr />v&lt;deleter_<wbr />type&gt;</code> is <code>true</code>.</p>
+<p>Preconditions: <code>D</code> meets the Cpp17DefaultConstructible requirements, and that <span>construction does not throw an exception</span>.</p>
+</blockquote>
+<p>But our custom deleter could throw an exception if <code>Co­Get­Object­Context</code> fails. So it doesn&#8217;t meet the preconditions.</p>
+<p>We can fix that by using the constructor that takes an explicit deleter from which the stored deleter can be move-constructed. If an exception occurs, it happens during the creation of the parameter and not inside the <code>unique_<wbr />ptr</code> constructor.</p>
+<pre>    if (d.try_as&lt;::INoMarshal&gt;()) {
+        void* p;
+        if constexpr (std::is_reference_v&lt;Delegate&gt;) {
+            p = winrt::detach_abi(d);
+        } else {
+            winrt::copy_to_abi(d, p);
+        }
+        return
+            [p = std::unique_ptr&lt;void, in_context_deleter&gt;(p, <span>{}</span>),
+            token = get_context_token()](auto&amp;&amp;...args) {
+                if (token == get_context_token()) {
+                    std::remove_reference_t&lt;Delegate&gt; d;
+                    winrt::copy_from_abi(d, p.get());
+                    d(std::forward&lt;decltype(args)&gt;(args)...);
+                } else {
+                    throw winrt::hresult_error(CO_E_NOT_SUPPORTED);
+                }
+            };
+    }
+</pre>
+<p>Okay, so now we&#8217;re done?</p>
+<p>Nope, still broken.</p>
+<p>More next time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260727-00/?p=112566">Making an agile version of a Windows Runtime delegate in C++/WinRT, part 6</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
