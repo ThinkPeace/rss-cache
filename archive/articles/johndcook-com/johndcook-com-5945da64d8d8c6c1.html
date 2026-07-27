@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Counting permutations with roots | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Counting permutations with roots</h1>
+        <div class="meta">John D. Cook 2026-07-27T16:03:44Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/07/27/counting-permutations-with-roots/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-5945da64d8d8c6c1.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">My post from yesterday on permutation roots ends with a Mathematica code for finding the probability that a permutation of n elements has a kth root. This is done by finding the coefficient of xn in the generating function I wanted to say more about this, and look at implementing the same code in SymPy. […] The post Counting permutations with roots first ap…</div>
+        <div class="content">
+          <p>My post from <a href="https://www.johndcook.com/blog/2026/07/26/permutation-roots/">yesterday</a> on permutation roots ends with a Mathematica code for finding the probability that a permutation of <em>n</em> elements has a <em>k</em>th root. This is done by finding the coefficient of <em>x</em><sup><em>n</em></sup> in the generating function</p>
+<p><img decoding="async" class="aligncenter size-medium" src="https://www.johndcook.com/expq11.svg" alt="\prod_{m=1}^\infty \exp_{\text{gcd}(m, k)} \left\frac{x^m}{m}\right)" width="162" height="54" /></p>
+<p>I wanted to say more about this, and look at implementing the same code in SymPy. I was curious how well SymPy would do because I&#8217;ve noticed that LLMs often generate SymPy code since it&#8217;s an open source <abbr title="computer algebra system">CAS</abbr>.</p>
+<p>Wilf [1] describes the infinite product above as the exponential generating function (egf) of <em>f</em>(<em>n</em>, <em>k</em>), the number of permutations of <em>n</em> objects that have a <em>k</em>th root. Since egfs have a <em>n</em>! term in the denominator, this is also the ordinary generating function (ogf) of the <em>probability</em> that a randomly chosen permutation on <em>n</em> objects has a <em>k</em>th root.</p>
+<p>My first attempt at using Mathematica to probe the generating function was</p>
+<pre>expq[x_, q_] := MittagLefflerE[q, x^q]	 
+p[n_, k_] :=  SeriesCoefficient[	 
+    Product[expq[x^m/m, GCD[m, k]], {m, 1, Infinity}], {x, 0, n}]
+</pre>
+<p>This hung forever when I tried to use it on a small example. I realized, but apparently Mathematica did not, that <code>Infinity</code> could be replaced by <code>n</code> since terms higher than <em>n</em> do not contribute to the coefficient of <em>x</em><sup><em>n</em></sup>. With that change, the code ran quickly.</p>
+<p>This morning I tried converting the Mathematica code to Sympy; Claude did this in one shot. I also reproduced the table of <em>f</em>(<em>n</em>, <em>k</em>) values on page 150 of [1] to test the code. Since Wilf tabulated <em>f</em>(<em>n</em>, <em>k</em>), not <em>f</em>(<em>n</em>, <em>k</em>)/<em>n</em>!, I multiplied the results by <em>n</em>!.</p>
+<p>Here is the output:</p>
+<pre>k = 2 [1, 1, 3, 12, 60, 270, 1890, 14280, 128520, 1096200]
+k = 3 [1, 2, 4, 16, 80, 400, 2800, 22400, 181440, 1814400]
+k = 4 [1, 1, 3, 12, 60, 270, 1890, 13020, 117180, 1039500]
+k = 5 [1, 2, 6, 24, 96, 576, 4032, 32256, 290304, 2612736]
+k = 6 [1, 1, 1, 4, 40, 190, 1330, 8680, 52920, 340200]
+k = 7 [1, 2, 6, 24, 120, 720, 4320, 34560, 311040, 3110400]
+</pre>
+<p>and here is the SymPy code. I edited the main but the rest is verbatim from Claude.</p>
+<pre>from sympy import symbols, gcd, factorial, Rational, S
+
+x = symbols('x')
+
+def expq_coeffs(m, q, n):
+    """
+    Truncated (degree &lt;= n) series coefficients of
+        expq(x**m/m, q) = MittagLefflerE(q, (x**m/m)**q)
+    Since q is a positive integer:
+        E_q(y^q) = sum_j y^(q*j) / (q*j)!
+    with y = x**m/m, so the term of degree m*q*j has coefficient
+        1 / ( m**(q*j) * (q*j)! ).
+    Returns a list c[0..n] of coefficients.
+    """
+    c = [S.Zero] * (n + 1)
+    j = 0
+    while m * q * j &lt;= n:
+        deg = m * q * j
+        c[deg] += Rational(1, m**(q * j) * factorial(q * j))
+        j += 1
+    return c
+
+def poly_mult_trunc(a, b, n):
+    """Multiply two series (lists of coeffs, index = degree) truncated to degree n."""
+    c = [S.Zero] * (n + 1)
+    for i, ai in enumerate(a):
+        if ai == 0:
+            continue
+        max_j = n - i
+        for j2 in range(max_j + 1):
+            bj = b[j2]
+            if bj != 0:
+                c[i + j2] += ai * bj
+    return c
+
+def p(n, k):
+    """
+    SymPy equivalent of:
+        expq[x_, q_] := MittagLefflerE[q, x^q]
+        p[n_, k_] := SeriesCoefficient[
+            Product[expq[x^m/m, GCD[m, k]], {m, 1, n}], {x, 0, n}]
+    """
+    result = [S.Zero] * (n + 1)
+    result[0] = S.One
+    for m in range(1, n + 1):
+        q = gcd(m, k)
+        factor = expq_coeffs(m, q, n)
+        result = poly_mult_trunc(result, factor, n)
+    return result[n]
+
+# example
+if __name__ == "__main__":
+    for k in range(2, 8):
+        print("k =", k, [factorial(n)*p(n, k) for n in range(1,11)])
+</pre>The post <a href="https://www.johndcook.com/blog/2026/07/27/counting-permutations-with-roots/">Counting permutations with roots</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
