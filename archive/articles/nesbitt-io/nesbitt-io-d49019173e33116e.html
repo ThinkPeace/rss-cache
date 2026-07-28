@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why npm Dependency Trees Are So Big | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why npm Dependency Trees Are So Big</h1>
+        <div class="meta">Andrew Nesbitt 2026-07-28T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/07/28/why-npm-dependency-trees-are-so-big.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-d49019173e33116e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Two versions of lodash walk into a tree</div>
+        <div class="content">
+          <p>Every major release of Rails sets off a wave of releases across the rest of the gem ecosystem. An application that tries to upgrade runs <code class="language-plaintext highlighter-rouge">bundle update rails</code> and Bundler refuses, because some gem in the tree only allows activesupport up to the previous major. The error names the gem, an issue gets filed on its tracker, and a maintainer who had nothing to do with the Rails release widens a version range and ships. Multiply that across every gem with a Rails constraint and the upgrade arrives as dozens of small releases from maintainers who mostly don’t know each other, each responding to errors their own users are hitting.</p>
+
+<p>Bundler refuses because it picks one version of every gem for the entire application. Every constraint in every gem is a claim on that shared choice, and finding a set of versions that satisfies all of them at once is <a href="/2025/12/05/package-manager-tradeoffs.html">NP-complete in the general case</a>. Sometimes no set exists, and Bundler refuses to install, listing the gems whose constraints collided.</p>
+
+<p>That makes every constraint a cost that other people pay: a gem that pins a dependency tightly will block someone’s upgrade and get issues filed about it, so gem authors keep dependency lists short and ranges wide. All of it runs through the conflict error, which names the packages whose constraints disagree, so the problem reaches the maintainers who can fix it.</p>
+
+<p>That error has no equivalent in npm, which starts with the runtime. Ruby loads one copy of each gem per process, Python keys imported modules by name, and a JVM classpath resolves each class name once. You can get a second version into any of them if you work at it, but one version per program is the working assumption, so their package managers all resolve each library to a single version, and disagreements have to be settled somewhere.</p>
+
+<p>JavaScript module loading keys on file paths, not package names: two copies of the same package in different <code class="language-plaintext highlighter-rouge">node_modules</code> directories are just two different files, and Node’s <a href="https://nodejs.org/api/modules.html#loading-from-node_modules-folders">module resolution</a> loads whichever copy sits closest to the code requiring it. A resolver on top of that runtime could still pick one shared version per package and error when constraints can’t agree, but when two packages want different versions of a shared dependency, npm gives each its own copy. Ordinary dependency resolution has no conflict error in it at all: whatever constraints the packages in your tree declare, install succeeds.</p>
+
+<p>Which means a constraint in npm costs its author nothing: a library can pin an exact version of everything it uses and no downstream install will ever fail because of it. Your choice of range never collides with anyone else’s, so there is no occasion to talk to another maintainer about what you both should support, and no prompt to look at what your tree has accumulated. A dependency on a ten-line package is as free as any other too, which is the condition the micro-package habit needed.</p>
+
+<p>The costs show up elsewhere: npm’s dependency network was already <a href="https://arxiv.org/abs/1710.04936">the largest and fastest growing</a> of the seven ecosystems Decan, Mens and Grosjean measured in 2017, and installing an average npm package means <a href="https://www.usenix.org/conference/usenixsecurity19/presentation/zimmerman">trusting 79 other packages and 39 maintainers</a>. Every duplicated copy gets installed, bundled, and added to the surface you have to audit, so everyone pays a little of it and nothing like the Rails upgrade wave follows.</p>
+
+<p>Two copies of the same package do break things when the package holds module-level state: each copy gets its own singletons, and <code class="language-plaintext highlighter-rouge">instanceof</code> checks fail when an object from one copy reaches the other. The famous case is React, where <a href="https://react.dev/warnings/invalid-hook-call-warning">two Reacts in one app</a> break hooks, so a component library has to run against the application’s copy.</p>
+
+<p><code class="language-plaintext highlighter-rouge">peerDependencies</code> exists for that case: a declaration that this package must share one version with the rest of the tree rather than getting its own. For years npm only warned when peer ranges couldn’t agree. When npm 7 started enforcing them, the resulting <code class="language-plaintext highlighter-rouge">ERESOLVE</code> errors were unpopular enough that npm added <a href="https://docs.npmjs.com/cli/v11/using-npm/config#legacy-peer-deps"><code class="language-plaintext highlighter-rouge">--legacy-peer-deps</code></a>, a flag for turning the conflicts back off.</p>
+
+<p>Cargo runs both designs at once, and within a semver-compatible range it behaves like Bundler: every crate that depends on <code class="language-plaintext highlighter-rouge">bitflags</code> 1.x shares a single version. If the requirements can’t unify, say one crate pins <code class="language-plaintext highlighter-rouge">=1.2.3</code> while another needs a later patch, the <a href="https://doc.rust-lang.org/cargo/reference/resolver.html">resolver backtracks and errors</a> rather than take two copies.</p>
+
+<p>Incompatible ranges get the npm treatment: 1.x and 2.x of the same crate coexist in one build with no error. And because a caret requirement on a 0.x crate only spans that minor, every 0.x minor is its own compatibility range, which puts a large share of the crate ecosystem on the npm side of the line.</p>
+
+<p>Rust’s coordination culture lives on the strict side, where foundational crates sit on the same major for years because a breaking release would split the single version every dependent has to share. serde has been on <a href="https://crates.io/crates/serde/versions">1.x since 2017</a>. When a crate that far down the stack does have to break compatibility, there’s the <a href="https://github.com/dtolnay/semver-trick">semver trick</a>, where the outgoing major gets one final release that depends on the new major and re-exports its types, so the resolver treats the two as one while the migration rolls through, a contortion maintainers only accept under real pressure.</p>
+
+<p>On the loose side of the line, a demo web service at Tweede golf came to <a href="https://tweedegolf.nl/en/blog/104/dealing-with-dependencies-in-rust/">141 crates, with base64, socket2, syn and time each present in two incompatible major versions</a>, and Armin Ronacher counts <a href="https://lucumr.pocoo.org/2025/1/24/build-it-yourself/">a basic Rocket web project at 172 crates</a>. Run <code class="language-plaintext highlighter-rouge">cargo tree --duplicates</code> in any sizeable project: every incompatible version it lists was resolved the way npm resolves everything.</p>
+
+<p>Dependency trees grow to the size their resolver permits: where every package must share one version, constraints put costs on other people, and those costs get maintainers talking to each other. npm settles every disagreement with another copy instead, and each copy makes the tree bigger.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
