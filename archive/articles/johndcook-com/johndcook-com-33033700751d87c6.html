@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inverse factorial improved | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Inverse factorial improved</h1>
+        <div class="meta">John D. Cook 2026-07-28T14:11:30Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/07/28/inverse-factorial-improved/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-33033700751d87c6.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A couple years ago I wrote about how to compute the inverse of factorial. I used that code in writing the previous post because the post required solving the equation ⌊log2(n!)⌋ = b given b. That is, given a number of bits b, find the smallest value of n such that n! &gt; 2b. What the […] The post Inverse factorial improved first appeared on John D. Cook .</div>
+        <div class="content">
+          <p><a href="https://www.johndcook.com/blog/2024/01/01/inverse-factorial/">A couple years ago</a> I wrote about how to compute the inverse of factorial. I used that code in writing the previous post because the post required solving the equation</p>
+<p>⌊log<sub>2</sub>(<em>n</em>!)⌋ = <em>b</em></p>
+<p>given <em>b</em>. That is, given a number of bits <em>b</em>, find the smallest value of <em>n</em> such that <em>n</em>! &gt; 2<sup><em>b</em></sup>.</p>
+<h2>What the code got right</h2>
+<p>Looking back on the code in that post, there are a few changes I&#8217;d like to make. But first of all, I&#8217;d like to point out something the post does right: instead of trying to solve</p>
+<p>Γ(<em>y</em>) = <em>x</em></p>
+<p>it solves</p>
+<p>log Γ(<em>y</em>) = log <em>x</em>.</p>
+<p>That&#8217;s why the argument to <code>inverse_log_gamma</code> is <code>logarg</code>. That makes the code useful for values of <em>x</em> that would far exceed the maximum floating point value, such as in the calculations for the previous post.</p>
+<h2>What I&#8217;d change</h2>
+<h3>Rounding</h3>
+<p>The function <code>inverse_factorial</code> from the old post solves finds the closest integer solution. It would be better for it to return the solution without rounding and then let the user round result if they want to. In my calculations in the previous post, I wanted to take the floor, not round.</p>
+<h3>Newton&#8217;s method</h3>
+<p>The code in the previous post uses the bisection method. This method is very safe, and fast enough for my purposes, but it could be made faster. Newton&#8217;s method is faster, but it can be ill-behaved if you don&#8217;t start close enough to the solution.</p>
+<p>It&#8217;s safe to use Newton&#8217;s method to invert log Γ for two reasons. First, you can get a good starting point based on Stirling&#8217;s approximation. Second, and more importantly, log Γ is convex. Newton&#8217;s method will converge from <em>any</em> starting point when applied to a convex function. A little caution is necessary because log Γ is not convex everywhere, but it is convex on the positive real axis.</p>
+<p>Another difficulty with Newton&#8217;s method is that you need to supply the derivative of the function whose root you&#8217;re trying to find. But this isn&#8217;t an issue here because the derivative of log Γ is the digamma function, which is implemented in SciPy.</p>
+<h3>Tolerance</h3>
+<p>Finally, the previous code used the default tolerance for deciding when to stop refining the solution. The revised method lets the user specify tolerance. It provides a default value, but that default is visible in the function call, not hidden down in SciPy.</p>
+<h2>Revised code</h2>
+<p>Here&#8217;s the revised code.</p>
+<pre>
+from scipy.special import gammaln, digamma
+from scipy.optimize import newton
+
+def inverse_log_gamma(logarg, tol=1e-12):
+    assert(logarg > 0)    
+    x0 = logarg / log(logarg + 1) + 1 if logarg > 1 else 2.0
+    def f(z): return gammaln(z) - logarg
+    return newton(f, x0, fprime=digamma, tol=tol)
+
+def inverse_factorial(logarg):
+    g = inverse_log_gamma(logarg)
+    return g - 1 
+</pre>The post <a href="https://www.johndcook.com/blog/2026/07/28/inverse-factorial-improved/">Inverse factorial improved</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
