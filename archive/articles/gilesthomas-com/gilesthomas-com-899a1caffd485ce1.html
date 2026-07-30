@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why do OpenAI&#x27;s GPT-2 weights beat mine? Part two: the bugfix | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why do OpenAI&#x27;s GPT-2 weights beat mine? Part two: the bugfix</h1>
+        <div class="meta">Giles&#x27; blog 2026-07-30T19:00:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/07/why-do-openai-gpt2-weights-beat-mine-2-the-bugfix">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-899a1caffd485ce1.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I&#x27;m digging into why my GPT-2 style models score worse on an instruction-following eval than OpenAI&#x27;s original weights; I gave the details in this post . While I was writing up the results of my first experiment into possible causes, I ran the post past ChatGPT -- I always use an &quot;editorial board&quot; of AIs to check my posts for flow, style, and any technical…</div>
+        <div class="content">
+          <p>I'm digging into why my GPT-2 style models score worse on an instruction-following eval than OpenAI's original weights;
+I gave the details in <a href="/2026/07/why-do-openai-gpt2-weights-beat-mine-1-intro">this post</a>.</p>
+
+<p>While I was writing up the results of my first experiment into possible causes,
+I ran the post past ChatGPT -- I always use an "editorial board" of AIs to check my
+posts for flow, style, and any technical errors (though all writing is always mine).
+It took a look at the eval code that I was running, and highlighted a bug.</p>
+
+<p>Luckily, it doesn't change the important results -- OpenAI's models continue to be
+better than mine at instruction-following. But it was
+enough to change the baseline numbers, re-ordering how well my own models did.
+So I fixed it and regenerated the baseline
+so that future experiments are based on solid ground.</p>
+<h2 id="the-bug">The bug</h2>
+
+<p>The eval takes a model, and trains it over multiple epochs on a split of a subset of the Alpaca
+instruction-following dataset.  At the end of each epoch, it evaluates
+the resulting model against a held-back validation split; if the eval loss starts
+rising, it bails out.  Finally, it runs a test split of the dataset through the resulting
+model, and saves the result.</p>
+
+<p>Once I've run it for a bunch of different models, I use an LLM-as-a-judge script
+to get GPT 5.5 to score results -- for each question-answering result, it sees all
+of the responses for all of the models <a href="/2026/01/llm-from-scratch-30-digging-into-llm-as-a-judge">in the same prompt</a>, shuffled in order each time,
+to try to make it judge models against each other as consistently as possible.</p>
+
+<p>Now, the idea was that the generation of the test split answers would use the model from the epoch prior
+to the rising-loss one.  So I had code like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">train</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">input_batch</span><span class="p">,</span> <span class="n">target_batch</span> <span class="ow">in</span> <span class="n">tqdm</span><span class="p">(</span><span class="n">train_loader</span><span class="p">,</span> <span class="n">desc</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Epoch </span><span class="si">{</span><span class="n">epoch</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">):</span>
+            <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">calc_loss_batch</span><span class="p">(</span>
+                <span class="n">input_batch</span><span class="p">,</span> <span class="n">target_batch</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">device</span>
+            <span class="p">)</span>
+            <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+            <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+
+        <span class="n">model</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+        <span class="n">val_loss</span> <span class="o">=</span> <span class="n">calc_loss_loader</span><span class="p">(</span><span class="n">val_loader</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">device</span><span class="p">,</span> <span class="n">eval_iter</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">last_val_loss</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">last_val_loss</span> <span class="o">&gt;</span> <span class="n">val_loss</span><span class="p">:</span>
+            <span class="n">last_val_loss</span> <span class="o">=</span> <span class="n">val_loss</span>
+            <span class="n">last_params</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">state_dict</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Val loss still decreasing, continuing&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Val loss rising, bailing out&quot;</span><span class="p">)</span>
+            <span class="k">break</span>
+
+    <span class="n">model</span><span class="o">.</span><span class="n">load_state_dict</span><span class="p">(</span><span class="n">last_params</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Each time the validation loss went down, I wanted to store the model's parameters
+in <code>last_params</code> so that they could be restored later in that last line.</p>
+
+<p>If you look closely, the error is pretty obvious.  <code>model.state_dict()</code> does not return
+a copy of the model's parameters -- it produces a dictionary containing references
+to the parameters inside the model.  So although I was trying to stash away the parameters
+in <code>last_params</code> each time loss went down, so that we had a copy of the ones that
+were live in the epoch prior to the rising-loss one, what I was actually doing was
+just pointlessly saving a reference to the "live" params.  The call to
+<code>model.load_state_dict(last_params)</code> was essentially a no-op.</p>
+
+<p>The solution was simple enough:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">copy</span><span class="w"> </span><span class="kn">import</span> <span class="n">deepcopy</span>
+<span class="o">...</span>
+        <span class="n">last_params</span> <span class="o">=</span> <span class="n">deepcopy</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">state_dict</span><span class="p">())</span>
+</code></pre>
+</div>
+
+<p>That was enough to make the code do what it was meant to do.</p>
+
+<p>While I was there, I also noticed that the evaluation code was only using the first
+five batches in my eval dataset.  This code was originally adapted from an eval
+in "<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>",
+where the eval was run much more frequently and had to be super-fast.  Because
+my own code ran it more rarely, it made more sense to use all of it.
+Given that I was going to completely re-run
+the script to generate the test responses, I figured that I might as well fix that
+at the same time.</p>
+
+<h2 id="a-new-baseline">A new baseline</h2>
+
+<p>I re-ran the fixed script on all of the models I'm comparing, and ran that past
+the GPT 5.5 judge; here's what I got:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>Old IFT epochs</th>
+  <th>Old IFT score</th>
+  <th>Old IFT rank</th>
+  <th>New IFT epochs</th>
+  <th>New IFT score</th>
+  <th>New IFT rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>2</td>
+  <td>41.62</td>
+  <td>1</td>
+  <td>2</td>
+  <td>42.41</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>JAX, with MHA bias, no dropout</td>
+  <td>3.418784</td>
+  <td>4</td>
+  <td>19.25</td>
+  <td>4</td>
+  <td>4</td>
+  <td>18.12</td>
+  <td>5</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, no dropout</td>
+  <td>3.420089</td>
+  <td><strong>3</strong></td>
+  <td>14.66</td>
+  <td>11</td>
+  <td><strong>5</strong></td>
+  <td>20.72</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, with dropout</td>
+  <td>3.476802</td>
+  <td><strong>4</strong></td>
+  <td>12.94</td>
+  <td>15</td>
+  <td><strong>7</strong></td>
+  <td>16.98</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>2</td>
+  <td>26.73</td>
+  <td>2</td>
+  <td>2</td>
+  <td>26.11</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>4</td>
+  <td>17.79</td>
+  <td>6</td>
+  <td>4</td>
+  <td>13.68</td>
+  <td>11</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>4</td>
+  <td>10.29</td>
+  <td>16</td>
+  <td>4</td>
+  <td>9.81</td>
+  <td>15</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td><strong>7</strong></td>
+  <td>20.71</td>
+  <td>3</td>
+  <td><strong>6</strong></td>
+  <td>19.45</td>
+  <td>4</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>6</td>
+  <td>15.11</td>
+  <td>9</td>
+  <td>6</td>
+  <td>13.39</td>
+  <td>12</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>4</td>
+  <td>14.74</td>
+  <td>10</td>
+  <td>4</td>
+  <td>14.64</td>
+  <td>9</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>4</td>
+  <td>13.25</td>
+  <td>14</td>
+  <td>4</td>
+  <td>11.30</td>
+  <td>14</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>4</td>
+  <td>14.50</td>
+  <td>12</td>
+  <td>4</td>
+  <td>13.84</td>
+  <td>10</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>4</td>
+  <td>16.03</td>
+  <td>8</td>
+  <td>4</td>
+  <td>11.82</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>7</td>
+  <td>13.73</td>
+  <td>13</td>
+  <td>7</td>
+  <td>8.93</td>
+  <td>16</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>7</td>
+  <td>16.70</td>
+  <td>7</td>
+  <td>7</td>
+  <td>17.10</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>7</td>
+  <td>18.68</td>
+  <td>5</td>
+  <td>7</td>
+  <td>17.28</td>
+  <td>6</td>
+</tr>
+</tbody>
+</table>
+
+<p>Let's dig into those numbers.</p>
+
+<h2 id="training-epochs">Training epochs</h2>
+
+<p>Let's look into the number of training epochs first; I've highlighted the models for which it changed.</p>
+
+<p>For the "Cloud FineWeb, 8x A100 40 GiB" model, I think that was a result of the change
+to the number of validation samples.</p>
+
+<p>For the two JAX models, it's a bit more of a mystery.  There may be some part of the
+same "more eval data" variation there, but I have a suspicion that there's something
+more, related to dropout.</p>
+
+<p>My methodology to date has been that the IFT training runs
+should use the same dropout setting as the original base model training run (I'll
+come back to this in a later post).   However, due to differences between the JAX
+training script and the evaluation code (which is PyTorch), matching the dropout
+rate when evaluating those models is a bit fiddly and error-prone.</p>
+
+<p>I am 100% sure that
+I got it right this time around -- I've checked and double-checked the specific commands
+I ran.
+But I think -- from what I remember doing -- that
+I might have messed it up the previous time.
+That's not certain, though -- just a suspicion based on half-memories
+of some commands I ran several weeks ago, which never wound up in my <code>.bash_history</code>
+(too many terminals open at once).</p>
+
+<h2 id="the-ranking">The ranking</h2>
+
+<p>For the IFT scores, remember that they're not strongly comparable between runs.
+Let's imagine that the LLM judge is given the following answers to the question "Who was the author of <em>Pride and Prejudice</em>?"</p>
+
+<ul>
+<li>"Jane Austen"</li>
+<li>"The author of 'Pride and Prejudice' was Jane Austen"</li>
+<li>"The author of 'Pride and Prejudice' was Sarah Palin"</li>
+<li>"The author of 'Pride and Prejudice' was 'Pride and Prejudice'"</li>
+</ul>
+
+<p>In some cases it might treat the first two as being 100/100, in others it
+might give the second 95/100 for being too wordy.  Likewise, in some cases it might
+rank the last two as 0/100 for being wrong, in others it might give the "Sarah Palin"
+one 5/100 for at least being the name of a person rather than complete nonsense.</p>
+
+<p>Now, we always ask the LLM to judge all of the models' answers for a given question in
+one go, so at least we can be sure that it will be consistent for a given prompt about
+a given question.  But what we can't keep consistent is which way it leans between
+different runs, or different questions within the same run.  Sometimes it might be
+feeling "generous" and give the Sarah Palin answer a bit of grace, other times
+it might be harsher.</p>
+
+<p>So there's a significant amount of noise there; my rule of thumb is that a variation of
+a point or two is within that noise, so OpenAI medium going from 41.62 to 42.41 is
+pretty much meaningless, and likewise "JAX, with MHA bias, no dropout"'s move from
+19.25 to 18.12.</p>
+
+<p>So what's important is the relative ranking -- which is first, which is second,
+and so on.  Naturally, you have to allow for the fact that -- for example -- if one
+model goes from position 11 to position 3, like "JAX, no MHA bias, no dropout"
+did, then the previous number 3 will have to become number 4, 4 will
+become 5, and so on.  You can see that happening in the results table.  Obviously,
+as other models rise and fall, that has further knock-on effects.</p>
+
+<p>Anyway, with all of those caveats, the good news is that my original mystery remains.
+The OpenAI models were still doing noticeably better than my own ones.  GPT-2 medium
+continued to lead the pack (unsurprisingly, given that it's a bigger model), and
+GPT-2 small was still in second place.  If that had changed, it would have made
+a rather disappointing end to this series: "mystery explained, it was a bug in the
+eval :-("</p>
+
+<p>But now let's look at my models.</p>
+
+<p>Firstly, it looked like the "no MHA bias" models might have benefited
+from the extra training -- or from having their dropout settings corrected.  They rose from
+positions 11 and 15 to 3 and 8 respectively -- a huge swing for "JAX, no MHA bias, no dropout",
+and a solid improvement for "JAX, no MHA bias, with dropout".</p>
+
+<p>Most of the other changes in relative rankings can be explained by those two models
+having been promoted, but there are some other changes.  In particular, three models
+dropped significantly in score (and, as a result, ranking):</p>
+
+<ul>
+<li><code>1xrtx3090-stacked-interventions</code></li>
+<li>"Cloud FineWeb, 8x B200 160 GiB"</li>
+<li>"Local FineWeb train"</li>
+</ul>
+
+<p>My suspicion -- a very weakly-held hypothesis, but an interesting one -- is that those models had previously been <em>benefiting</em> from the bug.</p>
+
+<p>Remember that the signal we're using to stop training is that the validation loss
+starts rising.  We're using that as a proxy for overfitting, which in turn we're using as
+a proxy for "this model has had as much training
+on this data as it needs for the eval".</p>
+
+<p>But there's no guarantee that the connection is there.  Perhaps the models weren't
+overfitting and if we'd waited for another epoch or two, the validation loss might have
+started falling again.  Or maybe some amount of overfitting would be beneficial for this
+eval?</p>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>There's probably a near-infinite amount of digging in that I could potentially do here.
+But I think it's best to stop.  The bugfix was important because it meant that the
+eval was now doing what I thought it was doing.</p>
+
+<p>Importantly, it doesn't change the puzzling
+fact that my models were worse at this eval than OpenAI's, which is what I'm trying to untangle.
+And it means that I can now lean more confidently on the baseline numbers.</p>
+
+<p>So now it's time to actually start changing things to see if I can close the gap!</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
