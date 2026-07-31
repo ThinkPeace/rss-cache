@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Making an agile version of a Windows Runtime delegate in C++/WinRT, part 9 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Making an agile version of a Windows Runtime delegate in C++/WinRT, part 9</h1>
+        <div class="meta">The Old New Thing 2026-07-30T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260730-00/?p=112573">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-3ed1e4b64aa6db29.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Maybe it doesn&#x27;t matter. The post Making an agile version of a Windows Runtime delegate in C++/WinRT, part 9 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Over half of the time we spent trying to make an agile version of a Windows Runtime delegate in C++/WinRT was dealing with the case of <a title="Making an agile version of a Windows Runtime delegate in C++/WinRT, part 8" href="https://devblogs.microsoft.com/oldnewthing/20260729-00/?p=112570"> a delegate that declares non-marshalability</a>. But how much does it matter?</p>
+<p>I looked at the three major C++ implementations of the Windows Runtime: C++/WinRT, C++/CX, and WRL.</p>
+<p>The C++/WinRT implementation <a href="https://github.com/microsoft/cppwinrt/blob/55f1b452aca069d6ac7eaad3e05cc1058fc39d27/strings/base_delegate.h#L88"> has an optimization for <code>IAgile­Object</code></a>, but for objects that aren&#8217;t agile, <a href="https://github.com/microsoft/cppwinrt/blob/55f1b452aca069d6ac7eaad3e05cc1058fc39d27/strings/base_delegate.h#L95"> it just goes directly to <code>agile_<wbr />ref</code></a> without checking for <code>INoMarshal</code>. This means that a delegate that declares non-marshability will always be rejected by C++/WinRT when used as an event handler.</p>
+<p>The C++/CX implementation <a href="https://github.com/ojdkbuild/tools_toolchain_vs2013e/blob/a6cea36c2e52a571864986ee2957fbd91d6f4ce8/VC/include/agile.h#L207"> lazy-creates the agile reference to the original delegate when the wrapper is used from a different apartment</a>. If the original delegate is non-marshalable, it means that the <code>CO_<wbr />E_<wbr />NOT­SUPPORTED</code> is produced only when the wrapper is used in a way that requires a marshalable delegate.</p>
+<p>The WRL implementation does not have an optimization for <code>IAgile­Object</code>, although <a href="https://github.com/tpn/winsdk-10/blob/9b69fd26ac0c7d0b83d378dba01080e93349c2ed/Include/10.0.16299.0/winrt/wrl/event.h#L278"> it mentions it as a possible optimization</a>. It always creates the agile reference eagerly, which means that if the original delegate is non-marshalable, it cannot be added to an agile event source.</p>
+<p>Okay, so let&#8217;s summarize in a table.</p>
+<table class="cp3" border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th rowspan="2">Event source</th>
+<th rowspan="2">C++/WinRT</th>
+<th rowspan="2">C++/CX</th>
+<th colspan="2">WRL</th>
+<th rowspan="2">Our version</th>
+</tr>
+<tr>
+<th>single-threaded</th>
+<th>multi-threaded</th>
+</tr>
+<tr>
+<td>Optimize agile delegates</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>N/A</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Avoid wrapping agile delegates</td>
+<td>Yes</td>
+<td>No</td>
+<td>Never wraps</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Agile reference creation</td>
+<td>Eager</td>
+<td>Lazy</td>
+<td>Never</td>
+<td>Eager</td>
+<td>Eager</td>
+</tr>
+<tr>
+<td>Non-marshalable delegates</td>
+<td>Rejected</td>
+<td>Allowed if used<br />
+non-agile-ly</td>
+<td>Allowed (always<br />
+used non-agile-ly)</td>
+<td>Rejected</td>
+<td>Allowed if used<br />
+non-agile-ly</td>
+</tr>
+</tbody>
+</table>
+<p>Now, maybe you think we are working too hard. (Maybe we are.) In which case you can remove support for whatever cases you feel you don&#8217;t need.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260730-00/?p=112573">Making an agile version of a Windows Runtime delegate in C++/WinRT, part 9</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
