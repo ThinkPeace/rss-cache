@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Making an agile version of a Windows Runtime delegate in C++/WinRT, part 10 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Making an agile version of a Windows Runtime delegate in C++/WinRT, part 10</h1>
+        <div class="meta">The Old New Thing 2026-07-31T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260731-00/?p=112578">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-d637cdea4be22d0e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">What failure of the context callback means. The post Making an agile version of a Windows Runtime delegate in C++/WinRT, part 10 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>In <a title="Making an agile version of a Windows Runtime delegate in C++/WinRT, part 5" href="https://devblogs.microsoft.com/oldnewthing/20260724-00/?p=112562"> part 5 of this unnecessarily long series on agile delegates</a>, <a href="https://devblogs.microsoft.com/oldnewthing/20260724-00/?p=112562&amp;commentid=144539#comment-144539"> commenter LB asked</a>, &#8220;Is the <code>Context­Callback</code> in the deleter guaranteed to always succeed? According to the docs it can fail. I wonder if there&#8217;s a way to move the fallible part to an earlier point so the deleter can be infallible.&#8221;</p>
+<p>Let&#8217;s look at the first part: What if <code>IContext­Callback::<wbr />Context­Callback</code> fails?</p>
+<p>If it fails, it means that COM couldn&#8217;t switch to the destination context.</p>
+<p>If you can&#8217;t switch to the destination context, then you can&#8217;t release the pointer. It&#8217;s not clear what recovery is possible anyway. Do you just keep retrying until it finally works?</p>
+<p>If the destination context is an ASTA, then it&#8217;s possible that the reason is that the context is already busy, and ASTA doesn&#8217;t allow re-entrancy. We&#8217;d have to wait a little bit and try again later, when the destination context might be ready. We can&#8217;t just block on the retry because the destination context might be calling into the thread we are on right now, so just spinning in a retry loop won&#8217;t help because it&#8217;s waiting for us! We&#8217;re have to return, allow whatever we&#8217;re doing to finish, which in turn allows the ASTA to resume, and then it becomes worthwhile to try to call into the ASTA again.</p>
+<p>This would be the issue for conventional COM calls into the ASTA, but we are using <code>IContextCallback</code>, and that lets us control whether or not to honor ASTA reentrancy roadblocks.</p>
+<blockquote class="q"><p>If riid is set to IID_ICallbackWithNoReentrancyToApplicationSTA, the function does not reenter an ASTA arbitrarily.</p></blockquote>
+<p>We are not passing that special value, so our call to <code>Context­Callback</code> is allowed to reenter an ASTA. That removes one possible source of failure.</p>
+<p>What other reasons could there be for not being able to switch to the destination apartment?</p>
+<p>The most likely reason is that the destination apartment no longer exists, in which case there is no recovery. Depending on how the object was managed by its creating thread, it might have been forcibly destroyed at thread termination¹, or it may simply have been leaked. We don&#8217;t know. At any rate, there&#8217;s no way to release it now.</p>
+<p>The other case is that the destination apartment is not reachable due to a low-memory condition. We discussed earlier how <a title="What does it mean when my cross-thread COM call fails with RPC_E_SYS_CALL_FAILED?" href="https://devblogs.microsoft.com/oldnewthing/20230216-00/?p=107836"> the most common reason is a destination thread that has stopped responding to messages</a>. I guess you could wait and try again later, but in practice if a thread has stopped responding for so long that its inbound message queue is full, the odds that it will magically start responding soon are pretty low.</p>
+<p>All of the failures are effectively unrecoverable. But some of them are non-fatal, such as the <code>Co­Disconnect­Object</code> discussed in the footnote. Unfortunately, we can&#8217;t tell what case we are in. The <code>Context­Callback</code> returns <code>RPC_E_DISCONNECTED</code> to say that the destination apartment no longer exists, but we don&#8217;t know how that apartment cleaned up its orphaned objects.</p>
+<p>The C++/CX implementation of lazy-created agile delegates ignores errors that occur trying to release the original pointer. So we&#8217;ll do the same.</p>
+<p>But wait, we can do better. Next time.</p>
+<p>¹ This is often combined with a <code>Co­Disconnect­Object</code> to tell proxies to fail all calls with <code>RPC_E_DISCONNECTED</code>, so that there are no external references to destroyed objects.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260731-00/?p=112578">Making an agile version of a Windows Runtime delegate in C++/WinRT, part 10</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
