@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 2 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 2</h1>
+        <div class="meta">The Old New Thing 2026-08-04T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260804-00/?p=112586">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-acdc17e1d887da16.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Using a reference stored in the global interface table. The post Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 2 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, <a title="Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 1" href="https://devblogs.microsoft.com/oldnewthing/20260803-00/?p=112582"> we hatched a plan for holding a reference to an object in another apartment that automatically expires when the apartment runs down</a>. Let&#8217;s try to implement that plan.</p>
+<pre>template&lt;typename T&gt;
+struct fake_agile_ref
+{
+private:
+    using Smart = std::conditional_t&lt;
+        std::is_base_of_v&lt;winrt::Windows::Foundation::IUnknown, T&gt;,
+        T, winrt::com_ptr&lt;T&gt;&gt;;
+</pre>
+<p>We define <code>Smart</code> to represent the smart pointer that holds a <code>T</code>. If <code>T</code> is a projected type, then it is already a smart pointer. Otherwise, <code>T</code> is a COM interface, and we put it inside a <code>com_ptr</code>. This is the same pattern that the C++/WinRT <code>agile_ref&lt;T&gt;</code> uses.</p>
+<pre>    winrt::com_ptr&lt;IContextCallback&gt; m_context;
+    ULONG_PTR m_token = 0;
+    winrt::com_ptr&lt;IGlobalInterfaceTable&gt; m_git;
+    DWORD m_cookie = 0;
+    void* m_raw = nullptr;
+</pre>
+<p>Our fake agile reference starts with a callback context and a context token. These are used to detect whether we are in the correct apartment when it comes time to access the original non-agile COM object.</p>
+<p>Next comes a reference to the GIT and a cookie that records the registered reference to the original non-agile COM object.</p>
+<p>Finally, we keep a raw (non-refcounted) pointer to the original non-agile COM object.</p>
+<p>The fake agile reference is considered &#8220;empty&#8221; if the cookie is zero, meaning that it does not refer to any object. In the case of an empty fake agile reference, none of the other members contains anything meaningful.</p>
+<pre>public:
+    fake_agile_ref(std::nullptr_t = nullptr) noexcept {}
+</pre>
+<p>Constructing an empty <code>fake_<wbr />agile_<wbr />ref</code> is easy: Just leave everything at its initial state. In particular, the <code>m_cookie</code> is zero, meaning that there is nothing inside. The values of all the other members are irrelevant, as long as they can be safely destructed.</p>
+<pre>    fake_agile_ref(Smart const&amp; p) : m_raw(winrt::get_abi(p))
+    {
+        if (m_raw) {
+            m_context = winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext);
+            m_token = get_context_token();
+            m_git = winrt::create_instance&lt;IGlobalInterfaceTable&gt;(CLSID_StdGlobalInterfaceTable);
+            winrt::check_hresult(m_git-&gt;RegisterInterfaceInGlobal(
+                static_cast&lt;::IUnknown*&gt;(m_raw), __uuidof(IUnknown), &amp;m_cookie));
+        }
+    }
+</pre>
+<p>To construct a <code>fake_<wbr />agile_<wbr />ref</code> from a smart pointer, we extract the raw pointer and check whether it is null. If so, then the smart pointer is empty, and we leave the <code>m_cookie</code> at zero. But if it is not null, we initialize the context information (so we can recognize this apartment later), and we register the COM object in the GIT to retain a reference to it for as long as the apartment is valid.</p>
+<pre>    fake_agile_ref(fake_agile_ref&amp;&amp; other) noexcept :
+        m_context(std::move(other.m_context)),
+        m_token(std:exchange(other.m_token, 0)),
+        m_git(std::move(other.m_git)),
+        m_cookie(std::exchange(other.m_cookie, 0)),
+        m_raw(other.m_raw)
+    {
+    }
+</pre>
+<p>Since we will have a nontrivial destructor, we need copy and move constructors per the Rule of Five. The move constructor merely steals all the content from the source and leaves the source in the empty state. We don&#8217;t need to create a copy constructor because the move constructor causes the implicitly-defined copy constructor to become deleted. (The fake agile reference is not copyable because we don&#8217;t know how to copy the cookie.)</p>
+<pre>    fake_agile_ref&amp; operator=(fake_agile_ref&amp;&amp; other) noexcept
+    {
+        using std::swap;
+        swap(m_context, other.m_context);
+        swap(m_token, other.m_token);
+        swap(m_git, other.m_git);
+        swap(m_cookie, other.m_cookie);
+        swap(m_raw, other.m_raw);
+    }
+</pre>
+<p>The fake agile reference also needs a move assignment operator to satisfy the Rule of Five. It just swaps the contents with the assigned-from object. Again, we don&#8217;t need a copy assignment operator because the declared move assignment operator causes the implicitly-defined copy assignment operator to become deleted.</p>
+<pre>    bool empty() const noexcept
+    {
+        return m_cookie == 0;
+    }
+
+    explicit operator bool() const noexcept
+    {
+        return !empty();
+    }
+</pre>
+<p>An explicit boolean conversion operator lets callers test the fake agile pointer to see whether it is empty.</p>
+<pre>    ~fake_agile_ref()
+    {
+        if (!empty()) {
+            m_git-&gt;RevokeInterfaceFromGlobal(std::exchange(m_cookie, 0));
+        }
+    }
+</pre>
+<p>We have reached our nontrivial destructor: If we have a GIT cookie, we revoke it. It would have been nice to let this be a custom deleter of a <code>unique_ptr</code>, but a cookie is not a pointer, and <code>unique_ptr</code> works only with pointers.</p>
+<pre>    [[nodiscard]] Smart get() const
+    {
+        if (empty()) {
+            return nullptr;
+        }
+        if (m_token != get_context_token()) {
+            throw winrt::hresult_error(CO_E_NOT_SUPPORTED);
+        }
+
+        Smart result{ nullptr };
+        winrt::copy_from_abi(result, m_raw);
+        return result;
+    }
+</pre>
+<p>Here is where the excitement is. To recover the original COM object, we first check if the fake agile pointer is empty. If so, then there is no COM object to return. If the fake agile pointer is nonempty, but we are in the wrong apartment, then we throw the <code>CO_<wbr />E_<wbr />NOT_<wbr />SUPPORTED</code> exception which is the same thing that <code>Ro­Get­Agile­Reference</code> does.</p>
+<p>Otherwise, we are in the correct context. Our cookie is keeping the original object alive, so we can just recover it from the raw pointer. (We could also redeem the cookie from the GIT, but this is faster.)</p>
+<pre>};
+</pre>
+<p>That ends the definition of <code>fake_<wbr />agile_<wbr />ref</code>, but we&#8217;re not done yet.</p>
+<pre>template&lt;typename T&gt; fake_agile_ref(winrt::com_ptr&lt;T&gt; const&amp;)
+    -&gt; fake_agile_ref&lt;T&gt;;
+template&lt;typename T&gt; fake_agile_ref(T const&amp;)
+    -&gt; fake_agile_ref&lt;T&gt;;
+</pre>
+<p>These deduction guides allow class template argument deduction (CTAD) to deduce the <code>T</code> from the constructor parameter: If the constructor parameter is a <code>com_ptr&lt;T&gt;</code>, then the template type parameter is <code>T</code>. Otherwise, the template type parameter matches the constructor parameter, which we assume is a projected type.</p>
+<p>We can now use this fake agile reference as a drop-in replacement for the normal agile reference in the case that the delegate is not marshalable.</p>
+<pre>template&lt;typename Delegate&gt;
+std::remove_reference_t&lt;Delegate&gt; make_agile_delegate(Delegate&amp;&amp; d)
+{
+    if (d.try_as&lt;::IAgileObject&gt;()) {
+        return d;
+    }
+
+    if (d.try_as&lt;::INoMarshal&gt;()) {
+        return [agile = <span>fake_agile_ref</span>(d)](auto&amp;&amp;...args) {
+            return agile.get()(std::forward&lt;decltype(args)&gt;(args)...);
+        };
+    }
+
+    return [agile = winrt::agile_ref(d)](auto&amp;&amp;...args) {
+        return agile.get()(std::forward&lt;decltype(args)&gt;(args)...);
+    };
+}
+</pre>
+<p>Unfortunately, when we take this out for a spin and give it a non-marshalable delegate, it fails at this line:</p>
+<pre>            winrt::check_hresult(m_git-&gt;RegisterInterfaceInGlobal(
+                static_cast&lt;::IUnknown*&gt;(m_raw), __uuidof(IUnknown), &amp;m_cookie));
+</pre>
+<p>That&#8217;s because <code>Register­Interface­In­Global</code> will not register objects that deny marshalability.</p>
+<p>Oh great, so we&#8217;re back to square one.</p>
+<p>We&#8217;ll break the cycle of despair next time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260804-00/?p=112586">Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 2</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
