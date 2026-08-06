@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 3 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 3</h1>
+        <div class="meta">The Old New Thing 2026-08-05T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260805-00/?p=112591">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-8313c9101374ab94.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Forcing an object into the global interface table. The post Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 3 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, we tried to execute on <a title="Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 2" href="https://devblogs.microsoft.com/oldnewthing/20260804-00/?p=112586"> our plan to use the global interface table to hold hold a reference to an object in another apartment that automatically expires when the apartment runs down</a>. But it broke down because objects that are marked <code>INoMarshal</code> can&#8217;t go into the global interface table.</p>
+<p>So we will just force the square peg into the round hole: We can put the non-marshalable object inside an object that <i>is</i> marshalable.</p>
+<pre>template&lt;typename Smart&gt;
+struct force_marshal :
+    winrt::implements&lt;force_marshal&lt;Smart&gt;, ::IUnknown, winrt::non_agile&gt;
+{
+    force_marshal(Smart const&amp; p) : m_p(p) {}
+    Smart m_p;
+};
+</pre>
+<p>The <code>force_marshal&lt;Smart&gt;</code> object babysits a non-marshalable smart pointer to a COM object and exposes a marshalable wrapper around it. Since the wrapped object is not agile, the wrapper cannot be either. (If the wrapper were agile, then we&#8217;d be back where we started: How do we ensure that the <code>m_p</code> is destructed in the correct apartment?)¹</p>
+<p>We can put the unmarshalable object inside the wrapper, and then put the wrapper in the global interface table.</p>
+<pre>template&lt;typename T&gt;
+struct fake_agile_ref
+{
+    ⟦ ... ⟧
+
+    fake_agile_ref(Smart const&amp; p) : m_raw(winrt::get_abi(p))
+    {
+        if (m_raw) {
+            m_context = winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext);
+            m_token = get_context_token();
+            m_git = winrt::create_instance&lt;IGlobalInterfaceTable&gt;(CLSID_StdGlobalInterfaceTable);
+            winrt::check_hresult(m_git-&gt;RegisterInterfaceInGlobal(
+                <span>winrt::make&lt;force_marshal&lt;Smart&gt;&gt;(p).get()</span>,
+                __uuidof(IUnknown), &amp;m_cookie));
+        }
+    }
+
+    ⟦ ... ⟧
+};
+
+template&lt;typename T&gt; fake_agile_ref(winrt::com_ptr&lt;T&gt; const&amp;)
+    -&gt; fake_agile_ref&lt;T&gt;;
+template&lt;typename T&gt; fake_agile_ref(T const&amp;)
+    -&gt; fake_agile_ref&lt;T&gt;;
+</pre>
+<p>Okay, so now we have managed to create an agile wrapper around an unmarshalable object. This agile wrapper is agile on paper: You can use it from any thread. However, it is not agile in practice: If you try to use it from the wrong apartment, it throws an exception. But at least the behavior when used from the wrong apartment is <i>well-defined</i>, as opposed to the case of directly using an unmarshalable object from the wrong apartment, which is <i>undefined</i>.</p>
+<p>Next time, we&#8217;ll do some fine tuning.</p>
+<p><b>Bonus chatter</b>: Of course, now that we have a marshalable wrapper, we <i>could</i> use that wrapper to call the original non-marshalable object.</p>
+<table class="cp3" border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>Original apartment</td>
+<td> </td>
+<td>&nbsp;</td>
+<td>Other apartment</td>
+</tr>
+<tr>
+<td>Wrapper</td>
+<td>←</td>
+<td>←</td>
+<td>Caller</td>
+</tr>
+<tr>
+<td>↓</td>
+<td> </td>
+<td>&nbsp;</td>
+</tr>
+<tr>
+<td>Non-marshalable</td>
+<td> </td>
+<td>&nbsp;</td>
+</tr>
+</tbody>
+</table>
+<p>The non-marshalable object does not allow any arrows to come in from other apartments, but the wrapper lives in the same apartment as the non-marshalable object, so <i>its</i> arrow is coming from within the same apartment.</p>
+<p>You can think of the wrapper as a VPN into the original apartment, allowing calls to come in from the outside, but to appear to the non-marshalable object as if they came from within the same apartment.</p>
+<p>Now, you <i>could</i> do that, but I&#8217;m not going to. The original object presumably went out of its way to declare itself non-marshalable for a reason, so we honor that preference and not play funny games to trick it into doing something it said that it didn&#8217;t want to do.</p>
+<p>¹ Two commenters fell into this trap by suggesting that we wrap the non-marshalable object inside an object that implements <code>IMarshal</code>. If you implement <code>IMarshal</code>, then you are saying, &#8220;I&#8217;m way cooler than a standard non-agile object. I&#8217;m going to do fancy stuff (like being agile).&#8221; But we <i>want</i> to be a boring non-agile object, so that COM will do standard marshaling for us.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260805-00/?p=112591">Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 3</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
