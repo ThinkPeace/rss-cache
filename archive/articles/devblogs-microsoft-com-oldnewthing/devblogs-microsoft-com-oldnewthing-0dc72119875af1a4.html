@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 5 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 5</h1>
+        <div class="meta">The Old New Thing 2026-08-07T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260807-00/?p=112597">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-0dc72119875af1a4.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Cheating with std::unique_ptr . The post Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 5 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, I confessed that <a title="Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 4" href="https://devblogs.microsoft.com/oldnewthing/20260806-00/?p=112595"> I lied when i said that we can&#8217;t use <code>std::<wbr />unique_ptr</code> to manage the registration cookie</a>.</p>
+<p>The trick here is that the registration cookie is of type <code>DWORD</code>, which fits in a pointer, so we can smuggle the integer value inside a pointer.</p>
+<pre>template&lt;typename T&gt;
+struct fake_agile_ref
+{
+private:
+    using Smart = std::conditional_t&lt;
+        std::is_base_of_v&lt;winrt::Windows::Foundation::IUnknown, T&gt;,
+        T, winrt::com_ptr&lt;T&gt;&gt;;
+
+    <span>struct git_deleter                                                                           </span>
+    <span>{                                                                                            </span>
+    <span>    winrt::com_ptr&lt;IGlobalInterfaceTable&gt; m_git;                                             </span>
+    <span>                                                                                             </span>
+    <span>    void operator()(void* p)                                                                 </span>
+    <span>    {                                                                                        </span>
+    <span>        m_git-&gt;RevokeInterfaceFromGlobal(static_cast&lt;DWORD&gt;(reinterpret_cast&lt;uintptr_t&gt;(p)));</span>
+    <span>    }                                                                                        </span>
+    <span>};                                                                                           </span>
+
+    winrt::com_ptr&lt;IContextCallback&gt; m_context;
+    ULONG_PTR m_token = 0;
+    <span>std::unique_ptr&lt;void, git_deleter&gt; m_cookie;</span>
+    void* m_raw = nullptr;
+</pre>
+<p>Our custom deleter holds a pointer to the Global Interface Table and uses it to revoke the cookie on destruction. The cookie is an integer smuggled inside a pointer, so we cast the pointer back to an integer by passing through a <code>uintptr_t</code> to avoid a compiler warning about casting between an integer and pointer of different sizes.</p>
+<p>We are relying on the fact that Windows implementations are required to support round-tripping integers through pointers. Macros like <code>MAKEINTRESOURCE</code> rely on it. It&#8217;s also codified in Windows with helper functions like <code>PtrToInt</code> and <code>IntToPtr</code>, but I&#8217;m writing it out for expository purposes rather than using those helpers.</p>
+<p>We can then store the Global Interface Table pointer and the corresponding cookie in the <code>unique_ptr</code>:</p>
+<pre>    fake_agile_ref(Smart const&amp; p) : m_raw(winrt::get_abi(p))
+    {
+        if (m_raw) {
+            m_context = winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext);
+            m_token = get_context_token();
+            <span>auto&amp; git = m_cookie.get_deleter().m_git;                                          </span>
+            <span>git = winrt::create_instance&lt;IGlobalInterfaceTable&gt;(CLSID_StdGlobalInterfaceTable);</span>
+            <span>DWORD cookie;                                                                      </span>
+            winrt::check_hresult(<span>git</span>-&gt;RegisterInterfaceInGlobal(
+                winrt::make&lt;force_marshal&lt;Smart&gt;&gt;(p).get(),
+                __uuidof(IUnknown), &amp;m_cookie));
+            <span>m_cookie.reset(reinterpret_cast&lt;void*&gt;(static_cast&lt;uintptr_t&gt;(cookie)));</span>
+        }
+    }
+</pre>
+<p>And now that we are letting <code>unique_ptr</code> manage the lifetime of the cookie, we don&#8217;t need a custom destructor, which allows us to use the Rule of Zero and simply not have any copy or move constructors or assignment operators.</p>
+<pre>    // <span>fake_agile_ref(fake_agile_ref&amp;&amp; other) noexcept :</span>
+    // <span>    m_context(std::move(other.m_context)),</span>
+    // <span>    m_token(std:exchange(other.m_token, 0)),</span>
+    // <span>    m_git(std::move(other.m_git)),</span>
+    // <span>    m_cookie(std::exchange(other.m_cookie, 0)),</span>
+    // <span>    m_raw(other.m_raw)</span>
+    // <span>{</span>
+    // <span>}</span>
+
+    // <span>fake_agile_ref&amp; operator=(fake_agile_ref&amp;&amp; other) noexcept</span>
+    // <span>{</span>
+    // <span>    using std::swap;</span>
+    // <span>    swap(m_context, other.m_context);</span>
+    // <span>    swap(m_token, other.m_token);</span>
+    // <span>    swap(m_git, other.m_git);</span>
+    // <span>    swap(m_cookie, other.m_cookie);</span>
+    // <span>    swap(m_raw, other.m_raw);</span>
+    // <span>}</span>
+
+    // <span>~fake_agile_ref()</span>
+    // <span>{</span>
+    // <span>    if (m_cookie) {</span>
+    // <span>       m_git-&gt;RevokeInterfaceFromGlobal(std::exchange(m_cookie, 0));</span>
+    // <span>   }</span>
+    // <span>}</span>
+</pre>
+<p>Since we are storing the cookie in a <code>unique_ptr</code>, we need to adjust the <code>empty</code> method:</p>
+<pre>    bool empty() const noexcept
+    {
+        return <span>reinterpret_cast&lt;uintptr_t&gt;(m_cookie.get())</span> != 0;
+    }
+</pre>
+<p><b>Bonus chatter</b>: The Windows Implementation Library (wil) has a class similar to <code>unique_ptr</code> called <code>wil::unique_any</code> that lets you apply cleanup to any data type, not just a pointer.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260807-00/?p=112597">Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 5</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
