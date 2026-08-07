@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 4 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 4</h1>
+        <div class="meta">The Old New Thing 2026-08-06T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260806-00/?p=112595">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-16c385b6144fe4a2.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Moving things around if possible. The post Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 4 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, we successfully <a title="Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 3" href="https://devblogs.microsoft.com/oldnewthing/20260805-00/?p=112591"> our plan to use the global interface table to hold created a fake agile wrapper that is technically agile, even though it isn&#8217;t useful outside its home apartment</a>. I noted that there are opportunities for fine-tuning.</p>
+<p>One thing we can do is move the non-marshalable COM object rather than copying it. This means forwarding the reference all the way into the <code>force_<wbr />marshal</code> wrapper.</p>
+<pre>template&lt;typename Smart&gt;
+struct force_marshal :
+    winrt::implements&lt;force_marshal&lt;Smart&gt;, IUnknown, winrt::non_agile&gt;
+{
+    <span>template&lt;typename Arg&gt;                                   </span>
+    <span>force_marshal(Arg&amp;&amp; arg) : m_p(std::forward&lt;Arg&gt;(arg)) {}</span>
+    Smart m_p;
+};
+</pre>
+<p>The <code>force_<wbr />marshal&lt;Smart&gt;</code> now takes anything and forwards it into the smart pointer. This means that if the inbound parameter is an rvalue reference to a smart pointer, the COM reference is moved into the <code>force_<wbr />marshal&lt;Smart&gt;</code> object rather than copied.</p>
+<p>Now it&#8217;s a matter of plumbing this reference all the way down.</p>
+<pre>template&lt;typename T&gt;
+struct fake_agile_ref
+{
+    ⟦ ... ⟧
+
+    <span>template&lt;typename Arg&gt;</span>
+    fake_agile_ref(<span>Arg&amp;&amp;</span> p) : m_raw(winrt::get_abi(p))
+    {
+        if (m_raw) {
+            m_context = winrt::capture&lt;IContextCallback&gt;(CoGetObjectContext);
+            m_token = get_context_token();
+            m_git = winrt::create_instance&lt;IGlobalInterfaceTable&gt;(CLSID_StdGlobalInterfaceTable);
+            winrt::check_hresult(m_git-&gt;RegisterInterfaceInGlobal(
+                winrt::make&lt;force_marshal&lt;Smart&gt;&gt;(<span>std::forward&lt;Arg&gt;(p)</span>).get(),
+                __uuidof(IUnknown), &amp;m_cookie));
+        }
+    }
+
+    ⟦ ... ⟧
+};
+
+template&lt;typename Delegate&gt;
+std::remove_reference_t&lt;Delegate&gt; make_agile_delegate(Delegate&amp;&amp; d)
+{
+    if (d.try_as&lt;::IAgileObject&gt;()) {
+        return d;
+    }
+
+    if (d.try_as&lt;::INoMarshal&gt;()) {
+        return [agile = fake_agile_ref(<span>std::forward&lt;Delegate&gt;(d)</span>](auto&amp;&amp;...args) {
+            return agile.get()(std::forward&lt;decltype(args)&gt;(args)...);
+        };
+    }
+
+    return [agile = winrt::agile_ref(d)](auto&amp;&amp;...args) {
+        return agile.get()(std::forward&lt;decltype(args)&gt;(args)...);
+    };
+}
+</pre>
+<p>Note that we didn&#8217;t have to update the deduction guides for <code>fake_<wbr />agile_<wbr />ref</code> to add forwarding support. Deduction guides are matched against the constructor invocation to determine which template specialization to use, but they are not used for actually invoking the constructor. That happens by matching against the constructors themselves. So if somebody tries to create a <code>fake_<wbr />agile_<wbr />ref</code> from an rvalue reference, the deduction guide for <code>const&amp;</code> steers class template argument deduction (CTAD) toward the correct specialization, and then when the compiler actually looks for a constructor, it finds the one that takes an rvalue reference.</p>
+<p>Remember how I complained that we couldn&#8217;t use <code>std::<wbr />unique_ptr</code> to avoid a lot of boilerplate in <code>fake_<wbr />agile_<wbr />ref</code> to manage the fact that cookies cannot be copied?</p>
+<p>Yeah, so maybe I lied.</p>
+<p>We&#8217;ll look at it next time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260806-00/?p=112595">Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment, part 4</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
