@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Extending immutability: deletion without losing data | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Extending immutability: deletion without losing data</h1>
+        <div class="meta">Xe Iaso&#x27;s blog 2026-08-11T00:00:00Z</div>
+        <div class="links">
+          <a href="https://www.tigrisdata.com/blog/soft-delete-deep-dive/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xeiaso-net/xeiaso-net-3bb311c2491564fd.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Tigris has a pretty advanced replication scheme for writes. What happens when you actually need to delete things? Turns out deleting things is hard in distributed systems. Especially when you have a geo-replicated active-active database like Tigris does. We can (and do) use tombstones to mark where data once was, but how do you let people undo an accidental…</div>
+        <div class="content">
+          <p>Tigris has a pretty advanced replication scheme for writes. What happens when
+        you actually need to delete things? Turns out deleting things is hard in
+        distributed systems. Especially when you have a geo-replicated active-active
+        database like Tigris does. We can (and do) use tombstones to mark where data
+        once was, but how do you let people undo an accidental delete?</p>
+        <p>Tigris wants to turn storage
+        <a href="https://martin.kleppmann.com/2015/03/04/turning-the-database-inside-out.html">inside out</a>,
+        so our implementation of soft deletion is by giving users the Recycle Bin for
+        objects and buckets. Today we're going to dig into how this works, why it works,
+        and what this gives you in terms of using object storage today.</p>
+        <h2>Recycle bins and you</h2>
+        <p>In Windows and macOS, the Recycle Bin (or Trash can) is a form of purgatory
+        where deleted files wait for their storage to be deallocated by the user. This
+        allows users to hit &quot;delete&quot; fearlessly because if they made a mistake they can
+        just drag it back out and go on with life.</p>
+        <p>This works great in your local filesystem because there's only one writer in one
+        region. This kinda falls apart when you have multiple regions in your database
+        and any one of them could be writing to it. How do you name things in the
+        recycle bin? How do you handle the conflict of an update happening in one region
+        before the deletion was fully replicated out from another region?</p>
+        <p>This is the fun of distributed systems, which is the kind of problem space that
+        Tigris lives in.</p>
+        <p>One way to think about how the Recycle Bin works is that the file metadata gets
+        moved there when the user hits delete. No data bytes move around on the disk,
+        but the file doesn't show up in My Documents anymore. In a distributed systems
+        context you can't just move the metadata around, you have to leave a tombstone
+        behind to record where that metadata once was. This prevents other regions from
+        being confused when actions happen really close to each other in time.</p>
+        <h2>Soft deletes in some universes</h2>
+        <p>At a high level, a <a href="https://www.metabase.com/glossary/soft-delete">soft-delete</a>
+        is when a DELETE action doesn't actually remove the data. When data is
+        soft-deleted, it's still there but just not visible in the main usage flow. This
+        lets you get the data back when a delete is made by accident.</p>
+        <h3>Your database becomes your API</h3>
+        <p>One of the interesting side effects of designing any API is that you end up
+        leaking the internals of how your database works to your users. Many object
+        storage systems were designed with overwriting or deleting data as one of the
+        primary operations, and as such have had to bolt versioning onto the side. For
+        the most part this does work; but once you get into advanced versioning schemes
+        everything starts to fall apart. Tigris doesn't suffer from the same problems
+        because we built immutability into the core from day one, and in immutable
+        systems you have to append new data on the end instead of overwriting data.</p>
+        <p>At the least, actually storing the data en masse is a boring problem. You put
+        the data somewhere, maybe name it after the checksum of its contents, and then
+        have a daemon make sure it's copied three places. That daemon also handles cases
+        when drives go offline and new ones are added to make sure data is shuffled
+        around the cluster. This is largely a solved problem with projects like Ceph,
+        Longhorn, or other distributed storage systems.</p>
+        <h3>S3 uses delete markers</h3>
+        <p>Some object storage systems like S3 expose platform internals to make soft
+        deletion work. In S3 deleting an object creates a delete marker (tombstone). A
+        delete marker is an explicit marker that the object is deleted and should not be
+        returned in normal operation. Here's what that looks like in practice:</p>
+        <figure><figcaption><span>FIG 01</span><span>DeleteObject writes a delete marker</span></figcaption><pre><div>  <span>┌───────────────────┐  ┌───────────────────┐  </span><span>┌───────────────────┐ ◀── DeleteObject</span></div><div>  <span>│</span><span> v1                </span><span>│  │</span><span> v2                </span><span>│  </span><span>│</span><span> v3        </span><span>current │</span></div><div>  <span>│</span> report.pdf        <span>│  │</span> report.pdf        <span>│  </span><span>│</span> report.pdf        <span>│</span></div><div>  <span>│</span><span> …198086           </span><span>│  │</span><span> …198088           </span><span>│  </span><span>│ delete marker     │</span></div><div>  <span>└─────────┬─────────┘  └─────────┬─────────┘  </span><span>└───────────────────┘</span></div><div>  <span>          │                      │              </span><span>no data</span></div><div>            ▼                      ▼</div><div>  ┌───────────────────────────────────────────────────────────────────┐</div><div>  <span>│</span><span> sea of data                                                       </span><span>│</span></div><div>  │    ┌──────────┐         ┌──────────┐                              │</div><div>  <span>│    │</span> v1 bytes <span>│         │</span> v2 bytes <span>│                              │</span></div><div>  │    └──────────┘         └──────────┘                              │</div><div>  └───────────────────────────────────────────────────────────────────┘</div><div> </div><div>  // the bytes stay. only the newest record says the object is gone.</div></pre></figure>
+        <p>I don't know how I feel about this flow. Based on reading between the lines in
+        the
+        <a href="https://docs.aws.amazon.com/en_es/AmazonS3/latest/userguide/ManagingDelMarkers.html">delete marker documentation</a>
+        it really feels like this is a leaked internal implementation detail of how S3's
+        eventually consistent database works instead of a full fledged feature of the
+        storage system. If I had to choose between leaking internal database details in
+        the API and implementing a higher level API for something complicated like soft
+        deletion, I'd want to implement the higher level API.</p>
+        <h3>Tigris' soft deletes are external references</h3>
+        <p>Let's rethink what soft deletes really are. What if they were like the Recycle
+        Bin in Windows?</p>
+        <p>Soft-deletes are external references to buckets or objects that live in a
+        different namespace from normal buckets or objects. We implemented them as
+        external references instead of tombstones because this is effectively moving
+        object metadata to the recycle bin. Tombstones mark the data as not being there,
+        but soft-delete markers are a copy of the data that was there. This makes it
+        easy to put the object back in place if you deleted it by mistake.</p>
+        <h3>Garbage collection roots</h3>
+        <p>One way to think about objects and buckets is that they are garbage collection
+        roots for points in the endless sea of data. Any data in the sea without a root
+        anchoring it down is eligible to be deleted. Uploading multiple versions of an
+        object with a forkable bucket creates multiple metadata entries at their
+        different timestamped version numbers. You can then fork a bucket from any one
+        of those timestamps to see what the bucket was like at that point:</p>
+        <figure><figcaption><span>FIG 02</span><span>fork at any version timestamp to see the bucket's past</span></figcaption><pre><div>  <span>every write appends a new version entry</span></div><div> </div><div>  <span>v1</span>              <span>v2</span>              <span>╎</span>   <span>v3</span>              <span>v4</span></div><div>  <span>┌────────────┐</span>  <span>┌────────────┐</span>  <span>╎</span>   <span>┌────────────┐</span>  <span>┌────────────┐</span></div><div>  <span>│</span> <span>…198086</span>    <span>│</span>  <span>│</span> <span>…431907</span>    <span>│</span>  <span>╎</span>   <span>│</span> <span>…764522</span>    <span>│</span>  <span>│</span> <span>…055310</span>    <span>│</span></div><div>  <span>│</span> 4.1 MB     <span>│</span>  <span>│</span> 4.3 MB     <span>│</span>  <span>╎</span>   <span>│</span> 4.4 MB     <span>│</span>  <span>│</span> 5.0 MB     <span>│</span></div><div>  <span>└─────┬──────┘</span>  <span>└─────┬──────┘</span>  <span>╎</span>   <span>└─────┬──────┘</span>  <span>└─────┬──────┘</span></div><div>  <span>──────┴───────────────┴─────────</span><span>╎</span><span>─────────┴───────────────┴───────▶</span></div><div>  <span>earlier</span>                         <span>╎ fork point</span>                <span>later</span></div><div>  <span>the fork inherits these</span>         <span>╎</span>   <span>written later — the fork never sees them</span></div><div>                                  <span>▼</span></div><div>                      <span>┌──────────────────────────────┐</span></div><div>                      <span>│</span> uploads/report.pdf           <span>│</span></div><div>                      <span>│</span> <span>current version</span> <span>v2</span>           <span>│</span></div><div>                      <span>│</span> <span>as of 1775929812004431907</span>    <span>│</span></div><div>                      <span>└──────────────────────────────┘</span></div><div> </div><div>  <span>// appending metadata instead of overwriting keeps any past instant addressable.</span></div></pre></figure>
+        <p>This would solve the soft-delete problem, but our existing database schema using
+        FoundationDB requires us to enable forking and snapshots at bucket creation
+        time. In essence, we need something that's halfway between what we have (each
+        bucket being a globally mutable namespace) and the bucket forking land of every
+        action being appending metadata onto the end.</p>
+        <p>To do that, we basically implemented most of that appending metadata on the end
+        trick but to a different place: the soft deletion corner. When you enable
+        soft-deletion and delete an object, its metadata gets moved to the trashcan so
+        you can pluck it back into place:</p>
+        <figure><figcaption><span>FIG 03</span><span>delete moves the metadata record to the soft-delete keyspace</span></figcaption><pre><div>  <span>main table · live keyspace</span>                <span>soft-delete keyspace · newest first</span></div><div>  <span>┌────────────────────────────┐</span>            <span>┌──────────────────────────────────┐</span></div><div>  <span>│</span> uploads/report.pdf         <span>│</span>            <span>│</span> uploads/report.pdf   <span>3rd delete</span>  <span>│</span></div><div>  <span>│</span> <span>live metadata record</span>       <span>│</span><span>───────▶</span>    <span>│</span> <span>deleted …768707198086</span>            <span>│</span></div><div>  <span>│</span> <span>in ListObjectsV2 output</span>    <span>│</span><span>◀╌╌╌╌╌╌</span>     <span>└──────────────────────────────────┘</span></div><div>                                            <span>┌──────────────────────────────────┐</span></div><div>                                            <span>│</span> uploads/report.pdf   <span>2nd delete</span>  <span>│</span></div><div>                                            <span>│</span> <span>deleted …412888100731</span>            <span>│</span></div><div>  <span>┌────────────────────────────┐</span>            <span>└──────────────────────────────────┘</span></div><div>  <span>│</span> uploads/notes.md           <span>│</span>            <span>┌──────────────────────────────────┐</span></div><div>  <span>│</span> <span>untouched by the delete</span>    <span>│</span>            <span>│</span> uploads/report.pdf   <span>1st delete</span>  <span>│</span></div><div>  <span>└────────────────────────────┘</span>            <span>│</span> <span>deleted …104233715492</span>            <span>│</span></div><div>                                            <span>└──────────────────────────────────┘</span></div><div> </div><div>  <span>───────▶</span>  <span>DeleteObject moves the record out — one entry per delete</span></div><div>  <span>◀╌╌╌╌╌╌</span>   <span>RestoreObject moves the same metadata back</span></div><div> </div><div>  <span>// the bin entry is a copy of the metadata, not a marker. restoring is a move.</span></div></pre></figure>
+        <p>It's the same basic idea as the recycle bin on your desktop. Any buckets or
+        objects left in the recycle bin for long enough become eligible to be deleted,
+        which then makes the backend go and securely erase things. Effectively, any bits
+        of metadata in the soft deletion corner are still considered garbage collection
+        roots, they're just not shown when you do a normal <code>ListObjectsV2</code> call.</p>
+        <h3>Distributed systems are fun*</h3>
+        <p>The real fun comes into play when you remember that Tigris has a globally
+        replicated active-active database where any region can change any object at any
+        time. Most of the time things work out and objects are replicated without too
+        much strife. The annoying part comes when two events are ordered weirdly.
+        Imagine a scenario where one agent in one datacentre deletes an object <em>after</em>
+        another agent in another datacentre:</p>
+        <figure><figcaption><span>FIG 04</span><span>two regions write to one key at the same time</span></figcaption><pre><div>  <span>ORD (Chicago)</span>                               <span>IAD (Ashburn)</span></div><div>  <span>┌──────────────────────────┐</span></div><div>  <span>│</span> <span>PutObject</span>  <span>· agent A</span>     <span>│</span></div><div>  <span>│</span> uploads/report.pdf       <span>│</span>  <span>──── replicates PUT ────▶</span></div><div>  <span>│</span> <span>t = …768707198086</span>        <span>│</span></div><div>  <span>└──────────────────────────┘</span></div><div> </div><div>                                              <span>┌──────────────────────────┐</span></div><div>                                              <span>│</span> <span>DeleteObject</span>  <span>· agent B</span>  <span>│</span></div><div>  <span>◀── replicates DELETE ──</span>                    <span>│</span> uploads/report.pdf       <span>│</span></div><div>                                              <span>│</span> <span>t = …768984210773</span>        <span>│</span></div><div>                                              <span>└──────────────────────────┘</span></div><div> </div><div>  <span>ORD applies</span>   PUT  ▸  DELETE    <span>deleted, as expected</span></div><div>  <span>IAD applies</span>   DELETE  ▸  PUT    <span>the put looks brand new</span></div><div> </div><div>  <span>// two writers, one key. the regions disagree about whether it exists.</span></div></pre></figure>
+        <p>How would this replicate out? Well for one each change is timestamped by when
+        it's done in terms of Unix nanoseconds, so the replication messages kinda look
+        like this:</p>
+        <figure><figcaption><span>FIG 05</span><span>replication records are timestamped in Unix nanoseconds</span></figcaption><pre><div>  <span>produced first</span>                          <span>produced 277 ms later</span></div><div>  <span>┌──────────────────────────────────┐</span>    <span>┌──────────────────────────────────┐</span></div><div>  <span>│</span> uploads/report.pdf               <span>│</span>    <span>│</span> uploads/report.pdf               <span>│</span></div><div>  <span>│</span> op: <span>PUT</span>                          <span>│</span>    <span>│</span> op: <span>DELETE</span>                       <span>│</span></div><div>  <span>│</span> <span>LastModified</span>  1775929768<span>707198086</span><span>│</span>    <span>│</span> <span>LastModified</span>  1775929768<span>984210773</span><span>│</span></div><div>  <span>│</span> <span>block 0x3f2ac701 · origin ORD</span>    <span>│</span>    <span>│</span> <span>block 0x3f2ac701 · origin IAD</span>    <span>│</span></div><div>  <span>└──────────────────────────────────┘</span>    <span>└──────────────────────────────────┘</span></div><div> </div><div>  <span>last write wins</span></div><div>  <span>984210773</span>   <span>is greater than</span>  <span>707198086</span></div><div> </div><div>  <span>// the delete carries the newer LastModified, so the delete survives</span></div></pre></figure>
+        <p>This means that in theory, a user could DELETE an object <em>before</em> an update is
+        processed by another region, and that would make the regions disagree about if
+        the object exists or not. This is a horrible state to be in and usually requires
+        support intervention or to recreate/re-delete the object.</p>
+        <p>The root cause boils down to deleting objects actually deleting metadata from
+        the database doesn't scale past a single region. Updates to metadata include the
+        entire metadata object, so if you delete it locally and a new version is pushed
+        remotely, the object will gain the remote state.</p>
+        <p>We don't want users to have to deal with that, so we added the concept of
+        anti-resurrection to Tigris. Any write to an object must prove it is newer than
+        the deletion.</p>
+        <figure><figcaption><span>FIG 06</span><span>the tombstone is what a stale write must beat</span></figcaption><pre><div>  <span>ORD · agent PutObject</span>                     <span>IAD · user DeleteObject</span></div><div>  <span>┌──────────────────────────┐</span>              <span>┌──────────────────────────┐</span></div><div>  <span>│</span> uploads/report.pdf       <span>│</span>              <span>│</span> uploads/report.pdf       <span>│</span></div><div>  <span>│</span> <span>new version · v2</span>         <span>│</span><span>◀─────────────</span><span>│</span> <span>row deleted · marker kept</span><span>│</span></div><div>  <span>│</span> <span>t = 15</span>                   <span>│</span>   <span>delete</span>     <span>│</span> <span>tombstone t = 25</span>         <span>│</span></div><div>  <span>└────────────┬─────────────┘</span>              <span>└────────────┬─────────────┘</span></div><div>               <span>└────────────────────┬────────────────────┘</span></div><div>                                    <span>▼</span></div><div>    <span>┌────────────────────────────────────────────────────────────┐</span></div><div>    <span>│</span> at IAD: is the write newer than the marker?                <span>│</span></div><div>    <span>│</span> <span>write t = 15  ·  marker t = 25  ·  is 15 > 25 ?</span>            <span>│</span></div><div>    <span>│</span> <span>no — not strictly newer, so the write is dropped</span>           <span>│</span></div><div>    <span>│</span> <span>equal timestamps lose too · the guard runs for every bucket</span><span>│</span></div><div>    <span>└────────────────────────────────────────────────────────────┘</span></div><div> </div><div>  <span>// without the marker, an empty slot looks exactly like a key that never existed.</span></div></pre></figure>
+        <p>In this circumstance, a user sent a DeleteObject request to the IAD datacentre
+        at time 25, but an agent sent a new version of the object with PutObject to the
+        ORD datacentre at time 15. The user's delete is newer than the agent's put, so
+        the new version is rejected and the delete gets sent back to ORD.</p>
+        <h2>Using soft deletes</h2>
+        <p>Tigris extends the S3 API by having users add headers to their requests. For
+        example, to create a bucket with soft deletion enabled:</p>
+        <pre class="language-go"><code class="language-go code-highlight"><span class="code-line"><span class="token keyword">import</span> <span class="token punctuation">(</span>
+        </span><span class="code-line">	<span class="token string">&quot;context&quot;</span>
+        </span><span class="code-line">
+        </span><span class="code-line">	<span class="token string">&quot;github.com/aws/aws-sdk-go-v2/aws&quot;</span>
+        </span><span class="code-line">	<span class="token string">&quot;github.com/aws/aws-sdk-go-v2/service/s3&quot;</span>
+        </span><span class="code-line">	<span class="token string">&quot;github.com/tigrisdata/storage-go&quot;</span>
+        </span><span class="code-line"><span class="token punctuation">)</span>
+        </span><span class="code-line">
+        </span><span class="code-line">client<span class="token punctuation">,</span> err <span class="token operator">:=</span> storage<span class="token punctuation">.</span><span class="token function">New</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span>
+        </span><span class="code-line">	storage<span class="token punctuation">.</span><span class="token function">WithGlobalEndpoint</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+        </span><span class="code-line">	storage<span class="token punctuation">.</span><span class="token function">WithAccessKeypair</span><span class="token punctuation">(</span>
+        </span><span class="code-line">		os<span class="token punctuation">.</span><span class="token function">Getenv</span><span class="token punctuation">(</span><span class="token string">&quot;TIGRIS_STORAGE_ACCESS_KEY_ID&quot;</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+        </span><span class="code-line">		os<span class="token punctuation">.</span><span class="token function">Getenv</span><span class="token punctuation">(</span><span class="token string">&quot;TIGRIS_STORAGE_SECRET_ACCESS_KEY&quot;</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+        </span><span class="code-line">	<span class="token punctuation">)</span><span class="token punctuation">,</span>
+        </span><span class="code-line"><span class="token punctuation">)</span>
+        </span><span class="code-line">
+        </span><span class="code-line"><span class="token boolean">_</span><span class="token punctuation">,</span> err <span class="token operator">:=</span> client<span class="token punctuation">.</span><span class="token function">CreateBucketWithSoftDelete</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> <span class="token operator">&amp;</span>storage<span class="token punctuation">.</span>CreateBucketWithSoftDeleteInput<span class="token punctuation">{</span>
+        </span><span class="code-line">	CreateBucketInput<span class="token punctuation">:</span> <span class="token operator">&amp;</span>s3<span class="token punctuation">.</span>CreateBucketInput<span class="token punctuation">{</span>Bucket<span class="token punctuation">:</span> aws<span class="token punctuation">.</span><span class="token function">String</span><span class="token punctuation">(</span><span class="token string">&quot;my-bucket&quot;</span><span class="token punctuation">)</span><span class="token punctuation">}</span><span class="token punctuation">,</span>
+        </span><span class="code-line">	RetentionDays<span class="token punctuation">:</span>     <span class="token number">30</span><span class="token punctuation">,</span> <span class="token comment">// 0 uses the 7-day default</span>
+        </span><span class="code-line"><span class="token punctuation">}</span><span class="token punctuation">)</span>
+        </span></code></pre>
+        <p>Or to list soft-deleted objects:</p>
+        <pre class="language-go"><code class="language-go code-highlight"><span class="code-line">out<span class="token punctuation">,</span> err <span class="token operator">:=</span> client<span class="token punctuation">.</span><span class="token function">ListSoftDeletedObjects</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> <span class="token operator">&amp;</span>storage<span class="token punctuation">.</span>ListSoftDeletedObjectsInput<span class="token punctuation">{</span>
+        </span><span class="code-line">	Bucket<span class="token punctuation">:</span> <span class="token string">&quot;my-bucket&quot;</span><span class="token punctuation">,</span>
+        </span><span class="code-line">	Prefix<span class="token punctuation">:</span> <span class="token string">&quot;uploads/&quot;</span><span class="token punctuation">,</span>
+        </span><span class="code-line"><span class="token punctuation">}</span><span class="token punctuation">)</span>
+        </span><span class="code-line"><span class="token keyword">if</span> err <span class="token operator">!=</span> <span class="token boolean">nil</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">	<span class="token keyword">return</span> err
+        </span><span class="code-line"><span class="token punctuation">}</span>
+        </span><span class="code-line"><span class="token keyword">for</span> <span class="token boolean">_</span><span class="token punctuation">,</span> o <span class="token operator">:=</span> <span class="token keyword">range</span> out<span class="token punctuation">.</span>Objects <span class="token punctuation">{</span>
+        </span><span class="code-line">	log<span class="token punctuation">.</span><span class="token function">Printf</span><span class="token punctuation">(</span><span class="token string">&quot;%s v=%s %d bytes deleted=%s&quot;</span><span class="token punctuation">,</span> o<span class="token punctuation">.</span>Key<span class="token punctuation">,</span> o<span class="token punctuation">.</span>VersionID<span class="token punctuation">,</span> o<span class="token punctuation">.</span>Size<span class="token punctuation">,</span> o<span class="token punctuation">.</span>LastModified<span class="token punctuation">)</span>
+        </span><span class="code-line"><span class="token punctuation">}</span>
+        </span></code></pre>
+        <p>Or to permanently delete one soft-deleted version:</p>
+        <pre class="language-go"><code class="language-go code-highlight"><span class="code-line"><span class="token boolean">_</span><span class="token punctuation">,</span> err <span class="token operator">:=</span> client<span class="token punctuation">.</span><span class="token function">PermanentlyDeleteObject</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span>
+        </span><span class="code-line">	<span class="token string">&quot;my-bucket&quot;</span><span class="token punctuation">,</span> <span class="token string">&quot;uploads/report.pdf&quot;</span><span class="token punctuation">,</span> <span class="token string">&quot;1775929768707198086&quot;</span><span class="token punctuation">)</span>
+        </span></code></pre>
+        <p>When you have a soft-delete enabled bucket, you can also forcibly delete an
+        entire bucket:</p>
+        <pre class="language-go"><code class="language-go code-highlight"><span class="code-line"><span class="token boolean">_</span><span class="token punctuation">,</span> err <span class="token operator">:=</span> client<span class="token punctuation">.</span><span class="token function">ForceDeleteBucket</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> <span class="token operator">&amp;</span>s3<span class="token punctuation">.</span>DeleteBucketInput<span class="token punctuation">{</span>
+        </span><span class="code-line">	Bucket<span class="token punctuation">:</span> aws<span class="token punctuation">.</span><span class="token function">String</span><span class="token punctuation">(</span><span class="token string">&quot;my-bucket&quot;</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+        </span><span class="code-line"><span class="token punctuation">}</span><span class="token punctuation">)</span>
+        </span></code></pre>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-500/30"><div class="mt-1 flex-shrink-0 text-red-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-red-800 dark:text-red-300">Warning</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>If you use this call on a bucket that doesn't have soft deletion enabled, you
+        have permanently deleted your bucket. Please call this with care. Support
+        cannot help you if you use this call wrongly.</p></div></div></div>
+        <p>And then bring it back from the dead:</p>
+        <pre class="language-go"><code class="language-go code-highlight"><span class="code-line">trash<span class="token punctuation">,</span> err <span class="token operator">:=</span> client<span class="token punctuation">.</span><span class="token function">ListSoftDeletedBuckets</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> <span class="token boolean">nil</span><span class="token punctuation">)</span>
+        </span><span class="code-line"><span class="token keyword">if</span> err <span class="token operator">!=</span> <span class="token boolean">nil</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">	<span class="token keyword">return</span> err
+        </span><span class="code-line"><span class="token punctuation">}</span>
+        </span><span class="code-line"><span class="token keyword">for</span> <span class="token boolean">_</span><span class="token punctuation">,</span> b <span class="token operator">:=</span> <span class="token keyword">range</span> trash<span class="token punctuation">.</span>Buckets <span class="token punctuation">{</span>
+        </span><span class="code-line">	log<span class="token punctuation">.</span><span class="token function">Printf</span><span class="token punctuation">(</span><span class="token string">&quot;%s (%d day retention)&quot;</span><span class="token punctuation">,</span> b<span class="token punctuation">.</span>Name<span class="token punctuation">,</span> b<span class="token punctuation">.</span>RetentionDays<span class="token punctuation">)</span>
+        </span><span class="code-line">	<span class="token keyword">if</span> <span class="token boolean">_</span><span class="token punctuation">,</span> err <span class="token operator">:=</span> client<span class="token punctuation">.</span><span class="token function">RestoreBucket</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> <span class="token operator">&amp;</span>storage<span class="token punctuation">.</span>RestoreBucketInput<span class="token punctuation">{</span>Bucket<span class="token punctuation">:</span> b<span class="token punctuation">.</span>Name<span class="token punctuation">}</span><span class="token punctuation">)</span><span class="token punctuation">;</span> err <span class="token operator">!=</span> <span class="token boolean">nil</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">		<span class="token keyword">return</span> err
+        </span><span class="code-line">	<span class="token punctuation">}</span>
+        </span><span class="code-line"><span class="token punctuation">}</span>
+        </span></code></pre>
+        <h2>Now what?</h2>
+        <p>Object storage entered our stacks as an unlimited FTP server we all used for
+        backups. A distressing amount of the world's most important data lives in object
+        storage buckets because it's the best place to put it. This is why having an
+        &quot;undo&quot; button matters, it's what makes it safe to trust your backups in the
+        cloud. To err is human, and mistakes are a &quot;when&quot; to plan for, not an &quot;if&quot; that
+        you hopefully never have happen. The blast radius of one overly wide
+        <code>--recursive</code> flag is measured in years of people's lives.</p>
+        <p>One of the biggest usecases that comes to mind is ransomware prevention. Imagine
+        a case where an attacker downloads everything in your bucket, deletes it, and
+        asks for a ransom to send you the files back. With Tigris, soft deletes means
+        that the ransom can be ignored, you can un-delete your data, and be on your
+        merry way with incident response. The other big usecase is for agents, where
+        they somehow get the idea that deleting production data is the right way to
+        solve a problem. Both cases mean you need a quick and fast way to go back to
+        before things went wrong.</p>
+        <p>If you want true isolation instead of recovery, that's why we have
+        <a href="https://www.tigrisdata.com/docs/buckets/snapshots-and-forks/">bucket forking</a>.
+        Bucket forking needs to be enabled before a bucket is created, but you can
+        enable soft deletion on any bucket in the dashboard whenever you want.</p>
+        <p>Every storage system is going to make you choose between ones that hide how the
+        platform works and ones that expose the gorey internals to users. I think that
+        hiding the internals and exposing the high level operations built on top of them
+        is the right way to go, if only because the higher level operations are much
+        easier to make safe in our globally distributed future.</p>
+        <p>Enable soft delete on any Tigris bucket, new or existing, and every delete
+        becomes recoverable for up to 90 days. Restoring a whole bucket is one call.
+        <a href="https://www.tigrisdata.com/docs/buckets/soft-delete/">Read the soft delete docs</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
