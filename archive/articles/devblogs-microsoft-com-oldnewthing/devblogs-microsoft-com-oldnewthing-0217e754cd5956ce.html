@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The little-known winstart.bat batch file | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The little-known winstart.bat batch file</h1>
+        <div class="meta">The Old New Thing 2026-08-11T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260811-00/?p=112605">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-0217e754cd5956ce.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">It had been there long before Windows 95, but nobody remembered. The post The little-known &lt;TT&gt;winstart.bat&lt;/TT&gt; batch file appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Reader Otul Osan wants to know <a href="https://devblogs.microsoft.com/oldnewthing/20260123-00/?p=112008&amp;commentid=143764#comment-143764"> what the use case for <tt>C:\<wbr />WINDOWS\<wbr />WINSTART.BAT</tt> was, compared to <tt>C:\<wbr />AUTOEXEC.BAT</tt></a> and when exactly during system startup it launches.</p>
+<p>In Windows 95, you could create a <tt>winstart.bat</tt> file in your Windows directory. During startup, the virtual machine manager initializes and creates the so-called &#8220;System virtual machine&#8221; (the &#8220;System VM&#8221;), which is the virtual machine that all Windows programs run in. But before running the user-mode kernel in that virtual machine, the virtual machine manager runs the <tt>winstart.bat</tt> batch file if it exists.</p>
+<p>In pictures: First, we boot up MS-DOS and the command prompt. (Note: All diagrams omit lots of details not relevant to the discussion and are not to scale.)</p>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>Stuff</td>
+<td>(unused)</td>
+<td>MS-DOS</td>
+</tr>
+</tbody>
+</table>
+<p>The box labeled &#8220;Stuff&#8221; is a catch-all for random things that go at low addresses, like the interrupt vector table and the BIOS data area.</p>
+<p>Next, <tt>command.com</tt> runs <tt>autoexec.bat</tt>, which might install some TSRs.</p>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>Stuff</td>
+<td>TSR1</td>
+<td>(unused)</td>
+<td>MS-DOS</td>
+</tr>
+</tbody>
+</table>
+<p>And then Windows starts up and initializes the virtual machine manager. The system is now running in protected mode with a virtual machine running in v86 mode, and that virtual machine is initialized with whatever was running in real mode at the time the virtual machine manager took over.¹</p>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>v86 mode</td>
+<td>Stuff</td>
+<td>TSR1</td>
+<td>(unused)</td>
+<td><span>MS-DOS</span></td>
+</tr>
+</tbody>
+</table>
+</td>
+<td>ring 0: virtual machine manager</td>
+</tr>
+</tbody>
+</table>
+<p>I crossed out MS-DOS because the virtual machine manager took over responsibility for the file system and shut off the real-mode file system in MS-DOS.</p>
+<p>At this point, the virtual machine manager runs <tt>winstart.bat</tt> inside the virtual machine, and maybe it installs another TSR.</p>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>v86 mode</td>
+<td>Stuff</td>
+<td>TSR1</td>
+<td>TSR2</td>
+<td>(unused)</td>
+<td><span>MS-DOS</span></td>
+</tr>
+</tbody>
+</table>
+</td>
+<td>ring 0: virtual machine manager</td>
+</tr>
+</tbody>
+</table>
+<p>And then we start the user-mode kernel that is in charge of Windows applications. That user-mode kernel switches the virtual machine into protected mode and starts running what most people think of as Windows.</p>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>v86 mode</td>
+<td>Stuff</td>
+<td>TSR1</td>
+<td>TSR2</td>
+<td> </td>
+<td><span>MS-DOS</span></td>
+</tr>
+<tr>
+<td colspan="6"> </td>
+</tr>
+<tr>
+<td>prot mode<br />
+(ring 3)</td>
+<td colspan="5">GUI stuff</td>
+</tr>
+</tbody>
+</table>
+</td>
+<td>ring 0: virtual machine manager</td>
+</tr>
+</tbody>
+</table>
+<p>And then from the Windows GUI, you decide to open a command prompt, which means creating a second virtual machine.</p>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>v86 mode</td>
+<td>Stuff</td>
+<td>TSR1</td>
+<td>TSR2</td>
+<td> </td>
+<td><span>MS-DOS</span></td>
+</tr>
+<tr>
+<td colspan="6"> </td>
+</tr>
+<tr>
+<td>prot mode<br />
+(ring 3)</td>
+<td colspan="5">GUI stuff</td>
+</tr>
+</tbody>
+</table>
+</td>
+<td rowspan="3">ring 0: virtual machine manager</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+</tr>
+<tr>
+<td>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>v86 mode</td>
+<td>Stuff</td>
+<td>TSR1</td>
+<td>COMMAND.COM</td>
+<td><span>MS-DOS</span></td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+</tbody>
+</table>
+<p>Notice that the virtual machine running <tt>command.com</tt> is a copy of the system when Windows started.² So it has TSR1 (from <tt>autoexec.bat</tt>) but not TSR2 (from <tt>winstart.bat</tt>).</p>
+<p>If you install a TSR in the command prompt virtual machine, you get</p>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>v86 mode</td>
+<td>Stuff</td>
+<td>TSR1</td>
+<td>TSR2</td>
+<td> </td>
+<td><span>MS-DOS</span></td>
+</tr>
+<tr>
+<td colspan="6"> </td>
+</tr>
+<tr>
+<td>prot mode<br />
+(ring 3)</td>
+<td colspan="5">GUI stuff</td>
+</tr>
+</tbody>
+</table>
+</td>
+<td rowspan="3">ring 0: virtual machine manager</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+</tr>
+<tr>
+<td>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>v86 mode</td>
+<td>Stuff</td>
+<td>TSR1</td>
+<td>TSR3</td>
+<td>COMMAND.COM</td>
+<td><span>MS-DOS</span></td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+</tbody>
+</table>
+<p>Okay, now that we see how the pieces fit together, we can reverse-engineer the purpose of <tt>winstart.bat</tt>.</p>
+<p>The intended purpose of <tt>winstart.bat</tt> is batch file is to allow you to install TSRs that will apply only to Windows programs. For example, you might install network drivers to support your Windows programs. You might choose this option instead of installing them globally because you don&#8217;t care about networking for your MS-DOS programs and want to free up conventional memory for them. Or because those drivers don&#8217;t support running in multiple virtual machines, so you&#8217;ll take them in the System VM and forego them for your MS-DOS programs.</p>
+<p>What I find interesting is that most people who discover this say that it&#8217;s a feature of Windows 95. But really, it&#8217;s a feature of Windows 3.1 (and possibly even Windows 3.0). You can find it documented in the <a href="https://archive.org/details/bitsavers_microsoftr5Windows3.1ResourceKit199202_48972813/page/263/mode/2up"> Windows 3.1 Resource Kit</a> on page 263. That page even has a nice table showing three ways of launching TSRs and how they are visible in the different virtual machines. (In this table, &#8220;TSR visible in virtual machines&#8221; really means &#8220;TSR visible in non-Windows virtual machines&#8221;, but the documentation takes the convention that the term &#8220;virtual machine&#8221; refers only to non-Windows virtual machines and not to the virtual machine running Windows itself, which it simply calls &#8220;Windows&#8221;.)</p>
+<table class="cp3" border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th>Where TSR is loaded</th>
+<th>TSR visible in Windows?</th>
+<th>TSR visible in virtual machines?</th>
+</tr>
+<tr>
+<td>From MS-DOS</td>
+<td>Yes</td>
+<td>Yes, all virtual machines</td>
+</tr>
+<tr>
+<td>From WINSTART.BAT</td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td>In a single virtual machine</td>
+<td>No</td>
+<td>Only that virtual machine</td>
+</tr>
+</tbody>
+</table>
+<p>¹ Think about that: We booted an operating system and then booted another operating system around it, so that the original operating system was now running inside a virtual machine controlled by the second operating system. It&#8217;s like leaving your house, walking down the street, and halfway down the block, realizing that you&#8217;re now walking inside a movie studio set.</p>
+<p>² It isn&#8217;t actually a copy of the system at the time Windows started. Rather, it is a copy of the system VM, but only the parts that existed at the time Windows started. How this worked is too complex to try to explain in a footnote. Maybe I&#8217;ll discuss it some other time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260811-00/?p=112605">The little-known &lt;TT&gt;winstart.bat&lt;/TT&gt; batch file</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
