@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Another partial SSI trick with canonicalize | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Another partial SSI trick with canonicalize</h1>
+        <div class="meta">Max Bernstein&#x27;s Blog 2026-08-13T00:00:00Z</div>
+        <div class="links">
+          <a href="https://bernsteinbear.com/blog/more-partial-ssi/?utm_source=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/bernsteinbear-com/bernsteinbear-com-1804307139e1145f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">After reading Chris Fallin’s aegraph post , new ZJIT contributor dak2 landed a block-local version of the canonicalize function in #16828 . The pseudocode of the block-local canonicalize function looks like this: for block in function . reverse_post_order (): rewrite_map = {} for insn in block . insns : insn . operands . map_in_place ( lambda o : rewrite_ma…</div>
+        <div class="content">
+          <p>After reading <a href="https://cfallin.org/blog/2026/04/09/aegraph/">Chris Fallin’s aegraph
+post</a>, new ZJIT contributor dak2
+landed a block-local version of the <code class="language-plaintext highlighter-rouge">canonicalize</code> function in
+<a href="https://github.com/ruby/ruby/pull/16828">#16828</a>.</p>
+
+<p>The pseudocode of the block-local canonicalize function looks like this:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">for</span> <span class="n">block</span> <span class="ow">in</span> <span class="n">function</span><span class="p">.</span><span class="n">reverse_post_order</span><span class="p">():</span>
+    <span class="n">rewrite_map</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">insn</span> <span class="ow">in</span> <span class="n">block</span><span class="p">.</span><span class="n">insns</span><span class="p">:</span>
+        <span class="n">insn</span><span class="p">.</span><span class="n">operands</span><span class="p">.</span><span class="n">map_in_place</span><span class="p">(</span><span class="k">lambda</span> <span class="n">o</span><span class="p">:</span> <span class="n">rewrite_map</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="n">o</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">insn</span><span class="p">.</span><span class="n">opcode</span> <span class="o">==</span> <span class="s">"GuardType"</span><span class="p">:</span>
+            <span class="n">rewrite_map</span><span class="p">[</span><span class="n">insn</span><span class="p">.</span><span class="n">val</span><span class="p">]</span> <span class="o">=</span> <span class="n">insn</span>
+</code></pre></div></div>
+
+<p>As a refresher, this turns IR like this:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>v0:Object = ...
+v1:Int = GuardType v0, Int
+... do something with v1
+
+v2:Int = GuardType v0, Int
+... do something with v2
+</code></pre></div></div>
+
+<p>into this:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>v0:Object = ...
+v1:Int = GuardType v0, Int
+... do something with v1
+
+v2:Int = GuardType v1, Int
+... do something with v2
+</code></pre></div></div>
+
+<p>Note that the second use of <code class="language-plaintext highlighter-rouge">v0</code> has been turned into <code class="language-plaintext highlighter-rouge">v1</code>. This is important
+because a later constant-folding pass can observe that the input <code class="language-plaintext highlighter-rouge">v1</code> of <code class="language-plaintext highlighter-rouge">GuardType
+v1, Int</code> is <em>already an Int</em> and can therefore replace all uses of <code class="language-plaintext highlighter-rouge">v2</code> with
+<code class="language-plaintext highlighter-rouge">v1</code> and delete the guard.</p>
+
+<p>Because in this local version we make a new <code class="language-plaintext highlighter-rouge">rewrite_map</code> for each block, we
+don’t carry any rewrites across blocks (but ZJIT still gained a lot because
+until recently its IR was in maximal SSA form, so a block-local pass had more
+global effects).</p>
+
+<p>About five days later, dak2 came back with a global version in
+<a href="https://github.com/ruby/ruby/pull/17013">#17013</a>! This PR came with a bunch of
+changes in the name of performance—which I appreciate—but I like doing the
+silly slow thing first, especially because the PR is so much smaller. We can
+always refactor it later to be faster and, in the meantime, use the slow but
+maybe-easier-to-verify thing as a correctness oracle. So I did<sup id="fnref:much-later" role="doc-noteref"><a href="#fn:much-later" class="footnote" rel="footnote">1</a></sup> the
+silly slow thing in <a href="https://github.com/ruby/ruby/pull/17766">#17766</a>.</p>
+
+<p>This copy-happy version of canonicalize looks like:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">rewrite_maps</span> <span class="o">=</span> <span class="p">{</span><span class="n">block</span><span class="p">:</span> <span class="p">{}</span> <span class="k">for</span> <span class="n">block</span> <span class="ow">in</span> <span class="n">blocks</span><span class="p">}</span>
+<span class="n">dominators</span> <span class="o">=</span> <span class="n">compute_dominators</span><span class="p">()</span>
+<span class="k">for</span> <span class="n">block</span> <span class="ow">in</span> <span class="n">function</span><span class="p">.</span><span class="n">reverse_post_order</span><span class="p">():</span>
+    <span class="n">rewrite_map</span> <span class="o">=</span> <span class="n">rewrite_maps</span><span class="p">[</span><span class="n">dominators</span><span class="p">.</span><span class="n">idom</span><span class="p">(</span><span class="n">block</span><span class="p">)].</span><span class="n">clone</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">insn</span> <span class="ow">in</span> <span class="n">block</span><span class="p">.</span><span class="n">insns</span><span class="p">:</span>
+        <span class="n">insn</span><span class="p">.</span><span class="n">operands</span><span class="p">.</span><span class="n">map_in_place</span><span class="p">(</span><span class="k">lambda</span> <span class="n">o</span><span class="p">:</span> <span class="n">rewrite_map</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="n">o</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">insn</span><span class="p">.</span><span class="n">opcode</span> <span class="o">==</span> <span class="s">"GuardType"</span><span class="p">:</span>
+            <span class="n">rewrite_map</span><span class="p">[</span><span class="n">insn</span><span class="p">.</span><span class="n">val</span><span class="p">]</span> <span class="o">=</span> <span class="n">insn</span>
+    <span class="n">rewrite_maps</span><span class="p">[</span><span class="n">block</span><span class="p">]</span> <span class="o">=</span> <span class="n">rewrite_map</span>
+</code></pre></div></div>
+
+<p>(Which you may or may not notice looks a lot like <a href="https://github.com/beehive-lab/Maxine-VM/blob/e213a842f78983e2ba112ae46de8c64317bc206e/com.sun.c1x/src/com/sun/c1x/opt/GlobalValueNumberer.java">Maxine’s GVN
+implementation</a>.
+This is not a coincidence.)</p>
+
+<p>The core stays the same as the block-local version but now we can cascade
+rewrites along the dominator tree. I say that but we’re not actually computing
+a (top-down walkable) dominator tree—we’re only building a (bottom-up) map of
+<code class="language-plaintext highlighter-rouge">idom</code> using <a href="/assets/img/dominators-engineered.pdf">the engineered algorithm</a>
+(PDF). The rewrites still cascade down the dominator tree because this
+RPO-walk+idom-clone approach ends up being equivalent to actually walking a
+dominator tree.</p>
+
+<p>The block iteration order is different (RPO vs domtree pre-order) but the only
+property we care about maintaining is that we visit dominators before blocks
+that get dominated, and that is true in both.</p>
+
+<p>But where was I going with all this?</p>
+
+<p>…</p>
+
+<p>Oh, right. More <a href="/blog/partial-ssi/">partial SSI</a>. In the last post, we
+inserted <code class="language-plaintext highlighter-rouge">RefineType</code> in SSA construction so that we can infer things about the
+Ruby type of the conditional. For example:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bb0:
+  v0: Object = ...
+  v1: CBool = Test v0
+  v2: Truthy = RefineType v0, Truthy
+  v3: Falsy = RefineType v0, Falsy
+  CondBranch v1, bb1(v2), bb2(v3)
+
+bb1(v4:Truthy):
+  ...
+
+bb2(v5:Falsy):
+  ...
+</code></pre></div></div>
+
+<p>This is neat when the branch comes from Ruby code but sometimes we synthesize
+branches so we can’t do this in SSA construction. The general case looks like
+this:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bb0:
+  v0: CBool = ...
+  CondBranch v0, bb1, bb2
+
+bb1:
+  ...
+
+bb2:
+  ...
+</code></pre></div></div>
+
+<p>In this more general case, we stil want <code class="language-plaintext highlighter-rouge">bb1</code> to know that <code class="language-plaintext highlighter-rouge">v0</code> is
+<code class="language-plaintext highlighter-rouge">CBool[true]</code> in that branch and <code class="language-plaintext highlighter-rouge">bb2</code> to know that <code class="language-plaintext highlighter-rouge">v0</code> is <code class="language-plaintext highlighter-rouge">CBool[false]</code> in
+its branch (and in blocks dominated by <code class="language-plaintext highlighter-rouge">bb1</code> and <code class="language-plaintext highlighter-rouge">bb2</code>).</p>
+
+<p>Well, this is another thing we can do in <code class="language-plaintext highlighter-rouge">canonicalize</code>!</p>
+
+<p>All we need to do is at the beginning of each block B:</p>
+
+<ul>
+  <li>Check if B has one incoming control edge E<sup id="fnref:block-vs-edge" role="doc-noteref"><a href="#fn:block-vs-edge" class="footnote" rel="footnote">2</a></sup></li>
+  <li>Check if the terminator T for E.block is a conditional branch</li>
+  <li>If T.iftrue == B, seed the <code class="language-plaintext highlighter-rouge">rewrite_map</code> with <code class="language-plaintext highlighter-rouge">T.cond =&gt; Const(CBool[true])</code></li>
+  <li>If T.iffalse == B, seed the <code class="language-plaintext highlighter-rouge">rewrite_map</code> with <code class="language-plaintext highlighter-rouge">T.cond =&gt; Const(CBool[false])</code></li>
+</ul>
+
+<p>If you plan on running <code class="language-plaintext highlighter-rouge">canonicalize</code> multiple times, you may end up generating
+many constant instructions in your IR. To avoid this, you can intern them and,
+for example, place them in the entry block. This helps make the pass idempotent
+instead of always allocating new instructions.</p>
+
+<p>So what does this buy us?</p>
+
+<p>Well, I admit I was looking at the <code class="language-plaintext highlighter-rouge">30k_ifelse</code> benchmark on ruby-bench and
+wondering how to further collapse a bunch of IR that came out of my prototype
+value numbering implementation. The IR after value numbering looked like:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bb0:
+  v0: CBool = ...
+  CondBranch v0, bb1, bb2
+
+bb1:
+  ...
+  CondBranch v0, ...
+
+bb2:
+  ...
+  CondBranch v0, ...
+</code></pre></div></div>
+
+<p>and it felt a little silly that <code class="language-plaintext highlighter-rouge">bb1</code> and <code class="language-plaintext highlighter-rouge">bb2</code> didn’t get more information
+about <code class="language-plaintext highlighter-rouge">v0</code> by being branch targets. This couple-line change managed to collapse
+a bunch of those branches.</p>
+
+<p>So, perhaps a bit contrived, but it feels like a useful tool to have.</p>
+
+<p>See you all next time!</p>
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:much-later" role="doc-endnote">
+      <p>This PR landed much later than dak2’s because I wanted to wait
+for the <a href="https://github.com/ruby/ruby/pull/17311">SSA minimization pass</a> to
+land—more on that another time—so that global canonicalization could do
+more. Otherwise, because we had maximal SSA, we didn’t really re-use SSA
+values across blocks. <a href="#fnref:much-later" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:block-vs-edge" role="doc-endnote">
+      <p>It’s possible to have one block A do a conditional branch to
+another block B for both the iftrue case and the iffalse case. This is
+useful if, for example, it is passing different data along the block
+arguments of each edge. For this reason, we check the number of incoming
+edges, not the number of predecessor blocks. <a href="#fnref:block-vs-edge" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
