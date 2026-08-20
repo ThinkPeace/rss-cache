@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>On wrapping a callable in a lambda that just calls it with the same parameters | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>On wrapping a callable in a lambda that just calls it with the same parameters</h1>
+        <div class="meta">The Old New Thing 2026-08-19T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260819-00/?p=112624">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-ecec339ca89b1a02.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Just use the callable directly. The post On wrapping a callable in a lambda that just calls it with the same parameters appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Suppose you have a function that accepts a lambda and wants to use it when calling another function. I&#8217;ve seen people wrap the lambda inside another lambda:</p>
+<pre>template&lt;typename Lambda&gt;
+bool Widget::QueueToWorkerThread(Lambda&amp;&amp; lambda)
+{
+    CreateWorkerThreadIfNeeded();
+    return m_dispatcherQueue.TryEnqueue(
+        <span>[lambda = std::forward&lt;Lambda&gt;(lambda)]() { lambda(); }</span>);
+}
+</pre>
+<p>But there&#8217;s no point in wrapping a lambda inside another lambda if you are just calling the inner lambda with the same parameters as the outer one. You can use the inner lambda&#8217;s function call operator directly.</p>
+<pre>template&lt;typename Lambda&gt;
+bool Widget::QueueToWorkerThread(Lambda&amp;&amp; lambda)
+{
+    CreateWorkerThreadIfNeeded();
+    return m_dispatcherQueue.TryEnqueue(
+        <span>std::forward&lt;Lambda&gt;(lambda)</span>);
+}
+</pre>
+<p>My guess is that some people don&#8217;t realize that a lambda is not a special entity in the C++ language, where if somebody says that a function accepts a lambda, they think that it means that you must literally pass a lambda.</p>
+<p>In C++, a lambda is just syntactic sugar for a class with a function call operator. And if you already have a class with a function call operator, there&#8217;s no need to wrap it inside another class with the same function call operator.</p>
+<p>Wrapping a lambda is basically doing this:</p>
+<pre>template&lt;typename Lambda&gt;
+bool Widget::QueueToWorkerThread(Lambda&amp;&amp; lambda)
+{
+    CreateWorkerThreadIfNeeded();
+    <span>struct wrapper {                                   </span>
+    <span>    wrapper(Lambda&amp;&amp; lambda) :                     </span>
+    <span>        m_lambda(std::forward&lt;Lambda&gt;(lambda)) {}  </span>
+    <span>    auto operator()() const { return m_lambda(); } </span>
+    <span>private:                                           </span>
+    <span>    const std::remove_reference_t&lt;Lambda&gt; m_lambda;</span>
+    <span>};                                                 </span>
+    return m_dispatcherQueue.TryEnqueue(
+        wrapper(std::forward&lt;Lambda&gt;(lambda)));
+}
+</pre>
+<p>There&#8217;s no need to introduce the extra level of indirection. The incoming lambda is already in the form you want. Just use it.</p>
+<p><b>Bonus chatter</b>: Wrapping a lambda is significant if there is a transformation on the parameters, such as cocercing them to a particular type or forcing them to be passed by value.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260819-00/?p=112624">On wrapping a callable in a lambda that just calls it with the same parameters</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
