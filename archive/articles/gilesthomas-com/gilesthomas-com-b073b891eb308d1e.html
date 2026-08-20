@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why do OpenAI&#x27;s GPT-2 weights beat mine? Part two: IFT dropout | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why do OpenAI&#x27;s GPT-2 weights beat mine? Part two: IFT dropout</h1>
+        <div class="meta">Giles&#x27; blog 2026-08-14T19:00:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/08/why-do-openai-gpt2-weights-beat-mine-2-ift-dropout">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-b073b891eb308d1e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Wait, dropout! https://arxiv.org/pdf/2101.03961 -- p11 -- Regularizing large sparse models. Our paper considers the common NLP approach of pre-training on a large corpus followed by fine-tuning on smaller downstream tasks such as summarization or question answering. One issue that naturally arises is overfitting since many fine-tuning tasks have very few ex…</div>
+        <div class="content">
+          <h2 id="wait-dropout">Wait, dropout!</h2>
+
+<p>https://arxiv.org/pdf/2101.03961 -- p11 --</p>
+
+<blockquote>
+  <p>Regularizing large sparse models. Our paper considers the common NLP approach
+  of pre-training on a large corpus followed by fine-tuning on smaller downstream tasks such
+  as summarization or question answering. One issue that naturally arises is overfitting since
+  many fine-tuning tasks have very few examples. During fine-tuning of standard Transformers, Raffel et al. (2019) use dropout (Srivastava et al., 2014) at each layer to prevent
+  overfitting. Our Switch Transformers have significantly more parameters than the FLOP
+  matched dense baseline, which can lead to more severe overfitting on these smaller downstream tasks.</p>
+</blockquote>
+
+<p>Could that be it?!  Model conf has dropout in it, so...</p>
+
+<p>Drop rate was zero in the GPT-2 weights JSON files I had!  Nothing in the paper but
+Raschka and also https://huggingface.co/docs/transformers/v4.48.2/en/model_doc/gpt2#transformers.GPT2Config</p>
+
+<p>When I did the extended/two-epoch runs, I wound up doing many more epochs for the
+IFT.</p>
+
+<h3 id="matching-pre-training">Matching pre-training</h3>
+
+<p>OK, firstly let's do a run where we match the models' pre-train dropout.</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>Base dropout</th>
+  <th>IFT epochs</th>
+  <th>IFT score</th>
+  <th>IFT rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>Yes</td>
+  <td>2</td>
+  <td>42.43</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>JAX, overtrained one long epoch</td>
+  <td>3.324953</td>
+  <td>No</td>
+  <td>3</td>
+  <td>19.35</td>
+  <td>4</td>
+</tr>
+<tr>
+  <td>JAX, overtrained two normal epochs</td>
+  <td>3.326482</td>
+  <td>No</td>
+  <td>4</td>
+  <td>18.68</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td>JAX, with MHA bias, no dropout</td>
+  <td>3.418784</td>
+  <td>No</td>
+  <td>4</td>
+  <td>18.96</td>
+  <td>6</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, no dropout</td>
+  <td>3.420089</td>
+  <td>No</td>
+  <td>5</td>
+  <td>21.45</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, with dropout</td>
+  <td>3.476802</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>17.17</td>
+  <td>10</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>23.66</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>No</td>
+  <td>4</td>
+  <td>14.06</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>No</td>
+  <td>4</td>
+  <td>10.51</td>
+  <td>17</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td>Yes</td>
+  <td>6</td>
+  <td>19.25</td>
+  <td>5</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>Yes</td>
+  <td>6</td>
+  <td>13.37</td>
+  <td>14</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>14.25</td>
+  <td>12</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>Yes</td>
+  <td>5</td>
+  <td>14.31</td>
+  <td>11</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>11.48</td>
+  <td>16</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>11.50</td>
+  <td>15</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>9.09</td>
+  <td>18</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>17.70</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>17.55</td>
+  <td>9</td>
+</tr>
+</tbody>
+</table>
+
+<p>Epochs in keeping with previous ones except for OpenAI small which took 4 rather than 2,
+and oddly "Cloud FineWeb, 8x H100 80 GiB" which took an extra epoch.</p>
+
+<p>The ordering has swapped around a bit, but nothing drastic.  All models are scoring
+a bit higher than they were, apart from OpenAI medium and small.  So maybe signal?
+Small is still way ahead though.</p>
+
+<h3 id="dropout-always-on">Dropout always on</h3>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>Base dropout</th>
+  <th>IFT epochs</th>
+  <th>IFT score</th>
+  <th>IFT rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>Yes</td>
+  <td>2</td>
+  <td>42.22</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>JAX, overtrained one long epoch</td>
+  <td>3.324953</td>
+  <td>No</td>
+  <td>19</td>
+  <td>7.26</td>
+  <td>17</td>
+</tr>
+<tr>
+  <td>JAX, overtrained two normal epochs</td>
+  <td>3.326482</td>
+  <td>No</td>
+  <td>16</td>
+  <td>12.71</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td>JAX, with MHA bias, no dropout</td>
+  <td>3.418784</td>
+  <td>No</td>
+  <td>13</td>
+  <td>13.09</td>
+  <td>11</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, no dropout</td>
+  <td>3.420089</td>
+  <td>No</td>
+  <td>20</td>
+  <td>5.20</td>
+  <td>18</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, with dropout</td>
+  <td>3.476802</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>18.00</td>
+  <td>4</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>23.94</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>No</td>
+  <td>13</td>
+  <td>15.28</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>No</td>
+  <td>19</td>
+  <td>8.32</td>
+  <td>16</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td>Yes</td>
+  <td>6</td>
+  <td>20.77</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>Yes</td>
+  <td>6</td>
+  <td>14.16</td>
+  <td>10</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>15.17</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>Yes</td>
+  <td>5</td>
+  <td>14.86</td>
+  <td>9</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>12.35</td>
+  <td>14</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>12.99</td>
+  <td>12</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>10.31</td>
+  <td>15</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>17.33</td>
+  <td>6</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>17.94</td>
+  <td>5</td>
+</tr>
+</tbody>
+</table>
+
+<p>As you'd expect, epochs the same for the models base trained with dropout.  <em>Much</em> higher
+for non-dropout base models.</p>
+
+<p>Models base trained with dropout seem to have been largely unaffected, as you'd expect --
+points go up or down but pretty much within a range of +/-1.  But all models that
+were base trained without performed catastrophically worse, with the exception of
+<code>1xrtx3090-stacked-interventions</code>, which actually went up a bit (though within the noise).</p>
+
+<p>Interesting.</p>
+
+<h3 id="dropout-always-off">Dropout always off</h3>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>Base dropout</th>
+  <th>IFT epochs</th>
+  <th>IFT score</th>
+  <th>IFT rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>Yes</td>
+  <td>2</td>
+  <td>42.81</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>JAX, overtrained one long epoch</td>
+  <td>3.324953</td>
+  <td>No</td>
+  <td>3</td>
+  <td>18.62</td>
+  <td>5</td>
+</tr>
+<tr>
+  <td>JAX, overtrained two normal epochs</td>
+  <td>3.326482</td>
+  <td>No</td>
+  <td>4</td>
+  <td>18.94</td>
+  <td>4</td>
+</tr>
+<tr>
+  <td>JAX, with MHA bias, no dropout</td>
+  <td>3.418784</td>
+  <td>No</td>
+  <td>4</td>
+  <td>17.60</td>
+  <td>6</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, no dropout</td>
+  <td>3.420089</td>
+  <td>No</td>
+  <td>5</td>
+  <td>20.60</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, with dropout</td>
+  <td>3.476802</td>
+  <td>Yes</td>
+  <td>5</td>
+  <td>12.55</td>
+  <td>15</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>Yes</td>
+  <td>2</td>
+  <td>25.86</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>No</td>
+  <td>4</td>
+  <td>13.15</td>
+  <td>14</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>No</td>
+  <td>4</td>
+  <td>10.11</td>
+  <td>18</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td>Yes</td>
+  <td>3</td>
+  <td>16.78</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>14.94</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>Yes</td>
+  <td>3</td>
+  <td>13.71</td>
+  <td>12</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>13.86</td>
+  <td>11</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>Yes</td>
+  <td>3</td>
+  <td>10.75</td>
+  <td>17</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>13.60</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>Yes</td>
+  <td>5</td>
+  <td>12.03</td>
+  <td>16</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>Yes</td>
+  <td>5</td>
+  <td>14.19</td>
+  <td>10</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>Yes</td>
+  <td>5</td>
+  <td>14.75</td>
+  <td>9</td>
+</tr>
+</tbody>
+</table>
+
+<p>Training epochs stable vs first run in this post for models base trained with no dropout, as you'd expect.
+Models trained with dropout all get fewer epochs apart from Cloud FineWeb, 8x B200 160 GiB,
+which is stable</p>
+
+<p>OpenAI weights unharmed.</p>
+
+<p>Other with-dropout models mostly harmed apart from <code>1xrtx3090-baseline</code>, Local FineWeb train.</p>
+
+<p>Need a better comparitive table.</p>
+
+<!--
+uv run ../ift_generate_test_responses.py 1xrtx3090-baseline ../runs/1xrtx3090-baseline/model.json ../runs/1xrtx3090-baseline/checkpoints/latest/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py 1xrtx3090-stacked-interventions ../runs/1xrtx3090-stacked-interventions/model.json ../runs/1xrtx3090-stacked-interventions/checkpoints/latest/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py 8xa100m40-baseline ../runs/8xa100m40-baseline/model.json ../runs/8xa100m40-baseline/checkpoints/best/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py 8xa100m40 ../runs/8xa100m40/model.json ../runs/8xa100m40/checkpoints/best/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py 8xa100m40-stacked-interventions-1 ../runs/8xa100m40-stacked-interventions-1/model.json ../runs/8xa100m40-stacked-interventions-1/checkpoints/best/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py 8xa100m80 ../runs/8xa100m80/model.json ../runs/8xa100m80/checkpoints/best/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py 8xb200m160 ../runs/8xb200m160/model.json ../runs/8xb200m160/checkpoints/best/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py 8xh100m80 ../runs/8xh100m80/model.json ../runs/8xh100m80/checkpoints/latest/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py jax-mha-bias ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias/model.json ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias/checkpoints/latest/pytorch-model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py jax-no-mha-bias-dropout ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-dropout/model.json ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-dropout/checkpoints/latest/pytorch-model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py jax-no-mha-bias ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train/model.json ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train/checkpoints/latest/pytorch-model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py local-fineweb-edu-extended ../runs/1xrtx3090-baseline/model.json ~/Dev/llm-from-scratch/big-train-checkpoints-fw-edu-2x/latest/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py local-fineweb-edu ../runs/1xrtx3090-baseline/model.json ~/Dev/llm-from-scratch/big-train-checkpoints-fw-edu/latest/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py local-fineweb ../runs/1xrtx3090-baseline/model.json ~/Dev/llm-from-scratch/big-train-checkpoints-fw/latest/model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py openai-medium ~/Dev/llm-from-scratch/openai-weights-gpt-medium.json ~/Dev/llm-from-scratch/gpt-2-medium.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py openai-small ~/Dev/llm-from-scratch/openai-weights-gpt-small.json ~/Dev/llm-from-scratch/gpt-2-small.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py jax-mha-bias-extended-train ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias-extended/model.json ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias-extended/checkpoints/latest/pytorch-model.safetensors --dropout=on
+uv run ../ift_generate_test_responses.py jax-mha-bias-2-epoch ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias-2-epoch/model.json ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias-2-epoch/checkpoints/latest/pytorch-model.safetensors --dropout=on
+-->
+
+<!--
+uv run ../ift_generate_test_responses.py 1xrtx3090-baseline ../runs/1xrtx3090-baseline/model.json ../runs/1xrtx3090-baseline/checkpoints/latest/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py 1xrtx3090-stacked-interventions ../runs/1xrtx3090-stacked-interventions/model.json ../runs/1xrtx3090-stacked-interventions/checkpoints/latest/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py 8xa100m40-baseline ../runs/8xa100m40-baseline/model.json ../runs/8xa100m40-baseline/checkpoints/best/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py 8xa100m40 ../runs/8xa100m40/model.json ../runs/8xa100m40/checkpoints/best/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py 8xa100m40-stacked-interventions-1 ../runs/8xa100m40-stacked-interventions-1/model.json ../runs/8xa100m40-stacked-interventions-1/checkpoints/best/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py 8xa100m80 ../runs/8xa100m80/model.json ../runs/8xa100m80/checkpoints/best/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py 8xb200m160 ../runs/8xb200m160/model.json ../runs/8xb200m160/checkpoints/best/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py 8xh100m80 ../runs/8xh100m80/model.json ../runs/8xh100m80/checkpoints/latest/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py jax-mha-bias ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias/model.json ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias/checkpoints/latest/pytorch-model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py jax-no-mha-bias-dropout ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-dropout/model.json ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-dropout/checkpoints/latest/pytorch-model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py jax-no-mha-bias ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train/model.json ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train/checkpoints/latest/pytorch-model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py local-fineweb-edu-extended ../runs/1xrtx3090-baseline/model.json ~/Dev/llm-from-scratch/big-train-checkpoints-fw-edu-2x/latest/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py local-fineweb-edu ../runs/1xrtx3090-baseline/model.json ~/Dev/llm-from-scratch/big-train-checkpoints-fw-edu/latest/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py local-fineweb ../runs/1xrtx3090-baseline/model.json ~/Dev/llm-from-scratch/big-train-checkpoints-fw/latest/model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py openai-medium ~/Dev/llm-from-scratch/openai-weights-gpt-medium.json ~/Dev/llm-from-scratch/gpt-2-medium.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py openai-small ~/Dev/llm-from-scratch/openai-weights-gpt-small.json ~/Dev/llm-from-scratch/gpt-2-small.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py jax-mha-bias-extended-train ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias-extended/model.json ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias-extended/checkpoints/latest/pytorch-model.safetensors --dropout=off
+uv run ../ift_generate_test_responses.py jax-mha-bias-2-epoch ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias-2-epoch/model.json ~/Dev/jax-gpt2-from-scratch/runs/full-llm-full-train-with-mha-output-bias-2-epoch/checkpoints/latest/pytorch-model.safetensors --dropout=off
+-->
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

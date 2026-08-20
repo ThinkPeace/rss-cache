@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Use the built-in GELU, don&#x27;t roll your own! | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Use the built-in GELU, don&#x27;t roll your own!</h1>
+        <div class="meta">Giles&#x27; blog 2026-08-20T02:00:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/08/built-in-gelu">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-c45dceaaed2e39a1.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Unsurprisingly, PyTorch&#x27;s own built-in GELU function is faster than the hand-rolled one I&#x27;ve been using to date. But I was surprised at how much faster using it made things when training my models. I discovered this accidentally just now while working on something unrelated, but am logging the details here for anyone else that might find it useful. The head…</div>
+        <div class="content">
+          <p>Unsurprisingly, <a href="https://docs.pytorch.org/docs/2.13/generated/torch.nn.GELU.html">PyTorch's own built-in GELU function</a>
+is faster than the hand-rolled one I've been using to date.  But I <em>was</em> surprised at
+how <em>much</em> faster using it made things when training my models.  I discovered this
+accidentally just now while working on something unrelated, but am logging the details
+here for anyone else that might find it useful.</p>
+
+<p>The headline numbers: the same code, training the same model on the same data, ran
+at about:</p>
+
+<ul>
+<li>21,000 tokens per second using the hand-rolled GELU from <a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>".</li>
+<li>25,000 tokens per second using PyTorch's built-in GELU with no arguments.</li>
+<li>25,000 tokens per second using the built-in GELU with <code>approximate="tanh"</code>, which
+uses the same maths as Raschka's version under the hood.</li>
+</ul>
+
+<p>That's a 20% increase in throughput for both of the built-in versions -- definitely nothing to be sneezed at.</p>
+
+<p>And what is particularly
+interesting is that there aren't that many GELUs going on -- it's a GPT-2 small-style
+model, with 12 layers.  So that's 12 GELUs handling tensors
+shaped <code>(batch_size, seq_len, 4 * d_emb)</code>, which is <code>(6, 1024, 3072)</code> for my training setup.
+Given that the rest of the model is doing all of the normal full attention stuff for GPT-2, it's
+<em>really</em> surprising that the GELUs alone must have been taking up so much of the time.  The throughput
+numbers mean that we must have been spending about 17% of our time on the extra overhead from the hand-rolled
+version, so that sets a lower bound for how much time the GELUs were taking up.</p>
+
+<p>More info below the fold.</p>
+<p>Back when I was doing the "interventions" part of my <a href="/llm-from-scratch">LLM from scratch series</a>, training
+dozens of GPT-2 small-sized models in the cloud and on my local machines, to keep things simple I used
+the original model code from Raschka's book.
+That happens to have its own implementation of the GELU function --
+you can see <a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/16dd249447754c3a7be4f1212ccaf312c7416d92/gpt.py#L78">my copy here</a>.</p>
+
+<p>I'm not that sure why the hand-rolled version is in there -- he covers the maths, but the specific implementation isn't explained
+in that much depth, and it seems rather like boilerplate, just a "type this in and use it"
+kind of thing.  By contrast, for example, while he does explain the maths behind cross-entropy loss in similar detail,
+we use the built-in function for it rather than coding it up ourselves.</p>
+
+<p>When I switched to using JAX for <a href="/2026/07/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax">my own from-scratch implementation</a>,
+I decided to not bother porting the boilerplate, and just used <a href="https://docs.jax.dev/en/latest/_autosummary/jax.nn.gelu.html#jax.nn.gelu">JAX's own built-in version</a>.</p>
+
+<p>I was revisiting the PyTorch code -- I'm in the process of extending it with mixture-of-experts
+support, about which more in a later post -- and decided to switch from the hand-written GELU to the PyTorch one just to
+tidy things up a bit.
+I noticed something interesting -- my new MoE code suddenly seemed to speed up.</p>
+
+<p>Was that a mirage?  Or had I discovered part -- or even all -- of the reason why the
+JAX code was so much faster than the PyTorch code?  With PyTorch, I was typically
+getting training speeds of about 21,000 tokens per second, while in JAX I was getting 24,000 tps or so.
+I'd been chalking that up to JAX's JIT compilation, but could it have been just a result
+of a random implementation choice I'd made?</p>
+
+<p>I did three partial test training runs, letting each one run for 20 minutes to allow the
+training speed to settle down from any startup overhead.  Firstly, with the old
+hand-coded GELU:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@poppy:~/Dev/ddp-base-model-from-scratch<span class="w"> </span><span class="o">((</span>HEAD<span class="w"> </span>detached<span class="w"> </span>at<span class="w"> </span>16dd249<span class="o">))</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>torchrun<span class="w"> </span>--nproc_per_node<span class="o">=</span><span class="m">1</span><span class="w"> </span>ddp_train.py<span class="w"> </span>1xrtx3090-baseline<span class="w"> </span>datasets/
+Fetching<span class="w"> </span><span class="m">4</span><span class="w"> </span>files:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>███████████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">4</span>/4<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">3173</span>.90it/s<span class="o">]</span>
+Starting<span class="w"> </span>rank<span class="w"> </span><span class="m">0</span><span class="w"> </span>training<span class="w"> </span>at<span class="w"> </span>global<span class="w"> </span>step<span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="m">0</span>%<span class="p">|</span><span class="w">                                                                                                                  </span><span class="p">|</span><span class="w"> </span><span class="m">0</span>/33165<span class="w"> </span><span class="o">[</span><span class="m">00</span>:04&lt;?,<span class="w"> </span>?it/s,<span class="w"> </span><span class="nv">loss</span><span class="o">=</span><span class="m">10</span>.991,<span class="w"> </span><span class="nv">tps</span><span class="o">=</span><span class="m">19</span>,982<span class="o">]</span>
+
+
+Checkpoint
+
+Continuing<span class="w"> </span>training
+<span class="w">  </span><span class="m">1</span>%<span class="p">|</span>▊<span class="w">                                                                                                     </span><span class="p">|</span><span class="w"> </span><span class="m">257</span>/33165<span class="w"> </span><span class="o">[</span><span class="m">20</span>:07&lt;<span class="m">42</span>:53:57,<span class="w">  </span><span class="m">4</span>.69s/it,<span class="w"> </span><span class="nv">loss</span><span class="o">=</span><span class="m">6</span>.570,<span class="w"> </span><span class="nv">tps</span><span class="o">=</span><span class="m">20</span>,920<span class="o">]</span>
+</code></pre>
+</div>
+
+<p>So it was getting 20,920 on average over those 257 global steps.  That speed was in line with <a href="/2026/04/llm-from-scratch-32k-interventions-training-our-best-model-locally-gradient-accumulation#the-new-local-baseline">the original run</a>
+of the configuration I was using.</p>
+
+<p>Next, I introduced the built-in PyTorch GELU with no arguments:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="gd">-</span>
+<span class="gd">-class GELU(nn.Module):</span>
+<span class="gd">-</span>
+<span class="gd">-    def forward(self, x):</span>
+<span class="gd">-        return 0.5 * x * (1 + torch.tanh(torch.sqrt(torch.tensor(2.0 / torch.pi)) * (x + 0.044715 * torch.pow(x, 3))))</span>
+<span class="gd">-</span>
+<span class="gd">-</span>
+<span class="gd">-</span>
+<span class="w"> </span>class FeedForward(nn.Module):
+
+<span class="w"> </span>    def __init__(self, cfg):
+<span class="w"> </span>        super().__init__()
+<span class="w"> </span>        self.layers = nn.Sequential(
+<span class="w"> </span>            nn.Linear(cfg[&quot;emb_dim&quot;], cfg[&quot;emb_dim&quot;] * 4),
+<span class="gd">-            GELU(),</span>
+<span class="gi">+            nn.GELU(),</span>
+<span class="w"> </span>            nn.Linear(cfg[&quot;emb_dim&quot;] * 4, cfg[&quot;emb_dim&quot;])
+<span class="w"> </span>        )
+</code></pre>
+</div>
+
+<p>That does the full calculations for GELU, rather than using the <code>tanh</code>-based approximation that
+the hand-rolled code did.  After 20 minutes, it looked like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@poppy:~/Dev/ddp-base-model-from-scratch<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>torchrun<span class="w"> </span>--nproc_per_node<span class="o">=</span><span class="m">1</span><span class="w"> </span>ddp_train.py<span class="w"> </span>1xrtx3090-baseline<span class="w"> </span>datasets/
+Fetching<span class="w"> </span><span class="m">4</span><span class="w"> </span>files:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>██████████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">4</span>/4<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">11222</span>.22it/s<span class="o">]</span>
+Starting<span class="w"> </span>rank<span class="w"> </span><span class="m">0</span><span class="w"> </span>training<span class="w"> </span>at<span class="w"> </span>global<span class="w"> </span>step<span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="m">0</span>%<span class="p">|</span><span class="w">                                                                                                                  </span><span class="p">|</span><span class="w"> </span><span class="m">0</span>/33165<span class="w"> </span><span class="o">[</span><span class="m">00</span>:04&lt;?,<span class="w"> </span>?it/s,<span class="w"> </span><span class="nv">loss</span><span class="o">=</span><span class="m">10</span>.991,<span class="w"> </span><span class="nv">tps</span><span class="o">=</span><span class="m">23</span>,953<span class="o">]</span>
+
+
+Checkpoint
+
+Continuing<span class="w"> </span>training
+<span class="w">  </span><span class="m">1</span>%<span class="p">|</span>▉<span class="w">                                                                                                     </span><span class="p">|</span><span class="w"> </span><span class="m">307</span>/33165<span class="w"> </span><span class="o">[</span><span class="m">20</span>:00&lt;<span class="m">35</span>:40:59,<span class="w">  </span><span class="m">3</span>.91s/it,<span class="w"> </span><span class="nv">loss</span><span class="o">=</span><span class="m">6</span>.331,<span class="w"> </span><span class="nv">tps</span><span class="o">=</span><span class="m">25</span>,134<span class="o">]</span>
+</code></pre>
+</div>
+
+<p>So this time we were getting 25,134 tokens per second -- 20% faster!</p>
+
+<p>By default, PyTorch's GELU uses an exact calculation of the function -- the hand-written
+code from the book uses an approximation using <code>tanh</code>.  Luckily, you can get that same
+approximation from PyTorch:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="w"> </span>        super().__init__()
+<span class="w"> </span>        self.layers = nn.Sequential(
+<span class="w"> </span>            nn.Linear(cfg[&quot;emb_dim&quot;], cfg[&quot;emb_dim&quot;] * 4),
+<span class="gd">-            nn.GELU(),</span>
+<span class="gi">+            nn.GELU(approximate=&quot;tanh&quot;),</span>
+<span class="w"> </span>            nn.Linear(cfg[&quot;emb_dim&quot;] * 4, cfg[&quot;emb_dim&quot;])
+<span class="w"> </span>        )
+</code></pre>
+</div>
+
+<p>So, training with that for 20 minutes:</p>
+
+<div class="codehilite">
+<pre><span></span><code>giles@poppy:~/Dev/ddp-base-model-from-scratch<span class="w"> </span><span class="o">(</span>main<span class="o">)</span>$<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>torchrun<span class="w"> </span>--nproc_per_node<span class="o">=</span><span class="m">1</span><span class="w"> </span>ddp_train.py<span class="w"> </span>1xrtx3090-baseline<span class="w"> </span>datasets/
+Fetching<span class="w"> </span><span class="m">4</span><span class="w"> </span>files:<span class="w"> </span><span class="m">100</span>%<span class="p">|</span>███████████████████████████████████████████████████████████████████████████████████████████████████████████████████<span class="p">|</span><span class="w"> </span><span class="m">4</span>/4<span class="w"> </span><span class="o">[</span><span class="m">00</span>:00&lt;<span class="m">00</span>:00,<span class="w"> </span><span class="m">4115</span>.09it/s<span class="o">]</span>
+Starting<span class="w"> </span>rank<span class="w"> </span><span class="m">0</span><span class="w"> </span>training<span class="w"> </span>at<span class="w"> </span>global<span class="w"> </span>step<span class="w"> </span><span class="m">0</span>
+<span class="w">  </span><span class="m">0</span>%<span class="p">|</span><span class="w">                                                                                                                  </span><span class="p">|</span><span class="w"> </span><span class="m">0</span>/33165<span class="w"> </span><span class="o">[</span><span class="m">00</span>:04&lt;?,<span class="w"> </span>?it/s,<span class="w"> </span><span class="nv">loss</span><span class="o">=</span><span class="m">10</span>.991,<span class="w"> </span><span class="nv">tps</span><span class="o">=</span><span class="m">23</span>,875<span class="o">]</span>
+
+
+Checkpoint
+
+Continuing<span class="w"> </span>training
+<span class="w">  </span><span class="m">1</span>%<span class="p">|</span>▉<span class="w">                                                                                                     </span><span class="p">|</span><span class="w"> </span><span class="m">307</span>/33165<span class="w"> </span><span class="o">[</span><span class="m">20</span>:00&lt;<span class="m">35</span>:39:42,<span class="w">  </span><span class="m">3</span>.91s/it,<span class="w"> </span><span class="nv">loss</span><span class="o">=</span><span class="m">6</span>.332,<span class="w"> </span><span class="nv">tps</span><span class="o">=</span><span class="m">25</span>,142<span class="o">]</span>
+</code></pre>
+</div>
+
+<p>25,142 tokens per second -- basically the same as the non-approximate version.</p>
+
+<p>So: switching to the built-in GELU made my PyTorch code run 20% faster, at about 25,000 tps
+rather than 21,000.</p>
+
+<p>My JAX code, which used JAX's built-in GELU, ran at around 24,000 tps.  I'd actually
+found that rather surprising, because in JAX I was training in full-fat 32-bit floating point, while in PyTorch I was using
+Automatic Mixed Precision (AMP) -- a special mode that allows it to use 16-bit calculations
+where it won't hurt the model much.</p>
+
+<p>I'd <a href="/2025/12/llm-from-scratch-28-training-a-base-model-from-scratch">found</a> that
+AMP gave PyTorch a huge speedup -- from 15,402 tps to 19,797 on one test.  So JAX without AMP
+being so much faster than PyTorch with AMP was a bit of a surprise.  Its JIT is pretty
+amazing, but I didn't expect it to be <em>that</em> much faster.</p>
+
+<p>Now I think that we have at least part of an explanation.  I was using JAX's
+built-in GELU (interestingly, with its default parameters, which means that it used the <code>tanh</code>
+approximation), but the PyTorch code was using the hand-rolled one, and that unduly
+penalised it and erased some of the gains it got from AMP.</p>
+
+<p>If I really wanted to dig into this, I suppose I might try JAX with a hand-rolled GELU
+to see what happened.  My guess is that because of its JIT, it might actually handle it
+better -- the whole hand-rolled thing could be compiled into one thing on the GPU.  Perhaps
+it would also be interesting to try the non-AMP PyTorch code with the built-in GELU.
+But I doubt that would really be the best use of my time (and my electricity bill),
+so I'll leave it here.</p>
+
+<p>On the other hand, I do intend to have a look at <code>torch.compile</code> in the future, to see
+what kind of speedup I can get from it.  And it might be able to compile and fuse together
+the hand-rolled GELU -- so that would be an interesting thing to experiment with in that
+post: does the built-in GELU advantage disappear if we're compiling?</p>
+
+<p>But anyway, for now, lesson learned: use built-in PyTorch modules when you can.
+It's a pretty obvious one ;-)</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
