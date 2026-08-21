@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rust Glancer | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Rust Glancer</h1>
+        <div class="meta">matklad 2026-08-21T00:00:00Z</div>
+        <div class="links">
+          <a href="https://matklad.github.io/2026/08/21/rust-glancer.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/matklad-github-io/matklad-github-io-69fe74b6a8c28eb2.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Rust Glancer, a functional LSP server for Rust which uses two orders of magnitude less RAM, is incredibly cool. Go check it out! This post started as a comment on lobste.rs, but I figured it out that it&#x27;s better to publish it somewhat more prominently. Don&#x27;t expect polished writing though!</div>
+        <div class="content">
+          <header>
+  <h1>Rust Glancer</h1>
+  <time class="meta" datetime="2026-08-21">Aug 21, 2026</time>
+</header>
+<p><a href="https://rust-glancer.github.io/blog/hello-world/">Rust Glancer</a>, a functional
+LSP server for Rust which uses two orders of magnitude less RAM, is incredibly
+cool. Go check it out! This post started as a comment on lobste.rs, but I
+figured it out that it’s better to publish it somewhat more prominently. Don’t
+expect polished writing though!</p>
+<p>Some thoughts:</p>
+
+<figure class="blockquote">
+<blockquote><p>rust-analyzer uses rowan for syntax tree representation</p>
+</blockquote>
+
+</figure>
+<p>Yeah, rowan is garbage :P I was really thinking about</p>
+<ul>
+<li>
+incremental parsing,
+</li>
+<li>
+incremental, DOM-mutation style refactorings,
+</li>
+</ul>
+<p>And Rowan is pretty good for that. But that’s 1% use case. The 99% use case is
+all the code in your 6666 dependencies which you won’t ever look at, but which
+needs to be at least shallowly analyzed. Even for incremental tool whose main
+goal is refactoring, the primary AST structure should be just a list of arrays.
+There might be a real post about that at some point, see
+<a href="https://youtu.be/G93oYL1ry70" class="url">https://youtu.be/G93oYL1ry70</a> as a teaser.</p>
+
+<figure class="blockquote">
+<blockquote><p>Rust workspaces genuinely have a lot of information that must be indexed:
+thousands of functions, structures, traits, relationships between these,
+function bodies and statements in them, etc. Each of these needs to be
+analyzed and remembered, and you can’t really cheat if you want to have things
+like “find all references to this structure”.</p>
+</blockquote>
+
+</figure>
+<p>If I understand correctly, Rust Glancer wants to process each function body. I
+think <em>that</em> part can perhaps be made lazy (but not incremental!) with little
+overhead? Index all items, but, for functions, do only the currently opened
+file? This might combine some of the better parts of both worlds.</p>
+<p>Would be interesting to compare memory usage with Rust Rover. Net of the IDE
+GUI itself, I would expect RR to be more compact.</p>
+
+<figure class="blockquote">
+<blockquote><p>Some features are unlikely to be supported though, such as build scripts /
+proc macros support via proc macro invocation</p>
+</blockquote>
+
+</figure>
+<p>I might be rationalizing/misremembering things, but IIRC it’s exactly around
+adding proc macros that the thing began to feel unreasonably bulky. Expanding
+proc macros is slow as we are running real code, we can’t really do normal IDE
+cheats. And proc macros generate a lot of code. At one point I measured, it was
+like 30% of rust-analyzer binary size was attributed to JSON parsing code. If no
+one sees the code, it can’t harm anybody, right?</p>
+<p>One potential approach here is to pull the Sorbet trick, where you don’t run
+meta programming at all, and instead have a plugin interface to “explain” the
+<em>effects</em> of what that would have done. Instead of running serde, we just add a
+shim that injects <code class="display">imp Serialize for T {}</code> with an empty body.</p>
+
+<figure class="blockquote">
+<blockquote><p>I’m not sure why, but in rust-analyzer I’ve observed that when agents edit the
+code, inlay hints can get out of place</p>
+</blockquote>
+
+</figure>
+<p>Rust analyzer’s core data model is <em>very</em> pedantic about always observing
+consistent snapshots of the code, and does its best to ensure that the language
+client and server have a shared, strictly serializable view of the world. It’s a
+shame that
+<a href="https://github.com/Microsoft/language-server-protocol/issues/584">LSP doesn’t allow that to be <em>correct</em>, only heuristically right</a>,
+unlike the older Dart Analyzer protocol, which has sound data synchronization.</p>
+<p>However our implementation of file watching is sketchy! First, there are two
+backends: we can ask the editor to do watching for us, or we can use server side
+watching. Try changing
+<a href="https://rust-analyzer.github.io/book/configuration.html#files.watcher">this option</a>
+and see if it helps? But then, yeah, my recollection is that our native watcher’s API was
+fundamentally racy, and I didn’t do the messy platform-specific work of making it correct.</p>
+<hr>
+<p>But the main thing I want to write, and why I moved from the cozy lobste.rs text
+area to the comfort of an Emacs buffer, is that right now rust-analyzer is a bit
+like that half-drawn horse meme, except that it’s only the head half of the
+horse.</p>
+<p>One Big Idea of IntelliJ is that it’s PSI API (essentially AST with resolved
+types) is really an interface, and there are multiple provides. And in a typical
+usage, there’s at least three backends in play:</p>
+<ul>
+<li>
+For the files opened in the editor, actively modified by the user, the PSI is
+backed by the concrete syntax trees.
+</li>
+<li>
+For the rest of the project files, the PSI is backed by the so called Stub
+Tree, a compact on disk representation storing only the “externally visible”
+parts of the file (so, without function bodies). If the user navigates to a
+new file, its PSI transparently switches from stubs to syntax tree.
+</li>
+<li>
+For dependencies, the PSI is often backed by the compiled .class files,
+produced by javac. If you navigate there, the IDE just decompiles stuff four
+you! Super cool!
+</li>
+</ul>
+<p><em>This</em> is how I think such things should work. rust analyzer <em>shouldn’t</em> use
+salsa for all those 6666 dependencies you still haven’t looked at. It should
+just use rustc’s .rmeta files, switching to salsa, transparently, only when the
+user starts messing around their <code class="display">~/.cargo/registry/src</code> folder.</p>
+<p>The prerequisite for that is defining the abstract API for accessing Rust code.
+That was always the plan, and we did start on that at some point:</p>
+<p><a href="https://hackmd.io/ytd82QNiT_Ku2XFr1EAtiQ" class="url">https://hackmd.io/ytd82QNiT_Ku2XFr1EAtiQ</a></p>
+
+<figure class="blockquote">
+<blockquote><p>rmeta-transparent – source code might not be available for some crates, the API
+should support pre-compiled rmeta files as inputs.</p>
+</blockquote>
+
+</figure>
+<p>But I don’t think that work was ever completed.</p>
+<p>This still seems to me to be the lowest-hanging watermelon here — split the
+world into arcy-pointy incremental tip of the iceberg, and mostly read-only,
+on disk, compact, dark, moist breeding ground for supply chain attacks.</p>
+<p>Such glance analyzer architecture would be great, imo!</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
