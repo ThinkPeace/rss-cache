@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reducing C++ template bloat by factoring out the type-dependent portions of the function | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Reducing C++ template bloat by factoring out the type-dependent portions of the function</h1>
+        <div class="meta">The Old New Thing 2026-08-20T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260820-00/?p=112629">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-1e6c3088791626c7.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Looking for consolidation points. The post Reducing C++ template bloat by factoring out the type-dependent portions of the function appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>C++ templates let you reuse code, but it comes at a cost: Each template expansion results in a different function. This is not a big deal for small functions, but the less trivial your function becomes, the larger the cost of the repeated expansions.</p>
+<p>This is particularly expensive for functions that accept lambdas because every lambda is a unique type, so each time you invoke the template function with a lambda you get a different template expansion.</p>
+<p>Sometimes I see large template functions that have very few type dependencies.</p>
+<pre>template&lt;typename Table&gt;
+void something(Database const&amp; db)
+{
+    // extensive preparations
+    auto statusIndicator = ⟦ calculate status indicator ⟧
+    auto primaryTugboat = ⟦ calculate primary tugboat ⟧
+    std::vector&lt;Staircase&gt; staircases;
+
+    for (auto&amp;&amp; column : Table::Columns()) {
+        ⟦ operate on each column using the stuff we prepared ⟧
+        ⟦ maybe add things to the staircases and update the tugboat ⟧
+    }
+
+    ⟦ lots more code ⟧
+}
+</pre>
+<p>In this extreme case, the only type dependency is the <code>Table::Columns()</code>. (A more common source of type dependencies would be method calls on a templated inbound parameter.)</p>
+<p>This is a large function, and it will be re-expanded for each <code>Table</code>. Since each table has a different set of columns, and probably a different number of columns, there is no opportunity for COMDAT folding, so the different expansions will all be distinct.</p>
+<p>One way to mitigate the explosion is to wrap all the common pieces into a helper object.</p>
+<pre>struct SomethingState {
+    Database const&amp; db;
+    Indicator statusIndicator;
+    Tugboat primaryTugboat;
+    std::vector&lt;Staircase&gt; staircases;
+
+    __declspec(noinline)
+    SomethingState(Database const&amp; db) : db(db)
+    {
+        statusIndicator = ⟦ calulate status indicator ⟧
+        primaryTugboat = ⟦ calulate primary tugboat ⟧
+    }
+
+    __declspec(noinline)
+    void ProcessColumn(Column const&amp; column)
+    {
+        ⟦ operate on each column using the stuff we prepared ⟧
+        ⟦ maybe add things to the staircases and update the tugboat ⟧
+    }
+
+    __declspec(noinline)
+    void Finish()
+    {
+        ⟦ lots more code ⟧
+    }
+};
+
+template&lt;typename Table&gt;
+void something(Database const&amp; db)
+{
+    <span>SomethingState state(db);</span>
+
+    for (auto&amp;&amp; column : Table::Columns()) {
+        <span>state.ProcessColumn(column);</span>
+    }
+
+    <span>state.Finish();</span>
+}
+</pre>
+<p>Now, the different expansions of the <code>something</code> function can share the <code>SomethingState</code> constructor and methods, so the unique functions are fairly small.</p>
+<p>We mark the <code>SomethingState</code> constructor and methods as &#8220;no-inline&#8221; to discourage the compiler from inlining them, because inlining them would defeat our factoring. <b>Related</b>: <a title="A noinline inline function? What sorcery is this?" href="https://devblogs.microsoft.com/oldnewthing/20200521-00/?p=103777"> A noinline inline function? What sorcery is this</a>?</p>
+<p>Another way to reduce the code explosion problem is to do the factoring the other way: Instead of factoring out the common logic and keeping the type-dependent stuff, we factor out the type-dependent stuff and keep the common logic.</p>
+<p>The trick with this approach is finding some common type that all of the expansions share. I&#8217;ll assume that the <code>Table::Colums()</code> is a C-style array of <code>Column</code> objects, or a <code>std::vector</code> of <code>Column</code> objects, or a <code>std::array</code> of <code>Column</code> objects, or otherwise something that can produce a <code>std::span</code> of <code>Column</code> objects.</p>
+<pre>void somethingWorker(Database const&amp; db, <span>std::span&lt;Column&gt; columns</span>)
+{
+    // extensive preparations
+    auto statusIndicator = ⟦ calculate status indicator ⟧
+    auto primaryTugboat = ⟦ calculate primary tugboat ⟧
+    std::vector&lt;Staircase&gt; staircases;
+
+    for (auto&amp;&amp; column : <span>columns</span>) {
+        ⟦ operate on each column using the stuff we prepared ⟧
+        ⟦ maybe add things to the staircases and update the tugboat ⟧
+    }
+
+    ⟦ lots more code ⟧
+}
+
+template&lt;typename Table&gt;
+void something(Database const&amp; db)
+{
+    somethingWorker(db, <span>Table::Columns()</span>);
+}
+</pre>
+<p>We capture the columns ahead of time and then use the captured values to perform the enumeration inside a non-templated worker function. Since the worker function is non-templated, there is no template explosion when it is called by each <code>something&lt;Table&gt;</code>.</p>
+<p>One thing to watch out for is that we are changing the order of evaluation, The old code didn&#8217;t call <code>Table::Columns()</code> until after the preparations were complete. You can look at the code to confirm, but I suspect that <code>Table::Columns()</code> just returns a reference to some pre-existing source of column information, so it doesn&#8217;t matter when you call it. Even if it returned the columns by value (say, by cloning an internal vector), retrieving the columns early does change the point at which that vector is generated, but generating it even if the preparatory steps fail is probably not a problem because (1) generating it has no interesting side effects, (2) the order of evaluation is not important, and (3) the failure case is probably rare, so the extra cost of generating a vector that is not used is inconsequential.</p>
+<p>We&#8217;ll apply these principles to <a title="On wrapping a callable in a lambda that just calls it with the same parameters" href="https://devblogs.microsoft.com/oldnewthing/20260819-00/?p=112624"> our previous example</a> and make a surprising discovery that will shock and amaze you.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260820-00/?p=112629">Reducing C++ template bloat by factoring out the type-dependent portions of the function</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
