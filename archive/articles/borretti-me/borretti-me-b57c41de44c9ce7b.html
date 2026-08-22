@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A Syncthing and SQLite Gotcha | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A Syncthing and SQLite Gotcha</h1>
+        <div class="meta">Fernando Borretti 2026-08-22T14:00:00Z</div>
+        <div class="links">
+          <a href="https://borretti.me/article/a-syncthing-and-sqlite-gotcha">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/borretti-me/borretti-me-b57c41de44c9ce7b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">On the rename system call.</div>
+        <div class="content">
+          <p>So, I have this little app, <a href="https://github.com/eudoxia0/epoch">Epoch</a>, that I use to keep a journal. It’s a
+tiny Rust web app that runs as a systemd service and uses <a href="https://sqlite.org/">SQLite</a> as
+the database. I use a desktop and a <a href="/article/linux-on-the-fujitsu-lifebook-u729">laptop</a> regularly, and use
+<a href="https://syncthing.net/">Syncthing</a> to synchronize them, including Epoch’s database. That way I can
+use the app on both devices without needing a server to synchronize them, the
+tradeoff being that I have to make sure the sync is finished before performing
+any mutations.</p>
+
+<p>But I had this bug. Say I edit today’s entry on the laptop, come home, wait for
+Syncthing to finish, then I’d open today’s entry on the desktop, and the text
+would be missing. It’s not that the server is holding a lock on the file and
+preventing the sync: opening the database with the <code class="language-plaintext highlighter-rouge">sqlite3</code> command line tool
+shows the new text is there. If I restart the server, Epoch can read the new
+text.</p>
+
+<p>My mental model was:</p>
+
+<blockquote>
+  <p>The <a href="https://github.com/rusqlite/rusqlite">rusqlite</a> <code class="language-plaintext highlighter-rouge">Connection</code> object points to the database file. Syncthing
+swaps the file’s contents from under it. Subsequent queries go to the new
+file.</p>
+</blockquote>
+
+<p>Turns out there’s a very important part of POSIX filesystem semantics I was
+ignorant of. The standard way to replace a file safely (i.e. atomically) is the
+<a href="https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html"><code class="language-plaintext highlighter-rouge">rename</code></a> system call:</p>
+
+<div class="language-c highlighter-rouge">
+  <div class="highlight">
+    <pre class="highlight"><code><span class="kt">int</span> <span class="nf">rename</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">old</span><span class="p">,</span> <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">new</span><span class="p">);</span>
+</code></pre>
+  </div>
+</div>
+
+<p>Which Syncthing uses. This I know. What I didn’t know is: what happens if other
+processes had open file descriptors pointing to <code class="language-plaintext highlighter-rouge">new</code>? Do they see the new
+contents?  No: those processes can keep reading and writing to the old file
+<em>object</em>, but the file is orphaned in that no path points to it. And once all
+file descriptors are released, the file becomes inaccessible.</p>
+
+<p>I’m used to thinking of filesystem operations in terms of “this syscall takes a
+path and gives you a pointer to the file, which you mutate directly”. Whereas
+<code class="language-plaintext highlighter-rouge">rename</code> works at the level of directory entries: it atomically mutates the
+mapping from pathnames to files but doesn’t touch files at all.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
