@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bazel Module Versions Aren’t SemVer | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Bazel Module Versions Aren’t SemVer</h1>
+        <div class="meta">Andrew Nesbitt 2026-08-27T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/08/27/bazel-module-versions-arent-semver.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-601323337c3c550b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">According to strict SemVer, protobuf&#x27;s latest Bazel release is from 2022.</div>
+        <div class="content">
+          <p>Aman Sharma <a href="https://github.com/git-pkgs/enrichment/issues/65">reported</a> this week that <a href="https://packages.ecosyste.ms">packages.ecosyste.ms</a> had the latest version of protobuf on the <a href="https://registry.bazel.build/">Bazel Central Registry</a> (BCR, the default package index for Bazel’s built-in dependency manager) as <code class="language-plaintext highlighter-rouge">3.19.6</code>. The <a href="https://registry.bazel.build/modules/protobuf">current release</a> is <code class="language-plaintext highlighter-rouge">36.0.bcr.1</code>. Protobuf <a href="https://protobuf.dev/support/version-support/">dropped the leading <code class="language-plaintext highlighter-rouge">3.</code> in 2022</a> and has shipped <code class="language-plaintext highlighter-rouge">21.x</code> through <code class="language-plaintext highlighter-rouge">36.x</code> since, so <code class="language-plaintext highlighter-rouge">3.19.6</code> is four years behind.</p>
+
+<p>The <a href="https://github.com/ecosyste-ms/packages/issues/1810">root cause</a> is that the “latest release” query filters out anything the <a href="https://rubygems.org/gems/semantic"><code class="language-plaintext highlighter-rouge">semantic</code></a> gem fails to parse. That code predates the <a href="https://github.com/andrew/vers">vers</a> library and I’ve yet to swap it over, so it’s still applying one strict SemVer parser to every ecosystem. SemVer requires exactly three numeric segments before the hyphen. <code class="language-plaintext highlighter-rouge">36.0</code> has two, <code class="language-plaintext highlighter-rouge">0.7.1.bcr.1</code> has five, and <code class="language-plaintext highlighter-rouge">bcr</code> contains letters, so every protobuf release since <code class="language-plaintext highlighter-rouge">3.19.6</code> fails the parse and gets treated as unstable. The same filter reports <a href="https://registry.bazel.build/modules/glog">glog</a>’s latest as <code class="language-plaintext highlighter-rouge">0.7.1</code> when the registry has <code class="language-plaintext highlighter-rouge">0.7.1.bcr.1</code>.</p>
+
+<p>Bazel is a build tool first, and its module system (<a href="https://bazel.build/external/overview#bzlmod">bzlmod</a>, the default since Bazel 7) is mostly used to pull in existing C++, Java and Go projects that already have their own release histories. Rather than force those projects to renumber, Bazel <a href="https://bazel.build/external/module#version-format">documents</a> its version format as a deliberate loosening of SemVer: any SemVer string is valid and sorts the same way, and beyond that the release part can have any number of segments and each segment can contain letters. Abseil’s date-based <code class="language-plaintext highlighter-rouge">20210324.2</code> and protobuf’s two-segment <code class="language-plaintext highlighter-rouge">36.0</code> are both accepted as-is. The grammar in <a href="https://github.com/bazelbuild/bazel/blob/a8a2c0c1fa063a0bba4e7222a1b1d2c8a4e0e632/src/main/java/com/google/devtools/build/lib/bazel/bzlmod/Version.java#L33-L48"><code class="language-plaintext highlighter-rouge">Version.java</code></a> is <code class="language-plaintext highlighter-rouge">RELEASE[-PRERELEASE][+BUILD]</code>, where <code class="language-plaintext highlighter-rouge">RELEASE</code> is dot-separated identifiers of ASCII letters and digits only. Comparison applies SemVer’s <a href="https://semver.org/#spec-item-11">prerelease identifier rules</a> to the release segments as well:</p>
+
+<ul>
+  <li>numeric identifiers sort numerically, so <code class="language-plaintext highlighter-rouge">36.0</code> &gt; <code class="language-plaintext highlighter-rouge">4.0.0</code></li>
+  <li>any identifier containing a letter sorts above every purely numeric one, then as an ASCII string</li>
+  <li>a version with more release segments sorts above one that shares its prefix, so <code class="language-plaintext highlighter-rouge">0.7.1.bcr.1</code> &gt; <code class="language-plaintext highlighter-rouge">0.7.1</code></li>
+  <li>a prerelease sorts below the same release part on its own, so <code class="language-plaintext highlighter-rouge">36.0-rc2</code> &lt; <code class="language-plaintext highlighter-rouge">36.0</code></li>
+</ul>
+
+<p>The <code class="language-plaintext highlighter-rouge">.bcr.N</code> suffix is a <a href="https://github.com/bazelbuild/bazel-central-registry/blob/main/docs/README.md#module-versions">registry convention</a> rather than part of the format. Registry entries are immutable once published, and the registry often carries small patches on top of the upstream tarball to make a project build cleanly under Bazel. When one of those patches needs updating and the upstream source stays as-is, the fixed entry is published under a new version with <code class="language-plaintext highlighter-rouge">.bcr.1</code> tacked onto the release part. That’s why <code class="language-plaintext highlighter-rouge">36.0.bcr.1</code> exists: <code class="language-plaintext highlighter-rouge">36.0</code> was <a href="https://github.com/bazelbuild/bazel-central-registry/blob/main/modules/protobuf/metadata.json">yanked</a> for a macOS toolchain integrity mismatch, and the fix went in as extra release segments rather than a <code class="language-plaintext highlighter-rouge">+build</code> tag so that it sorts strictly above <code class="language-plaintext highlighter-rouge">36.0</code>. That ordering matters because Bazel resolves dependencies with <a href="https://research.swtch.com/vgo-mvs">Minimal Version Selection</a>, the same algorithm as Go modules, which always picks the highest version any dependent asked for; a suffix that sorted equal or lower would leave everyone pinned to the broken build.</p>
+
+<p><code class="language-plaintext highlighter-rouge">Version.java</code> also handles build metadata differently from SemVer §10: rather than being ignored for comparison and kept, the <code class="language-plaintext highlighter-rouge">+BUILD</code> part is <a href="https://github.com/bazelbuild/bazel/blob/a8a2c0c1fa063a0bba4e7222a1b1d2c8a4e0e632/src/main/java/com/google/devtools/build/lib/bazel/bzlmod/Version.java#L69-L72">stripped at parse time</a> before anything is stored or sent to a registry, so <code class="language-plaintext highlighter-rouge">1.2.3+abc</code> and <code class="language-plaintext highlighter-rouge">1.2.3</code> are equal and interchangeable rather than equal-but-distinct. The empty string is a valid version and <a href="https://github.com/bazelbuild/bazel/blob/a8a2c0c1fa063a0bba4e7222a1b1d2c8a4e0e632/src/main/java/com/google/devtools/build/lib/bazel/bzlmod/Version.java#L182-L186">sorts higher than everything else</a>; it marks a module that’s been overridden to point at a local directory or git commit instead of a registry release, and sorting it top means a local override always wins MVS. Since the release segments have no fixed meaning, breaking changes were originally signalled by a separate <code class="language-plaintext highlighter-rouge">compatibility_level</code> integer in the module file, roughly equivalent to a SemVer major version. Both active release lines <a href="https://github.com/bazelbuild/bazel/pull/28615">made that field a no-op</a> in February 2026 (9.1.0, backported to 8.6.0) after it caused resolution failures only the module authors could resolve, leaving breaking changes to be reported by the module’s own build-time errors instead.</p>
+
+<p>External parsers get <code class="language-plaintext highlighter-rouge">.bcr.N</code> wrong one of two ways:</p>
+
+<ul>
+  <li>strict SemVer (the <code class="language-plaintext highlighter-rouge">semantic</code> gem): rejects <code class="language-plaintext highlighter-rouge">0.7.1.bcr.1</code> because the release part must be exactly three integers, so it drops from the stable set</li>
+  <li>permissive generic (the vers fallback): accepts the extra segments, applies prerelease semantics to the alphabetic <code class="language-plaintext highlighter-rouge">bcr</code>, and sorts it below <code class="language-plaintext highlighter-rouge">0.7.1</code></li>
+</ul>
+
+<p>The <a href="https://github.com/package-url/vers-spec">vers spec</a>, the package-url project’s cross-ecosystem notation for version ranges, enumerates comparison schemes for <a href="https://github.com/package-url/vers-spec/blob/main/docs/types/vers-types.md">fifteen ecosystems</a> and has yet to cover Bazel, though <code class="language-plaintext highlighter-rouge">pkg:bazel</code> is a <a href="https://github.com/package-url/purl-spec/blob/main/types/bazel-definition.json">registered purl type</a> so there is already a slot for a <code class="language-plaintext highlighter-rouge">vers:bazel</code> scheme. Both vers libraries I maintain hit the second case. The fix in <a href="https://github.com/andrew/vers/pull/34">Ruby</a> and <a href="https://github.com/git-pkgs/vers/pull/43">Go</a> is a port of the <code class="language-plaintext highlighter-rouge">Version.java</code> sort as an implementation-defined <code class="language-plaintext highlighter-rouge">bazel</code> scheme ahead of the spec. The corresponding <a href="https://github.com/ecosyste-ms/packages/pull/1811">ecosyste.ms change</a> keeps <code class="language-plaintext highlighter-rouge">.bcr.N</code> releases eligible as stable, lets the yanked flag exclude <code class="language-plaintext highlighter-rouge">36.0</code>, and moves both protobuf and glog to the correct latest version.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

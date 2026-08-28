@@ -1,0 +1,857 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why do OpenAI&#x27;s GPT-2 weights beat mine? Part four: digging into dropout | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why do OpenAI&#x27;s GPT-2 weights beat mine? Part four: digging into dropout</h1>
+        <div class="meta">Giles&#x27; blog 2026-08-27T19:00:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/08/why-do-openai-gpt2-weights-beat-mine-4-ift-dropout">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-292bf09d9736e766.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I&#x27;m still digging into a mystery about the models I&#x27;ve been training; although an increasing number of them beat the OpenAI GPT-2 small weights on the narrow technical measure of the loss they get on a test set, they&#x27;re not as good at an instruction-fine-tuning test . While reading about MoE models, I came across this paragraph in the Switch Transformers pa…</div>
+        <div class="content">
+          <p>I'm still digging into a mystery about the models I've been training; although
+an increasing number of them beat the OpenAI GPT-2 small weights on the narrow
+technical measure of the loss they get on a test set, they're
+<a href="/2026/07/why-do-openai-gpt2-weights-beat-mine-1-intro">not as good at an instruction-fine-tuning test</a>.</p>
+
+<p>While reading about MoE models, I came across this paragraph in the
+<a href="https://arxiv.org/pdf/2101.03961">Switch Transformers paper</a>:</p>
+
+<blockquote>
+  <p>Our paper considers the common NLP approach
+  of pre-training on a large corpus followed by fine-tuning on smaller downstream tasks such
+  as summarization or question answering. One issue that naturally arises is overfitting since
+  many fine-tuning tasks have very few examples. During fine-tuning of standard
+  Transformers, Raffel et al. (2019) use dropout (Srivastava et al., 2014) at each layer to prevent
+  overfitting.</p>
+</blockquote>
+
+<p>So far, when running my IFT test, I'd been aiming to use the same dropout setting
+for the fine tune as the model concerned had used in its original
+pre-training.  That was just because it seemed natural.</p>
+
+<p>But the goal of dropout is to prevent overfitting when training over multiple epochs
+-- or, at least, that's how most of what I've read explains why we
+don't need it on modern single-epoch training runs over large datasets.</p>
+
+<p>If that's
+the case, though, when we do multiple epochs for a fine-tune with a more restricted dataset --
+exactly what I was doing for the IFT test -- it might make sense
+to use dropout, regardless of whether or not the model was pre-trained with it.
+The fine-tuning setup already tries to avoid overfitting by bailing out when a validation
+loss starts rising, but dropout might still help it avoid overfitting prematurely.</p>
+
+<p>On the other hand, something felt a little wrong about fine-tuning a model with
+dropout if its pre-training had happened without it.  A model pre-trained with dropout have been trained
+on billions of tokens, and so the model will have spent a lot of effort learning
+to overcome the issues that dropout causes, but one trained without it won't have that benefit.  Suddenly exposing it to dropout in a much
+shorter fine-tuning run felt rather like asking someone who rarely drinks alcohol to take a
+few shots of whisky; I felt that the models might not be prepared for the effects.</p>
+
+<p>As I looked into this more, I noticed another surprising thing -- there was an error in the
+configuration that I was using when fine-tuning the OpenAI models, both small and
+medium.  They were originally trained with dropout (or so it's believed --
+<a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf">the paper</a> doesn't
+say, but "<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>"
+says that they were, and <a href="https://huggingface.co/docs/transformers/v4.48.2/en/model_doc/gpt2#transformers.GPT2Config">this config on the Hugging Face GPT-2 code</a>
+agrees).</p>
+
+<p>But that actually made my original puzzle of why they outperformed my models on the IFT
+test seem even more perplexing, at least in the light of this idea.  If dropout
+was a good thing for fine-tuning, then so far they had been penalised by <em>not</em> using it -- that is,
+they were even further ahead of my own models than I thought they were.</p>
+
+<p>It was time to take a careful look.</p>
+<h3 id="the-fine-tunes">The fine-tunes</h3>
+
+<p>I fixed the config for the OpenAI weights so that my setup had dropout set to 0.1 for
+them, then carefully revisited the config for all of my own models, and made sure that those
+ones matched reality (which they did).</p>
+
+<p>Now, the IFT test that I've been running has two phases:</p>
+
+<ol>
+<li>Firstly, for each model, I run <a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/2a9a25fb0488dcbadb7d17738ead3bbde4ebb539/ift_generate_test_responses.py"><code>ift_generate_test_responses.py</code></a>.
+This script trains the specified model on an IFT dataset until validation loss
+starts rising.  It then uses the model from before that loss started going up to
+generate responses to a test set, and saves those responses to disk.  I made a small change
+to it so that the dropout used in the fine-tuning phase was a required command-line
+parameter, with three options: <code>model</code> -- that is, what the model
+was pre-trained with -- <code>on</code>, which forced it to 0.1, or <code>off</code>, to force it to 0.</li>
+<li>Next, I pass all of the saved test responses for all models into a second script,
+<a href="https://github.com/gpjt/ddp-base-model-from-scratch/blob/2a9a25fb0488dcbadb7d17738ead3bbde4ebb539/ift_judge.py"><code>ift_judge.py</code></a>,
+which <a href="/2026/01/llm-from-scratch-30-digging-into-llm-as-a-judge">sends them to an LLM judge</a>
+so that each model can get a score.  The script averages all scores across all
+questions for each model.  Check the link for more details of how that script works
+and tries to achieve consistency across models and responses.</li>
+</ol>
+
+<p>Now, the nice thing about the judge script was that it didn't really care whether
+the result files it got came from different models or the same one; it just printed
+out a mapping of result files to scores.  So I realised I could use it to do
+a comparison of all models with all possible dropout settings.</p>
+
+<p>For all of the models, I ran the <code>ift_generate_test_responses.py</code> three times, once
+with each of the dropout settings: <code>model</code>, <code>on</code>, and <code>off</code>.  Then I sent all of the
+resulting result files -- all models, and all dropout options for each -- to the LLM judge in
+one go, to see what it came up with.</p>
+
+<h3 id="the-results">The results</h3>
+
+<p>Here are the results, consolidated into one table.  For each model, I have:</p>
+
+<ul>
+<li>Its loss on my test set -- the technical measure of quality I mentioned near the
+start.  They're sorted by that column.</li>
+<li>Whether or not the base training run -- the pre-train -- had dropout.</li>
+<li>The number of fine-tuning epochs before validation loss started rising when the
+IFT run used a dropout setting identical to the pre-training (<code>model</code>).</li>
+<li>The score that the model thus trained got from the LLM judge.</li>
+<li>The fine-tuning epochs with dropout forced to be <code>off</code>.</li>
+<li>The score for the dropout-off model.</li>
+<li>The fine-tuning epochs for dropout forced to be <code>on</code>.</li>
+<li>And finally the score for the resulting model from that.</li>
+</ul>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>Base dropout</th>
+  <th><code>model</code> epochs</th>
+  <th><code>model</code> score</th>
+  <th><code>off</code> epochs</th>
+  <th><code>off</code> score</th>
+  <th><code>on</code> epochs</th>
+  <th><code>on</code> score</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>Yes</td>
+  <td>2</td>
+  <td>42.40</td>
+  <td>2</td>
+  <td><strong>43.75</strong></td>
+  <td>2</td>
+  <td>42.40</td>
+</tr>
+<tr>
+  <td>JAX, overtrained one long epoch</td>
+  <td>3.324953</td>
+  <td>No</td>
+  <td>3</td>
+  <td>19.77</td>
+  <td>3</td>
+  <td>19.77</td>
+  <td>19</td>
+  <td><strong>7.17</strong></td>
+</tr>
+<tr>
+  <td>JAX, overtrained two normal epochs</td>
+  <td>3.326482</td>
+  <td>No</td>
+  <td>4</td>
+  <td>19.72</td>
+  <td>4</td>
+  <td>19.72</td>
+  <td>16</td>
+  <td><strong>12.92</strong></td>
+</tr>
+<tr>
+  <td>JAX, with MHA bias, no dropout</td>
+  <td>3.418784</td>
+  <td>No</td>
+  <td>4</td>
+  <td>18.69</td>
+  <td>4</td>
+  <td>18.69</td>
+  <td>13</td>
+  <td><strong>13.20</strong></td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, no dropout</td>
+  <td>3.420089</td>
+  <td>No</td>
+  <td>5</td>
+  <td>21.46</td>
+  <td>5</td>
+  <td>21.46</td>
+  <td>20</td>
+  <td><strong>5.25</strong></td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, with dropout</td>
+  <td>3.476802</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>17.74</td>
+  <td>5</td>
+  <td><strong>13.22</strong></td>
+  <td>7</td>
+  <td>17.74</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>23.49</td>
+  <td>2</td>
+  <td><strong>26.00</strong></td>
+  <td>4</td>
+  <td>23.49</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>No</td>
+  <td>4</td>
+  <td>13.77</td>
+  <td>4</td>
+  <td>13.77</td>
+  <td>13</td>
+  <td><strong>14.06</strong></td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>No</td>
+  <td>4</td>
+  <td>10.76</td>
+  <td>4</td>
+  <td>10.76</td>
+  <td>19</td>
+  <td><strong>7.36</strong></td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td>Yes</td>
+  <td>6</td>
+  <td>19.71</td>
+  <td>3</td>
+  <td><strong>17.72</strong></td>
+  <td>6</td>
+  <td>19.71</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>Yes</td>
+  <td>6</td>
+  <td>13.53</td>
+  <td>4</td>
+  <td><strong>15.74</strong></td>
+  <td>6</td>
+  <td>13.53</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>15.15</td>
+  <td>3</td>
+  <td><strong>14.19</strong></td>
+  <td>4</td>
+  <td>15.15</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>Yes</td>
+  <td>5</td>
+  <td>14.02</td>
+  <td>4</td>
+  <td><strong>14.33</strong></td>
+  <td>5</td>
+  <td>14.02</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>11.25</td>
+  <td>3</td>
+  <td><strong>11.34</strong></td>
+  <td>4</td>
+  <td>11.25</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>Yes</td>
+  <td>4</td>
+  <td>12.02</td>
+  <td>4</td>
+  <td><strong>14.67</strong></td>
+  <td>4</td>
+  <td>12.02</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>8.85</td>
+  <td>5</td>
+  <td><strong>12.31</strong></td>
+  <td>7</td>
+  <td>8.85</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>17.56</td>
+  <td>5</td>
+  <td><strong>15.04</strong></td>
+  <td>7</td>
+  <td>17.56</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>Yes</td>
+  <td>7</td>
+  <td>17.43</td>
+  <td>5</td>
+  <td><strong>14.99</strong></td>
+  <td>7</td>
+  <td>17.43</td>
+</tr>
+</tbody>
+</table>
+
+<p>It's quite an intimidating wall of numbers, but there's a bunch of interesting stuff there.</p>
+
+<p>Firstly: I've put the IFT score for each model where it was trained with the <em>opposite</em> of
+its pre-training dropout in bold.  Let's look at the non-bold numbers first, though.</p>
+
+<h3 id="sanity-checks">Sanity checks</h3>
+
+<p>If you scan down through the models, you'll see that the non-bold IFT scores -- that is,
+the one where the IFT test was done with the <code>model</code> dropout, and then the one where it
+was done with dropout set explicitly to the same value as the <code>model</code> one -- are identical
+in every case.  That is a really reassuring sanity check.  Remember, each of those numbers
+came from a different run of the <code>ift_generate_test_responses.py</code> script -- but because
+there is a fixed random seed, they should have been identical.  They were presented to <code>ift_judge.py</code> in the same way as a separate model's response.
+The fact that it came up with identical scores tells us that it judged them as being
+equal, which is solid evidence for its consistency in judging results in this run
+(which is something that can be hard to guarantee with an LLM).</p>
+
+<p>Similarly, if you look through the numbers of training epochs, the <code>model</code> epochs
+for each one matches the epochs with the dropout forced to match the model's pre-training
+setting, which is also reassuring -- it's certainly what you'd expect given a
+fixed random seed.</p>
+
+<h3 id="epoch-counts">Epoch counts</h3>
+
+<p>Looking just at the <code>on</code> and <code>off</code> epochs columns, you can see something else
+interesting.  With dropout forced to be on, the number of fine-tuning epochs is
+always higher than the number of epochs with no dropout, except in the case of
+the OpenAI medium weights and "Cloud FineWeb, 8x B200 160 GiB", where it's the same.
+That makes intuitive sense, I think.  If you're discarding 10% of your activations when
+training a model, you'd expect it to take longer to converge.</p>
+
+<p>But now let's look at the size of those changes.  If you compare the increase in the
+number of epochs needed to train with dropout forced to be on, you can see that the
+change is <em>much</em> larger for those models that were pre-trained without dropout.
+The first of them, for example, "JAX, overtrained one long epoch", went up from 3 epochs
+to 19!  That's way larger than, say, the change from 5 to 7 for "JAX, no MHA bias, with dropout".</p>
+
+<p>That was the first indication that something interesting was happening when using
+dropout to fine-tune models that had been pre-trained without it.</p>
+
+<p>One question is whether so many epochs on a small dataset might just be a bad idea,
+regardless of whether the early-stopping from validation loss helps avoid overfitting.
+However, way back I did some <a href="/2026/04/llm-from-scratch-32l-interventions-instruction-fine-tuning-tests#epochs-of-fine-tuning">investigations</a>
+into the effect of the number of epochs of training, and found that while varying it
+changed the results somewhat -- as you'd expect -- the effect was surprisingly
+small, and didn't change anything about the fundamental mystery of why the GPT-2
+weights were so much better than mine.  So I think we can put that aside for now.</p>
+
+<h3 id="the-scores">The scores</h3>
+
+<p>Now let's dig into those scores.  We can divide them into two groups; models that
+were helped by adding dropout, and models that were harmed.</p>
+
+<p>In the "helped" group, we have these:</p>
+
+<ul>
+<li>"JAX, no MHA bias, with dropout", which was pre-trained <strong>with</strong> dropout and gained 4.52 points when the IFT run used dropout.</li>
+<li><code>1xrtx3090-stacked-interventions</code>, which was pre-trained <strong>without</strong> dropout and gained 0.29 points.</li>
+<li>"Cloud FineWeb, 8x A100 40 GiB", which was pre-trained <strong>with</strong> dropout and gained 1.99 points.</li>
+<li><code>8xa100m40-baseline</code>, which was pre-trained <strong>with</strong> dropout and gained 0.96 points.</li>
+<li>"Local FineWeb-Edu extended train", which was pre-trained <strong>with</strong> dropout and gained 2.52 points.</li>
+<li>"Local FineWeb-Edu train", which was pre-trained <strong>with</strong> dropout and gained 2.44 points.</li>
+</ul>
+
+<p>In the "harmed" group, we have:</p>
+
+<ul>
+<li>"OpenAI weights: medium", which was pre-trained <strong>with</strong> dropout and lost 1.35 points.</li>
+<li>"JAX, overtrained one long epoch", which was pre-trained <strong>without</strong> dropout and lost 12.6 points.</li>
+<li>"JAX, overtrained two normal epochs", which was pre-trained <strong>without</strong> dropout and lost 6.8 points.</li>
+<li>"JAX, with MHA bias, no dropout", which was pre-trained <strong>without</strong> dropout and lost 5.49 points.</li>
+<li>"JAX, no MHA bias, no dropout", which was pre-trained <strong>without</strong> dropout and lost 16.21 points.</li>
+<li>"OpenAI weights: small", which was pre-trained <strong>with</strong> dropout and lost 2.51 points.</li>
+<li><code>8xa100m40-stacked-interventions-1</code>, which was pre-trained <strong>without</strong> dropout and lost 3.4 points.</li>
+<li><code>1xrtx3090-baseline</code>, which was pre-trained <strong>with</strong> dropout and lost 2.21 points.</li>
+<li>"Cloud FineWeb, 8x H100 80 GiB", which was pre-trained <strong>with</strong> dropout and lost 0.31 points.</li>
+<li>"Cloud FineWeb, 8x A100 80 GiB", which was pre-trained <strong>with</strong> dropout and lost 0.09 points.</li>
+<li>"Cloud FineWeb, 8x B200 160 GiB", which was pre-trained <strong>with</strong> dropout and lost 2.65 points.</li>
+<li>"Local FineWeb train", which was pre-trained <strong>with</strong> dropout and lost 3.46 points.</li>
+</ul>
+
+<p>There are some patterns there, and I think that putting them into a table
+sorted by the score increase/decrease is a good way to visualise them:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Base dropout</th>
+  <th>Score change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>JAX, no MHA bias, with dropout</td>
+  <td>Yes</td>
+  <td>4.52</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>Yes</td>
+  <td>2.52</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>Yes</td>
+  <td>2.44</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>Yes</td>
+  <td>1.99</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>Yes</td>
+  <td>0.96</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>No</td>
+  <td>0.29</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>Yes</td>
+  <td>-0.09</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>Yes</td>
+  <td>-0.31</td>
+</tr>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>Yes</td>
+  <td>-1.35</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>Yes</td>
+  <td>-2.21</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>Yes</td>
+  <td>-2.51</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>Yes</td>
+  <td>-2.65</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>No</td>
+  <td>-3.4</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>Yes</td>
+  <td>-3.46</td>
+</tr>
+<tr>
+  <td>JAX, with MHA bias, no dropout</td>
+  <td>No</td>
+  <td>-5.49</td>
+</tr>
+<tr>
+  <td>JAX, overtrained two normal epochs</td>
+  <td>No</td>
+  <td>-6.8</td>
+</tr>
+<tr>
+  <td>JAX, overtrained one long epoch</td>
+  <td>No</td>
+  <td>-12.6</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, no dropout</td>
+  <td>No</td>
+  <td>-16.21</td>
+</tr>
+</tbody>
+</table>
+
+<p>One thing is pretty clear: with two exceptions, the models that were pre-trained
+with dropout are at the top, and the models that were pre-trained without are at
+the bottom.</p>
+
+<p>Of the exceptions,
+<code>8xa100m40-stacked-interventions-1</code> is so close to "Local FineWeb train" that perhaps its
+position could be due to some kind of noise.  <code>1xrtx3090-stacked-interventions</code> is much more puzzling, however.
+It's a real outlier in terms of the models that were pre-trained with no dropout,
+with its <em>improvement</em> of 0.29 compared to the next closest, with a decrease of 3.4.</p>
+
+<p>But if we disregard that outlier for the time being, the pattern actually does fit rather
+well into my original suspicion about the risks of switching on dropout when fine-tuning
+a model that was pre-trained without it.  They really don't handle it very well!</p>
+
+<p>On the other hand, it rather does put the kibosh on the idea that I based on
+the quote near the start of this post -- that fine-tuning with dropout is a good
+way to help the model learn with less risk of overfitting.  In my particular case -- these
+specific models, this particular fine-tuning task, with this IFT data -- dropout
+seems to generally have a negative effect on the fine-tuning results.  Even of those that were
+pre-trained with dropout, more than half got worse results when fine-tuned with it.</p>
+
+<p>Another interesting thing that stands out from the table above is that the JAX
+models are at the top and the bottom.  The model that was pre-trained with dropout
+was the one that gained the most from fine-tuning with it (or, contrariwise, lost
+out the most if fine-tuned without it).  The models that were pre-trained without
+were the ones that were most harmed by being fine-tuned with.</p>
+
+<p>If you look further up, at the original table of results, you'll see that the JAX
+models all did better than my other ones (which were trained using PyTorch) in terms of loss on
+my test set (the second column).  I've
+been chalking that up to two things: the JAX models would have started their pre-training
+with different random initial weights, and they were all trained in full-fat float32
+(unlike the PyTorch models, which used <a href="https://docs.pytorch.org/docs/2.13/amp.html">AMP</a>).
+Given that I <a href="/2026/04/llm-from-scratch-32h-interventions-full-fat-float32">found</a> that
+AMP had a negligible impact on training loss, I've been thinking that the "initial weights"
+aspect was the more important -- by chance, they happened to start in a place on
+the loss landscape with a route to a better minimum during training.</p>
+
+<p>I don't think there's anything in these results that pushes against that theory, but
+it does suggest that there's some kind of "fragility" in the minima they have found;
+changing dropout from what they were pre-trained with seems to knock them out of their exceptional positions.</p>
+
+<p>And finally, of course, the mystery around <code>1xrtx3090-stacked-interventions</code>'s
+anomalous position remains.  I honestly don't have any theories at all about that one
+right now.  Interestingly, it was trained with an identical configuration to our
+other (but less extreme) exception, <code>8xa100m40-stacked-interventions-1</code>.  The difference
+is that the first was trained on my local RTX 3090, using gradient accumulation to
+get a global batch size of 96, while the second was trained on a cloud machine
+with 8x A100 GPUs with 40 GiB each, which (using DDP) got a global batch across all
+GPUs of 96 without gradient accumulation.   There's something going on there, but
+I'm not sure what.</p>
+
+<p>Anyway, for now, I think it's time to wrap this one up.</p>
+
+<h3 id="conclusion">Conclusion</h3>
+
+<p>The idea I started this post with -- that using dropout for the fine-tuning part
+of all of these IFT tests might be a good idea to avoid issues from the multi-epoch
+nature of the fine-tuning -- doesn't seem to hold up.  Dropout in the fine-tuning
+turned out to be more often harmful than helpful, regardless of whether a model was originally pre-trained
+with dropout or not.</p>
+
+<p>However, exactly <em>how</em> harmful it was seemed to be pretty strongly correlated with
+whether the model was originally pre-trained with dropout, the oddity of <code>1xrtx3090-stacked-interventions</code>
+aside.</p>
+
+<p>I think that while working further on solving this mystery, I should stick to not
+using dropout.  Because adding it on for the OpenAI models made their performance
+worse, I think that's principled -- it's quite the opposite of making a choice
+to try to sweep the mystery I'm trying to solve under the carpet :-)</p>
+
+<p>So that means that my task in future posts in <a href="/gpt-2-mysteries">this series</a> is to explain this table (to go back to the format
+I've been using for the previous posts) -- the dropout <code>off</code> numbers from the table above,
+with rank added:</p>
+
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>Test loss</th>
+  <th>IFT epochs</th>
+  <th>IFT score</th>
+  <th>IFT rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>OpenAI weights: medium</td>
+  <td>3.231442</td>
+  <td>2</td>
+  <td>43.75</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>JAX, overtrained one long epoch</td>
+  <td>3.324953</td>
+  <td>3</td>
+  <td>19.77</td>
+  <td>4</td>
+</tr>
+<tr>
+  <td>JAX, overtrained two normal epochs</td>
+  <td>3.326482</td>
+  <td>4</td>
+  <td>19.72</td>
+  <td>5</td>
+</tr>
+<tr>
+  <td>JAX, with MHA bias, no dropout</td>
+  <td>3.418784</td>
+  <td>4</td>
+  <td>18.69</td>
+  <td>6</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, no dropout</td>
+  <td>3.420089</td>
+  <td>5</td>
+  <td>21.46</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td>JAX, no MHA bias, with dropout</td>
+  <td>3.476802</td>
+  <td>5</td>
+  <td>13.22</td>
+  <td>15</td>
+</tr>
+<tr>
+  <td>OpenAI weights: small</td>
+  <td>3.499677</td>
+  <td>2</td>
+  <td>26.00</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-stacked-interventions</code></td>
+  <td>3.538161</td>
+  <td>4</td>
+  <td>13.77</td>
+  <td>14</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-stacked-interventions-1</code></td>
+  <td>3.577761</td>
+  <td>4</td>
+  <td>10.76</td>
+  <td>18</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 40 GiB</td>
+  <td>3.673623</td>
+  <td>3</td>
+  <td>17.72</td>
+  <td>7</td>
+</tr>
+<tr>
+  <td><code>1xrtx3090-baseline</code></td>
+  <td>3.683835</td>
+  <td>4</td>
+  <td>15.74</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td><code>8xa100m40-baseline</code></td>
+  <td>3.691526</td>
+  <td>3</td>
+  <td>14.19</td>
+  <td>13</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x H100 80 GiB</td>
+  <td>3.724507</td>
+  <td>4</td>
+  <td>14.33</td>
+  <td>12</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x A100 80 GiB</td>
+  <td>3.729900</td>
+  <td>3</td>
+  <td>11.34</td>
+  <td>17</td>
+</tr>
+<tr>
+  <td>Cloud FineWeb, 8x B200 160 GiB</td>
+  <td>3.771478</td>
+  <td>4</td>
+  <td>14.67</td>
+  <td>11</td>
+</tr>
+<tr>
+  <td>Local FineWeb train</td>
+  <td>3.943522</td>
+  <td>5</td>
+  <td>12.31</td>
+  <td>16</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu extended train</td>
+  <td>4.134991</td>
+  <td>5</td>
+  <td>15.04</td>
+  <td>9</td>
+</tr>
+<tr>
+  <td>Local FineWeb-Edu train</td>
+  <td>4.166892</td>
+  <td>5</td>
+  <td>14.99</td>
+  <td>10</td>
+</tr>
+</tbody>
+</table>
+
+<p>The OpenAI small model still has a 4.54-point lead over the best of my own models,
+"JAX, no MHA bias, no dropout".</p>
+
+<p>Previously I'd considered data quality as a possibility, and felt it was an unlikely
+cause.  I now think I may have been premature in that, and it's worth looking into.
+Those two "Local FineWeb-Edu" models near the bottom were trained with sub-optimal
+hyperparameters and -- while they don't do super-well in this test -- they do much
+better than their raw test loss numbers might suggest.</p>
+
+<p>But while thinking about dropout, it occurred to me that there were other
+levers that I'd pulled in my <a href="/2026/04/llm-from-scratch-32m-interventions-conclusion">interventions into my original base model</a>
+that might be worth investigating <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>:</p>
+
+<ul>
+<li>Weight tying -- I honestly can't think of a reason why it might make a model better
+for this kind of task, but it certainly is true that the OpenAI weights use it --
+while none of the ones of mine that I've been testing do.  That feels worth a quick look, especially
+given that I have a copy of a model that I trained using it lying around.</li>
+<li>AMP.  Apart from "JAX, no MHA bias, with dropout", all of the JAX models -- trained without AMP -- did pretty well
+in this test (though not close to the OpenAI models).  And again I have a PyTorch model
+that was trained without AMP on my disk somewhere, so I may as well throw it in and see how it does.</li>
+<li>The learning rate.  All of these fine-tunes are happening with a fixed learning rate of
+0.00005.  While I really don't want to do some kind of sweep across multiple values
+for all of these models, perhaps there's some way I can try to relate the fine-tuning
+learning rate to what the models are "used to" from pre-training and see if that helps?</li>
+</ul>
+
+<p>So, plenty of further possibilities for this investigation.  Stay tuned!</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>Other interventions that I decided not to check, at least at this point:</p>
+
+<ul>
+<li>QKV bias: all of my PyTorch models in the table apart from the two <code>stacked-interventions</code>
+ones use it, so that's been thoroughly tested.</li>
+<li>Weight decay: again, we have a mixture of values for that in the table and there's no
+obvious pattern.</li>
+<li>Gradient clipping: likewise.</li>
+</ul>
+
+<p><a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
