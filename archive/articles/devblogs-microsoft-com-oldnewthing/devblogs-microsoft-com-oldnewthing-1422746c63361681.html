@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>On forcing all derived classes to implement a specific non-virtual method, part 2 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>On forcing all derived classes to implement a specific non-virtual method, part 2</h1>
+        <div class="meta">The Old New Thing 2026-08-28T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260828-00/?p=112654">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-1422746c63361681.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Explicitly denying that you implement the method. The post On forcing all derived classes to implement a specific non-virtual method, part 2 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, we observed that <a title="On forcing all derived classes to implement a specific non-virtual method, part 1" href="https://devblogs.microsoft.com/oldnewthing/20260827-00/?p=112651"> one way to force all derived classes to implement a specific non-virtual method is simply not to implement it in the base class</a> and sit back and wait for the compile-time fireworks. I noted that we can do better than this, though.</p>
+<p>The problem is that the compiler tells you what is wrong, but the details are often buried in the &#8220;supplementary error information&#8221;, and it may not be obvious how to dig it out, or maybe you dig it out but you don&#8217;t understand how to fix it.</p>
+<p>You can steer people to the correct error by implementing the method as deleted.</p>
+<pre>// C++/WRL
+
+struct OneWayConverter
+{
+    // Derived classes must implement Convert()
+    HRESULT STDMETHODCALLTYPE Convert(IInspectable* value,
+        ABI::Windows::UI::Xaml::Interop::TypeName targetType,
+        IInspectable* parameter, HSTRING language,
+        IInspectable** result) <span>= delete</span>;
+
+    // One-way converters cannot convert back
+    HRESULT STDMETHODCALLTYPE ConvertBack(IInspectable* /*value*/,
+        ABI::Windows::UI::Xaml::Interop::TypeName /*targetType*/,
+        IInspectable* /*parameter*/, HSTRING /*language*/,
+        IInspectable** result)
+    {
+        *result = nullptr;
+        return E_NOTIMPL;
+    }
+};
+
+// C++/WinRT
+
+struct OneWayConverter
+{
+    // Derived classes must implement Convert()
+    winrt::Windows::Foundation::IInspectable
+        Convert(
+            winrt::Windows::Foundation::IInspectable const&amp; /*value*/,
+            winrt::Windows::UI::Xaml::Interop::TypeName const&amp; /*targetType*/,
+            winrt::Windows::Foundation::IInspectable const&amp; /*parameter*/,
+            winrt::hstring const&amp; /*language*/) <span>= delete</span>;
+
+    // One-way converters cannot convert back
+    winrt::Windows::Foundation::IInspectable
+        ConvertBack(
+            winrt::Windows::Foundation::IInspectable const&amp; /*value*/,
+            winrt::Windows::UI::Xaml::Interop::TypeName const&amp; /*targetType*/,
+            winrt::Windows::Foundation::IInspectable const&amp; /*parameter*/,
+            winrt::hstring const&amp; /*language*/)
+    {
+        throw winrt::hresult_not_implemented();
+    }
+};
+
+// Plain C++ analogous scenario
+
+struct OneWayConverter
+{
+    // Derived classes must implement Convert()
+    Color Convert(Widget const&amp;amp /*value*/) <span>= delete</span>;
+
+    // One-way converters cannot convert back
+    Widget ConvertBack(Color const&amp; /*color*/)
+    {
+        throw std::exception("not implemented");
+    }
+};
+</pre>
+<p>This has a few benefits.</p>
+<p>One is that the developer can see the exact function signature that they need to implement: It&#8217;s the one that got deleted in the base class.</p>
+<p>Another is that the error message takes them to the deleted function, and if they go to that line of code, they will see the comment that explains why it is deleted.</p>
+<pre>winrt\windows.ui.xaml.data.h(1469,90): error C2280: 'winrt::<wbr />Windows::<wbr />Foundation::<wbr />IInspectable OneWayConverter::<wbr />Convert(<wbr />const winrt::<wbr />Windows::<wbr />Foundation::<wbr />IInspectable &amp;,<wbr />const winrt::<wbr />Windows::<wbr />UI::<wbr />Xaml::<wbr />Interop::<wbr />TypeName &amp;,<wbr />const winrt::<wbr />Windows::<wbr />Foundation::<wbr />IInspectable &amp;,<wbr />const winrt::<wbr />hstring &amp;)': attempting to reference a deleted function
+      see declaration of 'OneWayConverter::Convert'
+      test.cpp(60,9):
+      'winrt::<wbr />Windows::<wbr />Foundation::<wbr />IInspectable OneWayConverter::<wbr />Convert(<wbr />const winrt::<wbr />Windows::<wbr />Foundation::<wbr />IInspectable &amp;,const winrt::<wbr />Windows::<wbr />UI::<wbr />Xaml::<wbr />Interop::<wbr />TypeName &amp;,const winrt::<wbr />Windows::<wbr />Foundation::<wbr />IInspectable &amp;,<wbr />const winrt::<wbr />hstring &amp;)': <span>function was explicitly deleted</span>
+      ⟦ other error message spew the same as before ⟧
+</pre>
+<p>Starting in C++26, you can do even better yet: You can put a custom message directly in the <code>delete</code>!</p>
+<pre>struct OneWayConverter
+{
+    // Derived classes must implement Convert()
+    winrt::Windows::Foundation::IInspectable
+        Convert(
+            winrt::Windows::Foundation::IInspectable const&amp; /*value*/,
+            winrt::Windows::UI::Xaml::Interop::TypeName const&amp; /*targetType*/,
+            winrt::Windows::Foundation::IInspectable const&amp; /*parameter*/,
+            winrt::hstring const&amp; /*language*/)
+        = delete<span>("If you derive from OneWayConverter, you must implement Convert()")</span>;
+
+    // One-way converters cannot convert back
+    winrt::Windows::Foundation::IInspectable
+        ConvertBack(
+            winrt::Windows::Foundation::IInspectable const&amp; /*value*/,
+            winrt::Windows::UI::Xaml::Interop::TypeName const&amp; /*targetType*/,
+            winrt::Windows::Foundation::IInspectable const&amp; /*parameter*/,
+            winrt::hstring const&amp; /*language*/)
+    {
+        throw winrt::hresult_not_implemented();
+    }
+};
+</pre>
+<p>The Microsoft Visual C++ compiler doesn&#8217;t support this feature yet, but other compilers do, and they include the custom message in the primary error text.</p>
+<pre>// clang
+error: attempt to use a deleted function: <span>If you derive from OneWayConverter, you must implement Convert()</span>
+
+// gcc
+error: use of deleted function 'winrt::<wbr />Windows::<wbr />Foundation::<wbr />IInspectable OneWayConverter::<wbr />Convert(<wbr />winrt::<wbr />Windows::<wbr />Foundation::<wbr />IInspectable const&amp;,<wbr />winrt::<wbr />Windows::<wbr />UI::<wbr />Xaml::<wbr />Interop::<wbr />TypeName const&amp;,<wbr />winrt::<wbr />Windows::<wbr />Foundation::<wbr />IInspectable const&amp;,<wbr />winrt::<wbr />hstring const&amp;)': <span>If you derive from OneWayConverter, you must implement Convert()</span>
+</pre>
+<p>While this works for C++/WinRT and plain C++, it doesn&#8217;t work for C++/WRL because WRL derives from the abstract base class, and you cannot delete a method implemented by a base class. (Presumably because the method is still callable by casting to the base class.)</p>
+<p>So the <code>delete</code> trick works only if your declaration is not an override of a base class declaration.</p>
+<p>Tweaking the implementation to provide better compiler error messages is another example of <a title="Compiler error message metaprogramming: Helping to find the conflicting macro definition" href="https://devblogs.microsoft.com/oldnewthing/20211206-00/?p=106002"> compiler error message metaprogramming</a>, which is one of the under-appreciated aspects of authoring a code library.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260828-00/?p=112654">On forcing all derived classes to implement a specific non-virtual method, part 2</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
