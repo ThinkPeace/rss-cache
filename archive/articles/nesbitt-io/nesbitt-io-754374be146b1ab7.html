@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Git Submodules as a Package Manager | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Git Submodules as a Package Manager</h1>
+        <div class="meta">Andrew Nesbitt 2026-09-01T09:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/09/01/git-submodules-as-a-package-manager.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-754374be146b1ab7.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">.gitmodules is a manifest and the gitlink is a lockfile entry.</div>
+        <div class="content">
+          <p>I added a worktree to a repository last week to try a branch alongside the main checkout, ran <code class="language-plaintext highlighter-rouge">git submodule update --init</code> in it because the build needed the vendored dependencies, and when I was done went to clean up with <code class="language-plaintext highlighter-rouge">git worktree remove</code>, which git refused. Per <a href="https://git-scm.com/docs/git-worktree">the man page</a> only clean worktrees can be removed, and “unclean worktrees or ones with submodules” need <code class="language-plaintext highlighter-rouge">--force</code>. Submodules get their own clause in that sentence, distinct from dirty state. <code class="language-plaintext highlighter-rouge">git worktree move</code> is stricter again and <a href="https://git-scm.com/docs/git-worktree#Documentation/git-worktree.txt-move">refuses outright</a> on any worktree containing submodules. I’d spent <a href="/2026/08/25/hardening-the-override-flag.html">the previous week</a> cataloguing how command-line tools harden their <code class="language-plaintext highlighter-rouge">--force</code> flags, and here was git requiring one because two of its own features had collided.</p>
+
+<p>GitHub’s <a href="https://github.blog/2015-07-29-git-2-5-including-multiple-worktrees-and-triangular-workflows/">git 2.5 announcement</a> introduced <code class="language-plaintext highlighter-rouge">git worktree</code> in July 2015 with a one-line caveat: “It’s not recommended to use <code class="language-plaintext highlighter-rouge">git worktree</code> with a repository that contains submodules.” Eleven years later git still requires <code class="language-plaintext highlighter-rouge">--force</code> to remove a worktree that has submodules and refuses to move one. In between, <code class="language-plaintext highlighter-rouge">worktree add</code> had to be <a href="https://github.com/git/git/commit/4782cf2ab686bacca8d2908319981ac27d54ca25">patched to ignore <code class="language-plaintext highlighter-rouge">submodule.recurse</code></a> because honouring it made the internal <code class="language-plaintext highlighter-rouge">reset --hard</code> recurse into submodule paths that were still empty in the fresh worktree.</p>
+
+<p>This got me thinking about submodules as a package manager. Most of the pieces are there and the behaviour roughly matches, but they don’t quite line up and the experience of using them is worse at almost every step. Enough projects have adopted them and then <a href="https://diziet.dreamwidth.org/14666.html">backed out</a> that <a href="https://news.ycombinator.com/item?id=31792303">“why are git submodules so bad”</a> is a recurring thread.</p>
+
+<p>The gitlink in the superproject’s tree, a commit SHA recorded at a path with mode <code class="language-plaintext highlighter-rouge">160000</code>, is the lockfile entry, and the <a href="/2026/02/05/git-magic-files.html"><code class="language-plaintext highlighter-rouge">.gitmodules</code> file</a> mapping paths to fetch URLs is the manifest. <code class="language-plaintext highlighter-rouge">git submodule update</code> reads both and populates the working tree, which is the install step. The pin itself is as precise as any package manager’s: an exact commit identified by object ID.</p>
+
+<h2 id="resolution">Resolution</h2>
+
+<p>The gitlink records only which commit to check out, so <code class="language-plaintext highlighter-rouge">.gitmodules</code> carries a <code class="language-plaintext highlighter-rouge">url</code> per submodule and <code class="language-plaintext highlighter-rouge">update</code> clones from there, which is the only resolution mechanism. If the upstream repository is renamed, transferred to a different host, or taken private, every downstream pin breaks, even though the SHA is unchanged and the objects still exist in every clone that already has them. The manifest hard-codes a host because git has no lookup from a commit ID to servers that hold it.</p>
+
+<p>Git also copies each URL into the superproject’s <code class="language-plaintext highlighter-rouge">.git/config</code> the first time <code class="language-plaintext highlighter-rouge">git submodule init</code> runs, under <code class="language-plaintext highlighter-rouge">submodule.&lt;name&gt;.url</code>, and later commands read it from there, ignoring <code class="language-plaintext highlighter-rouge">.gitmodules</code>. Editing the committed <code class="language-plaintext highlighter-rouge">.gitmodules</code> to point at a mirror or a fork leaves an already-initialised clone unchanged until <a href="https://git-scm.com/docs/git-submodule"><code class="language-plaintext highlighter-rouge">git submodule sync</code></a> copies the new value across.</p>
+
+<p>The usual workaround in CI is git’s global <a href="https://git-scm.com/docs/git-config"><code class="language-plaintext highlighter-rouge">url.&lt;base&gt;.insteadOf</code></a> config, which rewrites any URL with a matching prefix before fetching, submodule URLs included. The common cases are rewriting <code class="language-plaintext highlighter-rouge">https://github.com/</code> to <code class="language-plaintext highlighter-rouge">git@github.com:</code> so an SSH deploy key applies, or redirecting an internal hostname to a mirror.</p>
+
+<h2 id="installation">Installation</h2>
+
+<p>A plain <code class="language-plaintext highlighter-rouge">git clone</code> writes the gitlink into the index so the submodule directory exists, and leaves it empty until <code class="language-plaintext highlighter-rouge">git submodule update --init</code> runs or the clone was made with <code class="language-plaintext highlighter-rouge">--recurse-submodules</code>. The <a href="https://git-scm.com/docs/git-config"><code class="language-plaintext highlighter-rouge">submodule.recurse</code></a> config setting makes <code class="language-plaintext highlighter-rouge">checkout</code>, <code class="language-plaintext highlighter-rouge">fetch</code>, <code class="language-plaintext highlighter-rouge">pull</code>, <code class="language-plaintext highlighter-rouge">grep</code> and several other commands recurse automatically, and it defaults to off.</p>
+
+<p>By default <code class="language-plaintext highlighter-rouge">update</code> checks out the gitlink commit, detached, and two independent flags modify that:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">--init</code>: copy any missing <code class="language-plaintext highlighter-rouge">.gitmodules</code> entries into <code class="language-plaintext highlighter-rouge">.git/config</code> first, required on first run and a no-op after</li>
+  <li><code class="language-plaintext highlighter-rouge">--remote</code>: check out the tip of the submodule’s configured remote-tracking branch instead of the gitlink commit (the remote’s <code class="language-plaintext highlighter-rouge">HEAD</code> if <code class="language-plaintext highlighter-rouge">submodule.&lt;name&gt;.branch</code> is unset)</li>
+</ul>
+
+<p>The <a href="https://git-scm.com/docs/git-submodule">command reference</a> documents both, though the name <code class="language-plaintext highlighter-rouge">update</code> conflates “install what’s pinned” with “update to latest”. Switching branches in the superproject changes the gitlink in the index and leaves the submodule’s working tree wherever it already was, so <code class="language-plaintext highlighter-rouge">git status</code> immediately shows the submodule as modified. Passing <code class="language-plaintext highlighter-rouge">--recurse-submodules</code> to <code class="language-plaintext highlighter-rouge">checkout</code>, or setting <code class="language-plaintext highlighter-rouge">submodule.recurse</code>, brings the submodule working tree along with the branch switch. The Rust project’s <a href="https://blog.rust-lang.org/inside-rust/2026/06/04/how-josh-helps-rust-manage-code-across-multiple-repositories/">account of moving compiler subprojects off submodules</a> lists this cluster from experience: checkouts left empty or on the wrong commit after clone, unrelated submodule bumps landing in pull requests because a branch switch left the submodule dirty, and custom logic in the <code class="language-plaintext highlighter-rouge">bootstrap</code> build tool to check each submodule out to the right commit before building.</p>
+
+<h2 id="storage">Storage</h2>
+
+<p>A submodule’s git directory is stored under the superproject’s <code class="language-plaintext highlighter-rouge">$GIT_DIR/modules/&lt;name&gt;/</code>, with a <code class="language-plaintext highlighter-rouge">.git</code> file in the submodule’s working tree containing a <code class="language-plaintext highlighter-rouge">gitdir:</code> pointer back to it and a <code class="language-plaintext highlighter-rouge">core.worktree</code> setting pointing the other way. <a href="https://git-scm.com/docs/git-submodule"><code class="language-plaintext highlighter-rouge">git submodule absorbgitdirs</code></a> migrates older clones that still have a nested <code class="language-plaintext highlighter-rouge">.git/</code> directory. Each entry under <code class="language-plaintext highlighter-rouge">modules/</code> is a git directory with its own refs, HEAD, index, config, hooks, and by default its own object store. Removing a submodule is correspondingly spread across three places: <code class="language-plaintext highlighter-rouge">git rm &lt;path&gt;</code> drops the gitlink and the <code class="language-plaintext highlighter-rouge">.gitmodules</code> entry, <code class="language-plaintext highlighter-rouge">git submodule deinit &lt;path&gt;</code> clears the working tree and the <code class="language-plaintext highlighter-rouge">.git/config</code> entry, and the absorbed <code class="language-plaintext highlighter-rouge">$GIT_DIR/modules/&lt;name&gt;</code> directory that both leave behind is <a href="https://git-scm.com/docs/gitsubmodules#_forms">documented</a> as a manual <code class="language-plaintext highlighter-rouge">rm -rf</code>.</p>
+
+<p>Worktrees and submodules collide over this layout because a linked worktree shares the superproject’s <code class="language-plaintext highlighter-rouge">$GIT_DIR</code> but has its own working tree, HEAD, and index under <code class="language-plaintext highlighter-rouge">$GIT_DIR/worktrees/&lt;id&gt;/</code>. Put two worktrees on different superproject branches and they reference the same submodule at two different commits. Each needs its own submodule checkout and index, tied to storage that’s partly per-worktree and partly shared. <code class="language-plaintext highlighter-rouge">worktree remove</code> requires the override rather than checking whether that state is disposable, and <code class="language-plaintext highlighter-rouge">worktree move</code> refuses because the pointer-file rewrite it would need is unimplemented.</p>
+
+<p>Xavier Morel <a href="https://www.spinics.net/lists/git/msg520955.html">asked on the git list this March</a> whether a submodule checkout could itself be a worktree of an existing shared clone, having found bare repositories plus worktrees worked well for a set of related projects but that adding submodules on top always cloned fresh. An <a href="https://www.spinics.net/lists/git/msg523846.html">RFC</a> and a <a href="https://www.spinics.net/lists/git/msg523988.html">three-patch series</a> proposing <code class="language-plaintext highlighter-rouge">--recurse-submodules</code> for <code class="language-plaintext highlighter-rouge">git worktree add</code> followed in April, giving each linked worktree its own submodule git directory under <code class="language-plaintext highlighter-rouge">$GIT_COMMON_DIR/worktrees/&lt;id&gt;/modules/</code> and sharing the object storage between them by hardlink.</p>
+
+<p>The same multiplication happens in a single-worktree clone when two submodules both depend on a third repository. Each path in the superproject gets its own <code class="language-plaintext highlighter-rouge">modules/</code> entry, its own object store unless alternates are configured by hand, and its own gitlink. The two pins can point at different commits of the same repository, and git treats them as unrelated checkouts. Package managers with a shared cache (cargo’s <a href="https://doc.rust-lang.org/cargo/guide/cargo-home.html">registry cache</a>, pnpm’s <a href="https://pnpm.io/motivation">content-addressable store</a>, the <a href="https://go.dev/ref/mod#module-cache">Go module cache</a>) store the bytes once and check them out per location.</p>
+
+<h2 id="updating">Updating</h2>
+
+<p>The gitlink holds one commit SHA, so moving a submodule forward means entering it, fetching, checking out the new commit, leaving, and <code class="language-plaintext highlighter-rouge">git add &lt;path&gt;</code> in the superproject to record the new gitlink. <code class="language-plaintext highlighter-rouge">git submodule update --remote</code> fetches the configured branch’s tip and checks that out instead of the recorded gitlink, and committing the result in the superproject is what moves the pin. <code class="language-plaintext highlighter-rouge">.gitmodules</code> can name a <code class="language-plaintext highlighter-rouge">branch</code> per submodule for <code class="language-plaintext highlighter-rouge">--remote</code> and the update bots to follow. A plain <code class="language-plaintext highlighter-rouge">update</code> ignores that field and checks out the gitlink SHA regardless. There is no syntax for a version range, a tag pattern, or a minimum commit, so the manifest’s only floating reference is a branch name and the gitlink is the only pin.</p>
+
+<p>Dependabot and Renovate can both open pull requests bumping a gitlink. Dependabot’s <a href="https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file"><code class="language-plaintext highlighter-rouge">gitsubmodule</code> ecosystem</a> proposes a new gitlink SHA when the submodule’s configured branch moves, and Renovate’s <a href="https://docs.renovatebot.com/modules/manager/git-submodules/"><code class="language-plaintext highlighter-rouge">git-submodules</code> manager</a> does the same, shipping disabled by default; both follow branch tips because a branch name is the only reference the manifest exposes.</p>
+
+<h2 id="security">Security</h2>
+
+<p><code class="language-plaintext highlighter-rouge">.gitmodules</code> is committed to the repository, so a hostile upstream controls its contents, and git parses it during <code class="language-plaintext highlighter-rouge">clone --recurse-submodules</code> before the user has seen any of the fetched files, a combination that has produced remote code execution repeatedly. <a href="https://nvd.nist.gov/vuln/detail/CVE-2018-11235">CVE-2018-11235</a> used <code class="language-plaintext highlighter-rouge">../</code> in a submodule’s name so its git directory, hooks included, was written outside <code class="language-plaintext highlighter-rouge">$GIT_DIR/modules/</code> and a <code class="language-plaintext highlighter-rouge">post-checkout</code> hook ran during clone. In <a href="https://nvd.nist.gov/vuln/detail/CVE-2018-17456">CVE-2018-17456</a> the submodule URL began with <code class="language-plaintext highlighter-rouge">-</code>, so the child <code class="language-plaintext highlighter-rouge">git clone</code> parsed it as an option, the class of bug git’s <a href="/2026/07/21/end-of-options.html"><code class="language-plaintext highlighter-rouge">--end-of-options</code></a> delimiter defends against. <a href="https://github.com/git/git/security/advisories/GHSA-3wp6-j8xr-qw85">CVE-2022-39253</a> was a disclosure bug: a symlink in a submodule’s object directory made a local-transport clone copy arbitrary files from the victim’s disk. The fix changed the <a href="https://git-scm.com/docs/git-config"><code class="language-plaintext highlighter-rouge">protocol.file.allow</code></a> default to <code class="language-plaintext highlighter-rouge">user</code>, so local-path submodules now need an explicit opt-in. <a href="https://github.com/git/git/security/advisories/GHSA-8h77-4q3w-gfgv">CVE-2024-32002</a> combined a symlink with a case-insensitive filesystem to write a hook into <code class="language-plaintext highlighter-rouge">.git/</code> during recursive clone. I covered the broader pattern of package-manager checkout paths as an attack surface in <a href="/2026/05/04/package-manager-cwes.html">the CWE field guide</a>.</p>
+
+<h2 id="abstraction">Abstraction</h2>
+
+<p>Submodules expose git’s internals directly: object IDs as the pin, detached HEADs after update, the <code class="language-plaintext highlighter-rouge">$GIT_DIR/modules/</code> layout, transport URLs in the manifest. A package manager wraps the equivalents behind a manifest format, a resolver, and a local cache; submodules surface them raw.</p>
+
+<p>Most of the gaps map to things package managers already solved: a shared object cache, recursing into dependencies by default on clone and checkout, a single lifecycle for adding and removing a dependency, range constraints in the manifest. The <a href="https://www.spinics.net/lists/git/msg523988.html">April patch series</a> adding <code class="language-plaintext highlighter-rouge">--recurse-submodules</code> to <code class="language-plaintext highlighter-rouge">git worktree add</code> tackles one instance of the storage problem, giving each worktree its own submodule checkout over hardlinked shared storage. Resolution is the harder one: a commit SHA is a host-independent identity for the object, and the URL in <code class="language-plaintext highlighter-rouge">.gitmodules</code> is git’s only mapping from that identity to a server that holds it.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
