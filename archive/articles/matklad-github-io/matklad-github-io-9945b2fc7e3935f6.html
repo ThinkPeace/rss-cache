@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Static Allocation, Constant Work | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Static Allocation, Constant Work</h1>
+        <div class="meta">matklad 2026-09-02T00:00:00Z</div>
+        <div class="links">
+          <a href="https://matklad.github.io/2026/09/02/static-allocation-constant-work.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/matklad-github-io/matklad-github-io-9945b2fc7e3935f6.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">In reply to this email:</div>
+        <div class="content">
+          <header>
+  <h1>Static Allocation, Constant Work</h1>
+  <time class="meta" datetime="2026-09-02">Sep 2, 2026</time>
+</header>
+<p>In reply to this email:</p>
+
+<figure class="blockquote">
+<blockquote><p><a href="https://matklad.github.io/2026/07/20/memory-safety-hardest-problem.html"><em>Memory Safety’s Hardest Problem</em></a>
+named something I’d hit but couldn’t articulate.
+Your case is a pointer into one union variant surviving a write of a different
+variant, so live typed pointers end up reading bytes that belong to something
+else now.</p>
+<p>Last year I wrote a limit-order matching engine and shipped a use-after-free: a
+cancelled order was released back to the pool while it was still linked into its
+price level, so the next allocation handed that memory to a new order and the
+stale link kept resolving. I’d filed it under “I was careless with lifetimes.”</p>
+<p>After your post I’m not sure that’s what it was. A recycling pool looks like a
+tagged union where the tag is “which generation of object currently lives in
+this slot,” and nothing in the type system tracks it. Is that a fair reading, or
+does the pool case stay genuinely easier because generational indices actually
+solve it and the union case has no equivalent?</p>
+</blockquote>
+
+</figure>
+<p>Yes, object pools are an interesting case to think about, as they clarify the
+relation between <em>memory</em> safety and and more general correctness.</p>
+<p><em>First</em>, consider the case where no object pool is used, and we <code>malloc</code> and
+<code>free</code> order objects. In this case, the logical error of use-after-free turns
+into physical type confusion, and can easily lead to arbitrary code execution
+and the like. If you have two objects of different <em>types</em> sharing the same
+memory location, a user-controlled integer in one object might be a function
+pointer in the other: an exploitable <code>goto</code> primitive</p>
+<p>Now, what happens if we introduce an object pool which stores a list of “dead”
+objects of type <code>T</code>? Logical use-after-free is still possible, but its physical
+effect is now different — we still get aliasing of memory, but there’s no type
+confusion. You can’t necessarily fiddle with an integer and change a function
+pointer, unless you additionally hit the hard case, where the object in question
+stores an inline enum. Assuming that doesn’t hapen, you get a perfectly defined,
+deterministic behavior, even if you are not happy about the result.</p>
+<p>This suggests an interesting solution for hardening code, which I’ve learned
+from <a href="https://fil-c.org/meet_fil">Fil</a>. <em>If</em> your allocation function is typed
+(it takes a <code>T</code> comptime parameter or runtime type witness, rather than a
+runtime type-erased size and alignment), you can write an allocator that uses
+type-segregated pools internally. This will be somewhat less memory efficient,
+as the allocator won’t be able to re-use freed memory of objects of type <code>U</code> for
+objects of type <code>T</code>, but the memory overhead will probably be small (rare object
+types do not matter, popular object types will have a lot of intra-type re-use),
+you might actually gain in memory locality, <em>and</em> solve most of type confusions.
+Again, inline enums break this, but, curiously, if you always heap allocate enum
+variants, then this works again. Fil-C can’t use this, because C allocator’s
+interface is untyped, but someone else could :P</p>
+<p>But this is academic. How do we avoid the bugs? Generational indexes are a
+popular remedy, but I have never used them, so I don’t have any non-common
+knowledge insights about this pattern. Instead, I will share another pair of tricks
+from <a href="https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md">TigerStyle</a>.
+I have only a vague understanding of what an order matching engine is, but I
+suspect these tricks might help there</p>
+<section id="Static-Allocation">
+
+<h2><a href="#Static-Allocation">Static Allocation</a></h2>
+<p>The first one is:</p>
+
+<figure class="blockquote">
+<blockquote><p>No dynamic memory allocation after initialization</p>
+</blockquote>
+
+</figure>
+<p><a href="https://www.youtube.com/watch?v=GRJtYwneG2Q&amp;t=1823s" class="display url">https://www.youtube.com/watch?v=GRJtYwneG2Q&amp;t=1823s</a></p>
+<p>This is the pool idea, taken to its logical conclusion. We specify the maximum
+number of orders we are willing to work with at startup, and never go beyond
+that. So, you might start the program as</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-title function_">$</span> order-engine --orders-max=1_000_000</span></code></pre>
+
+</figure>
+<p>and then one of the first lines in its <code>main</code> function would be :</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">const</span> orders: []Order = <span class="hl-keyword">try</span> gpa.alloc(Order, cli_args.orders_max);</span></code></pre>
+
+</figure>
+<p>If, at runtime, more than <code>orders_max</code> requests come in, the surplus requests
+are rejected. Someone might object: “But what if I actually have some spare
+memory for one more order? Wouldn’t it be a good idea to at least try to handle
+it?”</p>
+<p>My rejoinder would be “Well, what if you don’t?”. Systems operating at capacity
+<em>without</em> strict limits fail catastrophically. Attempting to allocate just one
+more <code>Order</code> could cause kernel’s OOM killer to terminate the entire order
+matching engine, losing the other million orders, or, better yet, to kill the
+supervisor process so that you can’t even restart.</p>
+<p>Static allocation gives you piece of mind. The system might fail to start if you
+don’t have enough memory, but, if it did start, you can be rest assured that it
+would handle overload gracefully, continuing to render the service while you are
+provisioning a beefier machine.</p>
+</section>
+<section id="Constant-Work">
+
+<h2><a href="#Constant-Work">Constant Work</a></h2>
+<p>What would you do with the slice of orders? One approach is to
+<code class="display">@memset(orders, undefined)</code>
+and hand the slice over to a pool which tracks spare objects with a bit set:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">const</span> OrderPool = <span class="hl-keyword">struct</span> {</span>
+<span class="line">    orders: []Order,</span>
+<span class="line">    free: DynamicBitSet,</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">fn</span><span class="hl-function"> acquire</span>(pool: <span class="hl-operator">*</span>OrderPool) ?<span class="hl-operator">*</span>Order { ... }</span>
+<span class="line">    <span class="hl-keyword">fn</span><span class="hl-function"> release</span>(pool: <span class="hl-operator">*</span>OrderPool, order: <span class="hl-operator">*</span>Order) { ... }</span>
+<span class="line">};</span></code></pre>
+
+</figure>
+<p>or with a free list:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">const</span> OrderPool = <span class="hl-keyword">struct</span> {</span>
+<span class="line">    orders: []<span class="hl-keyword">union</span> {</span>
+<span class="line">        order: Order,</span>
+<span class="line">        next_free: ?<span class="hl-type">u32</span>,</span>
+<span class="line">    },</span>
+<span class="line">    first_free: ?<span class="hl-type">u32</span>,</span>
+<span class="line">};</span></code></pre>
+
+</figure>
+<p>But there’s an alterative approach. Instead of thinking about a limit on the
+number of orders, you could instead design the system to <em>always</em> have a fixed
+amount of orders, by introducing a no-op, neutral order:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">const</span> Order = {</span>
+<span class="line">    id: <span class="hl-type">u128</span>,</span>
+<span class="line">    price: <span class="hl-type">u32</span>,</span>
+<span class="line">    count: <span class="hl-type">u32</span>,</span>
+<span class="line"></span>
+<span class="line">    tag: <span class="hl-keyword">enum</span> { bid, ask, reserved },</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">pub</span> <span class="hl-keyword">const</span> reserved: Order = .{</span>
+<span class="line">        .id = <span class="hl-numbers">0</span>,</span>
+<span class="line">        .price = <span class="hl-numbers">0</span>,</span>
+<span class="line">        .count = <span class="hl-numbers">0</span>,</span>
+<span class="line">        .tag = .reserved,</span>
+<span class="line">    };</span>
+<span class="line">};</span></code></pre>
+
+</figure>
+<p>Your initialization then becomes <span class="display"><code>@memset(orders, .reserved)</code>.</span></p>
+<p>One benefit here is cognitive, you no longer think in terms of creating and
+destroying orders. Instead, the orders merely circulate in the system according
+to the law of the conservation of the number of orders. It becomes harder to
+loose track of an order if you must always pay attention not only to where the
+order goes, but also to where it came from. You explicitly write state
+transition functions for each <em>pair</em> of states, and that makes it easier to
+exhaustively enumerate all the cases. And you double check that with asserting,
+at every point, that the state is what you expect it to be (and then you DST the
+asserts) .</p>
+<p>Another benefit is code simplification and predictability. You no longer need to
+track a separate collection of “live” orders. Instead, you always iterate the
+full set, doing no-ops for reserved. This feels wasteful: should we make the
+code run faster when there are few orders? But consider this: by specifying the
+limit of orders up-front, you commit to be able to serve that amount. <em>If</em> the
+maximum amount of orders is active, does the system have acceptable performance?
+If not, that is a bug! Gray failure (system becoming unusably slow) is another
+way to break when reaching the limit.</p>
+<p>Avoiding indexes improves performance for the maximal load case. This</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">for</span> (orders) <span class="hl-operator">|</span>order<span class="hl-operator">|</span> {</span>
+<span class="line">    process(order)</span>
+<span class="line">}</span></code></pre>
+
+</figure>
+<p>is much easier for compiler to vectorize, and for CPU Cache to prefetch, than
+this:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">for</span> (orders_active) <span class="hl-operator">|</span>order_index<span class="hl-operator">|</span> {</span>
+<span class="line">    <span class="hl-keyword">const</span> order = orders[order_index];</span>
+<span class="line">    process(order);</span>
+<span class="line">}</span></code></pre>
+
+</figure>
+<p>Similarly to static allocation, the <em>Constant Work</em> principle gives you piece of
+mind with respect to performance. P100 latency stays flat regardless of the
+load. Insufficient performance is discovered when you roll out the system, not
+during Black Friday on-call.</p>
+<p>At TigerBeetle, we apply this pattern in the small. Rather than writing a
+search loop with an early return:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">const</span> item = <span class="hl-keyword">for</span> (items) <span class="hl-operator">|</span>item<span class="hl-operator">|</span> {</span>
+<span class="line">    <span class="hl-keyword">if</span> (predicate(item)) <span class="hl-keyword">break</span> item;</span>
+<span class="line">} <span class="hl-keyword">else</span> <span class="hl-literal">null</span>;</span></code></pre>
+
+</figure>
+<p>we sometimes let the loop to run its full natural course, additionally asserting
+that theres a <em>unique</em> matching item:</p>
+<p><a href="https://github.com/tigerbeetle/tigerbeetle/blob/0.17.9/src/vsr/grid.zig#L715-L725" class="url">https://github.com/tigerbeetle/tigerbeetle/blob/0.17.9/src/vsr/grid.zig#L715-L725</a></p>
+<hr>
+<p>As usual, this is <em>a</em> trick which is useful to have in your arsenal, but it
+isn’t a universal solution to all programming’s problems.</p>
+</section>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
