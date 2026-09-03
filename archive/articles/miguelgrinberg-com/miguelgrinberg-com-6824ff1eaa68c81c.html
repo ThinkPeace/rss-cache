@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>You Should be Using Rootless Containers | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>You Should be Using Rootless Containers</h1>
+        <div class="meta">Miguel Grinberg&#x27;s Blog 2026-09-03T14:59:54Z</div>
+        <div class="links">
+          <a href="https://blog.miguelgrinberg.com/post/you-should-be-using-rootless-containers">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/miguelgrinberg-com/miguelgrinberg-com-6824ff1eaa68c81c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The other day a serious vulnerability was disclosed in one of the newer Linux distributions (the one led by the racist, so it isn&#x27;t getting a mention here). The issue was interesting because it was caused by a non-standard Docker configuration that their installer applied by default, without alerting users that this configuration was creating a security ris…</div>
+        <div class="content">
+          <html>
+  <body><h1><a href="https://blog.miguelgrinberg.com/post/you-should-be-using-rootless-containers">You Should be Using Rootless Containers</a></h1>
+  <h2>Posted by</h2>on under<p>The other day a serious vulnerability was disclosed in one of the newer Linux distributions (the one led by the racist, so it isn't getting a mention here). The issue was interesting because it was caused by a non-standard Docker configuration that their installer applied by default, without alerting users that this configuration was creating a security risk. The end result was that any process running on these systems had the ability to elevate itself to root, without password, <pre>sudo</pre> or any prompts to the user.</p><p>While this incident did not affect me, it served as a reminder that it is difficult to set up Docker in a way that is secure. If you are interested in understanding what the issues with Docker are and what can be done to address them, then you are in the right place.</p><h2>The problem with Docker</h2><p>The security problems with Docker stem from the choice of using a client-server architecture that was made way back in the beginning. On a standard installation, the Docker daemon runs in the background under the <pre>root</pre> user, providing all the functionality through an API. Clients such as <pre>docker-cli</pre> send requests to this API through the Docker socket, which the server listens on.</p><p>Because the Docker daemon runs as the <pre>root</pre> user, an attacker that gains access to it can execute code with root permissions. You may think that this is just theoretical, or maybe an unlikely, highly complex and obscure vulnerability that only genius hackers can exploit. Well, think again.</p><p>Here is a simple example in which I show how I can obtain root access on my Ubuntu 26.04 system just using the <pre>docker</pre> command and without using a password:</p><pre><pre># as a regular user, the following command fails
+$ ls /etc/sudoers.d/
+ls: cannot open directory '/etc/sudoers.d/': Permission denied
+
+# but I can ask Docker to run this command and it works, no questions asked! 
+$ docker run -v /:/host alpine:latest ls /host/etc/sudoers.d/
+90-cloud-init-users
+README
+</pre></pre>
+<p>In case it isn't clear how this works, the <pre>docker run</pre> command above starts a standard Alpine Linux container, mounting the entire file system of the host under the /host path. Because the container is running under the root account through the Docker daemon, it has access to all files and thus can bypass any restrictions of the user that issued the <pre>docker run</pre> command. Note that there was no need to authenticate or enter any passwords, the command just worked. A slightly more elaborate malicious script could use the same technique to modify or exfiltrate system files, install cron jobs or other nasty things, all without the user noticing.</p><p>Now I don't want to lie to you. The above root escalation attack is not going to work on every Docker install out there. If you do a basic install of Docker, then "root escalation" does not really have much of a point, since under a default install the <pre>docker</pre> command is accessible only to the <pre>root</pre> user. If you wanted to use Docker from your regular user account you would be forced to run <pre>sudo docker</pre> and that requires authentication.</p><p>These types of attacks are possible because users often relax access permissions to the Docker socket in the name of convenience. A very common non-standard configuration change that people make is to add themselves to the <pre>docker</pre> group on their machines, which allows them to run the <pre>docker</pre> command without <pre>sudo</pre>. That is what I did for the demonstration I shared above, and also what the Linux distribution I referenced at the start did without notifying their users.</p><p>The truth is that using Docker only as the root user is incredibly inconvenient, so much that the details on how to reconfigure it to work without <pre>sudo</pre> are <a href="https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user">documented</a> in the official Docker website, in spite of being a security nightmare. My guess is that if you use Docker on Linux you have made this change, and thus, your system is vulnerable to root escalation attacks.</p><h3>What about Docker on macOS and Windows?</h3><p>Everything I discussed above relates to running Docker on Linux. In fact, Docker only runs on Linux, so products such as Docker Desktop, which support the other operating systems, have to create a Linux virtual machine (VM) as a trick to allow Docker to run there.</p><p>I'm honestly not very well versed on how these solutions work, but I would imagine standard virtualization tools such as QEMU, Hyper-V, or similar are used to host the Linux VM that is home to Docker. This creates an additional layer of separation from the physical host, so my impression is that the risks to the host are considerably reduced when running Docker on these operating systems. If anyone with experience on these tools would like to chime in with more details, feel free to use the comments section at the bottom of this article.</p><p>I think WSL, the native Linux support that comes with Windows, needs to be treated as a special case. WSL has a much tighter integration with the OS, with the Linux kernel running directly in the host. So there are potentially similar risks to those that exist on a regular Linux system. Once again, if you have things to share about this, I'd love to hear them.</p><h2>The alternative: rootless containers</h2><p>As mentioned above, Docker made the decision to go with a client-server architecture, and this largely led to the traditional root-owned daemon. But there are alternative ways to run containers that do not rely on the <pre>root</pre> user. Of the many alternative platforms out there, I want to mention two:</p><ul><li><a href="https://docs.docker.com/engine/security/rootless/">Docker in rootless mode</a>: a variation in the installation process of the standard Docker, where the daemon runs as a user-level service</li><li><a href="https://podman.io/">Podman</a>: a daemonless container platform</li></ul><p>I find the rootless Docker solution a bit hacky. The official <a href="https://docs.docker.com/engine/security/rootless/#install">installation instructions</a> ask you to do a regular install, then manually disable the Docker daemon, and finally run a script they provide that creates a user-level daemon replacement for the current user.</p><p>Now for Podman, you just install it and you're done, with the added benefit that no background services need to run on the system. If you get used to typing <pre>podman</pre> instead of <pre>docker</pre> (or add <pre>alias docker=podman</pre> to your shell configuration), chances are the vast majority of the workflows will work the same, but all your containers will run under your own user, with no viable path for a root escalation. And you will not be running a daemon (unless you need one, see below.)</p><h2>The catch with Podman</h2><p>What's not to like about Podman, right? Seems to be perfect, as it addresses the security problems that have plagued Docker since the early days.</p><p>Well, note how above I carefully said that the "vast majority" of workflows will work the same with Podman as with Docker. The truth is that not all workflows can be transparently switched over. So let's review some of the issues I have experienced when transitioning.</p><p>Docker defaults to using its own Docker Hub registry when pulling an image, but Podman sometimes does not, depending on how it was configured. Take the following command:</p><pre><pre>docker pull postgres
+</pre></pre>
+<p>This may will fail under Podman because it may not know where to pull the image from. While it is possible to configure Docker Hub (or any other registries that you use) as a default registry, I find that when using Podman it is best to get used to name all container images with their fully qualified addresses:</p><pre><pre>podman pull docker.io/library/postgres
+</pre></pre>
+<p>There are also some significant differences in Podman due to its daemonless nature.</p><p>Not having a daemon makes Podman unable to restart containers after a reboot, so using Podman on servers that need to be up 24/7 requires a bit of additional work. Podman includes an integration with <pre>systemd</pre> under the <pre>podman quadlet</pre> group of commands that can install containers as individual services.</p><p>Also in the same vein, if there is no daemon, how do applications launch or interact with containers through an API? This is actually a very popular way to use Docker.</p><p>For this, Podman provides an optional API service that you can launch via the <pre>podman system service</pre> command. The command accepts the socket address that you want to use and an optional time for the service to be active. Once started, the service runs just for the user that started it, exposing an API that is compatible with the one from Docker. For servers, there is also a <pre>systemd</pre> integration to have this user-level service running at all times in the background.</p><h2>Conclusion</h2><p>I hope you now have a more clear view of how rootless containers would make your system more secure. Or maybe this helped you decide that rootless containers aren't for you, and that the risks of root escalation with Docker are something you can live with, which is not what I would recommend, but I guess it is fine if you understand what those risks are.</p><p>As for myself, I mostly use Podman these days. I also make use of <a href="https://podman-desktop.io/">Podman Compose</a> quite a bit, the clone of Docker Compose. Even though on occasion I start the Podman API, most of the time I don't need it, so I do everything via the <pre>podman</pre> command without running an API service. I do use Docker sometimes, but I only go for it when I need to do some quick test on a disposable and isolated VM, where security isn't a big concern.</p><h2>Buy me a coffee?</h2><p>Thank you for visiting my blog! If you enjoyed this article, please consider supporting my work and keeping me caffeinated with a small one-time donation through <a href="https://www.buymeacoffee.com/miguelgrinberg">Buy me a coffee</a>. Thanks!</p><img src="https://blog.miguelgrinberg.com/static/buymeacoffee-yellow.png" alt="Buy Me A Coffee"/><h2>Share this post</h2><p><a href="https://news.ycombinator.com/submitlink?u=https%3A//blog.miguelgrinberg.com/post/you-should-be-using-rootless-containers&amp;t=You%20Should%20be%20Using%20Rootless%20Containers"/></p><p><a href="https://reddit.com/submit/?url=https%3A//blog.miguelgrinberg.com/post/you-should-be-using-rootless-containers&amp;resubmit=true&amp;title=You Should be Using Rootless Containers"/></p><p><a href="https://twitter.com/intent/tweet/?text=You%20Should%20be%20Using%20Rootless%20Containers&amp;url=https%3A//blog.miguelgrinberg.com/post/you-should-be-using-rootless-containers"/></p><p><a href="https://www.linkedin.com/shareArticle?mini=true&amp;url=https%3A//blog.miguelgrinberg.com/post/you-should-be-using-rootless-containers&amp;title=You%20Should%20be%20Using%20Rootless%20Containers&amp;summary=You%20Should%20be%20Using%20Rootless%20Containers&amp;source=https%3A//blog.miguelgrinberg.com/post/you-should-be-using-rootless-containers"/></p><p><a href="https://facebook.com/sharer/sharer.php?u=https%3A//blog.miguelgrinberg.com/post/you-should-be-using-rootless-containers"/></p><p><a href="mailto:?subject=You%20Should%20be%20Using%20Rootless%20Containers&amp;body=https%3A//blog.miguelgrinberg.com/post/you-should-be-using-rootless-containers"/></p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

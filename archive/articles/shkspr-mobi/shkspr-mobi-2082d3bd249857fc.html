@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A reasonably practical guide to validating RFC 9421 HTTP Signatures for ActivityPub in PHP | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A reasonably practical guide to validating RFC 9421 HTTP Signatures for ActivityPub in PHP</h1>
+        <div class="meta">Terence Eden’s Blog 2026-09-03T11:34:12Z</div>
+        <div class="links">
+          <a href="https://shkspr.mobi/blog/2026/09/a-reasonably-practical-guide-to-validating-rfc-9421-http-signatures-for-activitypub-in-php/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/shkspr-mobi/shkspr-mobi-2082d3bd249857fc.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">If you&#x27;re reading this, you&#x27;ve probably been hitting your head against a brick wall trying to parse and decipher the new HTTP Signatures sent by Mastodon and other Fediverse servers. This is a basic and somewhat incomplete guide to accepting these signatures. I&#x27;m sure there are various gotchas, but it works with the signatures I&#x27;ve seen in the wild. Shut Up…</div>
+        <div class="content">
+          <p>If you're reading this, you've probably been hitting your head against a brick wall trying to parse and decipher the new HTTP Signatures sent by Mastodon and other Fediverse servers.</p>
+
+<p>This is a basic and somewhat incomplete guide to accepting these signatures. I'm sure there are various gotchas, but it works with the signatures I've seen in the wild.</p>
+
+<h2 id="shut-up-and-show-me-the-code"><a href="https://shkspr.mobi/blog/2026/09/a-reasonably-practical-guide-to-validating-rfc-9421-http-signatures-for-activitypub-in-php/#shut-up-and-show-me-the-code">Shut Up And Show Me The Code!</a></h2>
+
+<p>OK, wow, no need to be a dick about it! Here's how I validated a real signature that my server received.</p>
+
+<pre><code class="language-php">$verified = openssl_verify(
+    data:       '"@method": POST
+"@target-uri": https://example.viii.fi/inbox
+"content-digest": sha-256=:tFdB/ENGczHMlZMDb66pXoUi2d0OqH2iBHdnN/WV1mc=:
+"@signature-params": ("@method" "@target-uri" "content-digest");created=1787780262;keyid="https://mastodon.social/users/Edent#main-key"',
+    signature:  base64_decode( "sIfmNsM/Q8iG6AJlne1IkZVjQSVFDEYIPsnoSOXQY+W3Eb4+SOn9o4J5SQmFOP+Jecjf3ioFwUdsrFjAGkUUOHPvSbNWkGKtNuGm+C6r3aI3JBCFGPqX3ITgZYV76CF7JJJ5hPGaG8YH/XdmxVIeFfD3M39FQCncMyyq7xJJvwKKP1mzS5s1vNQie8hbQ9owRjtqvoWcmM9GEYCUHNcMPLjZc+CBrj8sfBbNTYgIFI4UtirOaRJvYymxXjmXuzeVYxQujMjAjgobxQ8QFv0zlYsHk+gS5EYyafpJG9zmfCFSoF9+ZwqKNADmuADbISD9LZIH/bmkPoNXhxaeFPqYog==" ),
+    public_key: "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsYMEs4waqk/6gaS+xn1T\nYygElTtNIFNkBcEdEBMaeoGVhyZiVKtSjJCS4z+X+394PKvcfSTcFILIt2GI2jOB\nHD0M2fFgxc8mmdSdCQkgEh9jF3bFI3kopDvzYf726iioYKlHXKpfPKvFt7EJgKH7\naCtS25NQkek3YUd6y3VBcT3R6Xhze9P3QNoZMIsFXklgXDKj+EllfbUqLf1vxt3s\nmD9ETxy2bJi9FheE0uY2WhARn49XAvwczM5Wzt+zqxVEtgpi5v2+ZZAVKhDnJkiC\nCCuI6hrSnKNIx/5mSlX0a0S5h5d03djrCkYsqmwelu01rhOXP2grsz4BXp0y2wrO\n3QIDAQAB\n-----END PUBLIC KEY-----\n",
+    algorithm:  "sha256"
+);
+
+echo $verified;
+</code></pre>
+
+<p>Copy and paste that into PHP and you should see that <code>$verified</code> is true.</p>
+
+<h2 id="now-explain-the-code"><a href="https://shkspr.mobi/blog/2026/09/a-reasonably-practical-guide-to-validating-rfc-9421-http-signatures-for-activitypub-in-php/#now-explain-the-code">NOW EXPLAIN THE CODE</a></h2>
+
+<p>Say please.</p>
+
+<h2 id="please"><a href="https://shkspr.mobi/blog/2026/09/a-reasonably-practical-guide-to-validating-rfc-9421-http-signatures-for-activitypub-in-php/#please">PLEASE!!!</a></h2>
+
+<p>Along with the message sent to your server, you will have received HTTP headers like this:</p>
+
+<pre><code class="language-_">content-digest: sha-256=:tFdB/ENGczHMlZMDb66pXoUi2d0OqH2iBHdnN/WV1mc=:
+signature: sig1=:sIfmNsM/Q8iG6AJlne1IkZVjQSVFDEYIPsnoSOXQY+W3Eb4+SOn9o4J5SQmFOP+Jecjf3ioFwUdsrFjAGkUUOHPvSbNWkGKtNuGm+C6r3aI3JBCFGPqX3ITgZYV76CF7JJJ5hPGaG8YH/XdmxVIeFfD3M39FQCncMyyq7xJJvwKKP1mzS5s1vNQie8hbQ9owRjtqvoWcmM9GEYCUHNcMPLjZc+CBrj8sfBbNTYgIFI4UtirOaRJvYymxXjmXuzeVYxQujMjAjgobxQ8QFv0zlYsHk+gS5EYyafpJG9zmfCFSoF9+ZwqKNADmuADbISD9LZIH/bmkPoNXhxaeFPqYog==:
+signature-input: sig1=("@method" "@target-uri" "content-digest");created=1787780262;keyid="https://mastodon.social/users/Edent#main-key"
+</code></pre>
+
+<p>The <code>signature-input</code> tells you how to construct a "Signature Base". You have to build a text string which places the various components in the order specified and separated with a newline:</p>
+
+<pre><code class="language-_">"@method": POST
+"@target-uri": https://example.viii.fi/inbox
+"content-digest": sha-256=:tFdB/ENGczHMlZMDb66pXoUi2d0OqH2iBHdnN/WV1mc=:
+"@signature-params": ("@method" "@target-uri" "content-digest");created=1787780262;keyid="https://mastodon.social/users/Edent#main-key"
+</code></pre>
+
+<p>Where <code>@method</code> is the HTTP method used to send data to your server (usually <code>GET</code> or <code>POST</code>), and <code>@target-uri</code> is the URl the message was sent to (usually your inbox).</p>
+
+<p>The <code>publicKey</code> is slightly trickier. As you can see, the <code>signature-input</code> ends with <code>keyid="https://mastodon.social/users/Edent#main-key</code></p>
+
+<p>If you make a signed request to that URl, you'll get back an ActivityPub Actor document. It will look something like this:</p>
+
+<pre><code class="language-json">{
+  "@context": [
+    "https://www.w3.org/ns/activitystreams",
+    "https://w3id.org/security/v1",
+  ],
+  "id": "https://mastodon.social/users/Edent",
+  "webfinger": "Edent@mastodon.social",
+  "type": "Person",
+  "name": "Terence Eden",
+  "publicKey": {
+    "id": "https://mastodon.social/users/Edent#main-key",
+    "owner": "https://mastodon.social/users/Edent",
+    "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsYMEs4waqk/6gaS+xn1T\nYygElTtNIFNkBcEdEBMaeoGVhyZiVKtSjJCS4z+X+394PKvcfSTcFILIt2GI2jOB\nHD0M2fFgxc8mmdSdCQkgEh9jF3bFI3kopDvzYf726iioYKlHXKpfPKvFt7EJgKH7\naCtS25NQkek3YUd6y3VBcT3R6Xhze9P3QNoZMIsFXklgXDKj+EllfbUqLf1vxt3s\nmD9ETxy2bJi9FheE0uY2WhARn49XAvwczM5Wzt+zqxVEtgpi5v2+ZZAVKhDnJkiC\nCCuI6hrSnKNIx/5mSlX0a0S5h5d03djrCkYsqmwelu01rhOXP2grsz4BXp0y2wrO\n3QIDAQAB\n-----END PUBLIC KEY-----\n"
+  },
+</code></pre>
+
+<p>The <code>publicKeyPem</code> is the string you need. There's no need to convert the <code>\n</code> to literal newlines.</p>
+
+<h2 id="is-that-it"><a href="https://shkspr.mobi/blog/2026/09/a-reasonably-practical-guide-to-validating-rfc-9421-http-signatures-for-activitypub-in-php/#is-that-it">Is that it?</a></h2>
+
+<p>Not quite! All we've done so far is verify the headers. It is possible that these are genuine headers but attached to a fraudulent body.</p>
+
+<p>This takes us back to the header <code>"content-digest": sha-256=:tFdB/ENGczHMlZMDb66pXoUi2d0OqH2iBHdnN/WV1mc=:</code></p>
+
+<p>That says that the body of the message sent has a Base64 encoded SHA256 hash of <code>tFdB/ENGczHMlZMDb66pXoUi2d0OqH2iBHdnN/WV1mc=</code>.</p>
+
+<p>To calculate your own content digest in PHP:</p>
+
+<pre><code class="language-php">$digestCalculated = base64_encode(
+    hash(
+        algo: "sha256",
+        data: $body,
+        binary: true
+    )
+);
+</code></pre>
+
+<p>Does your digest match the one sent along with the headers? If not, something dodgy is going on.</p>
+
+<h2 id="putting-it-all-together"><a href="https://shkspr.mobi/blog/2026/09/a-reasonably-practical-guide-to-validating-rfc-9421-http-signatures-for-activitypub-in-php/#putting-it-all-together">Putting it all together</a></h2>
+
+<p>The steps are:</p>
+
+<ol>
+<li>Get the headers.</li>
+<li>Get the body.</li>
+<li>From the headers' <code>content-digest</code> extract the algorithm and hash.</li>
+<li>Using the body, calculate your own hash using the algorithm from <code>content-digest</code>.</li>
+<li>Does your hash match the sent hash? If not, stop. If so, proceed.</li>
+<li>From the headers' <code>signature</code> extract the base64 encoded signature.</li>
+<li>From the headers' <code>signature-input</code> extract the signature-input string.</li>
+<li>From the signature-input string extract the order of the Signature Base.</li>
+<li>Construct the Signature Base.</li>
+<li>From the signature-input string extract the keyid.</li>
+<li>Get the Public Key from the keyid.</li>
+<li>Use <code>openssl_verify()</code> to verify the Signature Base and the base64 decoded signature, against the Public Key using SHA256.</li>
+</ol>
+
+<p>Note, <a href="https://docs.joinmastodon.org/spec/security/#http-message-signatures">Mastodon <em>only</em> uses SHA256</a>.  I think it should explicitly say which algorithm it is using <a href="https://github.com/mastodon/mastodon/issues/29905#issuecomment-5440336919">and have raised the issue</a>.</p>
+
+<h3 id="in-code-form"><a href="https://shkspr.mobi/blog/2026/09/a-reasonably-practical-guide-to-validating-rfc-9421-http-signatures-for-activitypub-in-php/#in-code-form">In Code Form</a></h3>
+
+<p>This is how you do it in PHP. Please read this carefully as there are some hard-coded assumptions.</p>
+
+<pre><code class="language-php">&lt;?php
+
+//  Validate the Digest.
+//  It is the hash of the raw input string, in binary, encoded as base64.
+
+//  The format is content-digest =&gt; &lt;algorithm&gt;=:&lt;base64 encoded hash&gt;:
+$digestString = $headers["content-digest"];
+//  The Base64 encoding may have multiple `=` at the end. So split this at the first `=`.
+$digestData = explode( separator: "=", string: $digestString, limit: 2 );
+
+//  Hashes are in lowercase, but have a `-` in their name.
+//  This is not what hash_algos() expects.
+$digestAlgorithm = str_replace( search: "-", replace: "", subject: $digestData[0] );
+
+//  The hash is surrounded by `:` characters.
+$digestHash = str_replace( search: ":", replace: "", subject: $digestData[1] );
+
+//  Check if the hash algorithm is one known about to PHP.
+//  If not, reject and record an error.
+if ( !in_array( needle:$digestAlgorithm, haystack: hash_algos() ) ) {
+    return false;
+}
+
+//  Manually calculate the digest based on the data sent.
+$digestCalculated = base64_encode( hash( algo: $digestAlgorithm, data: $input, binary: true ) );
+
+//  Does our calculation match what was sent?
+if ( !( $digestCalculated == $digestHash ) ) {
+    return false;
+}
+
+//  The signature format is signature =&gt; &lt;signature name&gt;=:&lt;base64 encoded hash&gt;:
+$signatureString = $headers["signature"];
+//  The Base64 encoding may have multiple `=` at the end. So split this at the first `=`.
+$signatureData = explode( separator: "=", string: $signatureString, limit: 2 );
+$signatureName = $signatureData[0];
+
+//  The signature is surrounded by `:` characters.
+$signatureB64 = str_replace( search: ":", replace: "", subject: $signatureData[1] );
+
+//  The signature-input format is complicated!
+$signatureInputString = $headers["signature-input"];
+
+//  Get the parameters. Assume there is only one signature.
+$signatureParamsString = explode( separator: "=", string: $signatureInputString, limit: 2 )[1];
+
+//  Get the different elements of the signature.
+$signatureInputData = explode( separator: ";", string: $signatureInputString );
+
+//  Construct the data.
+$signatureInput = [];
+foreach( $signatureInputData as $signatureInputParts ) {
+    $partsData = explode( separator: "=", string: $signatureInputParts );
+    //  Strip quotes from keyid and parentheses from sig1.
+    if ( "keyid" == $partsData[0] ) {
+        $partsData[1] = str_replace( search: "\"", replace: "", subject: $partsData[1] );
+    }
+
+    if ( $signatureName == $partsData[0] ) {
+        $partsData[1] = str_replace( search: ["(", ")"], replace: "", subject: $partsData[1] );
+    }
+
+    $signatureInput[ $partsData[0] ] = $partsData[1] ;
+}
+
+$signatureStructure = $signatureInput[$signatureName];
+$signatureKeyID     = $signatureInput["keyid"];
+
+//  Remove quotes.
+$signatureStructure = str_replace( search: "\"", replace: "", subject: $signatureStructure );
+$signatureStructureData = explode( separator: " ", string: $signatureStructure );
+
+//  https://www.rfc-editor.org/info/rfc9421/#section-2.5
+$signatureBase = "";
+foreach ( $signatureStructureData as $signatureStructureParts ) {
+    if ( "@method" == $signatureStructureParts ) {
+        //  https://www.rfc-editor.org/info/rfc9421/#name-method
+        $signatureBase .= "\"@method\": " . strtolower( $_SERVER["REQUEST_METHOD"] . "\n" );
+    }
+    if ( "@target-uri" == $signatureStructureParts ) {
+        //  https://www.rfc-editor.org/info/rfc9421/#section-2.2.2
+        //  Change the domain name to your own.
+        $signatureBase .= "\"@target-uri\": https://EXAMPLE.COM" . $_SERVER["REQUEST_URI"] . "\n";
+    }
+    if ( "content-digest" == $signatureStructureParts ) {
+        $signatureBase .= "\"content-digest\": $digestString\n";
+    }
+}
+
+//  https://victoronsoftware.com/posts/http-message-signatures/#how-the-signature-is-created
+$signatureBase .= "\"@signature-params\": $signatureParamsString";
+
+//  Get the signing user's public key.
+//  This is usually in the form `https://example.com/user/username#main-key`
+//  This is to differentiate if the user has multiple keys.
+//  This may need to be a signed request. You will need to write your own getDataFromURl() function to get the sending user's key.
+$userData  = getDataFromURl( $signatureKeyID );
+$publicKey = $userData["publicKey"]["publicKeyPem"];
+
+//  Verify the request
+$verified = openssl_verify(
+    data:       $signatureBase,
+    signature:  base64_decode( $signatureB64 ),
+    public_key: $publicKey,
+    algorithm:  $digestAlgorithm
+);
+
+//  Convert the result to boolean.
+if ( $verified === 1 ) {
+    $verified = true;
+} elseif ( $verified === 0 ) {
+    $verified = false;
+} else {
+    $verified = null;
+}
+
+return $verified;
+</code></pre>
+
+<h2 id="further-reading"><a href="https://shkspr.mobi/blog/2026/09/a-reasonably-practical-guide-to-validating-rfc-9421-http-signatures-for-activitypub-in-php/#further-reading">Further Reading</a></h2>
+
+<ul>
+<li><a href="https://www.rfc-editor.org/info/rfc9421/">RFC 9421 HTTP Message Signatures</a></li>
+<li><a href="https://victoronsoftware.com/posts/http-message-signatures/">Understanding HTTP message signatures: A developer's guide</a></li>
+<li><a href="https://www.otoroshi.io/docs/tutorials/http-message-signatures-rfc9421/">Sign and verify HTTP messages (RFC 9421)</a></li>
+<li><a href="https://darutk.medium.com/verification-of-http-message-signatures-501bbdc7dfec">Verification of HTTP Message Signatures</a></li>
+<li><a href="https://github.com/macgirvin/HTTP-Message-Signer">HTTP-Message-Signer in PHP</a></li>
+</ul>
+
+<h2 id="thanks-to-nlnet"><a href="https://shkspr.mobi/blog/2026/09/a-reasonably-practical-guide-to-validating-rfc-9421-http-signatures-for-activitypub-in-php/#thanks-to-nlnet">Thanks to NLnet</a></h2>
+
+<p>This blog post was funded in part by the work I'm doing for my NLnet NGI0 grant. Thanks!</p>
+
+<p><a href="https://nlnet.nl/project/ActivityBot/"><img src="https://shkspr.mobi/blog/wp-content/uploads/2026/08/NGI-logos.webp" alt="NLnet logo." width="900" height="200" class="aligncenter"></a></p>
+<img src="https://shkspr.mobi/blog/wp-content/themes/edent-wordpress-theme/info/okgo.php?ID=74429&HTTP_REFERER=RSS" alt="" width="1" height="1" loading="eager">
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
