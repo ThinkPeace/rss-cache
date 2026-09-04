@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The case of the progress callback that never got called when progress happened | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>The case of the progress callback that never got called when progress happened</h1>
+        <div class="meta">The Old New Thing 2026-09-03T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260903-00/?p=112672">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-d980f7d6c4e06f02.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Are you talking to the right guy? The post The case of the progress callback that never got called when progress happened appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>A colleague was trying to figure out why their progress handler wasn&#8217;t being called.</p>
+<pre>// C#
+
+async Task&lt;bool&gt; DownloadItemAsync(string id)
+{
+    var op = item.DownloadAsync(id);
+    op.Progress += (s, pct) UpdateProgress(pct);
+    var result = await op;
+    ClearProgress();
+    return result;
+}
+</pre>
+<p>This is pretty standard stuff. Start the operation, hook up the progress, and then wait for the operation to complete. But they never got any progress.</p>
+<p>I asked them to check if maybe the item was downloading so fast that they missed all the progress. But no, even if the download takes a long time, they never get any progress.</p>
+<p>I suggested that they step through the <code>Download­Async</code> method to see where it raises progress, and then follow the execution to the point where the progress callback is supposed to be invoked, to see why it didn&#8217;t make it. (To be fair, this is a cross-language debugging problem, so it&#8217;s harder than it looks. I suggested just focusing on the C++ side: Wait for the COM-callable wrapper to be generated and set as the progress callback, and then set a breakpoint on that wrapper. If that breakpoint gets hit, but the C# code doesn&#8217;t run, then there is a problem in the projection. If the breakpoint never gets hit, then the problem is on the C++ side.)</p>
+<p>My colleague came back with the answer. Here&#8217;s the code for <code>Download­Async</code>:</p>
+<pre>// C++/WinRT
+
+winrt::IAsyncOperationWithProgress&lt;bool, double&gt;
+    AggregateSource::DownloadAsync(winrt::hstring id)
+{
+    std::wstring_view idview { id };
+    auto pos = idview.find(L':');
+    if (pos == std::wstring_view::npos) {
+        co_return false;
+    }
+
+    auto providerId = Unescape(idview.substr(0, pos - 1));
+
+    auto provider = GetProvider(providerId);
+    if (!provider) {
+        co_return false;
+    }
+
+    auto providerItemId = Unescape(idview.substr(pos + 1));
+    co_return co_await provider.DownloadAsync(providerItemId);
+}
+</pre>
+<p>The <code>Aggregate­Source</code> gathers items from multiple providers. The format of the <code>id</code> is a provider, a colon, and then an ID. (The provider ID and item ID are escaped, just in case they themselves happen to contain a colon.)</p>
+<p>We look up the provider, and then ask the provider to download the item.</p>
+<p>Do you see the problem?</p>
+<p>The <code>Download­Async</code> does not generate any progress reports!</p>
+<p>It never calls <code>co_await winrt::get_progress_token()</code>, much less call the token with a progress value to generate a progress report.</p>
+<p>It&#8217;s apparent that what the code wants to do when it attaches the progress callback is to receive callbacks from the <i>inner</i> operation, the one that comes from the provider. However, the only <code>IAsync­Operation­With­Progress</code> that it has access to is the one returned by the <code>Aggregate­Source::<wbr />Download­Async</code> method.</p>
+<p>The easy solution here is to get rid of the middle man and just return the provider&#8217;s <code>IAsync­Operation­With­Progress</code>. That way, the caller can connect to the underlying operation&#8217;s progress.</p>
+<pre>winrt::IAsyncOperationWithProgress&lt;bool, double&gt;
+    AggregateSource::DownloadAsync(winrt::hstring id)
+{
+    std::wstring_view idview { id };
+    auto pos = idview.find(L':');
+    if (pos == std::wstring_view::npos) {
+        <span>return <a title="Creating an already-completed asynchronous activity in C++/WinRT, part 8" href="https://devblogs.microsoft.com/oldnewthing/20240718-00/?p=109977">completed_async</a>(false);</span>
+    }
+
+    auto providerId = Unescape(idview.substr(0, pos - 1));
+
+    auto provider = GetProvider(providerId);
+    if (!provider) {
+        <span>return completed_async(false);</span>
+    }
+
+    auto providerItemId = Unescape(idview.substr(pos + 1));
+    <span>return provider.DownloadAsync(providerItemId);</span>
+}
+</pre>
+<p>If you don&#8217;t believe in <code>completed_<wbr />async</code>, you can just write</p>
+<pre>        return [] -&gt; winrt::IAsyncOperationWithProgress&lt;bool, double&gt; {
+            return false;
+        }();
+</pre>
+<p>I said that this is the easy solution. There&#8217;s also a hard solution, which we will have to look at later because I haven&#8217;t written it up yet.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260903-00/?p=112672">The case of the progress callback that never got called when progress happened</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
