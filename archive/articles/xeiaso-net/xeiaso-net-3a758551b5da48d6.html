@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>It took a year to ship WebAssembly in Anubis | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>It took a year to ship WebAssembly in Anubis</h1>
+        <div class="meta">Xe Iaso&#x27;s blog 2026-09-06T00:00:00Z</div>
+        <div class="links">
+          <a href="https://anubis.techaro.lol/blog/2026/anubis-wasm/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xeiaso-net/xeiaso-net-3a758551b5da48d6.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">After a year of work, hundreds of commits, 5 generations of pull requests, dozens of tests, rewriting part of Anubis in Rust, the first compiler bug of my career, and at least three times making my tower run out of ram I think I have finally done it. The next version of Anubis will ship with WebAssembly-based proof of work checks that admins can enable in t…</div>
+        <div class="content">
+          <p><img src="https://xeiaso.net/static/blog/2026/anubis-wasm/chrystarium.webp" alt/></p>
+        <p>After a year of work, hundreds of commits, 5 generations of pull requests, dozens of tests, rewriting part of Anubis in Rust, the first compiler bug of my career, and at least three times making my tower run out of ram I think I have finally done it. The next version of Anubis will ship with <a href="https://anubis.techaro.lol/docs/admin/configuration/challenges/wasm">WebAssembly-based proof of work checks</a> that admins can enable in their thresholds or bot rules:</p>
+        <pre class="language-yaml"><code class="language-yaml code-highlight"><span class="code-line"><span class="token key atrule">thresholds</span><span class="token punctuation">:</span>
+        </span><span class="code-line">  <span class="token punctuation">-</span> <span class="token key atrule">name</span><span class="token punctuation">:</span> moderate<span class="token punctuation">-</span>suspicion
+        </span><span class="code-line">    <span class="token key atrule">expression</span><span class="token punctuation">:</span>
+        </span><span class="code-line">      <span class="token key atrule">all</span><span class="token punctuation">:</span>
+        </span><span class="code-line">        <span class="token punctuation">-</span> weight <span class="token punctuation">></span>= 10
+        </span><span class="code-line">        <span class="token punctuation">-</span> weight &lt; 20
+        </span><span class="code-line">    <span class="token key atrule">action</span><span class="token punctuation">:</span> CHALLENGE
+        </span><span class="code-line">    <span class="token key atrule">challenge</span><span class="token punctuation">:</span>
+        </span><span class="code-line">      <span class="token key atrule">algorithm</span><span class="token punctuation">:</span> argon2id
+        </span><span class="code-line">      <span class="token key atrule">difficulty</span><span class="token punctuation">:</span> <span class="token number">6</span>
+        </span></code></pre>
+        <p>This makes Anubis challenges use a <a href="https://en.wikipedia.org/wiki/Memory-hard_function">memory-hard</a> proof of work function (<a href="https://en.wikipedia.org/wiki/Argon2">argon2id</a>) instead of just a CPU hard one. It also means that the &quot;hey Claude vibeslop me a CUDA Anubis solver&quot; route is on its way to being fundamentally dead. Overall, this project taught me a lot of things about how WebAssembly works in practice, what the rough edges are when operating on the bleeding edge like I am, and led to the first genuine compiler bug of my career.</p>
+        <p>Today I want to take you through the journey and process behind adding these WebAssembly based proof of work checks and all the problems that came up along the way.</p>
+        <h2>Why use WebAssembly in the first place?</h2>
+        <p>The big impetus behind wanting to use WebAssembly in Anubis is that there's a constant tension that's underlined a lot of the performance work I've been doing: phone CPUs suck and trying to balance equitability to phone CPUs with trying to punish scraper CPUs is a huge challenge.</p>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">Note</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>To be clear: I am tackling the &quot;Anubis makes my phone overheat&quot; problem. It's
+        hard to just lower the difficulty for phones without giving attackers enough
+        information to lower the difficulty for scrapers. If you want to contribute
+        performance data so that I can improve my classification process and/or target
+        future development, please <a href="https://xeiaso.net/contact/">get in touch with me</a>.
+        I want to make things better but can't without data. I am actively testing with
+        a <a href="https://www.gsmarena.com/motorola_moto_g8_power-10052.php">Moto G8 Power</a>
+        alongside my normal testing steps.</p></div></div></div>
+        <p>Using WebAssembly here means that the binary will run faster, which will make Anubis <em>go away</em> faster, which is what we all want, right?</p>
+        <h3>The same binary runs on both the client and the server</h3>
+        <p>One of the other big advantages of this setup is that it lets clients and servers run the same binary in order to solve and validate challenges. Note that I didn't say the same code, I said the same <em>binary</em>. This means that the client and server are in lockstep, much like the <a href="https://en.wikipedia.org/wiki/CIC_(Nintendo)">CIC chip in the NES</a>. This also does mean that a bug in the shared code means that the client could send an invalid value that the server would accept as valid, but I don't think this is a practical concern until something like that happens.</p>
+        <p>Right now the <a href="https://anubis.techaro.lol/docs/admin/configuration/challenges/proof-of-work"><code>fast</code> challenge</a> has two implementations in Anubis: one <a href="https://github.com/TecharoHQ/anubis/blob/main/web/js/worker/sha256.ts">in JavaScript</a> and the other <a href="https://github.com/TecharoHQ/anubis/blob/main/lib/challenge/proofofwork/proofofwork.go">in Go</a>. Updating it in one place means making the same updates in other places and also making sure that everywhere else that assumes how challenges work is also updated.</p>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">Note</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>Yeah, it's probably bad to have made those assumptions about how challenges
+        work across the codebase. There's a lot of weird technical debt here that needs
+        to be solved at some point. I expect that to be a fair bit of effort to
+        untangle, it may end up with keeping the <code>fast</code> challenge only for tests when
+        the WebAssembly based routes are working out well enough to make the
+        default/only option.</p></div></div></div>
+        <p>Making the same binary run on both the client and the server means that future experiments like per-client program synthesis can also proceed. I'll get more into that sometime in the future.</p>
+        <h3>This lets us sneak Rust into Anubis</h3>
+        <p>Right now the core of Anubis is written in Go. Go's standard library HTTP server is surprisingly performant and is the key component of things like Google's HTTP frontend service. I have no intention to rewrite Anubis in Rust or anything as drastic as that.</p>
+        <p>However breaking up Anubis from one monolithic binary into what amounts to a plugin loader is a lot more interesting from a maintenance standpoint. One of the main problems with Anubis is that the combination of rules I've set for myself (no CGo allowed and everything must cross compile to prod from my MacBook) means that updating any part of Anubis means recompiling all of Anubis across prod. Making Anubis be <em>able</em> to have parts of it downloaded and swapped out at runtime is really interesting to me because it means being able to adapt to threats <em>as soon as the threat actors change behaviour</em>.</p>
+        <p>Also I figured out pretty quickly that Rust builds some of the smallest WebAssembly binaries that run hilariously fast, so I wrote all the WebAssembly code in Rust (no-std, wasm32-unknown-unknown)!</p>
+        <h3>Finally fixing the challenge difficulty scaling issue</h3>
+        <p>Along the way this also lets me fix one of the bigger administrative problems with Anubis: challenges scale incorrectly with the <code>fast</code> challenge. Anubis uses string comparison to count the number of leading zero <em>nibbles</em> in a hash instead of the number of leading zero <em>bits</em>. This means that adding one (1) to the difficulty of a challenge makes it 1024 (one thousand twenty-four) times as hard to solve in the worst case.</p>
+        <p>The original post has <a href="https://anubis.techaro.lol/blog/2026/anubis-wasm/#finally-fixing-the-challenge-difficulty-scaling-issue">an interactive diagram</a> that shows the difference in scaling at play.</p>
+        <p>This was a mistake in retrospect, but if we're changing details about how challenges work here then we may as well wrap up the fix into that.</p>
+        <h2>How you normally add WebAssembly to something like this</h2>
+        <p>In a normal world you'd not have about half of the restrictions that I have when working with Anubis. Normally you just write your code, compile it to WebAssembly, and then make sure it runs on modern browsers. This is nice and simple. I wish I could live in this world.</p>
+        <p>Comparatively, this is what it's like getting all of this working across browser versions, platforms, and so many other things:</p>
+        <p><img src="https://xeiaso.net/static/blog/2026/anubis-wasm/mental-gymnastics.webp" alt/></p>
+        <p>Anubis supports Chrome 75 and newer. I wanted to reduce the support range to not have to deal with Chrome that old (the feature difference between Chrome 155 and Chrome 75 is <a href="https://caniuse.com/?compare=chrome+75,chrome+155&amp;compareCats=all">absolutely massive</a>), but there are a lot of smartphones, smart TVs, and other electronic devices running Android out there that are just marooned on Chrome that old with <em>no path to upgrade it</em>. As a result, I gotta target Chrome 75 for features, but out of an abundance of caution and to make sure that things are generally compatible with browsers older than Chrome 75 (eg: old iOS releases), I target my JavaScript to Chrome 66 as an abundance of caution.</p>
+        <p>I haven't been able to test with iOS or Android versions of the same vintage as Chrome 75, so a lot of this is aspirational backwards compatibility. I sure hope it's good enough!</p>
+        <h3>The host -> guest WASM ABI</h3>
+        <p>When you're doing this kind of work, you're effectively writing an operating system kernel that makes the WebAssembly guests run as processes. Any calls you pass to the WebAssembly guest are effectively system calls into the host. Normally I'd love to be able to reuse the <a href="https://component-model.bytecodealliance.org/introduction.html">WebAssembly Component Model</a> so that a lot of the &quot;hard part&quot; is done for me. WebAssembly Components make you define your calls in packages that contain interfaces with functions in worlds.</p>
+        <p>Here's an example of the kind of WebAssembly Interface Types world Anubis would need:</p>
+        <pre><code class="code-highlight"><span class="code-line">// theoretical/wit/proof-of-work.wit
+        </span><span class="code-line">package techaro:anubis;
+        </span><span class="code-line">
+        </span><span class="code-line">interface update-ui {
+        </span><span class="code-line">  // update the UI with the current nonce every 1024 iterations.
+        </span><span class="code-line">  update-nonce: func(u32);
+        </span><span class="code-line">}
+        </span><span class="code-line">
+        </span><span class="code-line">interface proof-of-work {
+        </span><span class="code-line">  // possible ways the computation can go wrong.
+        </span><span class="code-line">  enum error {
+        </span><span class="code-line">    no-error,
+        </span><span class="code-line">    input-too-big,
+        </span><span class="code-line">    cant-find-solution,
+        </span><span class="code-line">    computed-different-result,
+        </span><span class="code-line">  }
+        </span><span class="code-line">
+        </span><span class="code-line">  // write up to 4096 bytes of challenge data to the challenge buffer,
+        </span><span class="code-line">  // if the user tries to write more then throw an error.
+        </span><span class="code-line">  write-data: func(data: list&lt;u8>) -> result&lt;u32, error>;
+        </span><span class="code-line">
+        </span><span class="code-line">  // read the generated result
+        </span><span class="code-line">  read-result: func() -> list&lt;u8>;
+        </span><span class="code-line">
+        </span><span class="code-line">  // write to the verification buffer, if the user tries to write more
+        </span><span class="code-line">  // than the buffer supports throw an error.
+        </span><span class="code-line">  write-verification: func(data: list&lt;u8>) -> error;
+        </span><span class="code-line">
+        </span><span class="code-line">  // grind at the right hash in a loop and return the nonce that passes
+        </span><span class="code-line">  // validation to send to the server.
+        </span><span class="code-line">  anubis-work: func(difficulty: u32, initial-nonce: u32, difficulty: u32, iterand: u32) -> result&lt;u32, error>;
+        </span><span class="code-line">
+        </span><span class="code-line">  // validate that running the proof of work function on the data buffer
+        </span><span class="code-line">  // with the given nonce results in the same output that the client
+        </span><span class="code-line">  // calculated.
+        </span><span class="code-line">  anubis-validate: func(difficulty: u32, nonce: u32) -> result&lt;bool, error>;
+        </span><span class="code-line">}
+        </span><span class="code-line">
+        </span><span class="code-line">world anubis {
+        </span><span class="code-line">  import update-ui;
+        </span><span class="code-line">  export proof-of-work;
+        </span><span class="code-line">}
+        </span></code></pre>
+        <p>If this worked (I wrote this all out in one go based on how the current handcrafted ABI works and have not tested it, sorry), this would describe the shape of the API that we need for doing the proof of work operations. At the time I wrote the API/ABI that Anubis uses, the main tool for generating the server-side bindings for WebAssembly Component Model stuff in Go <a href="https://github.com/arcjet/gravity">gravity</a> didn't support passing records (structs) or bytestrings (<code>list&lt;u8></code> or <code>Vec&lt;u8></code> / <code>[]byte</code>) from the host to the guest. As such, I had to do it by hand.</p>
+        <h3>API design</h3>
+        <p>So given that we can't do it the &quot;right way&quot;, we have to do it the &quot;bad way&quot;. Also given that no matter what I pick for this I'm going to be &quot;wrong&quot;, I just decided to treat the WebAssembly modules as dynamic libraries that just happen to use WebAssembly as an implementation detail. There only needs to be three buffers that are read from / written to, so let's just focus around those:</p>
+        <ol>
+        <li>The data buffer: up to 4096 bytes of challenge data. This is 4096 bytes so that it can (hopefully) land in its own 4Ki machine page. This is the only variable-length buffer in the setup, so it needs two calls:
+        <ol>
+        <li><code>data_ptr() -> *const u8</code>: return the pointer to the data buffer in WASM linear memory. This is used as the base address for copying data into the guest.</li>
+        <li><code>set_data_length(len: u32)</code>: update the globally mutable &quot;data length&quot; variable to signal to the guest how much data was actually written into the data buffer. The combination of these two calls lets you treat that global data buffer as a slice.</li>
+        </ol>
+        </li>
+        <li>The result buffer: a challenge-defined buffer that usually has about 32 bytes of data. This is read out of the guest's linear memory when the challenge is done processing.
+        <ol>
+        <li><code>result_hash_ptr() -> *const u8</code>: return the pointer to the result buffer in WASM linear memory. This is used as the base address for reading out of the guest.</li>
+        <li><code>result_hash_size() -> usize</code>: return the length of the result buffer (a compile time constant based on the needs of the challenge, but the runtime can't know that).</li>
+        </ol>
+        </li>
+        <li>The verification buffer: a challenge-defined buffer that usually has about 32 bytes of data. This is written into when the server is validating a challenge.
+        <ol>
+        <li><code>verification_hash_ptr() -> *const u8</code>: return the pointer to the result buffer in WASM linear memory. This is used as the base address for reading out of the guest.</li>
+        <li><code>verification_hash_size() -> usize</code>: return the length of the result buffer (a compile time constant based on the needs of the challenge, but the runtime can't know that).</li>
+        </ol>
+        </li>
+        </ol>
+        <p>Challenge modules also expose two entrypoints:</p>
+        <ol>
+        <li><code>anubis_work</code>: the main entrypoint for browsers. Given the data loaded into the challenge buffer, hash it in a tight loop until you get a solution that matches the difficulty.</li>
+        <li><code>anubis_verify</code>: the main entrypoint for the server. Given the data loaded into the challenge and verification buffers, ensuring that one run through the hashing function produces a result that both meets the difficulty demands and exactly matches what the client sent.</li>
+        </ol>
+        <p>Challenge modules also import <code>anubis.anubis_update_nonce</code> from the environment so that they can periodically report their hash rate back to the frontend. This allows users to see a progress bar based on how long it should take to finish the process.</p>
+        <p>This works enough for now. It'll be interesting to see how this falls short in the real world!</p>
+        <h2>The ride never ends</h2>
+        <p>Honestly, the first bit of this took a few days at most. Most of the hard work was making sure that pointers, offsets, and whatnot were all wired up correctly so that the browser worked the same way as the server. My experience building and messing around with <a href="https://github.com/Xe/olin">many</a> <a href="https://github.com/Xe/pahi">WebAssembly</a> <a href="https://xeiaso.net/talks/unix-philosophy-logical-extreme-wasm/">runtimes</a> and <a href="https://xeiaso.net/talks/wazero-lightning-2023/">egregious hacks</a> meant that making it was really easy for me.</p>
+        <p>The devil came out in the details. Here are all the things that came up while I was working on this. All of these problems added up is the sole reason that this took a year instead of a week.</p>
+        <h3>SIMD means speed in my dispatch</h3>
+        <p>Early on in development I found out that WebAssembly has a <a href="https://developer.mozilla.org/en-US/docs/WebAssembly/Reference/SIMD">SIMD extension</a>. SIMD stands for <a href="https://en.wikipedia.org/wiki/Single_instruction,_multiple_data">Single Instruction Multiple Data</a> and is a family of instructions that let you do operations on multiple values at a time. This gives programmers data-level parallelism (this is distinct from multi-threading) so that things like hash calculations and MP3 decoding can be done faster than they would be if each operation had to be its own instruction.</p>
+        <p><a href="https://caniuse.com/wasm-simd">CanIUse considers WebAssembly SIMD to be &quot;baseline&quot;</a> (supported by browsers newer than Chrome 91), but I have a lower version bound of Chrome 75. However the benefits from SIMD on mobile devices are <em>so drastic</em> that it's worth having two builds of the WebAssembly code: one with SIMD and one without it. In the browser it dispatches which version to use by using <a href="https://www.npmjs.com/package/wasm-feature-detect">wasm-feature-detect</a> to probe WebAssembly functionality by trying to parse/run trivial minimal programs that exercise those features.</p>
+        <p>Hopefully I don't need to add <a href="https://github.com/TecharoHQ/anubis/blob/4578023de7b631537e3a43d89b1998e802beb7e0/web/js/algorithms/wasm.ts#L58-L62">an additional build</a> into this process, but there is nothing in the tooling that would prevent it!</p>
+        <h3>The birth and death of Yavascript</h3>
+        <p>One of the big things that blocked this shipping for so long was not having an escape hatch of some kind to allow clients that disable WebAssembly by policy to get through the gate. In my experience most clients don't have JavaScript enabled but WebAssembly disabled, however there are a few notable usecases that forced my hand: iOS <a href="https://support.apple.com/en-us/105120">Lockdown mode</a> and GrapheneOS' <a href="https://discuss.grapheneos.org/d/4196-webassembly-on-vanadium">Vanadium</a>'s default configuration. This combination of factors means that there would need to be another implementation of the proof of work code in JavaScript that would actually execute the number crunching.</p>
+        <p>I don't want to make another implementation of the proof of work function (the entire point of this is to only have <em>one</em> implementation!) so while I was browsing around I came across the legendary talk <a href="https://www.destroyallsoftware.com/talks/the-birth-and-death-of-javascript">The Birth &amp; Death of JavaScript</a> and got a horrible idea. What if you just compiled the WebAssembly to JavaScript? Would that even work? It's &quot;just&quot; turning one Turing machine into another, right? How would it fare in practice?</p>
+        <p>Turns out I'm not the first person to think about this! The team behind <a href="https://github.com/WebAssembly/binaryen">binaryen</a> have made this escape hatch in the form of <a href="https://github.com/WebAssembly/binaryen/blob/main/src/tools/wasm2js.cpp">wasm2js</a> which takes WebAssembly binaries and produces moderately cromulent JavaScript in response. One of the main downsides is that the generated binaries tend to be rather large.</p>
+        <p>For example consider this simple WebAssembly module that exposes a function that adds two numbers together:</p>
+        <pre><code class="code-highlight"><span class="code-line">(module
+        </span><span class="code-line">  (func $add (param $lhs i32) (param $rhs i32) (result i32)
+        </span><span class="code-line">    local.get $lhs
+        </span><span class="code-line">    local.get $rhs
+        </span><span class="code-line">    i32.add)
+        </span><span class="code-line">  (export &quot;add&quot; (func $add))
+        </span><span class="code-line">)
+        </span></code></pre>
+        <p>Seems simple enough, right? Here's the JavaScript that generates:</p>
+        <pre class="language-javascript"><code class="language-javascript code-highlight"><span class="code-line"><span class="token keyword">function</span> <span class="token function">asmFunc</span><span class="token punctuation">(</span><span class="token parameter">imports</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">  <span class="token keyword">var</span> <span class="token maybe-class-name">Math_imul</span> <span class="token operator">=</span> <span class="token known-class-name class-name">Math</span><span class="token punctuation">.</span><span class="token property-access">imul</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token keyword">var</span> <span class="token maybe-class-name">Math_fround</span> <span class="token operator">=</span> <span class="token known-class-name class-name">Math</span><span class="token punctuation">.</span><span class="token property-access">fround</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token keyword">var</span> <span class="token maybe-class-name">Math_abs</span> <span class="token operator">=</span> <span class="token known-class-name class-name">Math</span><span class="token punctuation">.</span><span class="token property-access">abs</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token keyword">var</span> <span class="token maybe-class-name">Math_clz32</span> <span class="token operator">=</span> <span class="token known-class-name class-name">Math</span><span class="token punctuation">.</span><span class="token property-access">clz32</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token keyword">var</span> <span class="token maybe-class-name">Math_min</span> <span class="token operator">=</span> <span class="token known-class-name class-name">Math</span><span class="token punctuation">.</span><span class="token property-access">min</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token keyword">var</span> <span class="token maybe-class-name">Math_max</span> <span class="token operator">=</span> <span class="token known-class-name class-name">Math</span><span class="token punctuation">.</span><span class="token property-access">max</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token keyword">var</span> <span class="token maybe-class-name">Math_floor</span> <span class="token operator">=</span> <span class="token known-class-name class-name">Math</span><span class="token punctuation">.</span><span class="token property-access">floor</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token keyword">var</span> <span class="token maybe-class-name">Math_ceil</span> <span class="token operator">=</span> <span class="token known-class-name class-name">Math</span><span class="token punctuation">.</span><span class="token property-access">ceil</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token keyword">var</span> <span class="token maybe-class-name">Math_trunc</span> <span class="token operator">=</span> <span class="token known-class-name class-name">Math</span><span class="token punctuation">.</span><span class="token property-access">trunc</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token keyword">var</span> <span class="token maybe-class-name">Math_sqrt</span> <span class="token operator">=</span> <span class="token known-class-name class-name">Math</span><span class="token punctuation">.</span><span class="token property-access">sqrt</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token keyword">function</span> <span class="token function">$0</span><span class="token punctuation">(</span><span class="token parameter">$0_1<span class="token punctuation">,</span> $1</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">    $0_1 <span class="token operator">=</span> $0_1 <span class="token operator">|</span> <span class="token number">0</span><span class="token punctuation">;</span>
+        </span><span class="code-line">    $1 <span class="token operator">=</span> $1 <span class="token operator">|</span> <span class="token number">0</span><span class="token punctuation">;</span>
+        </span><span class="code-line">    <span class="token keyword control-flow">return</span> <span class="token punctuation">(</span>$0_1 <span class="token operator">+</span> $1<span class="token punctuation">)</span> <span class="token operator">|</span> <span class="token number">0</span> <span class="token operator">|</span> <span class="token number">0</span><span class="token punctuation">;</span>
+        </span><span class="code-line">  <span class="token punctuation">}</span>
+        </span><span class="code-line">
+        </span><span class="code-line">  <span class="token keyword control-flow">return</span> <span class="token punctuation">{</span>
+        </span><span class="code-line">    <span class="token literal-property property">add</span><span class="token operator">:</span> $0<span class="token punctuation">,</span>
+        </span><span class="code-line">  <span class="token punctuation">}</span><span class="token punctuation">;</span>
+        </span><span class="code-line"><span class="token punctuation">}</span>
+        </span><span class="code-line">
+        </span><span class="code-line"><span class="token keyword">var</span> retasmFunc <span class="token operator">=</span> <span class="token function">asmFunc</span><span class="token punctuation">(</span><span class="token punctuation">{</span><span class="token punctuation">}</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        </span><span class="code-line"><span class="token keyword module">export</span> <span class="token keyword">var</span> add <span class="token operator">=</span> retasmFunc<span class="token punctuation">.</span><span class="token property-access">add</span><span class="token punctuation">;</span>
+        </span></code></pre>
+        <p>As you can imagine, this only gets <a href="https://anubis.techaro.lol/.within.website/x/cmd/anubis/static/js/worker/wasm2js.mjs">progressively worse</a> as you end up making the Rust standard library get compiled from WASM to JavaScript, and even worse when you actually get hashing functions into the mix. The end result is probably very optimized when you run it through a JIT, but given that this runs on an interpreter it's probably gonna be slow no matter what I do.</p>
+        <p>Sorry! I tried!</p>
+        <h3>How I found the first compiler bug in my career</h3>
+        <p>This ended up working fairly well in testing, but I tried building it in GitHub Actions and ran into an issue. I noticed that wasm2js was <a href="https://manpages.ubuntu.com/manpages/resolute/man1/wasm2js.1.html">packaged in Ubuntu</a> and that the version in Fedora worked fine but the version in Ubuntu did not and threw an obscure error message about not understanding the tail call extension that Rust was using for some reason.</p>
+        <p>I ended up bisecting versions of binaryen by downloading a tarball, building it from source, and then seeing if the result of running it on the Anubis WebAssembly modules worked in a browser. I ended up selecting Binaryen version 128, the newest version at the time. It was new enough that most of <a href="https://repology.org/project/anubis-anti-crawler/versions">the distributions that package Anubis</a> don't have that version of Binaryen packaged.</p>
+        <p>However I didn't want to make my life more complicated by having some kind of conditional compilation step that would effectively tell end users &quot;sorry, the admin is using an unofficial build that just so happens to not support your browser, please complain to them&quot; because they'll just end up complaining to me. In my experience the kinds of people who run this exact combination of circumstances also tend to be the kind of people that have a wide variance in the level of kindness they display to the authors of open source programs that happen to be in their way. So I needed an escape hatch that would <em>force</em> build systems to use <em>the exact version</em> that I use in my builds.</p>
+        <p>Then inspiration hit me as if Apollo himself sniped me from the heavens. We're dealing with WebAssembly here right? What's stopping us from just compiling the WebAssembly to JS tool to WebAssembly with some kind of reproducible build, committing that blob to the repo, and then moving on with life?</p>
+        <p>I ended up <a href="https://github.com/llvm/llvm-project/issues/204883">finding a bug in LLVM</a> around how it was iterating over exception handling blocks by the compiler iterating over them in machine pointer order. As a result each build would drift by about 29 bytes per build:</p>
+        <pre class="language-diff"><code class="language-diff code-highlight"><span class="code-line"><span class="token unchanged"><span class="token prefix unchanged"> </span><span class="token line"> i32.load  offset=4            ;; 28 02 04
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line"> i32.const 6                   ;; 41 06
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line"> i32.ne                        ;; 47
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line"> br_if     0                   ;; 0d 00
+        </span></span></span><span class="code-line deleted"><span class="token unchanged"><span class="token line"></span></span><span class="token deleted-sign deleted"><span class="token prefix deleted">-</span><span class="token line"> try_table (catch_all_ref 8)   ;; 1f 40 01 03 08
+        </span></span></span><span class="code-line inserted"><span class="token deleted-sign deleted"><span class="token line"></span></span><span class="token inserted-sign inserted"><span class="token prefix inserted">+</span><span class="token line"> try_table (catch_all_ref 4)   ;; 1f 40 01 03 04
+        </span></span></span><span class="code-line inserted"><span class="token inserted-sign inserted"><span class="token line"></span><span class="token prefix inserted">+</span><span class="token line"> try_table (catch_all_ref 9)   ;; 1f 40 01 03 09
+        </span></span></span><span class="code-line"><span class="token inserted-sign inserted"><span class="token line"></span></span><span class="token unchanged"><span class="token prefix unchanged"> </span><span class="token line">   local.get 2                 ;; 20 02
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.const 32                ;; 41 20
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.add                     ;; 6a
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   local.set 3                 ;; 21 03
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   local.get 2                 ;; 20 02
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.const 56                ;; 41 38
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.add                     ;; 6a
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   local.get 1                 ;; 20 01
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.const 8                 ;; 41 08
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   i32.add                     ;; 6a
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   call 17461                  ;; 10 b5 88 81 80 00
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   local.set 4                 ;; 21 04
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line"> end                           ;; 0b
+        </span></span></span><span class="code-line deleted"><span class="token unchanged"><span class="token line"></span></span><span class="token deleted-sign deleted"><span class="token prefix deleted">-</span><span class="token line"> try_table (catch_all_ref 4)   ;; 1f 40 01 03 04
+        </span></span></span><span class="code-line"><span class="token deleted-sign deleted"><span class="token line"></span></span><span class="token unchanged"><span class="token prefix unchanged"> </span><span class="token line">   local.get 3                 ;; 20 03
+        </span></span></span><span class="code-line"><span class="token unchanged"><span class="token line"></span><span class="token prefix unchanged"> </span><span class="token line">   local.get 4                 ;; 20 04
+        </span></span></span></code></pre>
+        <p>This is what lead me to write <a href="https://xeiaso.net/notes/2026/anubis-wasm-vendor-binary/">I hate compilers</a> as a combination blogpost/cry for help which made me realize this was actually an LLVM bug. I didn't instantly lean towards it being an LLVM bug until I figured out that disabling ASLR (via <code>setarch --addr-no-randomize</code>) made the results consistent on the same host within the same boot.</p>
+        <p>Honestly this is the first time in my career I've ever run into a compiler bug like this. When I do a lot of my work I usually work under the assumption that the compiler is bug-free and that my inputs are wrong somehow. As such, even thinking it could possibly be an LLVM bug was just outside of the realm of possibility for me.</p>
+        <p>Once that LLVM bug got fixed and a new version of <a href="https://github.com/WebAssembly/wasi-sdk">wasi-sdk</a> with that fix got released, I was off to the races, updated my build of wasm-opt/wasm2js, made my build scripts run it with <a href="https://wasmtime.dev/">wasmtime</a> (alongside a wazero-based fallback process that would be slower, but did work enough) and everything worked out. Every time Anubis builds the WebAssembly in CI it uses the version of wasm-opt and wasm2js that ships in the repo to ensure that everything is as byte-for-byte deterministic as possible.</p>
+        <p>Your build tools can't differ from my build tools if I ship you the build tools I use.</p>
+        <h3>Okay, but will it work on Ukrainian Smart TVs?</h3>
+        <p>Then we get into the other big problem that made this difficult: browser testing. One of the most common failure modes of Anubis is that someone uses some browser that I don't test in CI and then things don't work with it. I'm tired of installing 50 different browsers on several machines to test things and I have gone through so many throwaway VMs that I'm sure it's reduced the lifetime of my SSD.</p>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">Note</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>Yes, I really have been testing Anubis by hand in god knows how many browsers.
+        Why do you think it takes so long to tag new releases?</p></div></div></div>
+        <p>I built a harness that I call &quot;chromesweep&quot; that lets me spawn many Googles Chrome (term c.f. Attorneys General, et.al) in their default configuration to try and hit a version of Anubis listening over HTTPS. Getting this far meant making a library of all of these browser versions. I've put that library up on Github at <a href="https://github.com/TecharoHQ/gubal">TecharoHQ/gubal</a> in case it's useful for you.</p>
+        <p>One of the other big problems I ran into while getting browser testing working was making sure that my Googles Chrome strictly stay within the bounds of my Kubernetes cluster's network. Chrome this old is actively radioactive and I want to treat it like the security threat it is. As such, I set up a strict <a href="https://kubernetes.io/docs/concepts/services-networking/network-policies/">NetworkPolicy</a> to only allow it to access the Anubis instance under test and make DNS queries. I also wrap each Chrome pod in a microVM with <a href="https://katacontainers.io/">Kata containers</a> as an additional layer of security.</p>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">Note</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>It honestly terrifies me to think that I am putting more effort into securing
+        these Googles Chrome than <a href="https://collusion.wiki/">big AI companies are putting into securing their AI
+        agent testing infrastructure</a>. It literally doesn't
+        take much to put a big dent into securing things! The current state of our
+        industry boggles the mind. All I want is for Techaro's
+        <a href="https://www.felonybench.com/">FelonyBench</a> score to remain at 0, is that too
+        much to ask?</p></div></div></div>
+        <p>I also rigged the browser testing infrastructure up to a single slash command in GitHub pull requests. Doing it makes my office very warm so I try to avoid doing it when possible. This works well enough that it lets me move on to the next stage and has already caught something that lead to building all the JavaScript with the <code>--chrome66</code> flag.</p>
+        <p><img src="https://xeiaso.net/static/blog/2026/anubis-wasm/chromesweep.webp" alt/></p>
+        <p>I wonder if this is yet another case where making infrastructure for Anubis could result in that infrastructure alone being its own viable tech product. I run into a lot of those.</p>
+        <h3>Yo dawg, heard you liked compiling</h3>
+        <p>In the process of doing that automated browser testing I found out that Chrome 75 had a weird error pop up when it tried to compile Anubis' WASM to native code:</p>
+        <pre><code class="code-highlight"><span class="code-line">CompileError: WebAssembly.compile(): Compiling function
+        </span><span class="code-line">#4:&quot;_RINvMs0_NtNtNtNtCsdl5sGgnNXvY_3std3sys4sync4on...&quot; failed:
+        </span><span class="code-line">expected table index 0, found 128 @+664
+        </span></code></pre>
+        <p>This also caused failures up to Chrome 100, so this signaled to me that something I was doing with my &quot;strict MVP&quot; build of Anubis' WASM wasn't in fact sticking to just the MVP features of WebAssembly. It turns out that the function referenced (probably somewhere in <a href="https://doc.rust-lang.org/std/sync/struct.Once.html">std::sync::Once</a>? I probably should have traced it down to the exact bit) was in the standard library. This surprised me because I assumed that building Rust code with CPU features selected would apply that to everything, including the standard library, right?</p>
+        <p>No, turns out that when you download the <a href="https://rust-lang.github.io/rustup/concepts/components.html"><code>rust-std</code> component</a> in <a href="https://rustup.rs/">rustup</a>, that doesn't just download the standard library. To aid in cross compilation and I guess to avoid disk space waste, the Rust standard library is precompiled. This surprised me as Go typically has you recompile the standard library (and runtime for that matter) when doing normal builds and cross compilation.</p>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">Note</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>The actual issue here is that the stdlib function in question was compiled down
+        to use <a href="https://bytecodealliance.org/articles/reference-types-in-wasmtime">reference
+        types</a>,
+        which made
+        <a href="https://webassembly.github.io/spec/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-call-indirect-x-y"><code>call_indirect</code></a>
+        references get stored as a table index instead of what MVP WebAssembly would
+        put there. Chrome tried to read a null byte, got not a null byte, and then
+        understandably exploded.</p></div></div></div>
+        <p>I looked into the process involved for rebuilding the standard library twice: once with only MVP wasm features enabled and once with an &quot;all yes config&quot; like usual. Based on <a href="https://wiki.osdev.org/Porting_Rust_standard_library">some research I did</a> this seemed like a massive pain.</p>
+        <p>However, I had gone through that effort to build reproducible WASI versions of wasm2js and wasm-opt. <a href="https://github.com/WebAssembly/binaryen#tools">wasm-opt</a> is a tool that lets you take compiled WebAssembly modules, optimize them, and more importantly remove features from them so they can run in older browsers. After a bit of hacking to make sure that the tools were able to run properly, I set up a Claude Opus / GLM 5.2 loop to fuzz various wasm-opt flags and make sure Chrome 75 could parse the output. I ended up with these flags:</p>
+        <pre class="language-shell"><code class="language-shell code-highlight"><span class="code-line"><span class="token comment"># Chrome shipped sign-ext and mutable-globals in 74, bulk-memory and</span>
+        </span><span class="code-line"><span class="token comment"># nontrapping-fptoint in 75, multivalue in 85 and simd in 91.</span>
+        </span><span class="code-line"><span class="token assign-left variable">baseline_features</span><span class="token operator">=</span><span class="token string">&quot;-mvp --enable-sign-ext --enable-mutable-globals \
+        </span></span><span class="code-line"><span class="token string">--enable-bulk-memory --enable-nontrapping-float-to-int&quot;</span>
+        </span><span class="code-line"><span class="token assign-left variable">simd128_features</span><span class="token operator">=</span><span class="token string">&quot;<span class="token variable">${baseline_features}</span> --enable-multivalue --enable-simd&quot;</span>
+        </span></code></pre>
+        <p>This strips away all the other WebAssembly features from the build like unwanted paint (the <code>-mvp</code> flag means &quot;disable everything not in the original MVP definition of WebAssembly&quot;). I think that it'd be safe-ish to enable reference types in the SIMD build (they were added before Chrome added SIMD), but it's not hurting anything to remove them so I'll just let cowardice win here. Either way, I threw the results into chromesweep and got a successful response, so win! If/when this comes to bite me I'll try and improve it.</p>
+        <h2>Things that probably need to be fixed at some point but I want to see what's on fire in practice first, you know?</h2>
+        <p>I'm pretty sure that this work isn't <em>perfect</em>, but at some point you gotta cut your losses, ship it, and then see where things fail to prioritize perfecting it. These issues include but are not limited to:</p>
+        <ul>
+        <li>The wasm2js flow doesn't currently have a way to update the progress bar with its <code>update_nonce</code> import stubbed out. I have no idea how to properly wire that up with the constraints of my runtime, but I'm sure I can figure it out eventually.</li>
+        <li>The WebAssembly that's shipped with this flow is ridiculously performant. This may mean you need to adjust the difficulty to compensate for this. Oops! Sorry!</li>
+        <li>This is better on mobile phones, but I'm working on a mobile request classifier that will use a combination of IP address reputation, TLS fingerprinting, and other signals to determine if a request is from a phone and give it the appropriate amount of grace. This is hard. Please contact me if you have ideas on how to make my current prototype better.</li>
+        <li>I need some way to dynamically rotate out challenge programs at runtime instead of just at compile time when I work on Anubis. Eventually I hope to have this pull WebAssembly files and supporting bundles from OCI/Docker registries, but I need to do a lot more experimentation with this before I can conclude how good/bad of an idea this is.</li>
+        </ul>
+        <p>Overall though, I'm hopeful that most of the worst parts of this can be solved. It would be nice if I didn't have to work what amounts to two full time jobs.</p>
+        <h2>Ad astra per aspera</h2>
+        <p>I'm pretty sure that this is stable enough to ship as off-by-default in Anubis v1.28.0: <a href="https://ffxiv.consolegameswiki.com/wiki/Wuk_Lamat">Wuk Lamat</a>. Based on the feedback I get from administrators and users, I'll enable it in the default configuration in Anubis v1.29.0.</p>
+        <p>I hope this look into how Anubis is developed can give you ideas as to the scale and challenge involved. Making something like this is tireless and thankless work and it's really weird to see people talk about it in the same breath as Cloudflare or AWS' WAF.</p>
+        <p>Have a good day all!</p>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">Note</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>AI was not used in the production of the prose of this article. I have my draft
+        as <a href="https://docs.google.com/document/d/1n-KE0M3gvXXmkWVRy-stT0pWHrz0u0aApaOastqwNEM/edit?tab=t.cknmv81px79i#heading=h.bh5cic8vnftr">a Google
+        Doc</a>
+        so you can see exactly where and when I typed every word myself. The only use of
+        AI was Claude Opus to help me make the visual bit/nibble diagram.</p></div></div></div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
