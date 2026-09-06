@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Conflict resolution is “fun” | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Conflict resolution is “fun”</h1>
+        <div class="meta">Xe Iaso&#x27;s blog 2026-09-01T00:00:00Z</div>
+        <div class="links">
+          <a href="https://www.tigrisdata.com/blog/conflict-resolution-is-fun/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/xeiaso-net/xeiaso-net-8730d5be02313d0e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">One of the hardest problems in distributed systems is conflict resolution, or the same basic problem as merge conflicts in Git. Git merge conflicts happen when your branch differs from upstream in a way that Git can’t easily work its way around so it exposes both sides of the changes to humans and has the human (or their agent) figure out which side is “cor…</div>
+        <div class="content">
+          <p>One of the hardest problems in distributed systems is conflict resolution, or
+        the same basic problem as merge conflicts in Git. Git merge conflicts happen
+        when your branch differs from upstream in a way that Git can’t easily work its
+        way around so it exposes both sides of the changes to humans and has the human
+        (or their agent) figure out which side is “correct”. Distributed systems don’t
+        really have this same flow as the scale of changes is often impossible for any
+        human or team of humans to keep up with.</p>
+        <p>As a result, we <em>really</em> want to have our own business logic define which side
+        of a conflict wins. FoundationDB doesn’t let us do that out of the box, so we
+        had to make our own layer. The neat part about being able to do this is that
+        this lets us control the replication behaviour of buckets based on user needs.
+        The three main ways it differs are with
+        <a href="https://www.tigrisdata.com/docs/buckets/locations/#single-region">single-region buckets</a>,
+        <a href="https://www.tigrisdata.com/docs/buckets/locations/#multi-region">multi/dual-region buckets</a>,
+        and <a href="https://www.tigrisdata.com/docs/buckets/locations/#global">global buckets</a>.
+        I’m going to cover the replication differences in the order of complexity.</p>
+        <h2>Single-region buckets</h2>
+        <p>One of the easiest conflict resolution methods we have is a
+        <a href="https://www.tigrisdata.com/docs/buckets/locations/#single-region">single-region bucket</a>,
+        which prevents any need for it. In this mode all actions are reverse proxied to
+        the bucket’s region and any metadata changes are local to that region in
+        particular. This means that any other regions trust the changes made by the
+        bucket’s region and reject any changes made by any other regions. As a side
+        effect this also means that the data <em>does not</em> move between regions like other
+        buckets do. You’d think that would mean “if a region goes down, my bucket goes
+        down.” But we have implemented data proxying, which means that if that region’s
+        block storage is still available, other gateways can route requests to it and
+        you can still access your data come hell, high water, or Giant Meteors.</p>
+        <p>The conflict resolution flow is like this:</p>
+        <figure><figcaption><span>FIG 01</span><span>the single-region write path</span></figcaption><pre><div>  ┌────────────┐      ┌────────────────────┐      ┌───────────────────────────────┐</div><div>  │ client     │ ───▶ │ nearest Tigris     │ ───▶ │ owning region                 │</div><div>  │ PutObject  │      │ gateway            │      │                               │</div><div>  └────────────┘      │                    │      │ 1. bytes ──▶ block store      │</div><div>                      │ which region owns  │      │ 2. metadata ──▶ FoundationDB  │</div><div>                      │ this bucket?       │      │    <span>(one gRPC commit)</span>          │</div><div>                      └────────────────────┘      │ 3. <span>return success</span>             │</div><div>                                                  └───────────────┬───────────────┘</div><div>                                                                  │</div><div>                                                      <span>reads queue</span> │ <span>(async)</span></div><div>                                                                  ▼</div><div>                                                  ┌───────────────────────────────┐</div><div>                                                  │ replication worker            │</div><div>                                                  │ every other region gets       │</div><div>                                                  │ a read-only copy              │</div><div>                                                  └───────────────────────────────┘</div></pre></figure>
+        <p>The main tradeoff with a single-region bucket is that you trade <em>strict
+        consistency</em> (because there is only one possible writer) with <em>higher latency</em>
+        (unless all of your workload is geographically close to that Tigris region in
+        particular). This makes a Tigris bucket mostly behave like a region-locked S3
+        bucket with the exception of being able to query the files globally without
+        having to configure your client to access that particular region.</p>
+        <h2>Global buckets</h2>
+        <p>That was nice and simple. In comparison, global buckets are not.</p>
+        <p>Global buckets let any region be authoritative for any aspect of the bucket or
+        any object in the bucket. Any changes get committed to the local FoundationDB
+        cluster and then lazily replicated out to the other regions. This also means
+        that we expect there to be some level of conflict. Imagine an object storage
+        bucket like a git repository. You end up having conflicts when multiple people
+        push to the same files. How do we decide who wins? You can’t just have a person
+        sit there and decide which version of an object is right all the time.</p>
+        <p>Remember that we run a separate FoundationDB cluster per region. FoundationDB
+        has a sequencer that gives version identity to everything in the cluster. Those
+        versions are also based on time so you think we’d just be able to use those and
+        compare them to know which version is the newest, right? Well, it turns out that
+        FoundationDB versionstamps aren’t comparable across clusters as they’re partly
+        based on the cluster’s creation date and all of our clusters were created at
+        different times as we scaled globally. So we have to use something else that
+        changes fairly constantly between clusters in a way that’s easy for us to
+        validate without too much extra effort. Ideally, it’s something we already keep
+        in sync for making sure everything else in the system works.</p>
+        <p>Like many other things in Tigris, we use time to determine who wins a conflict.</p>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">Note</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>Using time for this sounds boring, but time synchronization is unironically one
+        of the <a href="https://youtu.be/zT71UvUxhjU">most complicated things in computing</a>.
+        This is a field where phrases like “temporal smearing”, “false ticker” and
+        “clock skew” are thrown around freely and ends up being a mess in practice. It’s
+        a small miracle that any of this works in practice.</p></div></div></div>
+        <p>Here’s a paraphrased and reformatted version of our conflict resolution
+        function:</p>
+        <figure><figcaption><span>FIG 02</span><span>compare() decides which version of an object wins</span></figcaption><pre><div>  compare(previous, new, force)</div><div><span>  │</span></div><div><span>  ├── </span>is prev or next unset, or a brand-new key in FDB?</div><div><span>  │      </span>yes: different objects <span>──────────▶</span>  <span>drop, log the conflict  ✗</span></div><div><span>  │</span></div><div><span>  ├── </span>is prev older than the new data?</div><div><span>  │      </span>yes: the new version is newer <span>───▶</span>  <span>apply, row replaced     ✓</span></div><div><span>  │</span></div><div><span>  └── </span>tie, or new is older: is this a forced change?</div><div>         yes: tie forcibly broken <span>────────▶</span>  <span>apply, row replaced     ✓</span></div><div>         no <span>──────────────────────────────▶</span>  <span>drop, log the conflict  ✗</span></div></pre></figure>
+        <p>Or: we prioritize the most recent entry when possible, accounting for deletions
+        and the like such that a newer delete wins over an older update. This combined
+        with eventual consistency means that there are potentially situations where one
+        region updates an object and another region deletes it at the same time. During
+        that small replication window you can get a situation where Singapore says an
+        object exists that Chicago says doesn’t exist, but in practice the replication
+        delay is small enough (single digit seconds or thereabout) that it doesn’t
+        matter.</p>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">Note</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>In theory we could have done this by breaking out exotic things like
+        <a href="https://en.wikipedia.org/wiki/Conflict-free_replicated_data_type">conflict-free replicated data types</a>,
+        but that seems kinda overkill for our usecase. That would work great for the
+        source control merge conflict problem though!</p></div></div></div>
+        <h3>Time keeps ticking</h3>
+        <p>At this point clock skew is also a factor. We run NTP clients on all our
+        infrastructure and that usually keeps us within about 10 microseconds (10,000
+        nanoseconds) off of NTP time. Given that we measure timestamps as nanoseconds to
+        decide conflicts, clock skew-based ordering conflicts can genuinely be a factor.</p>
+        <p>Imagine that the two operations in Chicago were served by different servers that
+        just so happen to have their clocks off by a fraction of a fraction of a second.
+        A DELETE could be sequenced before a PUT and the object could be shown as
+        deleted in Chicago but present in Singapore because that PUT replicated out
+        <em>after</em> the delete was committed locally.</p>
+        <p>According to all the rules of the game, every region but Chicago sees that the
+        DELETE is slightly older than the current data, so it ignores that DELETE and
+        continues as if that PUT is the right state of the world.</p>
+        <figure><figcaption><span>FIG 04</span><span>a clock-skew race resurrects a deleted object</span></figcaption><pre><div> client          Chicago (bucket owner)         Singapore</div><div>    │                       │                       │</div><div>    │ PUT thing.txt         │                       │</div><div>    ├──────────────────────▶│                       │</div><div>    │                       │                       │   <span>stamped …000200</span></div><div>    │                       │                       │   <span>(the clock ran a hair fast)</span></div><div>    │                       │                       │</div><div>    │                       │ replicate @ …000200   │</div><div>    │                       ├──────────────────────▶│</div><div>    │                       │                       │   <span>Singapore stores the</span></div><div>    │                       │                       │   <span>live copy @ …000200</span></div><div>    │                       │                       │</div><div>    │ DELETE thing.txt      │                       │</div><div>    ├──────────────────────▶│                       │</div><div>    │                       │                       │   <span>the clock still reads …000100,</span></div><div>    │                       │                       │   <span>so the tombstone is stamped</span></div><div>    │                       │                       │   <span>BEHIND the row it deletes</span></div><div>    │ 204 No Content        │                       │</div><div>    │◀─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┤                       │</div><div>    │                       │                       │</div><div>    │                       │ tombstone @ …000100   │</div><div>    │                       ├──────────────────────▶│</div><div>    │                       │                       │   <span>…000100 is not newer than</span></div><div>    │                       │                       │   <span>…000200: the tombstone is</span></div><div>    │                       │                       │   <span>dropped, the live copy survives</span></div><div>    │                       │                       │</div><div>    │ GET thing.txt         │                       │</div><div>    ├───────────────────────┼──────────────────────▶│</div><div>    │ <span>200 OK, the deleted object is back</span>            │</div><div>    │◀─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┤</div><div>    │                       │                       │</div><div>    │ PUT If-None-Match: *  │                       │</div><div>    ├──────────────────────▶│                       │</div><div>    │ <span>412 Precondition Failed</span>                       │</div><div>    │◀─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┤                       │</div></pre></figure>
+        <p>This is the kind of race condition you can only really see in distributed
+        systems at our scale or larger. Nothing that happens in this situation is a
+        failure in the logic or implementation, it’s just a desync because of
+        unfortunate timing.</p>
+        <p>I wish I could tell you an epic tale of time synchronization and other fun
+        things along the way of fixing this particular issue, but the fix was sadly
+        boring. We just refuse to process a DELETE when the DELETE is older than the
+        data in the database. If the DELETE doesn’t land after the database row’s date,
+        we re-read the clock and try again every 100 milliseconds up to 5 (five) times.
+        If even that can’t result in a timestamp that sorts correctly we give up loudly
+        to the client instead of quietly doing the wrong thing.</p>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">-Wpedantic</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>Our conflict resolution is only as good as our clocks are. Time synchronization
+        like this is kind of a hard problem to solve and we’d like to avoid having to do
+        that if we can. If this becomes an issue in the future, we may have to build
+        sacrificial lamb servers with
+        <a href="https://store.timebeat.app/products/ocp-tap-timecard">Cesium/Rubidium time cards</a>
+        and deploy those in our datacentres, kinda like the atomic clocks Google uses
+        for Spanner. That would certainly make for a cool project!</p><p>Come to think of it, the premise of Neal Stephenson’s Anathem (where a group of
+        timekeeping monks lock themselves in giant clocks as part of their timekeeping
+        practices) makes a lot more sense after working in distributed systems for as
+        long as I have. If timekeeping magic is all that we’ve known, it really is easy
+        to miss what really goes on.</p></div></div></div>
+        <h2>Multi-region buckets</h2>
+        <p>Finally we have multi-region buckets. These are the most complicated as they
+        combine aspects of both single-region and global buckets. There wasn’t a
+        protocol off the shelf that would do this for us– FoundationDB uses Paxos*
+        internally, and I’ve read about MultiPaxos (and Matchmaker Paxos,
+        <a href="https://mwhittaker.github.io/publications/matchmaker_paxos.pdf">Matchmaker MultiPaxos</a>,
+        it goes on…). It seems like everyone modifies the algorithm for their use case,
+        I wonder if there is a “true” Paxos outside of academia. Maybe it was
+        implemented by the one true Scotsman.</p>
+        <p>We replicate multi-region bucket metadata by having one region be the leader for
+        a group and having that leader actively push out changes as well as enqueueing
+        them like a global bucket. This means that the regions in the group get the data
+        faster than they would otherwise and commits to the leader mean that the data is
+        committed to all members of the group. It’s kinda like this:</p>
+        <figure><figcaption><span>FIG 05</span><span>a multi-region write with one follower down</span></figcaption><pre><div> client          gateway         leader        follower 1      follower 2</div><div>    │               │               │               │               │</div><div>    │ PUT object    │               │               │               │</div><div>    ├──────────────▶│               │               │               │</div><div>    │               │ bytes + meta  │               │               │</div><div>    │               ├──────────────▶│               │               │</div><div>    │               │               │               │               │   <span>upload to the leader's block</span></div><div>    │               │               │               │               │   <span>store, commit the metadata:</span></div><div>    │               │               │               │               │   <span>ONE transaction writes the row</span></div><div>    │               │               │               │               │   <span>and enqueues replication</span></div><div>    │               │ <span>committed</span>     │               │               │</div><div>    │               │◀─ ─ ─ ─ ─ ─ ─ ┤               │               │</div><div>    │               │               │               │               │</div><div>    │               │ apply this right now          │               │</div><div>    │               ├───────────────┼──────────────▶│               │</div><div>    │               │ apply this right now          │               │</div><div>    │               ├───────────────┼───────────────┼──────────────▶│</div><div>    │               │               │               │               │   <span>pushed to every follower</span></div><div>    │               │               │               │               │   <span>at once, in parallel</span></div><div>    │               │ <span>ok</span>            │               │               │</div><div>    │               │◀─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─ ─ ┤               │</div><div>    │               │ <span>error</span>         │               │               │</div><div>    │               │◀─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─ ─ ┤</div><div>    │               │               │               │               │</div><div>    │ <span>200 OK</span>        │               │               │               │</div><div>    │◀─ ─ ─ ─ ─ ─ ─ ┤               │               │               │</div><div>    │               │               │               │               │   <span>one follower is enough</span></div><div>    ·               ·               ·               ·               ·</div><div>    │               │               │               │               │   <span>seconds later, the queue delivers</span></div><div>    │               │               │               │               │   <span>the same change all over again</span></div><div>    │               │               │ queued copy   │               │</div><div>    │               │               ├──────────────▶│               │</div><div>    │               │               │               │               │   <span>same timestamp, not newer:</span></div><div>    │               │               │               │               │   <span>follower 1 drops it</span></div><div>    │               │               │ queued copy   │               │</div><div>    │               │               ├───────────────┼──────────────▶│</div><div>    │               │               │               │               │   <span>nothing here yet, so it applies:</span></div><div>    │               │               │               │               │   <span>follower 2 catches up</span></div></pre></figure>
+        <p>When a client writes to a multi-region bucket, Tigris forwards the write to the
+        leader and blocks there. If the leader can’t take it, the write errors out and
+        nothing changes. If the leader commits the change, the gateway actively pushes
+        that change out to the other regions in the group in parallel and waits for them
+        to commit before answering the client. Interestingly enough, it uses the same
+        codepath that the global replication workers use. Every region in the group is
+        going to get this change twice: once from the fan-out on the leader’s commit and
+        the other from the queue worker pushing it out a moment later.</p>
+        <p>This may also seem like a race condition, but remember that the replication rows
+        contain the before and after state, a-la
+        <a href="https://www.postgresql.org/docs/current/logical-replication.html">Postgres logical replication</a>
+        or git commit syncing. If the current data in the database is newer or the same
+        as the data being pushed out, the change is ignored and the cluster moves on
+        with life:</p>
+        <figure><figcaption><span>FIG 06</span><span>the failed write that succeeds anyway</span></figcaption><pre><div> client            gateway           leader          every follower</div><div>    │                 │                 │                   │</div><div>    │ PUT object      │                 │                   │</div><div>    ├────────────────▶│                 │                   │</div><div>    │                 │ commit the metadata                 │</div><div>    │                 ├────────────────▶│                   │</div><div>    │                 │                 │                   │   <span>the row is written and durable.</span></div><div>    │                 │                 │                   │   <span>there is no undo from here</span></div><div>    │                 │ <span>committed</span>       │                   │</div><div>    │                 │◀─ ─ ─ ─ ─ ─ ─ ─ ┤                   │</div><div>    │                 │                 │                   │</div><div>    │                 │ apply this right now                │</div><div>    │                 ├─────────────────┼──────────────────▶│</div><div>    │                 │ <span>error</span>           │                   │</div><div>    │                 │◀─ ─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┤</div><div>    │                 │                 │                   │</div><div>    │ <span>5xx, your write failed</span>            │                   │</div><div>    │◀─ ─ ─ ─ ─ ─ ─ ─ ┤                 │                   │</div><div>    │                 │                 │                   │   <span>no follower succeeded</span></div><div>    ·                 ·                 ·                   ·</div><div>    │                 │                 │                   │   <span>but the queued copy was already</span></div><div>    │                 │                 │                   │   <span>durable, committed in the same</span></div><div>    │                 │                 │                   │   <span>transaction as the row</span></div><div>    │                 │                 │ queued copy       │</div><div>    │                 │                 ├──────────────────▶│</div><div>    │                 │                 │                   │   <span>applies normally</span></div><div>    │                 │                 │                   │</div><div>    │                 │                 │                   │   <span>the write you were told failed is</span></div><div>    │                 │                 │                   │   <span>now readable in every region</span></div></pre></figure>
+        <p>At some level you can think about multi-region buckets as a latency optimization
+        for the regions in the multi-region group. The replication queue is what
+        actually guarantees the global convergence of metadata, but the active fan-out
+        over regions is what gets there first. This means that if you have a
+        multi-region bucket in the EU and all your workloads are in the EU, you get a
+        lot of the same availability advantages of global buckets without a lot of the
+        consistency risks of normal global buckets.</p>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">Note</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>Given that this replication protocol isn’t a genuine two-phase commit (one phase
+        local, the second phase when the rest of the group has all committed), it means
+        that there is theoretically a case where a client can push a change to the
+        bucket, have that commit locally, fail to eagerly push out the changes at the
+        gateway level, and then return an error to the client after the data
+        successfully was written. The queue would then lazily replicate out the data
+        like nothing happened, meaning that the change would be pushed out even though
+        it technically failed.</p><p>HTTP doesn’t really have a good error code for this kind of partial failure and
+        the S3 API definitely does not either. If this becomes a problem in practice,
+        we’ll have to create an S3API extension for this. Stay tuned!</p></div></div></div>
+        <h2>Replication brings its own challenges</h2>
+        <p>Our current system has handled all customer load without too many issues. So
+        that any region can answer questions about the data, all metadata is replicated
+        to every region, even if it’s not requested anywhere else. This means that for
+        even single region buckets, there’s the same load on the replication queue as
+        there is for global buckets.</p>
+        <p>To work around this, we can compartmentalize the activities for these single
+        region buckets by sharding our FoundationDB clusters by bucket type, or even by
+        tenant, so the replication queue doesn’t risk lagging. We have a finite number
+        of replication workers and if too many objects change all at the same time it
+        can cause the replication delay to be minutes instead of seconds. The technical
+        term for this is “bad”.</p>
+        <p>Right now there’s one central FoundationDB cluster per region which stores
+        everything. In the future we plan to have one cluster that’s used to map
+        metadata about which buckets/organizations belong to which clusters, and from
+        there we will scale out depending on customer request pressure. If you’re a
+        large enough tenant, you may end up getting your own dedicated FoundationDB
+        cluster!</p>
+        <figure><figcaption><span>FIG 03</span><span>sharding FoundationDB clusters into replicasets</span></figcaption><pre><div>  S3 request</div><div>  │</div><div>  ▼</div><div>  ┌─────────┐ <span>── which replicaset holds this tenant? ──▶</span> ┌────────────────┐</div><div>  │ gateway │                                            │ shard mapping  │</div><div>  └─────────┘ <span>◀─ ─ ─ ─ ─ ─  </span><span>&quot;replicaset 2&quot;</span><span>  ─ ─ ─ ─ ─ ─  </span>│ cluster        │</div><div>       <span>║</span>                                                 └────────────────┘</div><div>       <span>╚═══════════════════╗</span></div><div>                           <span>▼</span></div><div>  ┌──────────────┐   <span>╔══════════════╗</span>   ┌──────────────┐</div><div>  │ replicaset 1 │   <span>║</span> replicaset 2 <span>║</span>   │ replicaset 3 │</div><div>  │ 2-3 FDB      │   <span>║</span> 2-3 FDB      <span>║</span>   │ 2-3 FDB      │</div><div>  │ clusters +   │   <span>║</span> clusters +   <span>║</span>   │ clusters +   │</div><div>  │ worker pool  │   <span>║</span> worker pool  <span>║</span>   │ worker pool  │</div><div>  └──────┬───────┘   <span>╚══════╤═══════╝</span>   └──────┬───────┘</div><div>         │                  │                  │</div><div>         └──────────────────┼──────────────────┘</div><div>                            ▼</div><div>                 <span>┌───────────────────────┐</span></div><div>                 <span>│ global pointer table  │</span></div><div>                 <span>└───────────────────────┘</span></div></pre></figure>
+        <div class="not-prose mx-auto my-6 flex gap-4 rounded-lg border p-4 max-w-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-500/30"><div class="mt-1 flex-shrink-0 text-blue-500"></div><div class="flex-grow"><h3 class="text-lg font-semibold text-blue-800 dark:text-blue-300">Note</h3><div class="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 mt-2"><p>Pop quiz for people reading this post via social media: which Massively
+        Multiplayer Online Roleplaying Game is the origin of the term “sharding” and
+        what happened to cause that to need to be done? The first person to answer right
+        without searching wins the sense of pride and accomplishment that comes with
+        being right on the Internet first.</p></div></div></div>
+        <p>This does come with the obvious downside of having to manage multiple clusters,
+        but we think the tradeoff is worth it when it eliminates the problem of noisy
+        neighbors causing replication delay. It will mean that our caching layer has to
+        be a bit more complicated (at the very least we expect the mapping of
+        organizations/buckets to FoundationDB clusters to be fairly stable), but that’s
+        just a simple matter of programming at this point. It’s also gonna make
+        replication “fun”, but we’ll cross that bridge when we come to it.</p>
+        <h2>Conclusion</h2>
+        <p>There’s three types of buckets but all of them use different shades of the same
+        global replication logic. Most of the levers we offer are all around
+        consistency, latency, and availability. Single region buckets remove the
+        question of where the data is stored at the cost of making that one region a
+        single point of failure. Global buckets embrace conflicts but can be a more
+        latent when changes are replicated out. Multi-region buckets double-replicate
+        your data across the cloud. All of these happen in regions that are far apart
+        enough that synchronous round trips are genuinely expensive, but everything is
+        just implementation details for the same basic object storage operations.</p>
+        <p>Computers really are something at this scale, aren’t they? The joys of our
+        industry know no end.</p>
+        <p>If your workload is big enough, you could end up with a dedicated FoundationDB
+        cluster all to yourself. <a href="mailto:help@tigrisdata.com">Get in touch</a> and let's
+        see if your data qualifies.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
