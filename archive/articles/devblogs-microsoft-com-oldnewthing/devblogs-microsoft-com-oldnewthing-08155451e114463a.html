@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why don’t we allow stacks to be sparse, instead of forcing them to be contiguous? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why don’t we allow stacks to be sparse, instead of forcing them to be contiguous?</h1>
+        <div class="meta">The Old New Thing 2026-09-07T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260907-00/?p=112677">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-08155451e114463a.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Imagining how to report a memory allocation failure for a sparse page. The post Why don’t we allow stacks to be sparse, instead of forcing them to be contiguous? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>When I discussed <a title="Why don't we just make the entire stack out of guard pages?" href="https://devblogs.microsoft.com/oldnewthing/20260713-00/?p=112528"> why we don&#8217;t just make the entire stack out of guard pages</a>, <a href="https://devblogs.microsoft.com/oldnewthing/20260713-00/?p=112528&amp;commentid=144516#comment-144516"> commenter BCS wondered</a>, &#8220;Why require that the stack use contiguously mapped pages? What would break if only touched pages got mapped in? That could actually be a good thing for example with a function that wanted to <code>alloca</code> 512MB on the stack but only read/writes a few pages.&#8221;</p>
+<p>So the question is asking why the stack must be contiguous. Why not let it be sparse and fault in only the pages that are touched?</p>
+<p>The first issue is that the stack check code would have to include an explicit check against the stack limit, instead of just walking down the stack a page at a time. This explicit check is needed to avoid security vulnerabilities if somebody manages to <code>alloca</code> a buffer so large that it goes past the end of the stack reservation entirely. If you go a single page at a time, you will eventually hit the no-access page that marks the end of the stack. But if you can leap over multiple pages at a time without touching them, you might leap so far past the end of the stack that you land somewhere else and start corrupting that other memory because you&#8217;re using it as a stack. In linux circles, this vulnerability is nicknamed &#8220;<a href="https://www.qualys.com/2017/06/19/stack-clash/stack-clash.txt">Stack Clash</a>&#8220;¹ and goes more formally by &#8220;<a href="https://lwn.net/Articles/725832/">stack guard-page hopping</a>.&#8221;²</p>
+<p>After fixing that issue, you have another problem: How would you report a failure to commit a page in the middle of the stack?</p>
+<pre>void dosomething()
+{
+    void* buffer = NULL;
+    __try {
+        buffer = alloca(65536);
+    } __except (GetExceptionCode() == STATUS_STACK_OVERFLOW) {
+        if (!_resetstkoflw()) __fastfail(FAST_FAIL_FATAL_APP_EXIT);
+    }
+
+    if (buffer != NULL) {
+        ⟦ use the buffer ⟧
+    }
+}
+</pre>
+<p>If you allowed sparse stacks, then the memory for the <code>buffer</code> would not actually be committed until the code used it. But the point the code uses the buffer is <i>outside</i> the exception handler for the failed <code>alloca()</code>. The code assumes, not unreasonably, that if <code>alloca</code> succeeds, then the memory is indeed allocated.</p>
+<p>I guess you could fix this by committing the memory without making it present. That would mean making a call to <code>Virtual­Alloc</code> to expand the stack rather than just accessing the memory. Not only would this make the stack expansion code more complicated, particularly since <a title="Windows stack limit checking retrospective, follow-up" href="https://devblogs.microsoft.com/oldnewthing/20260617-00/?p=112436"> you have to preserve all the registers that might possibly be used by any calling convention</a>, but you also have to make sure that the <code>Virtual­Alloc</code> function itself doesn&#8217;t allocate too much stack!</p>
+<p>Now, you can still tweak the x86-32 stack prober to avoid <a href="https://devblogs.microsoft.com/oldnewthing/20260311-00/?p=112134&amp;commentid=143917#comment-143917"> pete.d</a>&#8216;s problem, where a large stack frame is made completely present, with the resulting page-ins creating noticeable performance issues. The x86-32 prober could short-circuit the stack probe (<a title="Windows stack limit checking retrospective: arm64, also known as AArch64" href="https://devblogs.microsoft.com/oldnewthing/20260320-00/?p=112154">like the MIPS and other processors listed in the table on this page</a>) so that the page-ins occur only when the stack is actually expanding.</p>
+<p>¹ Bonus reading about Stack Clash:</p>
+<ul>
+<li><a href="https://developers.redhat.com/blog/2017/09/25/stack-clash-mitigation-gcc-background"> Stack Clash Mitigation in GCC &#8212; Background</a></li>
+<li><a href="https://developers.redhat.com/blog/2019/04/30/stack-clash-mitigation-in-gcc-why-fstack-check-is-not-the-answer"> Stack Clash mitigation in GCC: Why -fstack-check is not the answer</a></li>
+<li><a href="https://developers.redhat.com/blog/2020/05/22/stack-clash-mitigation-in-gcc-part-3"> Stack clash mitigation in GCC, Part 3</a></li>
+</ul>
+<p>² Some systems mitigate stack guard-page hopping by creating a really large no-access region beyond the end of the stack. However, this isn&#8217;t a fix; just a mitigation. It just makes people have to leap further to clear the no-access region. If you already have this vulnerability, it&#8217;s probably because an attacker can control the size of the allocation, in which case you didn&#8217;t really slow them down by much; they just have to put a bigger number in their attack payload.</p>
+<p>Other systems address this more thoroughly by (surprise) probing each page of the stack in sequence.</p>
+<p>Stack Clash continues to be a problem even though gcc had a solution in 2020. <a href="https://app.opencve.io/cve/CVE-2026-77658"> Here&#8217;s CVE-2026-77658 from just a few days ago</a>.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260907-00/?p=112677">Why don&#8217;t we allow stacks to be sparse, instead of forcing them to be contiguous?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
