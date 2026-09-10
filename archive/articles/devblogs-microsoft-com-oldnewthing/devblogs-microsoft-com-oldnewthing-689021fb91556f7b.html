@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>What algorithm did Windows XP use to choose your initial user picture? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>What algorithm did Windows XP use to choose your initial user picture?</h1>
+        <div class="meta">The Old New Thing 2026-09-09T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260909-00/?p=112683">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-689021fb91556f7b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">It&#x27;s random, really. The post What algorithm did Windows XP use to choose your initial user picture? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>I noted some time ago that <a title="The martial arts logon picture" href="https://devblogs.microsoft.com/oldnewthing/20040401-00/?p=39933"> Windows XP chose your initial picture at random</a> from among the pictures in the <tt>%ALLUSERSPROFILE%\<wbr />Application Data\<wbr />Microsoft\<wbr />User Account Pictures\<wbr />Default Pictures</tt> directory. But it seems people want to know more.</p>
+<blockquote class="twitter-tweet">
+<p dir="ltr" lang="en">Has anyone attempted to figure out the RNG for how Windows XP determines what profile picture is used on first account creation?</p>
+<p>— Xeno (@XenoPanther) <a href="https://twitter.com/XenoPanther/status/1999217479923413284">December 11, 2025</a></p></blockquote>
+<p></p>
+<p>The random number generator is our friend <code>RtlRandomEx</code>, using the current value of <code>GetTickCount()</code> as the initial seed.</p>
+<p>The function uses a one-pass random selection algorithm. I can immediately think of two benefits of this decision. First, compared to the naïve two-pass algorithm of counting up all the items, then randomly picking a number from 1 to <var>n</var>, and then iterating a second time to find the item at that index, it&#8217;s more efficient because it reduces the amount of calls into the file system, which is where the bottleneck is. Furthermore, the one-pass algorithm avoids complications if the number of files in the directory changes while the code is running.</p>
+<p>The one-pass algorithm is a special case of <a href="https://en.wikipedia.org/wiki/Reservoir_sampling"> reservoir sampling</a>, where <var>k</var> is 1. This special case permits a tailored algorithm that is much simpler.</p>
+<pre>selectRandomFromIterator(iterator)
+{
+    var count = 0;
+    var winner = null;
+
+    while (iterator.moveNext()) {
+        ++count;
+        if (uniform_random(min: 1, max: count) == count) {
+            winner = iterator.current();
+        }
+    }
+
+    return winner;
+}
+</pre>
+<p>The way this algorithm works is by observing that in a collection of <var>n</var> items, the last item has a 1/<var>n</var> chance of being randomly selected. If it isn&#8217;t selected, then you need to select randomly from the first <var>n</var> − 1 items, which you can solve recursively.</p>
+<p>Playing the recursion forward, you start with the base case which is that if you have a list of 1 item, then your only choice is to chose that item. Otherwise, if you have a list of <var>n</var> items, first choose an item randomly from the first <var>n</var> − 1, and then switch to the <var>n</var>th item with a 1/<var>n</var> probability.</p>
+<p>As a final safety check, the code stops after sampling 100 pictures. This avoids pathological behavior if somebody puts a million files in the <tt>Default Pictures</tt> directory.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260909-00/?p=112683">What algorithm did Windows XP use to choose your initial user picture?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
