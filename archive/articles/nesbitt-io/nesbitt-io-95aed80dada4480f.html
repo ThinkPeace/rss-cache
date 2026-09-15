@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shadowing the Standard Library | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Shadowing the Standard Library</h1>
+        <div class="meta">Andrew Nesbitt 2026-09-15T09:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/09/15/shadowing-the-standard-library.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-95aed80dada4480f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">export PYTHONSAFEPATH=1</div>
+        <div class="content">
+          <p>I was reading <a href="https://embracethered.com/blog/posts/2026/breaking-claude-code-opus-5-and-automode/">Johann Rehberger’s write-up</a> of an attack on a coding agent last week. The payload is a file called <code class="language-plaintext highlighter-rouge">struct.py</code> inside a zip archive. The agent unpacks the archive, writes its own small Python decoder in the extracted directory, and runs it. The decoder does <code class="language-plaintext highlighter-rouge">import base64</code>, <code class="language-plaintext highlighter-rouge">base64</code> internally does <code class="language-plaintext highlighter-rouge">import struct</code>, and Python resolves that to the attacker’s file because the script’s directory is the first entry on <code class="language-plaintext highlighter-rouge">sys.path</code>. Module-level code runs on import. The poisoned module re-exports the real <code class="language-plaintext highlighter-rouge">_struct</code> API so decoding still produces valid output and execution continues, and the payload relaunches itself with <code class="language-plaintext highlighter-rouge">python3 -I</code> so the second interpreter starts with a clean module path.</p>
+
+<p>That <code class="language-plaintext highlighter-rouge">-I</code> is the tell that this is a well-understood Python behaviour. Putting an ambient directory on the module search path is a default most dynamic-language runtimes shipped with early on, and several have since removed it, so I went through the ones I could find to see where each ended up. The problem is specific to resolving module lookups at run time against filesystem locations, so languages that bind everything at build time are mostly absent.</p>
+
+<h2 id="removed">Removed</h2>
+
+<p>Ruby dropped <code class="language-plaintext highlighter-rouge">.</code> from <code class="language-plaintext highlighter-rouge">$LOAD_PATH</code> in <a href="https://github.com/ruby/ruby/blob/master/doc/NEWS/NEWS-1.9.2">1.9.2</a>, released August 2010. The NEWS entry is one line, “$: no longer includes the current directory, use require_relative”. <a href="https://docs.ruby-lang.org/en/master/Kernel.html#method-i-require_relative"><code class="language-plaintext highlighter-rouge">require_relative</code></a> resolves against the calling file’s location, independent of the process working directory, so a script can load its own siblings while keeping the working directory off the search path for every other <code class="language-plaintext highlighter-rouge">require</code> in the process. There was no CVE and no escape-hatch environment variable; 1.9 was already a compatibility break from 1.8 and the load-path change went in alongside everything else.</p>
+
+<p>Perl removed <code class="language-plaintext highlighter-rouge">.</code> from the end of <code class="language-plaintext highlighter-rouge">@INC</code> in <a href="https://perldoc.perl.org/perl5260delta#Removal-of-the-current-directory-(%22.%22)-from-@INC">5.26.0</a>, released May 2017. That one did have a CVE, <a href="https://www.nntp.perl.org/group/perl.perl5.porters/2016/07/msg238271.html">CVE-2016-1238</a>, reported by cPanel: a script that changes directory to <code class="language-plaintext highlighter-rouge">/tmp</code> and then loads an optional module runs whatever a local user has left at <code class="language-plaintext highlighter-rouge">/tmp/Module.pm</code>. Perl had traditionally shipped with <code class="language-plaintext highlighter-rouge">.</code> on <code class="language-plaintext highlighter-rouge">@INC</code>, and taint mode (<code class="language-plaintext highlighter-rouge">perl -T</code>) had always stripped it, so the risk was documented long before the fix. 5.26 added <a href="https://perldoc.perl.org/perl5260delta#PERL_USE_UNSAFE_INC"><code class="language-plaintext highlighter-rouge">PERL_USE_UNSAFE_INC=1</code></a> to restore the old behaviour for the transition, and downstream distributions <a href="https://wiki.gentoo.org/wiki/Project:Perl/Dot-In-INC-Removal">carried patches for years</a> while CPAN modules that depended on <code class="language-plaintext highlighter-rouge">.</code> being present were fixed one at a time.</p>
+
+<h2 id="designed-out">Designed out</h2>
+
+<p>Node’s <code class="language-plaintext highlighter-rouge">require</code> <a href="https://nodejs.org/api/modules.html#core-modules">checks core module names first</a>, before <code class="language-plaintext highlighter-rouge">node_modules</code> or anything else on disk, so <code class="language-plaintext highlighter-rouge">require('http')</code> returns the built-in even with an <code class="language-plaintext highlighter-rouge">http.js</code> in the caller’s directory. Loading a neighbouring file has always taken an explicit relative path, <code class="language-plaintext highlighter-rouge">require('./http')</code>. Node 14.18.0 added the <a href="https://nodejs.org/api/modules.html#core-modules"><code class="language-plaintext highlighter-rouge">node:</code> prefix</a> so <code class="language-plaintext highlighter-rouge">require('node:http')</code> bypasses the require cache as well, and some newer built-ins such as <code class="language-plaintext highlighter-rouge">node:test</code> are only reachable that way. That protection covers core modules only: <code class="language-plaintext highlighter-rouge">require('express')</code> <a href="https://nodejs.org/api/modules.html#loading-from-node_modules-folders">searches upward from the caller’s directory through each <code class="language-plaintext highlighter-rouge">node_modules</code></a>, so a <code class="language-plaintext highlighter-rouge">node_modules/express</code> inside an extracted archive is resolved ahead of any installed copy. Java resolves classes at run time from a classpath, and the <a href="https://docs.oracle.com/en/java/javase/21/docs/specs/man/java.html">default classpath when neither <code class="language-plaintext highlighter-rouge">-cp</code> nor <code class="language-plaintext highlighter-rouge">CLASSPATH</code> is set is <code class="language-plaintext highlighter-rouge">.</code></a>, but the bootstrap class loader finds <code class="language-plaintext highlighter-rouge">java.*</code> before the application loader searches the classpath, so a <code class="language-plaintext highlighter-rouge">./java/lang/String.class</code> is unreachable for the same reason a local <code class="language-plaintext highlighter-rouge">http.js</code> is in Node. Deno dropped the ambient search path entirely: every import is <a href="https://docs.deno.com/runtime/fundamentals/modules/">a URL or a relative path</a>, and a bare specifier outside the import map is an error.</p>
+
+<p>Julia’s default <a href="https://docs.julialang.org/en/v1/base/constants/#Base.LOAD_PATH"><code class="language-plaintext highlighter-rouge">LOAD_PATH</code></a> is <code class="language-plaintext highlighter-rouge">["@", "@v#.#", "@stdlib"]</code>, three symbolic entries that expand to the active project environment, the user’s versioned default environment, and the standard library. <code class="language-plaintext highlighter-rouge">@</code> resolves to whichever <code class="language-plaintext highlighter-rouge">Project.toml</code> is active, regardless of which directory the process is in, so a script run from an untrusted directory looks up imports in a manifest file. PowerShell’s <code class="language-plaintext highlighter-rouge">Import-Module</code> searches <a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath"><code class="language-plaintext highlighter-rouge">$env:PSModulePath</code></a>, which defaults to the per-user, all-users and <code class="language-plaintext highlighter-rouge">$PSHOME</code> module directories only, and the shell applies the equivalent rule to executable lookup: running a script in the working directory <a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_scripts">requires an explicit <code class="language-plaintext highlighter-rouge">.\</code> prefix</a>, so a bare name searches only <code class="language-plaintext highlighter-rouge">$env:PATH</code>.</p>
+
+<h2 id="still-there">Still there</h2>
+
+<p>PHP’s <code class="language-plaintext highlighter-rouge">.</code> is the first entry in the default <a href="https://www.php.net/manual/en/ini.core.php#ini.include-path"><code class="language-plaintext highlighter-rouge">include_path</code></a>, so <code class="language-plaintext highlighter-rouge">include 'config.php'</code> picks up a <code class="language-plaintext highlighter-rouge">config.php</code> in the working directory ahead of one under the PEAR path. Lua’s default <a href="https://github.com/lua/lua/blob/v5.4.0/luaconf.h#L208-L219"><code class="language-plaintext highlighter-rouge">package.path</code></a> ends with <code class="language-plaintext highlighter-rouge">./?.lua;./?/init.lua</code>, so <code class="language-plaintext highlighter-rouge">require "json"</code> falls through to <code class="language-plaintext highlighter-rouge">./json.lua</code> after the installed-path entries have all missed. Lua’s own standard libraries, <code class="language-plaintext highlighter-rouge">string</code>, <code class="language-plaintext highlighter-rouge">table</code>, <code class="language-plaintext highlighter-rouge">math</code> and the rest, are <a href="https://github.com/lua/lua/blob/v5.4.0/linit.c">registered in <code class="language-plaintext highlighter-rouge">package.loaded</code> before <code class="language-plaintext highlighter-rouge">require</code> searches any path</a>, so a <code class="language-plaintext highlighter-rouge">./string.lua</code> is unreachable and only third-party names are exposed. In both PHP and Lua, dropping the working-directory entry means overriding the full path string, via <code class="language-plaintext highlighter-rouge">php -d include_path=...</code> or the <code class="language-plaintext highlighter-rouge">LUA_PATH</code> environment variable.</p>
+
+<p>Python prepends the script’s directory as <code class="language-plaintext highlighter-rouge">sys.path[0]</code> when running a file, the working directory when running <code class="language-plaintext highlighter-rouge">-m</code>, and an empty string, meaning the working directory, when running <code class="language-plaintext highlighter-rouge">-c</code> or the REPL. Isolated mode, <code class="language-plaintext highlighter-rouge">-I</code>, <a href="https://docs.python.org/3/using/cmdline.html#cmdoption-I">added in 3.4</a>, suppresses that entry along with user site-packages and all <code class="language-plaintext highlighter-rouge">PYTHON*</code> environment variables. 3.11 added a narrower switch, <a href="https://docs.python.org/3/using/cmdline.html#cmdoption-P"><code class="language-plaintext highlighter-rouge">-P</code> and <code class="language-plaintext highlighter-rouge">PYTHONSAFEPATH</code></a>, which drops only the <code class="language-plaintext highlighter-rouge">sys.path[0]</code> entry and leaves the rest of the environment alone. The tracker issue behind <code class="language-plaintext highlighter-rouge">-P</code>, <a href="https://github.com/python/cpython/issues/57684">bpo-13475</a>, was opened in November 2011. Victor Stinner, who landed <code class="language-plaintext highlighter-rouge">-P</code>, has a <a href="https://github.com/vstinner/misc/blob/main/cpython/pep_path0.rst">draft PEP</a> in his personal repo proposing to make safe-path the default and citing Perl 5.26 as precedent. Ruby could drop <code class="language-plaintext highlighter-rouge">.</code> because <code class="language-plaintext highlighter-rouge">require_relative</code> shipped in the same release and gave scripts another way to load their siblings. Python’s <a href="https://docs.python.org/3/reference/import.html#package-relative-imports">explicit relative imports</a> only work inside a package, so a standalone <code class="language-plaintext highlighter-rouge">script.py</code> importing <code class="language-plaintext highlighter-rouge">helper.py</code> from the same directory depends on <code class="language-plaintext highlighter-rouge">sys.path[0]</code> being that directory, and running it under <code class="language-plaintext highlighter-rouge">-P</code> fails with <code class="language-plaintext highlighter-rouge">ModuleNotFoundError</code>.</p>
+
+<p>Perl, Ruby and Lua all put <code class="language-plaintext highlighter-rouge">.</code> last, after the standard-library and site directories, so a file in the working directory could only supply a name that was missing everywhere else, and CVE-2016-1238 accordingly needed a target script that loaded an optional module. Python and PHP put the ambient directory first. The standard library comes after it on the path, <code class="language-plaintext highlighter-rouge">struct.py</code> in the working directory is loaded in place of the real <code class="language-plaintext highlighter-rouge">struct</code>, and any standard-library module read from disk is exposed the same way. Modules compiled into the interpreter and, <a href="https://docs.python.org/3/whatsnew/3.11.html#faster-startup">since 3.11</a>, the frozen startup set (<code class="language-plaintext highlighter-rouge">os</code>, <code class="language-plaintext highlighter-rouge">abc</code>, <code class="language-plaintext highlighter-rouge">io</code>, <code class="language-plaintext highlighter-rouge">codecs</code> among them) are served by <code class="language-plaintext highlighter-rouge">BuiltinImporter</code> and <code class="language-plaintext highlighter-rouge">FrozenImporter</code> on <code class="language-plaintext highlighter-rouge">sys.meta_path</code> before <code class="language-plaintext highlighter-rouge">PathFinder</code> touches disk; <code class="language-plaintext highlighter-rouge">struct</code> is a plain <code class="language-plaintext highlighter-rouge">.py</code> wrapper around a C extension and goes to <code class="language-plaintext highlighter-rouge">PathFinder</code>.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th> </th>
+      <th>Entry on default path</th>
+      <th>Position</th>
+      <th>Stdlib shadowable</th>
+      <th>Removed in</th>
+      <th>Safe-mode switch</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Ruby</td>
+      <td><code class="language-plaintext highlighter-rouge">.</code> in <code class="language-plaintext highlighter-rouge">$:</code></td>
+      <td>last</td>
+      <td>no</td>
+      <td>1.9.2 (2010)</td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Perl</td>
+      <td><code class="language-plaintext highlighter-rouge">.</code> in <code class="language-plaintext highlighter-rouge">@INC</code></td>
+      <td>last</td>
+      <td>no</td>
+      <td>5.26 (2017)</td>
+      <td>(<code class="language-plaintext highlighter-rouge">PERL_USE_UNSAFE_INC</code> restores)</td>
+    </tr>
+    <tr>
+      <td>Node.js</td>
+      <td>none</td>
+      <td> </td>
+      <td>no</td>
+      <td> </td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Java</td>
+      <td><code class="language-plaintext highlighter-rouge">.</code> when <code class="language-plaintext highlighter-rouge">-cp</code> unset</td>
+      <td> </td>
+      <td>no</td>
+      <td> </td>
+      <td>any <code class="language-plaintext highlighter-rouge">-cp</code> replaces it</td>
+    </tr>
+    <tr>
+      <td>Deno</td>
+      <td>none</td>
+      <td> </td>
+      <td>no</td>
+      <td> </td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Julia</td>
+      <td>none (project manifest)</td>
+      <td> </td>
+      <td>no</td>
+      <td> </td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Lua</td>
+      <td><code class="language-plaintext highlighter-rouge">./?.lua</code> in <code class="language-plaintext highlighter-rouge">package.path</code></td>
+      <td>last</td>
+      <td>no</td>
+      <td> </td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>PHP</td>
+      <td><code class="language-plaintext highlighter-rouge">.</code> in <code class="language-plaintext highlighter-rouge">include_path</code></td>
+      <td>first</td>
+      <td>yes</td>
+      <td> </td>
+      <td> </td>
+    </tr>
+    <tr>
+      <td>Python</td>
+      <td>script dir / cwd in <code class="language-plaintext highlighter-rouge">sys.path</code></td>
+      <td>first</td>
+      <td>yes</td>
+      <td> </td>
+      <td><code class="language-plaintext highlighter-rouge">-I</code> (3.4), <code class="language-plaintext highlighter-rouge">-P</code> / <code class="language-plaintext highlighter-rouge">PYTHONSAFEPATH</code> (3.11)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="threat-model">Threat model</h2>
+
+<p>The Perl 5.26 release notes describe the risk as a script loading an optional module “when its current directory is untrusted (such as <code class="language-plaintext highlighter-rouge">/tmp</code>)”, and the mitigation for the twenty years before that was procedural: system scripts <code class="language-plaintext highlighter-rouge">chdir</code> somewhere safe before loading anything optional, and users run tools only from directories they control, advice written for a person or a fixed-cwd daemon choosing where the interpreter runs.</p>
+
+<p>A coding agent that downloads an archive, extracts it, writes a helper next to the contents, and runs the helper is the <code class="language-plaintext highlighter-rouge">/tmp</code> case with a different label on the directory. The archive determined the directory contents, and the agent’s own script is what triggers the import. Python is also the language agents default to for generated helpers: the sandboxed runtime for both OpenAI’s <a href="https://developers.openai.com/api/docs/guides/tools-code-interpreter">Code Interpreter</a> and Anthropic’s <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/code-execution-tool">code execution tool</a>, and the interpreter Claude Code, the target in the write-up, invokes for ad-hoc scripts. In Rehberger’s version the shadowed module forwards to the real one, so the decoder returns a correct result. It is the same class of default as the <a href="/2026/08/25/hardening-the-override-flag.html">override flags a subprocess can set through its environment</a>: tolerable while a person supplied the working directory or the flag, and an agent processing an archive supplies the working directory as a side effect of extracting it.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
