@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>std::call_once vs. std::async | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>std::call_once vs. std::async</h1>
+        <div class="meta">The Old New Thing 2026-09-17T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260917-00/?p=112706">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-ed909ac118cab5f4.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Simple vs complex machinery. The post &lt;CODE&gt;std::call_once&lt;/CODE&gt; vs. &lt;CODE&gt;std::async&lt;/CODE&gt; appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, we compared <a title="Magic statics vs. std::call_once" href="https://devblogs.microsoft.com/oldnewthing/20260916-00/?p=112703"> magic statics with <code>std::call_once</code></a> and concluded that <code>std::call_once</code> lets you construct magic statics-like behavior for non-static variables.</p>
+<p>But there is also <code>std::async</code> for delayed execution. Can we use that instead?</p>
+<p>The idea here is that you tell <code>std::async</code> that you want it to defer execution of something (say, a lambda). It returns a <code>std::future</code> representing that deferred execution.</p>
+<pre>auto f = std::async(std::launch::deferred, ⟦ lambda ⟧);
+</pre>
+<p>At some later point, you can ask for the deferred execution to execute and retrieve the result.</p>
+<pre>auto value = future.get();
+</pre>
+<p>There are a few catches here.</p>
+<p>To permit getting non-copyable types, getting the value is a destructive operation: You are allowed to call <code>get()</code> only once, and subsequent calls result in undefined behavior. This is a problem for the case where you ask for the value multiple times, but you can fix it by converting the <code>std::<wbr />future</code> to a <code>std::<wbr />shared_<wbr />future</code>:</p>
+<pre>auto f = std::async(std::launch::deferred, ⟦ lambda ⟧)<span>.share()</span>;
+</pre>
+<p>When you call <code>get()</code> on a <code>shared_<wbr />future</code>, it gives you a const reference to the cached value and retains the cached value for future calls. The <code>shared_<wbr />future::<wbr />get()</code> method is marked <code>const</code>, which in the C++ standard library means that it is thread-safe with respect to itself and other <code>const</code> members. Therefore, you can call <code>get()</code> as many times as you like, and the first will run the lambda and return the result, and the others will return the already-calculated result.</p>
+<p>Okay, so our <code>Gadget</code> class can look like this:</p>
+<pre>class Gadget
+{
+public:
+    Gadget(std::shared_ptr&lt;Widget&gt; const&amp; widget) : widget(widget) {}
+
+    bool can_reverse_polarity()
+    {
+        return can_reverse_polarity_future.get();
+    }
+
+private:
+    std::shared_ptr&lt;Widget&gt; const widget;
+    std::shared_future&lt;bool&gt; const can_reverse_polarity_future =
+        std::async(std::launch::deferred,
+            [=] {
+                return is_configuration_enabled("polarity_reversal") &amp;&amp;
+                is_widget_polarity_reversible(*widget);
+            }).share();
+};
+</pre>
+<p>So why choose one over the other?</p>
+<p>Well, <code>std::call_<wbr />once</code> is very small. Visual Studio builds it out of the Win32 <code>INIT_ONCE</code>, which is the size of a pointer.¹</p>
+<p>On the other hand <code>std::<wbr />future</code> and <code>std::<wbr />shared_<wbr />future</code> involve a heap allocation to manage the shared state, as well to store the invocable and its parameters, and the result. Also, since <code>std::<wbr />async</code> supports other modes of execution, you pull in code to support those other modes that you might even be using. (For example, it has to worry about the possibility that you pass <code>std::<wbr />launch::<wbr />async</code>, so it links in the thread library, as well as other machinery to support <code>wait_<wbr />for</code>.)</p>
+<p>But a significant difference between them has to do with their exception behavior, which we haven&#8217;t even talked about yet.</p>
+<p>We&#8217;ll do that next time.</p>
+<p>¹ I can&#8217;t find what gcc builds it out of, but an old implementation I found just <a href="https://classpages.cselabs.umn.edu/current/csci5103/tools/installs/gcc-4.8.3+os161-2.1/libgcc/config/i386/gthr-win32.c"> builds it manually</a> with many defects. Just a quick look at it shows that it is not exception-safe and suffers from data races. The code appears to have <a href="https://github.com/gcc-mirror/gcc/blob/9149a5b7e0a66b7b94d5b7db3194a975d18dea2f/libgcc/config/i386/gthr-win32.h#L629"> moved around</a>, but it&#8217;s still intact. It seems that <a href="https://github.com/gcc-mirror/gcc/blob/9f6eb7d2993046e5720275f590098db0ac0188d4/libstdc%2B%2B-v3/include/std/mutex#L922"> the lack of exception safety is called out with a todo-like comment</a>. The data race is addressed by a comment saying that the processor implicitly makes all loads acquire and all stores release, and while that may be true, it doesn&#8217;t prevent the <i>compiler</i> from reordering the stores and loads. The compiler might decide to inline the callback and then reorder the stores so that the store to <code>done</code> happens before the end of the callback.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260917-00/?p=112706">&lt;CODE&gt;std::call_once&lt;/CODE&gt; vs. &lt;CODE&gt;std::async&lt;/CODE&gt;</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
