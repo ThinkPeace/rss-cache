@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notes on discrete-time Fourier series and transform | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Notes on discrete-time Fourier series and transform</h1>
+        <div class="meta">Eli Bendersky&#x27;s website 2026-09-19T16:39:00Z</div>
+        <div class="links">
+          <a href="https://eli.thegreenplace.net/2026/notes-on-discrete-time-fourier-series-and-transform/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/eli-thegreenplace-net/eli-thegreenplace-net-e0ab21db2786f000.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The following are my notes on discrete-time Fourier series (DTFS), as well as the discrete-time Fourier transform (DTFT). These topics serve as an important theoretical underpinning to the digital processing of signals by computers using the DFT (which will be covered in a future post). For discrete-time signals, we use …</div>
+        <div class="content">
+          <link rel="stylesheet" href="https://eli.thegreenplace.net/demos/discrete-fourier/discrete-fourier.css"><p>The following are my notes on discrete-time Fourier series (DTFS), as
+well as the discrete-time Fourier transform (DTFT). These topics serve
+as an important theoretical underpinning to the digital processing of
+signals by computers using the DFT (which will be covered in a future
+post).</p>
+<p>For discrete-time signals, we use the square bracket notation to
+denote samples: <object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object> is the n-th sample of signal
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/11f6ad8ec52a2984abaafd7c3b516503785c2072.svg" type="image/svg+xml">x</object>.</p>
+<p>We’ll say that a discrete-time (just <em>discrete</em> from this point on, for
+brevity) signal is periodic with period <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> if:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/72444fe45e23358b5515c447242702d052cf8b29.svg" type="image/svg+xml">\[x[n]=x[n+N]\qquad\forall{n}\]</object>
+<p>When talking about <a class="reference external" href="https://eli.thegreenplace.net/2026/notes-on-fourier-series/">continuous-time Fourier
+series</a>,
+we started with real trigonometric functions and later moved to complex
+exponentials. Here, we’ll just go ahead and start directly with
+(discrete) complex exponentials - converting between the two
+representations isn’t difficult and can be done as needed (Appendix C in
+this post demonstrates it).</p>
+<p>We’ll be dealing with the following family of signals <a class="footnote-reference" href="#footnote-1" id="footnote-reference-1">[1]</a>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/893482d035c092058c8fe74a07d0d2007b2610f0.svg" type="image/svg+xml">\[\phi_k[n]=e^{ikw_0n}=e^{ik(2\pi/N)n}\qquad \forall k\in\mathbb{Z}\]</object>
+<p>These are discrete complex exponentials that are periodic with period N.
+<object class="valign-m6 latex-math" data="https://eli.thegreenplace.net/images/math/aff8cebf2b8fefea8ffbcb72636173fa560cb3c4.svg" type="image/svg+xml">w_0=\frac{2\pi}{N}</object> is the <em>angular frequency</em>. As discussed in
+Appendix A, there are only N such distinct signals, since:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/63dc5525074209448db49c6df6e21ad55681bd06.svg" type="image/svg+xml">\[\phi_k[n]=\phi_{k+N}[n]\qquad\forall{k}\]</object>
+<div class="section" id="coefficients-of-discrete-time-fourier-series">
+<h2>Coefficients of discrete-time Fourier series</h2>
+<p>We’ll want to consider the representation of an arbitrary N-periodic
+<object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object> by a linear combination of <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/1da2937ccce1ec5bb97b6acf3aa4c16b0600ac0a.svg" type="image/svg+xml">\phi_k[n]</object>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/bc26c473be832c359f7b4113522934be90ee741f.svg" type="image/svg+xml">\[x[n]=\sum_{k=\langle N\rangle}a_k\phi_k[n]\]</object>
+<p>The notation <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/7b3c13344886d907a02d04d04620598839f6b01f.svg" type="image/svg+xml">k=\langle N\rangle</object> means <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/13fbd79c3d390e5d6585a21e11ff5ec1970cff0c.svg" type="image/svg+xml">k</object> runs over any
+sequence of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> consecutive integers. Since there are only
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> distinct signals <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/ce4de0873a5958646dce9993ddaba5d4511d8b2d.svg" type="image/svg+xml">\phi_k</object>, the order of summation
+doesn’t matter - as long as all of them are used. So it could go from 0
+to <object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/4f927fbfe4d5898f228630ce76e5284ed202f837.svg" type="image/svg+xml">N-1</object>, or from 1 to <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object>, or from 2 to <object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/4bbff46d5e4a2066e44932399c1db699e807cf39.svg" type="image/svg+xml">N+1</object>, and so
+on. All of these orders will enumerate all distinct <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/ce4de0873a5958646dce9993ddaba5d4511d8b2d.svg" type="image/svg+xml">\phi_k</object>.</p>
+<p>Going back to our linear combination:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/60c500ee298bcca4f6a719dff3b72b2ecb114fda.svg" type="image/svg+xml">\[x[n]=\sum_{k=\langle N\rangle}a_k\phi_k[n]=\sum_{k=\langle N\rangle}a_ke^{ikw_0n}\]</object>
+<p>This is the discrete-time Fourier series (DTFS) representation of
+<object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object> and the coefficients <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/b93e6f239fad8d0444d74634490a6e0e067b8954.svg" type="image/svg+xml">a_k</object> are the Fourier series
+coefficients. Note that there are no convergence issues as in the
+continuous case, because we’re dealing with a finite sum.</p>
+<p>To find the coefficients <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/b93e6f239fad8d0444d74634490a6e0e067b8954.svg" type="image/svg+xml">a_k</object>, we’ll proceed in a way that’s
+somewhat similar to the continuous case. Multiply both sides of the
+equation above by <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/4bd537f689b1c8840838d523803661568c9fafda.svg" type="image/svg+xml">e^{-ir(2\pi/N)n}</object> and sum over <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> terms:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/3ffeb7c8c33c990b9f29376bd6f897597e3d06b4.svg" type="image/svg+xml">\[\sum_{n=\langle N\rangle}x[n]e^{-ir(2\pi/N)n}=
+\sum_{n=\langle N\rangle}\sum_{k=\langle N\rangle}a_ke^{i(k-r)(2\pi/N)n}\]</object>
+<p>Interchanging the order of summation on the right-hand side:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/9804b43fc55e5f192b10cb39e6eb9a084be50542.svg" type="image/svg+xml">\[\sum_{n=\langle N\rangle}x[n]e^{-ir(2\pi/N)n}=
+\sum_{k=\langle N\rangle}a_k\sum_{n=\langle N\rangle}e^{i(k-r)(2\pi/N)n}\]</object>
+<p>By Appendix B, the inner sum on the right-hand side is equal to
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> when <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/0fcd76904fe07394bb05ec64895cdeb8f8515a9d.svg" type="image/svg+xml">N\mid r-k</object> and to 0 otherwise. Without loss of
+generality - since we iterate over <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> consecutive values - let’s
+just assume this happens in our sum when <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/6bfa11b94d344c093694a5e5c0c226bd7bb67deb.svg" type="image/svg+xml">r=k</object> (and therefore
+<object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/7bfafe6ba7d6a147468ce3ae51ef134705ea6190.svg" type="image/svg+xml">r-k=0</object>, which is an integer multiple of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object>).</p>
+<p>So our equation becomes:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/aeca1db09dfaab4c07ac592863fdf8918e7e205a.svg" type="image/svg+xml">\[\sum_{n=\langle N\rangle}x[n]e^{-ir(2\pi/N)n}=a_r N\]</object>
+<p>Or:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/725df9008f33e0060b10f1f261198885af42c03f.svg" type="image/svg+xml">\[a_r=\frac{1}{N}\sum_{n=\langle N\rangle}x[n]e^{-ir(2\pi/N)n}\]</object>
+<p>To conclude, the Fourier decomposition of a periodic discrete signal
+<object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object> into periodic complex exponentials is:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/945f40a89aa021441ed20fcfa8b08f4fa7fb1ad5.svg" type="image/svg+xml">\[\boxed{
+\begin{aligned}
+    x[n]&amp;=\sum_{k=\langle N\rangle}a_k e^{ik(2\pi/N)n}\\
+    \vspace{2pt}\\
+    a_k&amp;=\frac{1}{N}\sum_{n=\langle N\rangle}x[n]e^{-ik(2\pi/N)n}
+\end{aligned}
+}\]</object>
+</div>
+<div class="section" id="example-revisiting-the-triangular-function">
+<h2>Example: revisiting the triangular function</h2>
+<p>Let’s revisit the triangular function <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/75a7147566fd4ba98fe5d85fe008fab6d58d3968.svg" type="image/svg+xml">t(x)</object> from <a class="reference external" href="https://eli.thegreenplace.net/2026/notes-on-fourier-series">the post on
+Fourier
+series</a>.
+Here, we’ll be using the following <em>sampled</em> version:</p>
+<div class="fourier-plot-wrap">
+  <canvas id="sampled-triangle" class="fourier-plot-canvas" width="760" height="510">
+  Your browser does not support the HTML5 canvas tag.
+  </canvas>
+</div><p>The sampling is done with 12 samples per period of 4. The spacing
+between two samples is <object class="valign-m6 latex-math" data="https://eli.thegreenplace.net/images/math/13b32fa8a41892c1a019dab0362e6d9d405155a2.svg" type="image/svg+xml">\Delta x=\frac{1}{3}</object>. Another way to
+express it:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/8d255b5d4fbff6cfe08740d3fac99376d86cb10f.svg" type="image/svg+xml">\[t_d[n]=t(n/3)\]</object>
+<p>Substituting this into the definition of <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/75a7147566fd4ba98fe5d85fe008fab6d58d3968.svg" type="image/svg+xml">t(x)</object>, we get:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/cb846a2c9318006c0154c8027430ff79e8dfa895.svg" type="image/svg+xml">\[t_d[n]=
+\begin{cases}
+    \frac{n}{3}     &amp;  0 \leq n \leq 3 \\
+    2-\frac{n}{3}   &amp;  3 &lt; n \leq 6  \\
+\end{cases}\]</object>
+<p>We then do an odd extension <a class="footnote-reference" href="#footnote-2" id="footnote-reference-2">[2]</a> to the range <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/bc0e87f5ff28e46cb89d0658c909161ece916b88.svg" type="image/svg+xml">n=[6..12)</object>, and
+repeat it with period <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/29fc4a36d13899104899f4ab4d5c8ce2a63aba4d.svg" type="image/svg+xml">N=12</object>.</p>
+<p>Using considerations similar to the <a class="reference external" href="https://eli.thegreenplace.net/2026/notes-on-fourier-series/">continuous time
+case</a>,
+because our function is odd we just need a sine series here:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/8785494695502450d002402ca913063457868572.svg" type="image/svg+xml">\[t_d[n]=\sum_{k=1}^{5}b_k sin\frac{k\pi n}{6}\]</object>
+<p>The five terms correspond to the five pairs of nonzero-frequency
+indices; see Appendix C.</p>
+<p>And the coefficients are:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/f7d0d38c795dd2579f2f787a52e0c929362146bb.svg" type="image/svg+xml">\[b_k=\frac{1}{6}\sum_{n=0}^{11}t_d[n]sin\frac{k\pi n}{6}\\\]</object>
+<p>We can run this sum over half the period, because the terms at <img alt="n" class="valign-0 latex-math" src="https://eli.thegreenplace.net/images/math/d1854cae891ec7b29161ccaf79a24b00c274bdaa.png" />
+and <object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/a57fdf4a737281653331838e54c1f649f3aef0ab.svg" type="image/svg+xml">12-n</object> are equal (both <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/b2c6547bf744e9cad27f25ea4a538006b5e10df1.svg" type="image/svg+xml">t_d[n]</object> and the sine change
+signs). Also, the terms at <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/bfbd617aa9bc9d5a8b0b006de9d1d45d8e688c8d.svg" type="image/svg+xml">n=0</object> and <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/fd917de64a52110443142df37dfb4c646c895ca0.svg" type="image/svg+xml">n=6</object> vanish because
+<object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/e3c78f2af1b33eec6a99870e066384434b712b41.svg" type="image/svg+xml">t_d[0]=t_d[6]=0</object>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/3cdf6806c737e14fb49307ffef19344a949cc809.svg" type="image/svg+xml">\[b_k=\frac{1}{3}\sum_{n=1}^{5}t_d[n]sin\frac{k\pi n}{6}\\\]</object>
+<p>Looking at the values of <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/6c703960ebb50c648ed2886b17158571a96dd773.svg" type="image/svg+xml">t_d</object>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/0cfe030d1da24fd3e0c7306c19bd6e3f5ba9437b.svg" type="image/svg+xml">\[b_1=\frac{1}{3}\left(\frac{1}{3}sin\frac{\pi}{6}+\frac{2}{3}sin\frac{2\pi}{6}+sin\frac{3\pi}{6}+\frac{2}{3}sin\frac{4\pi}{6}+\frac{1}{3}sin\frac{\pi}{6}\right)=\frac{4+2\sqrt{3}}{9}\]</object>
+<p>We can similarly calculate all <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/3b3f66f8c1dafc487acd2b86ecf65def380b2314.svg" type="image/svg+xml">b_k</object> until <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/146fe9d1591e99d78c5be44a6b0f0afc608b0735.svg" type="image/svg+xml">k=5</object>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/025a84bb16cfb0037bc990691f9c498eafc231a9.svg" type="image/svg+xml">\[\begin{aligned}
+    b_1&amp;=\frac{4+2\sqrt{3}}{9}\\
+    b_2&amp;=0\\
+    b_3&amp;=-\frac{1}{9}\\
+    b_4&amp;=0\\
+    b_5&amp;=\frac{4-2\sqrt{3}}{9}\\
+\end{aligned}\]</object>
+<p>The resulting Fourier series is therefore:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/360fb6d0e15c3f648f39813083cd487a7ebc118c.svg" type="image/svg+xml">\[t_d[n]=\frac{4+2\sqrt{3}}{9}sin\frac{\pi n}{6}-\frac{1}{9}sin\frac{\pi n}{2}+\frac{4-2\sqrt{3}}{9}sin\frac{5\pi n}{6}\]</object>
+<p>You can use the following interactive plot to explore this approximation
+to the discrete triangle function <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/b2c6547bf744e9cad27f25ea4a538006b5e10df1.svg" type="image/svg+xml">t_d[n]</object>:</p>
+<div class="fourier-plot-wrap">
+<canvas id="sampled-triangle-fourier" class="fourier-plot-canvas" width="760" height="510" role="img">
+Your browser does not support the HTML5 canvas tag.
+</canvas>
+<div class="fourier-plot-controls">
+  <label class="fourier-plot-label" for="terms">Terms in the Fourier series
+    <select id="terms" class="fourier-plot-input">
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+    </select>
+  </label>
+</div>
+</div><p>The dropdown box selects how many of the terms in the series shown above
+to plot. The orange crosses show where the series’ values at the integer
+indices are, and the orange line is interpolated to better visualize the
+sine waves being added. Note that when all the coefficients are used,
+the DTFS <em>exactly</em> reconstructs the input signal.</p>
+</div>
+<div class="section" id="discrete-time-fourier-transform-dtft">
+<h2>Discrete-time Fourier Transform (DTFT)</h2>
+<p>In the post on <a class="reference external" href="https://eli.thegreenplace.net/2026/notes-on-the-fourier-transform/">the Fourier
+Transform</a>
+we’ve seen how non-periodic signals can be represented in the frequency
+domain by taking the Fourier series and calculating them at the limit
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/7024b94c8e1c4e174500651fed6f4034b91338e2.svg" type="image/svg+xml">L\rightarrow\infty</object>. Here, we’ll do something similar for
+discrete signals.</p>
+<p>Suppose we have a non-periodic discrete signal <object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object> of finite
+duration (it’s zero outside a finite range of indices). Here’s a sample
+plot:</p>
+<div class="fourier-plot-wrap">
+  <canvas id="sampled-triangle-single-cycle" class="fourier-plot-canvas" width="760" height="660" role="img">
+  Your browser does not support the HTML5 canvas tag.
+  </canvas>
+</div><p>The bottom half is <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/c6df076ab603be3c2cbc4b1d6d092e640b77e29b.svg" type="image/svg+xml">x_N[n]</object> - a periodic signal, one period
+(<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object>) of which is equal to <object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object>. We choose <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/c63ae6dd4fc9f9dda66970e827d13f7c73fe841c.svg" type="image/svg+xml">M</object> large
+enough that <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/4f69300aeca511bb7959f0d5aff5e33ed79f99b9.svg" type="image/svg+xml">x[n]=0</object> outside <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/506ae4d92172f3c5ce809ecedd25641313a8b1be.svg" type="image/svg+xml">[-M,M]</object> and set
+<object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/7648c8206c068d4af6259b746a017a4db66b1ad3.svg" type="image/svg+xml">N=2M+1</object>.</p>
+<p>Since <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/e3c3a8503e4f75a769e8bfe1a0aacda6768f9fdc.svg" type="image/svg+xml">x_N</object> is periodic, we can represent it with DTFS <a class="footnote-reference" href="#footnote-3" id="footnote-reference-3">[3]</a>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/7655e9e51d27c95ec2f109c7991133a220d036b6.svg" type="image/svg+xml">\[\begin{aligned}
+    x_N[n]&amp;=\sum_{k=-M}^{M}a_k e^{ik(2\pi/N)n}\\
+    a_k&amp;=\frac{1}{N}\sum_{n=-M}^{M}x[n]e^{-ik(2\pi/N)n}
+\end{aligned}\]</object>
+<p>We’ll use the notation of angular frequency:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/5863471c15fd749d07460da1cd5555373a479bee.svg" type="image/svg+xml">\[\Delta w=\frac{2\pi}{N}\qquad w_k=k\Delta w\]</object>
+<p>Then:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/d60f037fdf97691796d26081748cfc9075bae414.svg" type="image/svg+xml">\[\begin{aligned}
+    x_N[n]&amp;=\sum_{k=-M}^{M}a_k e^{i w_k n}\\
+    a_k&amp;=\frac{1}{N}\sum_{n=-M}^{M}x[n]e^{-i w_k n}
+\end{aligned}\]</object>
+<p>Now the critical part; since <object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object> is zero outside
+<object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/506ae4d92172f3c5ce809ecedd25641313a8b1be.svg" type="image/svg+xml">[-M,M]</object>, extending the summation to all integers does not change
+its value:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/651bf87714366d89832fc83ad2f37727771e1ed6.svg" type="image/svg+xml">\[a_k=\frac{1}{N}\sum_{n=-\infty}^{\infty}x[n]e^{-i w_k n}\]</object>
+<p>We’ll define the following <em>continuous</em> function with variable
+<img alt="w" class="valign-0 latex-math" src="https://eli.thegreenplace.net/images/math/aff024fe4ab0fece4091de044c58c9ae4233383a.png" />:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/12e943c782c2b7d52bc4af24f03889a7a390c800.svg" type="image/svg+xml">\[X(w)=\sum_{n=-\infty}^{\infty}x[n]e^{-i w n}\]</object>
+<p>Then at points <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/3d49dd4dad59a3db42b484b5bd2c815d00f63747.svg" type="image/svg+xml">w_k</object>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/2410280553643c2394bb40d31177935f81116b78.svg" type="image/svg+xml">\[a_k=\frac{1}{N}X(w_k)\]</object>
+<p>The function <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/634ff97b7c8940e499bad1f419482d41f5985e75.svg" type="image/svg+xml">X(w)</object> is the discrete-time Fourier transform (DTFT)
+of <object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object>. The inverse DTFT process reconstructs <object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object> from
+<object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/634ff97b7c8940e499bad1f419482d41f5985e75.svg" type="image/svg+xml">X(w)</object>, by substituting <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/b93e6f239fad8d0444d74634490a6e0e067b8954.svg" type="image/svg+xml">a_k</object> back into the DTFS:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/3862d71c50490b1f847db8a0d6d73d3edbf1ef59.svg" type="image/svg+xml">\[x_N[n]=\sum_{k=-M}^{M}\frac{1}{N}X(w_k) e^{i w_k n}\]</object>
+<p>By our definition of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/485c352e1532df3fe1ad52c8ac1ec6cdcefae85f.svg" type="image/svg+xml">\Delta w</object>, we have:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/03df7807d548c507c064153f90c03c9a563c0805.svg" type="image/svg+xml">\[\frac{1}{N}=\frac{\Delta w}{2\pi}\]</object>
+<p>Therefore:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/4a8494e729e71cda8a0a755ccda0efc956b18e23.svg" type="image/svg+xml">\[x_N[n]=\frac{1}{2\pi}\sum_{k=-M}^{M}X(w_k) e^{i w_k n}\Delta w\]</object>
+<p>Just like in the continuous case, we recognize the sum as a <em>Riemann
+sum</em>. Let <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/e25aba83bff23dbc0999183f7c3336fbbd597321.svg" type="image/svg+xml">M\rightarrow\infty</object>. The spacing <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/485c352e1532df3fe1ad52c8ac1ec6cdcefae85f.svg" type="image/svg+xml">\Delta w</object> tends
+to zero, and we can rewrite the sum as an integral:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/4439fc58730a31e2dd28d6ebda63260268060e11.svg" type="image/svg+xml">\[x[n]=\lim_{M\rightarrow\infty}x_N[n]=\frac{1}{2\pi}\int_{-\pi}^{\pi}X(w)e^{iwn}dw\]</object>
+<p>To conclude, the DTFT and inverse DTFT pair are:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/30a15dc5e03b381e24ac86dd31144dcbbe0d7687.svg" type="image/svg+xml">\[\boxed{
+    \begin{aligned}
+        X(w)&amp;=\sum_{n=-\infty}^{\infty}x[n]e^{-i w n}\\
+        \vspace{2pt}\\
+        x[n]&amp;=\frac{1}{2\pi}\int_{-\pi}^{\pi}X(w)e^{iwn}dw
+    \end{aligned}
+}\]</object>
+<p><object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/634ff97b7c8940e499bad1f419482d41f5985e75.svg" type="image/svg+xml">X(w)</object> is a continuous, periodic function with period
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/0833718ca4569f36e84dbdc7742eaec65e49b150.svg" type="image/svg+xml">2\pi</object>, because:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/c03a305933e7f52bce45ca16a618ebf03bf0e70c.svg" type="image/svg+xml">\[\begin{aligned}
+    X(w+2\pi)&amp;=\sum_{n=-\infty}^{\infty}x[n]e^{-i (w+2\pi) n}\\
+    &amp;=\sum_{n=-\infty}^{\infty}x[n]e^{-i w n}e^{-i 2\pi n}\\
+    &amp;=\sum_{n=-\infty}^{\infty}x[n]e^{-i w n}=X(w)\\
+\end{aligned}\]</object>
+<p>Therefore, it’s enough to run the integral on any interval of length
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/0833718ca4569f36e84dbdc7742eaec65e49b150.svg" type="image/svg+xml">2\pi</object>.</p>
+<p>The DTFS and DTFT are closely related. Starting with a finite-duration
+signal <object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object>, we form a periodic signal by repeating a block of
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> samples containing it. Its DTFS coefficients are equally
+spaced, scaled samples of the DTFT:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/b992961b96d8a9a9826ee6a62f6b4adf636f54b2.svg" type="image/svg+xml">\[a_k=\frac{1}{N}X\left(\frac{2\pi k}{N}\right)\]</object>
+<p>The relation is similar to the one between Fourier series and the
+Fourier transform in the continuous case.</p>
+<p>The DTFT also has useful properties similar to the continuous Fourier
+transform: linearity, time shifting, the convolution theorem etc, but we
+won’t spend time on them here.</p>
+</div>
+<div class="section" id="appendix-a-discrete-time-complex-exponentials">
+<h2>Appendix A: Discrete-time complex exponentials</h2>
+<p>Discrete-time complex exponentials have the form <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/7fd6adcf6eb2206420843202395b5e7971111935.svg" type="image/svg+xml">e^{iw_0n}</object> where
+<object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/6950ac388dc5e1d03924e0c4e7875931b7774abf.svg" type="image/svg+xml">w_0</object> is the <em>angular frequency</em>. The discrete nature of these
+functions leads to some interesting outcomes; for example, consider the
+exponential with angular frequency <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/11d5a9c41c6b478b606c650d1677cd48ff4381f7.svg" type="image/svg+xml">w_0+2\pi</object>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/0e8282dc16ccb8d86eb4bcc5537f678aac1825d2.svg" type="image/svg+xml">\[e^{i(w_0+2\pi)n}=e^{iw_0n}e^{i2\pi n}=e^{iw_0n}\]</object>
+<p>Therefore, the exponential at <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/11d5a9c41c6b478b606c650d1677cd48ff4381f7.svg" type="image/svg+xml">w_0+2\pi</object> is <em>exactly the same</em> as
+the exponential at <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/6950ac388dc5e1d03924e0c4e7875931b7774abf.svg" type="image/svg+xml">w_0</object>. In considering discrete complex
+exponentials, we need only choose <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/6950ac388dc5e1d03924e0c4e7875931b7774abf.svg" type="image/svg+xml">w_0</object> from a range of length
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/0833718ca4569f36e84dbdc7742eaec65e49b150.svg" type="image/svg+xml">2\pi</object>.</p>
+<p>Another interesting aspect of these functions concerns their
+periodicity. In order for <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/7fd6adcf6eb2206420843202395b5e7971111935.svg" type="image/svg+xml">e^{iw_0n}</object> to be periodic with some
+positive integer period <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object>, the following must hold:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/68f3400d73ba76397c3a61bc1adb9e1fdfadd26a.svg" type="image/svg+xml">\[e^{iw_0(n+N)}=e^{iw_0n}\]</object>
+<p>In other words:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/1b3ebb4ad3d3eec0bf3cd4b699ee3c366cca4e18.svg" type="image/svg+xml">\[e^{iw_0N}=1\]</object>
+<p>So <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/d08b73152a14ec2be0f693981bc9c49cf2d539c8.svg" type="image/svg+xml">w_0N</object> itself must be an integral multiple of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/0833718ca4569f36e84dbdc7742eaec65e49b150.svg" type="image/svg+xml">2\pi</object>. For
+some integer <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/13fbd79c3d390e5d6585a21e11ff5ec1970cff0c.svg" type="image/svg+xml">k</object>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/a9ac703fbfa53f089a336b9a0c160d74a3e27183.svg" type="image/svg+xml">\[w_0N=k\cdot(2\pi)\Longrightarrow w_0=\frac{k2\pi}{N}\]</object>
+<p>For a fixed positive integer <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object>, let’s consider all complex
+exponentials for which <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> is a period:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/fa894357b1a5788b91ab60893cdeb9067bc65b87.svg" type="image/svg+xml">\[\phi_k[n]=e^{ik(2\pi/N)n}\qquad \forall k\in\mathbb{Z}\]</object>
+<p>But earlier we’ve said that all complex exponentials with angular
+frequencies <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/0833718ca4569f36e84dbdc7742eaec65e49b150.svg" type="image/svg+xml">2\pi</object> apart are identical. This means that the set
+above consists of only <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> distinct exponentials. We can choose
+any starting <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/13fbd79c3d390e5d6585a21e11ff5ec1970cff0c.svg" type="image/svg+xml">k</object> and get distinct signals with <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/13fbd79c3d390e5d6585a21e11ff5ec1970cff0c.svg" type="image/svg+xml">k</object>,
+<object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/8d2d1975719162e2210a96c3bd5bebfdf42caa9b.svg" type="image/svg+xml">k+1</object>, <object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/f61af7574246ba464c7161afc0cddb3dc1b11267.svg" type="image/svg+xml">k+2</object> and so on until <object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/cef9dc4c07e239fd0ddcc7676f56668ca0151099.svg" type="image/svg+xml">k+N-1</object>. After that, they
+begin repeating: <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/1e420e19bf305c8715608dbf062a60159dfbdc2a.svg" type="image/svg+xml">\phi_N[n]=\phi_0[n]</object> and so on.</p>
+<p>All of this is very different from the continuous case, where <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/8efd86fb78a56a5145ed7739dcb00c78581c5375.svg" type="image/svg+xml">t</object>
+is a real number. The signals <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/28d243e6888f4bc4a0fc32b9f7af2a2ffa7f8c89.svg" type="image/svg+xml">e^{iw_0t}</object> and
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/9075753c0861695d1e91cec2d6932e06acd4bda6.svg" type="image/svg+xml">e^{i(w_0+2\pi)t}</object> agree only at integer values of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/8efd86fb78a56a5145ed7739dcb00c78581c5375.svg" type="image/svg+xml">t</object>, so
+they are distinct functions of <object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/9eae9191c02b6e7957862fc2401767c5f8b69547.svg" type="image/svg+xml">t\in\mathbb{R}</object>. Consequently, for
+a fixed positive period <img alt="T" class="valign-0 latex-math" src="https://eli.thegreenplace.net/images/math/c2c53d66948214258a26ca9ca845d7ac0c17f8e7.png" />, the continuous-time exponentials
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/041cda9e66d700c462a028de0f417be881e8e073.svg" type="image/svg+xml">e^{ik(2\pi/T)t}</object> are distinct for every integer <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/13fbd79c3d390e5d6585a21e11ff5ec1970cff0c.svg" type="image/svg+xml">k</object>, giving
+infinitely many distinct signals.</p>
+</div>
+<div class="section" id="appendix-b-sum-of-consecutive-complex-exponentials">
+<h2>Appendix B: Sum of consecutive complex exponentials</h2>
+<p>Let’s consider the following discrete function, defined by a sum:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/33a6c380ddeed86ef34e7e6583ca60f6d0bb642f.svg" type="image/svg+xml">\[A[k]=\sum_{n=0}^{N-1}e^{i(2\pi/N)kn}\]</object>
+<p>We’ll want to consider two cases:</p>
+<p>(1) When <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/13fbd79c3d390e5d6585a21e11ff5ec1970cff0c.svg" type="image/svg+xml">k</object> is an integer multiple of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object>: <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/e1f10f9c84c6289cd8a4279a240c098df07b22fa.svg" type="image/svg+xml">k=rN</object> for
+some integer <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/4dc7c9ec434ed06502767136789763ec11d2c4b7.svg" type="image/svg+xml">r</object> (for example <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/02f5d048ae1528ddfe91661c25c64469d096dd42.svg" type="image/svg+xml">k=0</object>, <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/84b1f89229e29e995deb4370c612a9f76e24a2f7.svg" type="image/svg+xml">k=N</object>,
+<object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/fec2b67cd1bb34d1d2338637374b8c4c86b0162b.svg" type="image/svg+xml">k=-2N</object> etc.)</p>
+<p>In this case, the sum becomes:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/914ae21c02d6c49cdbc4eafd92329769c87fee81.svg" type="image/svg+xml">\[A[k]=\sum_{n=0}^{N-1}e^{i(2\pi/N)rNn}=\sum_{n=0}^{N-1}e^{i2\pi rn}\]</object>
+<p>Since both <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/4dc7c9ec434ed06502767136789763ec11d2c4b7.svg" type="image/svg+xml">r</object> and <img alt="n" class="valign-0 latex-math" src="https://eli.thegreenplace.net/images/math/d1854cae891ec7b29161ccaf79a24b00c274bdaa.png" /> are integers, the exponent is an
+integer multiple of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/d2a8e570b43fb5570c95c42925813186ac2ea038.svg" type="image/svg+xml">2\pi i</object>, so:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/118bd1b6b3654c8e6847db1fe680270692bc2108.svg" type="image/svg+xml">\[A[k]=\sum_{n=0}^{N-1}1=N\]</object>
+<p>(2) When <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/13fbd79c3d390e5d6585a21e11ff5ec1970cff0c.svg" type="image/svg+xml">k</object> is not an integer multiple of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object>, let’s do a
+variable change <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/b723abdc2defc33a8cb6711523ebb1e84e78761d.svg" type="image/svg+xml">p=n+1</object>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/b7d825bbc662795d58217b17d9620f862fce599d.svg" type="image/svg+xml">\[A[k]=\sum_{p=1}^{N}e^{i(2\pi/N)k(p-1)}\]</object>
+<p>We can now use the finite sum formula for a geometric progression with
+the common ratio <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/f4dab53801ba436b1f7b4648aaeb33ba8e4415bc.svg" type="image/svg+xml">r=e^{i(2\pi/N)k}</object>; the sum is:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/c391f9689c3c8d921b2f4ef726abe50d147365b2.svg" type="image/svg+xml">\[S_N=\frac{1-r^N}{1-r}\]</object>
+<p>Note that <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/a492f6aa77feab0fbe5517ba5401340ff9e1ada1.svg" type="image/svg+xml">r\neq 1</object> because <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/13fbd79c3d390e5d6585a21e11ff5ec1970cff0c.svg" type="image/svg+xml">k</object> is not an integer multiple
+of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object>. However:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/92a7e0eade5ae2829fcb79d29b3b0562b02722a9.svg" type="image/svg+xml">\[r^N=e^{i(2\pi/N)kN}=1\]</object>
+<p>Therefore:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/4dd7c42cdb7a4290b25a4c25fd5851d13130efb0.svg" type="image/svg+xml">\[A[k]=S_N=0\]</object>
+<p>While these calculations demonstrate the sums from <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/bfbd617aa9bc9d5a8b0b006de9d1d45d8e688c8d.svg" type="image/svg+xml">n=0</object> to
+<object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/4f927fbfe4d5898f228630ce76e5284ed202f837.svg" type="image/svg+xml">N-1</object>, they work exactly the same for any <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> consecutive
+indices, because the summand is periodic in <img alt="n" class="valign-0 latex-math" src="https://eli.thegreenplace.net/images/math/d1854cae891ec7b29161ccaf79a24b00c274bdaa.png" /> with period
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object>. Therefore:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/ee92f8136729a20230b6d99f86f4347956f5e929.svg" type="image/svg+xml">\[A[k]=\sum_{n=\langle N\rangle}e^{i(2\pi/N)kn}=
+\begin{cases}
+    N      &amp; N\mid k\\
+    0      &amp; \text{otherwise}
+\end{cases}\]</object>
+</div>
+<div class="section" id="appendix-c-sine-series-decomposition-of-t-d-n">
+<h2>Appendix C: Sine series decomposition of <object class="valign-m6 latex-math heading-math" data="https://eli.thegreenplace.net/images/math/b2c6547bf744e9cad27f25ea4a538006b5e10df1.svg" type="image/svg+xml">t_d[n]</object></h2>
+<p>Using the formula for DTFS developed earlier in the post:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/dea847f17d73cf72834a3bf138cf296585600e8f.svg" type="image/svg+xml">\[\begin{aligned}
+    a_k&amp;=\frac{1}{12}\sum_{n=0}^{11}t_d[n]e^{-ik(\pi/6)n}\\
+    &amp;=\frac{1}{12}\sum_{n=0}^{11}t_d[n]cos\frac{k\pi n}{6}-i\frac{1}{12}\sum_{n=0}^{11}t_d[n]sin\frac{k\pi n}{6}\\
+\end{aligned}\]</object>
+<p>Recall that <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/b2c6547bf744e9cad27f25ea4a538006b5e10df1.svg" type="image/svg+xml">t_d[n]</object> is odd over the full range <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/6aaa4029be956bb3225f684513bacd9d2fa721d9.svg" type="image/svg+xml">n=[0..12)</object>.
+Specifically, since the cosine is an even function, we have for any
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/6b0d31c0d563223024da45691584643ac78c96e8.svg" type="image/svg+xml">m</object>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/78c15be789336fccf8caf504bf0a468c65a4ba10.svg" type="image/svg+xml">\[\begin{aligned}
+    t_d[12-m]&amp;=-t_d[m]\\
+    cos\frac{k\pi(12-m)}{6}&amp;=cos(2\pi k -\frac{k\pi m}{6})=cos\frac{k\pi m}{6}\\
+\end{aligned}\]</object>
+<p>Therefore the cosine terms cancel out throughout the period; term 1 is
+the same as negative term 11, etc.</p>
+<p>We’re left with the sines:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/04810fca94f796c09eb1a479d4c33728084e1ce7.svg" type="image/svg+xml">\[a_k=-i\frac{1}{12}\sum_{n=0}^{11}t_d[n]sin\frac{k\pi n}{6}\]</object>
+<p>All coefficients are purely imaginary. For convenience, let’s write:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/bc8a0c8832f7e8c57b624805bf57a3ab7442b335.svg" type="image/svg+xml">\[\begin{aligned}
+    b_k&amp;=\frac{1}{6}\sum_{n=0}^{11}t_d[n]sin\frac{k\pi n}{6}\\
+    a_k&amp;=\frac{-i b_k}{2}\\
+\end{aligned}\]</object>
+<p>Let’s turn back to the Fourier reconstruction formula:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/a81d1b157290e1b6fe8f180e4d35ebccacad75a0.svg" type="image/svg+xml">\[t_d[n]=\sum_{k=\langle N\rangle}a_k e^{ik(2\pi/N)n}\]</object>
+<p>And pair up exponentials at <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/13fbd79c3d390e5d6585a21e11ff5ec1970cff0c.svg" type="image/svg+xml">k</object> with ones at <object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/ca298a83efb32922e18a77b4656ece9aafc49f60.svg" type="image/svg+xml">12-k</object>:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/d3dad0787d1f52bc208ac361a75067b2e68b3d76.svg" type="image/svg+xml">\[e^{i(12-k)\pi n/6}=e^{i2\pi n}e^{-ikn\pi/6}=e^{-ikn\pi/6}\]</object>
+<p>Also, since <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/b2c6547bf744e9cad27f25ea4a538006b5e10df1.svg" type="image/svg+xml">t_d[n]</object> are real, the conjugate of <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/b93e6f239fad8d0444d74634490a6e0e067b8954.svg" type="image/svg+xml">a_k</object> is:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/097c9b2f3444ca43f9fba1aaff3df757b70e25bd.svg" type="image/svg+xml">\[a_{12-k}=a_k^*=\frac{ib_k}{2}\]</object>
+<p>So adding the paired exponentials with their coefficients and using
+Euler’s formula:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/f2cbd4e85e6772e49d149f5412bc92e8cb990318.svg" type="image/svg+xml">\[\begin{aligned}
+    a_ke^{i k\pi n/6}+a_{12-k}e^{-i k\pi n/6}&amp;=-\frac{ib_k}{2}e^{i k\pi n/6}+\frac{ib_k}{2}e^{-i k\pi n/6}\\
+    &amp;=b_k\frac{e^{i k\pi n/6}-e^{-i k\pi n/6}}{2i}\\
+    &amp;=b_k sin\frac{k\pi n}{6}
+\end{aligned}\]</object>
+<p>Therefore:</p>
+<object class="align-center" data="https://eli.thegreenplace.net/images/math/51f6856ecd4c6d1c0a997e355ed137c78e2ea77c.svg" type="image/svg+xml">\[t_d[n]=\sum_{k=0}^{11}a_k e^{ik(2\pi/N)n}=\sum_{k=1}^{5}b_k sin\frac{k\pi n}{6}\]</object>
+<p>We don’t include the terms at <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/02f5d048ae1528ddfe91661c25c64469d096dd42.svg" type="image/svg+xml">k=0</object> and <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/a1c10e3a8984ac438298ab152c4168f266ede25f.svg" type="image/svg+xml">k=6</object>, because
+<object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/84797f94c404864332fcfec975213ee61d2442a4.svg" type="image/svg+xml">a_0=a_6=0</object> (sine of an integral multiple of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/6ac47b6d7372b4087583cfd048d20f4c1571f5cf.svg" type="image/svg+xml">\pi</object>).</p>
+<hr class="docutils" />
+<table class="docutils footnote" frame="void" id="footnote-1" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-1">[1]</a></td><td>There are a lot of symbols used in this equation. <img alt="n" class="valign-0 latex-math" src="https://eli.thegreenplace.net/images/math/d1854cae891ec7b29161ccaf79a24b00c274bdaa.png" /> is the
+&quot;time&quot; index of the signal <object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object> - its domain; <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/13fbd79c3d390e5d6585a21e11ff5ec1970cff0c.svg" type="image/svg+xml">k</object>
+enumerates the k-th function <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/ce4de0873a5958646dce9993ddaba5d4511d8b2d.svg" type="image/svg+xml">\phi_k</object> from a family of
+functions - each <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/1da2937ccce1ec5bb97b6acf3aa4c16b0600ac0a.svg" type="image/svg+xml">\phi_k[n]</object> is a function of <img alt="n" class="valign-0 latex-math" src="https://eli.thegreenplace.net/images/math/d1854cae891ec7b29161ccaf79a24b00c274bdaa.png" />;
+<object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/b51a60734da64be0e618bacbea2865a8a7dcd669.svg" type="image/svg+xml">N</object> is the period; <img alt="i" class="valign-0 latex-math" src="https://eli.thegreenplace.net/images/math/042dc4512fa3d391c5170cf3aa61e6a638f84342.png" /> is the imaginary unit.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="footnote-2" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-2">[2]</a></td><td>The odd extension may be slightly confusing because we don’t use
+negative indices. But indices are arbitrary! In our case, within a
+single period index <object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/d868a680affb6ad2c7e2392566b6adc4e3201dea.svg" type="image/svg+xml">-n</object> is equivalent to <object class="valign-m1 latex-math" data="https://eli.thegreenplace.net/images/math/a57fdf4a737281653331838e54c1f649f3aef0ab.svg" type="image/svg+xml">12-n</object>; if we
+consider one period around the halfway point of <object class="valign-0 latex-math" data="https://eli.thegreenplace.net/images/math/fd917de64a52110443142df37dfb4c646c895ca0.svg" type="image/svg+xml">n=6</object>, it’s
+easy to see that the function is indeed odd.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="footnote-3" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-3">[3]</a></td><td>Note that we use <object class="valign-m5 latex-math" data="https://eli.thegreenplace.net/images/math/97897883b2ac574b045db012a128c024c5a05498.svg" type="image/svg+xml">x[n]</object>, not <object class="valign-m4 latex-math" data="https://eli.thegreenplace.net/images/math/c6df076ab603be3c2cbc4b1d6d092e640b77e29b.svg" type="image/svg+xml">x_N[n]</object> in the summation
+for <object class="valign-m3 latex-math" data="https://eli.thegreenplace.net/images/math/b93e6f239fad8d0444d74634490a6e0e067b8954.svg" type="image/svg+xml">a_k</object>. This is because within the chosen range they are
+equal.</td></tr>
+</tbody>
+</table>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
