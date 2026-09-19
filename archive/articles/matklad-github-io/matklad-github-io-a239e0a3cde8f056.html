@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Finding Bugs | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Finding Bugs</h1>
+        <div class="meta">matklad 2026-09-19T00:00:00Z</div>
+        <div class="links">
+          <a href="https://matklad.github.io/2026/09/19/finding-bugs.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/matklad-github-io/matklad-github-io-a239e0a3cde8f056.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Are generative (randomized) tests significantly more effective than example-based unit-tests at discovering bugs? There&#x27;s an interesting discussion about this on lobste.rs. One argument in favor of unit tests is, paraphrasing</div>
+        <div class="content">
+          <header>
+  <h1>Finding Bugs</h1>
+  <time class="meta" datetime="2026-09-19">Sep 19, 2026</time>
+</header>
+<p>Are generative (randomized) tests significantly more effective than example-based
+unit-tests at discovering bugs? There’s
+<a href="https://lobste.rs/s/mkv2pl/unit_tests_mark_territory_more_than#c_5nimhl">an interesting discussion about this on lobste.rs</a>.
+One argument in favor of unit tests is, paraphrasing</p>
+
+<figure class="blockquote">
+<blockquote><p>My generic fuzzer wasn’t able to find
+<a href="https://github.com/rust-lang/regex/issues/1354">this tricky bug</a>
+in Rust <code>regex</code> crate.</p>
+</blockquote>
+
+</figure>
+<p>To me, it seems that generative testing should shake out that particular
+creature, so I wrote <a href="https://github.com/matklad/regex-fuzz">a lil fuzzer</a>
+of my own, and it indeed discovered <em>another</em> bug in that version of <code>regex</code>,
+and then the one I was after. I didn’t find anything in the latest version. I
+like to do a write up about the process, as it is a good case study for how one
+approaches a problem like this.</p>
+<p>I want to be extra clear that my argument is very weak here, as I know exactly
+the bug I am after, and I even know that fuzzers can find it. My primary goal is
+to teach you the techniques, leaving it to your judgment just how effective they
+are. That being said, I think finding a <em>second</em> bug validates the approach
+somewhat.</p>
+<p>I also want to emphasize that writing fuzzers to find known bugs is far from an
+idle amusement. While I believe that generative testing is very powerful,
+relative to its cost, it’s always a question whether a particular test is
+throughout enough. And it never is, you <em>will</em> find more bugs elsewhere (that’s
+why defense in depth and <em>runtime</em> mitigations are critical). And, whenever you
+have a pest that dodged your fuzzers, your first order of business is to treat
+this event as a bug in the <em>fuzzer</em>, and change it so that it can find this and
+related bugs. Only then you are allowed to add a fix and a unit test!</p>
+<section id="The-Bug">
+
+<h2><a href="#The-Bug">The Bug</a></h2>
+<p>For <code>".abb|b"</code> regex and <code>"zabb"</code> input, an older version of <code>regex</code> crate
+returned <code>b</code> as the first match, which is incorrect, because the entire <code>zabb</code>
+matches:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">use</span> regex;</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">main</span>() {</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-variable">r</span> = regex::Regex::<span class="hl-title function_ invoke__">new</span>(<span class="hl-string">&quot;.abb|b&quot;</span>).<span class="hl-title function_ invoke__">unwrap</span>();</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-variable">m</span> = r.<span class="hl-title function_ invoke__">find</span>(<span class="hl-string">&quot;zabb&quot;</span>).<span class="hl-title function_ invoke__">unwrap</span>();</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-comment">// Fails with regex-automata=0.4.15:</span></span>
+<span class="line">    <span class="hl-built_in">assert_eq!</span>(m.<span class="hl-title function_ invoke__">as_str</span>(), <span class="hl-string">&quot;zabb&quot;</span>)</span>
+<span class="line">}</span></code></pre>
+
+</figure>
+<p>How do we find this, or something <em>like</em> this?</p>
+<p>Regular expression engines are one of the easiest things to apply generative
+testing to, they are pure algorithms. While few large systems are <em>just</em> an
+algorithm, algorithms are everywhere inside components of interesting systems,
+so this is a hands-on knowledge.</p>
+<p>And by far the most important technique for testing algorithms is to compare
+with the known right answer, with an oracle. Implement both <code>O(N log N)</code> and
+<code>O(N^2)</code> versions of the algorithm, and match the answers.</p>
+<p>To be fair, the original comment mentioned that the their fuzzer didn’t find the
+issue because they didn’t have access to an oracle. However, if you are
+designing a reliable system, it’s part of your job to ensure it has an oracle!
+One of the first things we did for our
+<a href="https://jepsen.io/analyses/tigerbeetle-0.16.11">Jepsen test</a> at TigerBeetle was to
+<a href="https://github.com/tigerbeetle/tigerbeetle/pull/2481">expose internal timestamps</a>
+via API, to make it easier for Jepsen to find bugs (TigerBeetle is
+<a href="https://tigerbeetle.com/blog/2026-08-20-protocol-aware-dst/">co-designed</a> with
+its internal simulator
+<a href="https://github.com/tigerbeetle/tigerbeetle/blob/47aeb2212a255273dda508288412e537d11e4b7c/docs/internals/vopr.md">VOPR</a>
+which naturally has access to timestamps and anything else). And for, a regex
+engine, coming up with an oracle shouldn’t be hard, as they typically already
+come with multiple specialized implementations under a single facade, and the
+implementations can be cross-checked against each other.</p>
+<p>But the <code>regex</code> case is even simpler (which makes it an excellent case study).
+There’s <code>regex_lite</code> crate that provides the same API.</p>
+<p>So here’s a plan: generate a regular expression, an input text, and check that
+<code>regex</code> and <code>regex_lite</code> give identical answers.</p>
+</section>
+<section id="Generating-a-String">
+
+<h2><a href="#Generating-a-String">Generating a String</a></h2>
+<p>I’ll start with code that generates a random string, as it is simpler, but still
+shows some non-trivial ideas. First, we’ll need a random number generator:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">use</span> fastrand::Rng;</span></code></pre>
+
+</figure>
+<p>There are fancier techniques, which can give you
+<a href="https://matklad.github.io/2026/04/20/test-case-minimization.html">test-case minimization</a>,
+<a href="https://matklad.github.io/2021/11/07/generate-all-the-things.html">exhaustive search</a>, or
+<a href="https://llvm.org/docs/LibFuzzer.html">coverage guided exploration</a>, but the
+insight is that even a humble PRNG is brutally effective, if you put it to good use.</p>
+<p>When you start with randomized testing, the instinct is to generate something
+big, no, HUGE! Surely regex will choke on 5 GiBs of input? This is usually a
+wrong call. Bugs <em>usually</em> involve small, but tricky examples, weaponizing
+interactions between a few features. A string where all characters are the same
+is more likely to trigger a bug than a purely random string where every
+character is unique.</p>
+<p>So my default approach to generating strings is this. <em>First</em>, I fix the
+alphabet of possible characters. A nice way to get one is to <code>sort | unique</code> all
+the unit tests. Then, for each particular string, I pick a <em>subset</em> of that
+alphabet. I want strings that use all the characters, but I also want long
+strings with only <code>a</code> and <code>b</code>! Then I generate a string using the given subset
+of the alphabet, where the length of the string is also picked at random.</p>
+<p>To make fuzzing efficient, I want to keep each iteration as fast as possible, so
+I make sure to re-use the memory across iterations,
+<a href="https://github.com/tigerbeetle/tigerbeetle/blob/47aeb2212a255273dda508288412e537d11e4b7c/docs/ARCHITECTURE.md#static-memory-allocation">static allocation</a>
+in the small:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">use</span> fastrand::Rng;</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">main</span>() {</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">rng</span> = Rng::<span class="hl-title function_ invoke__">new</span>();</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-comment">// Re-use the same memory for all tests.</span></span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">text_alphabet</span>: <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt; = <span class="hl-built_in">vec!</span>[];</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">text</span>: <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt; = <span class="hl-built_in">vec!</span>[];</span>
+<span class="line"></span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">for</span> <span class="hl-variable">_</span> <span class="hl-keyword">in</span> <span class="hl-number">0</span>..<span class="hl-number">1_000_000</span> {</span>
+<span class="line">        <span class="hl-comment">// It&#x27;s unlikely that a counter example with</span></span>
+<span class="line">        <span class="hl-comment">// 7 different letters exists, while there</span></span>
+<span class="line">        <span class="hl-comment">// isn&#x27;t one with just 6.</span></span>
+<span class="line">        <span class="hl-title function_ invoke__">alphabet_swarm</span>(&amp;<span class="hl-keyword">mut</span> rng, <span class="hl-string">b&quot;abcdef&quot;</span>, &amp;<span class="hl-keyword">mut</span> text_alphabet);</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">text</span> =</span>
+<span class="line">            <span class="hl-title function_ invoke__">gen_string</span>(&amp;<span class="hl-keyword">mut</span> rng, &amp;text_alphabet, &amp;<span class="hl-keyword">mut</span> text);</span>
+<span class="line">    }</span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">alphabet_swarm</span>&lt;<span class="hl-symbol">&#x27;a</span>&gt;(</span>
+<span class="line">    rng: &amp;<span class="hl-keyword">mut</span> Rng,</span>
+<span class="line">    all: &amp;[<span class="hl-type">u8</span>],</span>
+<span class="line">    pick: &amp;<span class="hl-symbol">&#x27;a</span> <span class="hl-keyword">mut</span> <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt;,</span>
+<span class="line">) {</span>
+<span class="line">    pick.<span class="hl-title function_ invoke__">clear</span>();</span>
+<span class="line">    pick.<span class="hl-title function_ invoke__">extend</span>(all);</span>
+<span class="line">    rng.<span class="hl-title function_ invoke__">shuffle</span>(pick);</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-variable">count</span> = rng.<span class="hl-title function_ invoke__">usize</span>(<span class="hl-number">1</span>..=pick.<span class="hl-title function_ invoke__">len</span>());</span>
+<span class="line">    pick.<span class="hl-title function_ invoke__">truncate</span>(count);</span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">gen_string</span>&lt;<span class="hl-symbol">&#x27;a</span>&gt;(</span>
+<span class="line">    rng: &amp;<span class="hl-keyword">mut</span> Rng,</span>
+<span class="line">    alphabet: &amp;[<span class="hl-type">u8</span>],</span>
+<span class="line">    result: &amp;<span class="hl-symbol">&#x27;a</span> <span class="hl-keyword">mut</span> <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt;,</span>
+<span class="line">) <span class="hl-punctuation">-&gt;</span> &amp;<span class="hl-symbol">&#x27;a</span> <span class="hl-type">str</span> {</span>
+<span class="line">    result.<span class="hl-title function_ invoke__">clear</span>();</span>
+<span class="line">    <span class="hl-comment">// Again, this is a short string.</span></span>
+<span class="line">    <span class="hl-comment">// Longer failures are not likely.</span></span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-variable">count</span> = rng.<span class="hl-title function_ invoke__">usize</span>(<span class="hl-number">0</span>..<span class="hl-number">8</span>);</span>
+<span class="line">    <span class="hl-keyword">for</span> <span class="hl-variable">_</span> <span class="hl-keyword">in</span> <span class="hl-number">0</span>..count {</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(alphabet[rng.<span class="hl-title function_ invoke__">usize</span>(<span class="hl-number">0</span>..alphabet.<span class="hl-title function_ invoke__">len</span>())]);</span>
+<span class="line">    }</span>
+<span class="line">    <span class="hl-type">str</span>::<span class="hl-title function_ invoke__">from_utf8</span>(result).<span class="hl-title function_ invoke__">unwrap</span>()</span>
+<span class="line">}</span></code></pre>
+
+</figure>
+<p>There’s a nice way to think about this two step process, generating alphabet
+first, and then generating a string. To generate a string, you need a
+distribution of characters. You <em>can</em> use the same distribution for each of the
+million iterations. But an easy way to spice things up is to make the
+distribution <em>itself</em> random. I file this “randomize distributions themselves” idea under
+<a href="https://tigerbeetle.com/blog/2025-04-23-swarm-testing-data-structures/">swarm testing</a>.</p>
+</section>
+<section id="Generating-a-Regex-Distribution">
+
+<h2><a href="#Generating-a-Regex-Distribution">Generating a Regex Distribution</a></h2>
+<p>Let’s apply the same tricks when generating a regex:</p>
+<ul>
+<li>
+pick a subset of active regex features,
+</li>
+<li>
+pick size at random,
+</li>
+<li>
+re-use memory.
+</li>
+</ul>
+<p>Let’s start with the first one:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-meta">#[derive(Default, Debug)]</span></span>
+<span class="line"><span class="hl-keyword">struct</span> <span class="hl-title class_">ReOptions</span> {</span>
+<span class="line">    alt: <span class="hl-type">u16</span>, <span class="hl-comment">// |</span></span>
+<span class="line">    rep: <span class="hl-type">u16</span>, <span class="hl-comment">// *</span></span>
+<span class="line">    any: <span class="hl-type">u16</span>, <span class="hl-comment">// .</span></span>
+<span class="line">    lit: <span class="hl-type">u16</span>, <span class="hl-comment">// &#x27;a&#x27;</span></span>
+<span class="line">    sum: <span class="hl-type">u16</span>,</span>
+<span class="line">    alphabet: <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt;,</span>
+<span class="line">}</span></code></pre>
+
+</figure>
+<p>Regexes have alternation <code>r1|r2</code>, repetition <code>r*</code>, wildcard <code>.</code>, and literals
+<code>a</code>. Rather then binary enabling or disabling a particular feature, I assign
+each feature a weight between 0 and 100, which is a bit more general. The <code>sum</code>
+is the total of all weights. To select a feature at random, we need to generate
+a number in <code>0..sum</code> and find which segment it falls into.</p>
+<p>In anything more serious, I’d introduce explicit types for probabilities and
+distributions, but just a two-digit number is perfectly serviceable in the
+small.</p>
+<p>This is how I generate <code>ReOptions</code>, making sure that literals always have
+non-zero weight, and also selecting an alphabet for them:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">impl</span> <span class="hl-title class_">ReOptions</span> {</span>
+<span class="line">    <span class="hl-keyword">fn</span> <span class="hl-title function_">swarm</span>(&amp;<span class="hl-keyword">mut</span> <span class="hl-keyword">self</span>, rng: &amp;<span class="hl-keyword">mut</span> Rng, alphabet_full: &amp;[<span class="hl-type">u8</span>]) {</span>
+<span class="line">        <span class="hl-comment">// We _still_ want to enable a few features at a time.</span></span>
+<span class="line">        <span class="hl-keyword">self</span>.alt = <span class="hl-keyword">if</span> rng.<span class="hl-title function_ invoke__">bool</span>() { <span class="hl-number">0</span> } <span class="hl-keyword">else</span> { rng.<span class="hl-title function_ invoke__">u16</span>(<span class="hl-number">0</span>..<span class="hl-number">100</span>) };</span>
+<span class="line">        <span class="hl-keyword">self</span>.rep = <span class="hl-keyword">if</span> rng.<span class="hl-title function_ invoke__">bool</span>() { <span class="hl-number">0</span> } <span class="hl-keyword">else</span> { rng.<span class="hl-title function_ invoke__">u16</span>(<span class="hl-number">0</span>..<span class="hl-number">100</span>) };</span>
+<span class="line">        <span class="hl-keyword">self</span>.any = <span class="hl-keyword">if</span> rng.<span class="hl-title function_ invoke__">bool</span>() { <span class="hl-number">0</span> } <span class="hl-keyword">else</span> { rng.<span class="hl-title function_ invoke__">u16</span>(<span class="hl-number">0</span>..<span class="hl-number">100</span>) };</span>
+<span class="line">        <span class="hl-keyword">self</span>.lit = rng.<span class="hl-title function_ invoke__">u16</span>(<span class="hl-number">1</span>..<span class="hl-number">100</span>);</span>
+<span class="line">        <span class="hl-keyword">self</span>.sum = <span class="hl-keyword">self</span>.alt + <span class="hl-keyword">self</span>.rep + <span class="hl-keyword">self</span>.any + <span class="hl-keyword">self</span>.lit;</span>
+<span class="line">        <span class="hl-built_in">assert!</span>(<span class="hl-keyword">self</span>.sum &gt; <span class="hl-number">0</span>);</span>
+<span class="line">        <span class="hl-title function_ invoke__">alphabet_swarm</span>(rng, alphabet_full, &amp;<span class="hl-keyword">mut</span> <span class="hl-keyword">self</span>.alphabet);</span>
+<span class="line">    }</span>
+<span class="line">}</span></code></pre>
+
+</figure>
+</section>
+<section id="Generating-a-Regex">
+
+<h2><a href="#Generating-a-Regex">Generating a Regex</a></h2>
+<p>So now we can generate a regular expression. This is convenient to do
+recursively. To avoid allocations, an output buffer is passed through. To
+control regex length, a <code>size</code> parameter is also threaded, and “branching”
+recursive invocations divide the <code>size</code> between the children:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">gen_re</span>(</span>
+<span class="line">    rng: &amp;<span class="hl-keyword">mut</span> Rng,</span>
+<span class="line">    options: &amp;ReOptions,</span>
+<span class="line">    result: &amp;<span class="hl-keyword">mut</span> <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt;,</span>
+<span class="line">) {</span>
+<span class="line">    result.<span class="hl-title function_ invoke__">clear</span>();</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-variable">size</span> = rng.<span class="hl-title function_ invoke__">u8</span>(<span class="hl-number">0</span>..<span class="hl-number">8</span>);</span>
+<span class="line">    <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size);</span>
+<span class="line"></span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">gen_re_rec</span>(</span>
+<span class="line">    rng: &amp;<span class="hl-keyword">mut</span> Rng,</span>
+<span class="line">    options: &amp;ReOptions,</span>
+<span class="line">    result: &amp;<span class="hl-keyword">mut</span> <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt;,</span>
+<span class="line">    size: <span class="hl-type">u8</span>,</span>
+<span class="line">) {</span>
+<span class="line">    <span class="hl-keyword">if</span> size == <span class="hl-number">0</span> {</span>
+<span class="line">        <span class="hl-keyword">return</span>; <span class="hl-comment">// Base case, empty regex.</span></span>
+<span class="line">    }</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-comment">// Pick one of the features, according to weights.</span></span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">p</span> = rng.<span class="hl-title function_ invoke__">u16</span>(<span class="hl-number">0</span>..options.sum);</span>
+<span class="line">    <span class="hl-keyword">if</span> p &lt; options.alt {</span>
+<span class="line">        <span class="hl-comment">// Alternation distributes the size</span></span>
+<span class="line">        <span class="hl-comment">// among the two children.</span></span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">size_left</span> = rng.<span class="hl-title function_ invoke__">u8</span>(<span class="hl-number">0</span>..=size - <span class="hl-number">1</span>);</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">size_right</span> = size - size_left - <span class="hl-number">1</span>;</span>
+<span class="line">        <span class="hl-built_in">assert!</span>(size == size_left + <span class="hl-number">1</span> + size_right);</span>
+<span class="line"></span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(<span class="hl-string">b&#x27;(&#x27;</span>);</span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size_left);</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">extend</span>(<span class="hl-string">b&quot;)|(&quot;</span>);</span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size_right);</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(<span class="hl-string">b&#x27;)&#x27;</span>);</span>
+<span class="line">        <span class="hl-keyword">return</span>;</span>
+<span class="line">    }</span>
+<span class="line">    p -= options.alt;</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">if</span> p &lt; options.rep {</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(<span class="hl-string">b&#x27;(&#x27;</span>);</span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size - <span class="hl-number">1</span>);</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">extend</span>(<span class="hl-string">b&quot;)*&quot;</span>);</span>
+<span class="line">        <span class="hl-keyword">return</span>;</span>
+<span class="line">    }</span>
+<span class="line">    p -= options.rep;</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">if</span> p &lt; options.any {</span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size - <span class="hl-number">1</span>);</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(<span class="hl-string">b&#x27;.&#x27;</span>);</span>
+<span class="line">        <span class="hl-keyword">return</span>;</span>
+<span class="line">    }</span>
+<span class="line">    p -= options.any;</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">if</span> p &lt; options.lit {</span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size - <span class="hl-number">1</span>);</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">index</span> = rng.<span class="hl-title function_ invoke__">usize</span>(<span class="hl-number">0</span>..options.alphabet.<span class="hl-title function_ invoke__">len</span>());</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">lit</span> = options.alphabet[index];</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(lit);</span>
+<span class="line">        <span class="hl-keyword">return</span>;</span>
+<span class="line">    }</span>
+<span class="line">    <span class="hl-built_in">unreachable!</span>();</span>
+<span class="line">}</span></code></pre>
+
+</figure>
+</section>
+<section id="Search-Loop">
+
+<h2><a href="#Search-Loop">Search Loop</a></h2>
+<p>Given that compiling regular expressions is somewhat slow, it seems like a good
+idea to try multiple strings for the same pair of regular expressions, which
+gives the following code:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">main</span>() {</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">rng</span> = Rng::<span class="hl-title function_ invoke__">new</span>();</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">options</span> = ReOptions::<span class="hl-title function_ invoke__">default</span>();</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">text_alphabet</span>: <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt; = <span class="hl-built_in">vec!</span>[];</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">text</span>: <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt; = <span class="hl-built_in">vec!</span>[];</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">re</span>: <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt; = <span class="hl-built_in">vec!</span>[];</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">test_count</span>: <span class="hl-type">u32</span> = <span class="hl-number">0</span>;</span>
+<span class="line">    <span class="hl-keyword">for</span> <span class="hl-variable">_</span> <span class="hl-keyword">in</span> <span class="hl-number">0</span>..<span class="hl-number">1_000_000</span> {</span>
+<span class="line">        options.<span class="hl-title function_ invoke__">swarm</span>(&amp;<span class="hl-keyword">mut</span> rng, <span class="hl-string">b&quot;abcdef&quot;</span>);</span>
+<span class="line">        <span class="hl-title function_ invoke__">alphabet_swarm</span>(&amp;<span class="hl-keyword">mut</span> rng, <span class="hl-string">b&quot;abcdefx&quot;</span>, &amp;<span class="hl-keyword">mut</span> text_alphabet);</span>
+<span class="line"></span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re</span>(&amp;<span class="hl-keyword">mut</span> rng, &amp;options, &amp;<span class="hl-keyword">mut</span> re);</span>
+<span class="line"></span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">re</span> = <span class="hl-type">str</span>::<span class="hl-title function_ invoke__">from_utf8</span>(&amp;re).<span class="hl-title function_ invoke__">unwrap</span>();</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">r1</span> = regex::Regex::<span class="hl-title function_ invoke__">new</span>(re).<span class="hl-title function_ invoke__">unwrap</span>();</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">r2</span> = regex_lite::Regex::<span class="hl-title function_ invoke__">new</span>(re).<span class="hl-title function_ invoke__">unwrap</span>();</span>
+<span class="line"></span>
+<span class="line">        <span class="hl-keyword">for</span> <span class="hl-variable">_</span> <span class="hl-keyword">in</span> <span class="hl-number">0</span>..<span class="hl-number">1000</span> {</span>
+<span class="line">            test_count += <span class="hl-number">1</span>;</span>
+<span class="line">            <span class="hl-keyword">let</span> <span class="hl-variable">text</span> =</span>
+<span class="line">                <span class="hl-title function_ invoke__">gen_string</span>(&amp;<span class="hl-keyword">mut</span> rng, &amp;text_alphabet, &amp;<span class="hl-keyword">mut</span> text);</span>
+<span class="line"></span>
+<span class="line">            <span class="hl-keyword">let</span> <span class="hl-variable">m1</span> = r1.<span class="hl-title function_ invoke__">find</span>(text)</span>
+<span class="line">                .<span class="hl-title function_ invoke__">map_or</span>(<span class="hl-string">&quot;not found&quot;</span>, |it| it.<span class="hl-title function_ invoke__">as_str</span>());</span>
+<span class="line">            <span class="hl-keyword">let</span> <span class="hl-variable">m2</span> = r2.<span class="hl-title function_ invoke__">find</span>(text)</span>
+<span class="line">                .<span class="hl-title function_ invoke__">map_or</span>(<span class="hl-string">&quot;not found&quot;</span>, |it| it.<span class="hl-title function_ invoke__">as_str</span>());</span>
+<span class="line"></span>
+<span class="line">            <span class="hl-keyword">if</span> m1 != m2 {</span>
+<span class="line">                eprintln!(<span class="hl-string">&quot;err re={re} text={text} m1={m1} m2={m2}&quot;</span>);</span>
+<span class="line">                <span class="hl-keyword">return</span>;</span>
+<span class="line">            }</span>
+<span class="line"></span>
+<span class="line">            <span class="hl-keyword">if</span> test_count % <span class="hl-number">500_000</span> == <span class="hl-number">0</span> {</span>
+<span class="line">                eprintln!(<span class="hl-string">&quot;ok  re={re} text={text}&quot;</span>);</span>
+<span class="line">            }</span>
+<span class="line">        }</span>
+<span class="line">    }</span>
+<span class="line">}</span></code></pre>
+
+</figure>
+<p>It produces examples similar to those in the issue, with a common suffix:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line">err re=(e)|(fee) text=xxfee</span></code></pre>
+
+</figure>
+<p>but also examples which somewhat different, without the shared suffix:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line">err re=(f..)*.d text=xfcbdd</span></code></pre>
+
+</figure>
+<p>All together:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-keyword">use</span> fastrand::Rng;</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">main</span>() {</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">rng</span> = Rng::<span class="hl-title function_ invoke__">new</span>();</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">options</span> = ReOptions::<span class="hl-title function_ invoke__">default</span>();</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">text_alphabet</span>: <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt; = <span class="hl-built_in">vec!</span>[];</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">text</span>: <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt; = <span class="hl-built_in">vec!</span>[];</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">re</span>: <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt; = <span class="hl-built_in">vec!</span>[];</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">test_count</span>: <span class="hl-type">u32</span> = <span class="hl-number">0</span>;</span>
+<span class="line">    <span class="hl-keyword">for</span> <span class="hl-variable">_</span> <span class="hl-keyword">in</span> <span class="hl-number">0</span>..<span class="hl-number">1_000_000</span> {</span>
+<span class="line">        options.<span class="hl-title function_ invoke__">swarm</span>(&amp;<span class="hl-keyword">mut</span> rng, <span class="hl-string">b&quot;abcdef&quot;</span>);</span>
+<span class="line">        <span class="hl-title function_ invoke__">alphabet_swarm</span>(&amp;<span class="hl-keyword">mut</span> rng, <span class="hl-string">b&quot;abcdefx&quot;</span>, &amp;<span class="hl-keyword">mut</span> text_alphabet);</span>
+<span class="line"></span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re</span>(&amp;<span class="hl-keyword">mut</span> rng, &amp;options, &amp;<span class="hl-keyword">mut</span> re);</span>
+<span class="line"></span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">re</span> = <span class="hl-type">str</span>::<span class="hl-title function_ invoke__">from_utf8</span>(&amp;re).<span class="hl-title function_ invoke__">unwrap</span>();</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">r1</span> = regex::Regex::<span class="hl-title function_ invoke__">new</span>(re).<span class="hl-title function_ invoke__">unwrap</span>();</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">r2</span> = regex_lite::Regex::<span class="hl-title function_ invoke__">new</span>(re).<span class="hl-title function_ invoke__">unwrap</span>();</span>
+<span class="line"></span>
+<span class="line">        <span class="hl-keyword">for</span> <span class="hl-variable">_</span> <span class="hl-keyword">in</span> <span class="hl-number">0</span>..<span class="hl-number">1000</span> {</span>
+<span class="line">            test_count += <span class="hl-number">1</span>;</span>
+<span class="line">            <span class="hl-keyword">let</span> <span class="hl-variable">text</span> =</span>
+<span class="line">                <span class="hl-title function_ invoke__">gen_string</span>(&amp;<span class="hl-keyword">mut</span> rng, &amp;text_alphabet, &amp;<span class="hl-keyword">mut</span> text);</span>
+<span class="line"></span>
+<span class="line">            <span class="hl-keyword">let</span> <span class="hl-variable">m1</span> = r1.<span class="hl-title function_ invoke__">find</span>(text)</span>
+<span class="line">                .<span class="hl-title function_ invoke__">map_or</span>(<span class="hl-string">&quot;not found&quot;</span>, |it| it.<span class="hl-title function_ invoke__">as_str</span>());</span>
+<span class="line">            <span class="hl-keyword">let</span> <span class="hl-variable">m2</span> = r2.<span class="hl-title function_ invoke__">find</span>(text)</span>
+<span class="line">                .<span class="hl-title function_ invoke__">map_or</span>(<span class="hl-string">&quot;not found&quot;</span>, |it| it.<span class="hl-title function_ invoke__">as_str</span>());</span>
+<span class="line"></span>
+<span class="line">            <span class="hl-keyword">if</span> m1 != m2 {</span>
+<span class="line">                eprintln!(<span class="hl-string">&quot;err re={re} text={text} m1={m1} m2={m2}&quot;</span>);</span>
+<span class="line">                <span class="hl-keyword">return</span>;</span>
+<span class="line">            }</span>
+<span class="line"></span>
+<span class="line">            <span class="hl-keyword">if</span> test_count % <span class="hl-number">500_000</span> == <span class="hl-number">0</span> {</span>
+<span class="line">                eprintln!(<span class="hl-string">&quot;ok  re={re} text={text}&quot;</span>);</span>
+<span class="line">            }</span>
+<span class="line">        }</span>
+<span class="line">    }</span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">alphabet_swarm</span>&lt;<span class="hl-symbol">&#x27;a</span>&gt;(</span>
+<span class="line">    rng: &amp;<span class="hl-keyword">mut</span> Rng,</span>
+<span class="line">    all: &amp;[<span class="hl-type">u8</span>],</span>
+<span class="line">    pick: &amp;<span class="hl-symbol">&#x27;a</span> <span class="hl-keyword">mut</span> <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt;,</span>
+<span class="line">) {</span>
+<span class="line">    pick.<span class="hl-title function_ invoke__">clear</span>();</span>
+<span class="line">    pick.<span class="hl-title function_ invoke__">extend</span>(all);</span>
+<span class="line">    rng.<span class="hl-title function_ invoke__">shuffle</span>(pick);</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-variable">count</span> = rng.<span class="hl-title function_ invoke__">usize</span>(<span class="hl-number">1</span>..=pick.<span class="hl-title function_ invoke__">len</span>());</span>
+<span class="line">    pick.<span class="hl-title function_ invoke__">truncate</span>(count);</span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">gen_string</span>&lt;<span class="hl-symbol">&#x27;a</span>&gt;(</span>
+<span class="line">    rng: &amp;<span class="hl-keyword">mut</span> Rng,</span>
+<span class="line">    alphabet: &amp;[<span class="hl-type">u8</span>],</span>
+<span class="line">    result: &amp;<span class="hl-symbol">&#x27;a</span> <span class="hl-keyword">mut</span> <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt;,</span>
+<span class="line">) <span class="hl-punctuation">-&gt;</span> &amp;<span class="hl-symbol">&#x27;a</span> <span class="hl-type">str</span> {</span>
+<span class="line">    result.<span class="hl-title function_ invoke__">clear</span>();</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-variable">count</span> = rng.<span class="hl-title function_ invoke__">usize</span>(<span class="hl-number">0</span>..<span class="hl-number">8</span>);</span>
+<span class="line">    <span class="hl-keyword">for</span> <span class="hl-variable">_</span> <span class="hl-keyword">in</span> <span class="hl-number">0</span>..count {</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(alphabet[rng.<span class="hl-title function_ invoke__">usize</span>(<span class="hl-number">0</span>..alphabet.<span class="hl-title function_ invoke__">len</span>())]);</span>
+<span class="line">    }</span>
+<span class="line">    <span class="hl-type">str</span>::<span class="hl-title function_ invoke__">from_utf8</span>(result).<span class="hl-title function_ invoke__">unwrap</span>()</span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-meta">#[derive(Default, Debug)]</span></span>
+<span class="line"><span class="hl-keyword">struct</span> <span class="hl-title class_">ReOptions</span> {</span>
+<span class="line">    alt: <span class="hl-type">u16</span>, <span class="hl-comment">// |</span></span>
+<span class="line">    rep: <span class="hl-type">u16</span>, <span class="hl-comment">// *</span></span>
+<span class="line">    any: <span class="hl-type">u16</span>, <span class="hl-comment">// .</span></span>
+<span class="line">    lit: <span class="hl-type">u16</span>, <span class="hl-comment">// &#x27;a&#x27;</span></span>
+<span class="line">    sum: <span class="hl-type">u16</span>,</span>
+<span class="line">    alphabet: <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt;,</span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">impl</span> <span class="hl-title class_">ReOptions</span> {</span>
+<span class="line">    <span class="hl-keyword">fn</span> <span class="hl-title function_">swarm</span>(&amp;<span class="hl-keyword">mut</span> <span class="hl-keyword">self</span>, rng: &amp;<span class="hl-keyword">mut</span> Rng, alphabet_full: &amp;[<span class="hl-type">u8</span>]) {</span>
+<span class="line">        <span class="hl-keyword">self</span>.alt = <span class="hl-keyword">if</span> rng.<span class="hl-title function_ invoke__">bool</span>() { <span class="hl-number">0</span> } <span class="hl-keyword">else</span> { rng.<span class="hl-title function_ invoke__">u16</span>(<span class="hl-number">0</span>..<span class="hl-number">100</span>) };</span>
+<span class="line">        <span class="hl-keyword">self</span>.rep = <span class="hl-keyword">if</span> rng.<span class="hl-title function_ invoke__">bool</span>() { <span class="hl-number">0</span> } <span class="hl-keyword">else</span> { rng.<span class="hl-title function_ invoke__">u16</span>(<span class="hl-number">0</span>..<span class="hl-number">100</span>) };</span>
+<span class="line">        <span class="hl-keyword">self</span>.any = <span class="hl-keyword">if</span> rng.<span class="hl-title function_ invoke__">bool</span>() { <span class="hl-number">0</span> } <span class="hl-keyword">else</span> { rng.<span class="hl-title function_ invoke__">u16</span>(<span class="hl-number">0</span>..<span class="hl-number">100</span>) };</span>
+<span class="line">        <span class="hl-keyword">self</span>.lit = rng.<span class="hl-title function_ invoke__">u16</span>(<span class="hl-number">1</span>..<span class="hl-number">100</span>);</span>
+<span class="line">        <span class="hl-keyword">self</span>.sum = <span class="hl-keyword">self</span>.alt + <span class="hl-keyword">self</span>.rep + <span class="hl-keyword">self</span>.any + <span class="hl-keyword">self</span>.lit;</span>
+<span class="line">        <span class="hl-built_in">assert!</span>(<span class="hl-keyword">self</span>.sum &gt; <span class="hl-number">0</span>);</span>
+<span class="line">        <span class="hl-title function_ invoke__">alphabet_swarm</span>(rng, alphabet_full, &amp;<span class="hl-keyword">mut</span> <span class="hl-keyword">self</span>.alphabet);</span>
+<span class="line"></span>
+<span class="line">    }</span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">gen_re</span>(</span>
+<span class="line">    rng: &amp;<span class="hl-keyword">mut</span> Rng,</span>
+<span class="line">    options: &amp;ReOptions,</span>
+<span class="line">    result: &amp;<span class="hl-keyword">mut</span> <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt;,</span>
+<span class="line">) {</span>
+<span class="line">    result.<span class="hl-title function_ invoke__">clear</span>();</span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-variable">size</span> = rng.<span class="hl-title function_ invoke__">u8</span>(<span class="hl-number">0</span>..<span class="hl-number">8</span>);</span>
+<span class="line">    <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size);</span>
+<span class="line"></span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span> <span class="hl-title function_">gen_re_rec</span>(</span>
+<span class="line">    rng: &amp;<span class="hl-keyword">mut</span> Rng,</span>
+<span class="line">    options: &amp;ReOptions,</span>
+<span class="line">    result: &amp;<span class="hl-keyword">mut</span> <span class="hl-type">Vec</span>&lt;<span class="hl-type">u8</span>&gt;,</span>
+<span class="line">    size: <span class="hl-type">u8</span>,</span>
+<span class="line">) {</span>
+<span class="line">    <span class="hl-keyword">if</span> size == <span class="hl-number">0</span> {</span>
+<span class="line">        <span class="hl-keyword">return</span>; <span class="hl-comment">// Base case, empty regex.</span></span>
+<span class="line">    }</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-comment">// Pick one of the features, according to weights.</span></span>
+<span class="line">    <span class="hl-keyword">let</span> <span class="hl-keyword">mut </span><span class="hl-variable">p</span> = rng.<span class="hl-title function_ invoke__">u16</span>(<span class="hl-number">0</span>..options.sum);</span>
+<span class="line">    <span class="hl-keyword">if</span> p &lt; options.alt {</span>
+<span class="line">        <span class="hl-comment">// Alternation distributes the size</span></span>
+<span class="line">        <span class="hl-comment">// among the two children.</span></span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">size_left</span> = rng.<span class="hl-title function_ invoke__">u8</span>(<span class="hl-number">0</span>..=size - <span class="hl-number">1</span>);</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">size_right</span> = size - size_left - <span class="hl-number">1</span>;</span>
+<span class="line">        <span class="hl-built_in">assert!</span>(size == size_left + <span class="hl-number">1</span> + size_right);</span>
+<span class="line"></span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(<span class="hl-string">b&#x27;(&#x27;</span>);</span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size_left);</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">extend</span>(<span class="hl-string">b&quot;)|(&quot;</span>);</span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size_right);</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(<span class="hl-string">b&#x27;)&#x27;</span>);</span>
+<span class="line">        <span class="hl-keyword">return</span>;</span>
+<span class="line">    }</span>
+<span class="line">    p -= options.alt;</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">if</span> p &lt; options.rep {</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(<span class="hl-string">b&#x27;(&#x27;</span>);</span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size - <span class="hl-number">1</span>);</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">extend</span>(<span class="hl-string">b&quot;)*&quot;</span>);</span>
+<span class="line">        <span class="hl-keyword">return</span>;</span>
+<span class="line">    }</span>
+<span class="line">    p -= options.rep;</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">if</span> p &lt; options.any {</span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size - <span class="hl-number">1</span>);</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(<span class="hl-string">b&#x27;.&#x27;</span>);</span>
+<span class="line">        <span class="hl-keyword">return</span>;</span>
+<span class="line">    }</span>
+<span class="line">    p -= options.any;</span>
+<span class="line"></span>
+<span class="line">    <span class="hl-keyword">if</span> p &lt; options.lit {</span>
+<span class="line">        <span class="hl-title function_ invoke__">gen_re_rec</span>(rng, options, result, size - <span class="hl-number">1</span>);</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">index</span> = rng.<span class="hl-title function_ invoke__">usize</span>(<span class="hl-number">0</span>..options.alphabet.<span class="hl-title function_ invoke__">len</span>());</span>
+<span class="line">        <span class="hl-keyword">let</span> <span class="hl-variable">lit</span> = options.alphabet[index];</span>
+<span class="line">        result.<span class="hl-title function_ invoke__">push</span>(lit);</span>
+<span class="line">        <span class="hl-keyword">return</span>;</span>
+<span class="line">    }</span>
+<span class="line">    <span class="hl-built_in">unreachable!</span>();</span>
+<span class="line">}</span></code></pre>
+
+</figure>
+<p><a href="https://github.com/matklad/regex-fuzz" class="display url">https://github.com/matklad/regex-fuzz</a></p>
+<p>Takeaways:</p>
+<ul>
+<li>
+Fuzzing against an oracle is effective, which is a strong motivation to build
+an oracle!
+</li>
+<li>
+Go for small, tricky examples, rather than large uniform ones.
+</li>
+<li>
+Real fuzzers are cool, but, if you know something, even xoroshiro can be dangerous.
+</li>
+<li>
+Black box testing is cool, but co-designing system and its testing harness is
+a point of leverage (build an oracle!).
+</li>
+<li>
+This stuff is not rocket science, you don’t need a Haskell PhD to apply these
+ideas.
+</li>
+</ul>
+</section>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
