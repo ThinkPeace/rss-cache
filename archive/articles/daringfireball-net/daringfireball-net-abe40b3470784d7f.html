@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WorkOS: How SSO Works and the Fastest Way to Add It | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>WorkOS: How SSO Works and the Fastest Way to Add It</h1>
+        <div class="meta">Daring Fireball 2026-09-20T17:35:31Z</div>
+        <div class="links">
+          <a href="https://workos.com/guide/the-developers-guide-to-sso?utm_source=daringfireball&amp;utm_medium=newsletter&amp;utm_campaign=q32026">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/daringfireball-net/daringfireball-net-abe40b3470784d7f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">My thanks to WorkOS for sponsoring this last week — a big week — at DF. SSO is table stakes for enterprise deals, but building it into your app yourself means writing SAML controllers, parsing XML assertions, and handling IdP-specific quirks for each provider. Learn how SAML flows work, the tradeoffs between building or buying, and best practices for securi…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>The developer’s guide to SSO</h1>
+    <p>Adding SSO to your app is a common requirement for selling to enterprise customers. Here’s a guide that will help you understand SSO and choose the best way to add it to your app.</p>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/67ebc43c4281053ebb4c83e4_guide-to-sso.webp"/>
+    <p>If you want more people using your product, the easiest place to start is making it easier to actually sign up. Adding SSO to your app will help you land those larger enterprise deals and remove the signup friction that keeps causing your visitors to drop off. For modern developers though, the world of XML, SOAP, and OASIS standards can be opaque.</p>
+    <p>Our guide will walk you through SSO: what it is, why it’s important, and best practices for setting it up and integrating it with your app.</p>
+    <h2>The basics: what SSO is and why you should care</h2>
+    <p>The easiest way to understand SSO quickly is to think about your app’s authentication as a service. Most developers build the service themselves: you take care of creating usernames and passwords, add them into a database, and check credentials every time someone logs in. But in the same way that you skip building payments infrastructure and use Stripe, you can “outsource” your auth and have someone else do it; and that’s what SSO is.</p>
+    <p>If you’ve heard of SSO before, you’re probably thinking of it as a security feature and that’s true, but where it really shines is through increased engagement. Making it easier to sign up and sign-in to your product lowers friction for users, increases retention through smoother login flows, and helps you land those elusive enterprise deals (many enterprises can’t work with vendors who don’t support SSO).</p>
+    <p>Apps with SSO enabled allow users to authenticate through someone else’s service. Instead of managing usernames and passwords, you integrate with a provider like Okta or OneLogin that does it for you. Those services, called Identity Providers (IdPs), are generally more full-featured and secure than what your typical growing startup would be able to build themselves.</p>
+    <p>SSO is a given among everyone from high growth startups to more traditional enterprises. Here’s Vercel's login page: they support SSO with Okta, Google, OneLogin, and more.</p>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/67ab7fbc758e9480d224c46a_sso.webp"/>
+    <p>Slack, Asana, Notion, Loom, and Webflow all support SSO too. It’s pretty much part of the standard growth playbook.</p>
+    <h2>Learning the lingo: SAML, SPs, IdPs, and assorted acronyms</h2>
+    <p>Let’s get a little deeper into how SSO works. One thing worth noting: SAML isn’t the only protocol you can use to implement SSO. <a href="https://workos.com/blog/oauth-vs-oauth-2-differences-what-you-need-to-know">OAuth (1.0 and 2.0)</a> are also popular, as well as WS-Fed and <a href="https://workos.com/blog/what-is-oidc">OpenID Connect (OIDC)</a>. The broad concepts can carry over across protocols, too.</p>
+    <p>If you’re integrating SSO into your app, you’re a service provider (SP). Your app is the service. The provider that you’re “outsourcing” identity to, like Okta or OneLogin, is called the identity provider (IdP). Where things start to get complex is when your app needs to communicate with IdPs to actually authenticate your users. SSO works with a communication protocol called SAML (Security Assertion Markup Language) that governs these phone lines.</p>
+    <p>Let’s walk through a typical SAML flow, starting with a user trying to sign in through your site.</p>
+    <ul>
+      <li>When a user navigates to your login page, they’ll either enter their email or click a button that takes them to an IdP portal like Okta. Your app issues a SAML request (and a browser redirect) to the IdP. It’s basically saying, “Hey, this user wants to sign in, do me a favor and verify that I should let them in.”</li>
+      <li>At the IdP, the user will enter their full credentials, and deal with more extensive security measures like 2FA. Once they’ve successfully authenticated with the IdP, the IdP sends your app a response containing an assertion: this user is good to go, and you can let them in. We call this assertion a SAML authorization response.</li>
+      <li>The app receives the response from the IdP, checks it, and sends an one-time auth code.</li>
+      <li>The app receives the user profile. The user is now able to access the application without needing to log in again. The user's session is managed by the service provider, which maintains the authentication state and ensures the user remains logged in as long as the session is valid.</li>
+    </ul>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/671fb90773af02208dd98d67_671fb8fcbca789d0186f227e_6234a00964f3353856319e76_614cf094e5c1fd4c4da94330_SAML%25252520flow.webp"/>
+    <p>SAML works through assertions. These are recorded and transferred as XML documents (for all those SOAP fans out there. Nobody? Ok).</p>
+    <p>Here’s an example of what a response containing an assertion might look like (thanks to <a href="https://www.samltool.com/generic_sso_res.php">OneLogin</a>):</p>
+    <p>The flow we just outlined is called <a href="https://workos.com/docs/sso/login-flows/sp-initiated-sso">​SP-initiated​</a>, because it started at ​your​ app, and you’re the service provider.</p>
+    <p>There’s another way this can go down though: users can ​start​ at their IdP (like the Okta app directory), click on which app they want to sign into, and then authenticate and redirect. That’s called ​<a href="https://workos.com/docs/sso/login-flows/idp-initiated-sso">IDP-initiated​</a>.</p>
+    <h2>Getting practical: how to add SSO to your app</h2>
+    <p>Like pretty much anything in software, there are two ways to add SSO to your app: you can build it yourself or pay someone else to do it for you.</p>
+    <h3>Option 1: building SSO from scratch</h3>
+    <p>Building SSO yourself is all about handling and working with the protocol you choose, assuming you’re targeting larger companies, we’re talking about SAML here. This isn’t a technical tutorial, but here are a few high-level components you’ll need to write:</p>
+    <ul>
+      <li>A SAML controller for handling requests and providing responses to your integrated IdPs.</li>
+      <li>A SAML service to verify x509 certs, entity IDs, and IdP URLs, alongside parsing SAML assertions and creating and validating SAML responses. You’ll particularly enjoy the XML parsing and IdP-specific request formats.</li>
+      <li>A strategy to correctly authenticate users in your app based on the attributes that IdPs send back (you’ll need to normalize these if you’re supporting multiple customers).</li>
+    </ul>
+    <p>If any of this sounds weirdly unfamiliar to you, that’s because it probably is: there’s a lot of upfront research required to understand the right way to do it. It’s not as simple as adding a new frontend library and skimming through the docs.</p>
+    <p>Part of the challenge of building SSO from scratch is customization: you’ll need to build SAML flows for each IdP independently. SAML is a standard and like any good standard it’s often fractured and can sometimes be a pain to work with.</p>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/6234a01c22b02a93e8d97555_5f03ef87590fbe675d1eb724_5ef11a0aa1289c05c64daeb7_xkcd.png" alt="The XKCD comic titled &quot;How Standards Proliferate.&quot;"/>
+    <p>Over the past few years, the web dev ecosystem has developed a few packages that take care of some of the repeatable work. Middleware like <a href="http://www.passportjs.org/">​passport.js​</a> can help you avoid building everything from scratch; or if your backend is in Python, OneLogin offers a <a href="https://github.com/onelogin/python-saml">python-saml​</a> package.</p>
+    <h3>Option 2: use an SSO provider</h3>
+    <p>If you don’t want to build SSO yourself (I mean, why would you?), there are a bunch of great third-party services that offer SDKs and packages to make integration as easy as a few lines of code. Some of the available providers are WorkOS, ‍Auth0, AWS Cognito, and GCP Identity Platform.</p>
+    <h2>Best practices from some engineers who have done it before</h2>
+    <p>Here are a few tips that might make your SSO integration process just a bit easier, whether you’re using a third-party provider or building it from scratch.</p>
+    <h3>Security</h3>
+    <ul>
+      <li>‍Disallow username and password logins, password resets, and email address changes: If an organization is using SSO with your product, give admins the ability to disable username/password based auth for their users. It creates a more seamless SSO experience by avoiding false login starts and keeps things secure.</li>
+      <li>‍Enforce session timeouts: Expire idle user sessions to make sure users aren't signed in indefinitely — it's good practice to grab the SAML response's session timeout value and use that, but there are cases where having a "time to live" setting for each account is useful too.</li>
+      <li>‍Force sign-in for active browser sessions: If your app gets a new sign-in request, replace any currently active browser sessions with the newly authenticated session. This is particularly important for apps that lean toward multi-tab use, like IDEs or CRMs.</li>
+    </ul>
+    <h3>Routing</h3>
+    <ul>
+      <li>‍Ask users for the information to determine the right IDP: If you plan on supporting multiple IDPs in your SSO implementation, ask users for their email address, account subdomain, or unique account URL to determine the correct identity provider for their login.‍</li>
+      <li>Make sure to deep link: If you’re asking users to authenticate from an existing product page or they’re expecting to land somewhere in particular in your product, you’ll want to implement deep linking in your SAML flows. You can use ​SAML’s RelayState parameter​ to get this working.</li>
+    </ul>
+    <h3>UX</h3>
+    <ul>
+      <li>‍Replace one-off email verification with <a href="https://workos.com/blog/the-developers-guide-to-domain-verification">domain verification</a>: If your app sends verification emails on username/password signups, it may be more effective to switch to domain verification. Essentially, when domain verification is employed, users logging in with email addresses from a verified domain do not require separate email verification. This approach is particularly useful if the user's email is associated with an IDP from a verified domain. Domain verification is crucial for establishing security and trust between service providers and organizations, ensuring that only authorized users can make changes to an organization's settings in the service provider.</li>
+      <li>‍Use <a href="https://workos.com/docs/sso/jit-provisioning">Just-In-Time (JIT) User Provisioning</a> for first time sign-ins: JIT user provisioning​ automates the account creation process for users signing in to your app for the first time via SAML. If they exist in their organization’s IDP, you’ll just create their account automatically instead of asking them to sign up from scratch. This lowers friction for new users ​significantly​ and helps make your app more attractive to larger organizations.</li>
+      <li>‍Prompt users for IDP logouts: When users log out of your app, prompt them to see if they’d like to log out of their IDP as well. The two intents often overlap, and you can save your users some time.</li>
+    </ul>
+    <h3>Further Reading:</h3>
+    <p>
+      <a href="https://workos.com/guide/authentication-vs-authorization"/>
+    </p>
+    <h2>Authentication vs. authorization</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/69b2879b4ae10c3099a1b319_Authentication%20vs%20Authorization%20(1).webp"/>
+    <p>
+      <a href="https://workos.com/guide/ui-ux-best-practices-for-idp-and-sp-initiated-sso"/>
+    </p>
+    <h2>UI/UX best practices for IdP &amp; SP-Initiated SSO</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/68a38eac829cf47eb648a4a8_UX%20best%20practices%20for%20IdP%20%26%20SP-Initiated%20SSO%20(1).webp"/>
+    <p>
+      <a href="https://workos.com/guide/what-is-saml-and-how-does-it-work"/>
+    </p>
+    <h2>What is SAML and how does it work?</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/684aa831a09f192ac3fe6472_What%20is%20SAML.webp"/>
+    <p>
+      <a href="https://workos.com/guide/the-developers-guide-to-user-management"/>
+    </p>
+    <h2>The developer's guide to user management</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/6810cc9aed9a03fb80b7b92e_The%20developer%E2%80%99s%20guide%20to%20user%20management.webp"/>
+    <p>
+      <a href="https://workos.com/guide/a-guide-to-organization-modeling"/>
+    </p>
+    <h2>A guide to organization modeling</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/69b28a02b6b703b54c9d9eb5_A%20guide%20to%20organization%20modeling%20(1).webp"/>
+    <p>
+      <a href="https://workos.com/guide/what-is-mfa-and-why-does-your-app-need-it"/>
+    </p>
+    <h2>What is MFA, and why does your app need it?</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/69b29018840ca9f1ecbc9d2b_What%20is%20MFA%20and%20why%20does%20your%20app%20need%20it%20(1).webp"/>
+    <p>
+      <a href="https://workos.com/guide/oidc-vs-saml"/>
+    </p>
+    <h2>OpenID Connect vs. SAML</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/68decdd9d55ca24d29087404_OpenID%20vs%20SAML.webp"/>
+    <p>
+      <a href="https://workos.com/guide/json-web-tokens"/>
+    </p>
+    <h2>What are JSON Web Tokens (JWTs)?</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/686f910390e455fee386e727_What%20are%20JSON%20Web%20Tokens%20(JWT)_.webp"/>
+    <p>
+      <a href="https://workos.com/guide/saml-vs-oauth"/>
+    </p>
+    <h2>SAML vs OAuth: A technical guide</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/69cbd30735dfa8f485c45757_SAML%20vs%20OAuth_%20What%27s%20the%20Difference%20%2B%20Which%20should%20you%20use_%20(1).webp"/>
+    <p>
+      <a href="https://workos.com/guide/what-is-authentication-authn"/>
+    </p>
+    <h2>What is authentication (authN)?</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/69b2869e5f9cbd2301535d62_What%20is%20Authentication_%20(1).webp"/>
+    <p>
+      <a href="https://workos.com/guide/managing-saml-x-509-certificates"/>
+    </p>
+    <h2>Managing SAML X.509 Certificates</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/68decc007b75af68504779b2_Managing%20SAML%20X.509%20Certificates.webp"/>
+    <p>
+      <a href="https://workos.com/guide/the-developers-guide-to-auth-sessions"/>
+    </p>
+    <h2>The developer’s guide to auth sessions</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/686f914176026ed82fb344d4_Developer%27s%20Guide%20to%20Auth%20Sessions.webp"/>
+    <p>
+      <a href="https://workos.com/guide/oidc"/>
+    </p>
+    <h2>What is OpenID Connect (OIDC)?</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/67ed1ba671c2506da47a8d0c_oauth-guide.webp"/>
+    <p>
+      <a href="https://workos.com/guide/single-logout"/>
+    </p>
+    <h2>What is Single Logout?</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/697cbc0dcc5ef17fb7339a8c_What%20is%20Single%20Logout%20and%20why%20is%20there%20such%20limited%20support%20for%20it_.webp"/>
+    <p>
+      <a href="https://workos.com/guide/jwt-validation"/>
+    </p>
+    <h2>JWT validation: how-to and best libraries to use</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/686e69d0bd2927fa6c542003_JWT%20validation_%20how-to%20and%20best%20libraries%20to%20use.webp"/>
+    <p>
+      <a href="https://workos.com/guide/common-saml-security-vulnerabilities"/>
+    </p>
+    <h2>Common SAML security vulnerabilities and how to defend against them</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/686e9e6f245eab9f9b7df3c6_Common%20SAML%20security%20vulnerabilities%20and%20how%20to%20defend%20against%20them.webp"/>
+    <p>
+      <a href="https://workos.com/guide/best-practices-for-cli-authentication-a-technical-guide"/>
+    </p>
+    <h2>Best practices for CLI authentication: A technical guide</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/68a38c21d155d0703f898476_Best%20practices%20for%20CLI%20authentication_%20a%20technical%20guide%20(1).webp"/>
+    <p>
+      <a href="https://workos.com/guide/sso-best-practices"/>
+    </p>
+    <h2>SSO best practices</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/686e47c3280305a5e1cf6a8d_SSO%20best%20practices.webp"/>
+    <p>
+      <a href="https://workos.com/guide/what-is-multitenant-authentication"/>
+    </p>
+    <h2>What is multitenant authentication?</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/697cde566ed5f2e62fa952c2_What%20is%20multitenant%20authentication_.webp"/>
+    <p>
+      <a href="https://workos.com/guide/authentication-glossary"/>
+    </p>
+    <h2>Authentication glossary</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/684aa7cf4822b3d3f8f72de7_Authentication%20Glossary.webp"/>
+    <p>
+      <a href="https://workos.com/guide/federated-identity"/>
+    </p>
+    <h2>What is federated identity?</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/69b28f8ed0499b4cf4b844f1_What%20is%20federated%20identity_%20(1).webp"/>
+    <p>
+      <a href="https://workos.com/guide/common-saml-errors"/>
+    </p>
+    <h2>Decoding and solving the five most common SAML errors</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/686e673c60f0b2007d0f7720_Decoding%20and%20solving%20the%20five%20most%20common%20SAML%20errors.webp"/>
+    <p>
+      <a href="https://workos.com/guide/auth0-to-workos-enterprise-connections-migration-guide"/>
+    </p>
+    <h2>How to migrate enterprise SSO connections from Auth0 to WorkOS</h2>
+    <img src="https://cdn.prod.website-files.com/621f84dc15b5ed16dc85a18a/68debdc27f1ecf7dbf88d78b_Auth0%20%E2%86%92%20WorkOS%20enterprise%20connections%20migration.webp"/>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
