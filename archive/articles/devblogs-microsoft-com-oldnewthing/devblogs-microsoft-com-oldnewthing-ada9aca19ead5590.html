@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>What’s the highest legal FILETIME? Is it safe to use? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>What’s the highest legal FILETIME? Is it safe to use?</h1>
+        <div class="meta">The Old New Thing 2026-09-21T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260921-00/?p=112711">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-ada9aca19ead5590.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Being wary of how people use it and how it interacts with other types. The post What’s the highest legal &lt;CODE&gt;FILETIME&lt;/CODE&gt;? Is it safe to use? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>A customer wanted to define a sentinel <code>FILETIME</code> that will be considered larger than another <code>FILETIME</code>. In other words, <code>Compare­File­Time</code> should always say that the sentinel value is later. What&#8217;s a good value to use?</p>
+<p>Strictly according to the definition, the <code>FILETIME</code> consists of ticks since January 1, 1601, and it is an unsigned value, so the highest value is presumably <code>0xFFFFFFFF`FFFFFFFF</code>.</p>
+<p>On the other hand, the documentation for <code>FILETIME</code> itself notes that some functions consider the value <code>0xFFFFFFFF`FFFFFFFF</code> to have special meaning. For example, the <code>Set­File­Time</code> function treats that value as meaning &#8220;Do not update the time for this handle.&#8221;</p>
+<p>Any values larger than <code>0x7FFFFFFF`FFFFFFFF</code> will also cause problems because functions like <code>Create­Waitable­Timer</code> treat <code>FILETIME</code>s with the high bit set as representing the negative of a relative duration rather than an absolute point in time. Also, some programs consider those values to represent times that comes <i>before</i> January 1, 1601.</p>
+<p>And then there are functions like <code>File­Time­To­System­Time</code> which also reject <code>FILETIME</code> values greater than <code>0x7FFFFFFF`FFFFFFFF</code>. So you&#8217;re probably best off not going above <code>0x7FFFFFFF`FFFFFFFF</code>.</p>
+<p>But wait, you may also want to be concerned about code that does time zone adjustments or things like &#8220;One day later&#8221;. If you give them the value at the extreme end of the range, the adjustment may trigger an overflow into a negative value. Is that okay? I mean, you did try to go beyond the maximum value. It sort of depends on what you&#8217;re using this sentinel value for.</p>
+<p>Interestingly, you can ask <code>File­Time­To­System­Time</code> to convert <code>0x7FFFFFFF`FFFFFFFF</code> to a <code>SYSTEMTIME</code>, and it will give you a date in the year 30828, but if you try to convert it back, <code>System­Time­To­File­Time&amp;shy</code> fails. It can dish it out, but it can&#8217;t take it.</p>
+<p>The <code>System­Time­To­File­Time</code> supports dates only through the end of the year 30827. If you try to get the last millisecond of the year 30827, you will get some value, but the precise number will depend on how many leap seconds have been stored in the leap second database.</p>
+<p>Meanwhile, the CLR <code>System.<wbr />DateTime</code> caps at the end of the year 9999. And some calendars like the ChineseLunisolarCalendar have an even lower maximum supported date. (For ChineseLunisolarCalendar, the maximum supported date is somewhere in early 2101 because <a href="https://github.com/microsoft/referencesource/blob/ec9fa9ae770d522a5b5f0607898044b7478574a3/mscorlib/system/globalization/chineselunisolarcalendar.cs#L277"> that&#8217;s as far as the tables go</a>.) Other programming languages will have their own limits on the range of a date.</p>
+<p>Okay, so what value should you use?</p>
+<p>It depends on what you&#8217;re using it for.</p>
+<p>If you need a number that simply compares larger than any other value when compared with <code>Compare­File­Time</code>, you can use <code>0xFFFFFFFF`FFFFFFFF</code>, which is the largest value supported by <code>Compare­File­Time</code>.</p>
+<p>However, you shouldn&#8217;t let that value escape your code that understands the value&#8217;s special sentinel meaning. If you let that very large value escape, then somebody might do a time zone conversion or say &#8220;Great, let me set an alarm for 1 day later,&#8221; or try to convert it to a C# <code>System.<wbr />Date­Time</code> and encounter an overflow.</p>
+<p>if you need a special value for use outside your code, you should find some other way of specifying that special value, like as a <code>std::optional</code> for C++ or a <code>Nullable&lt;DateTime&gt;</code> for C#. That way, each consumer can map the result to something appropriate for their specific language.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260921-00/?p=112711">What&#8217;s the highest legal &lt;CODE&gt;FILETIME&lt;/CODE&gt;? Is it safe to use?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

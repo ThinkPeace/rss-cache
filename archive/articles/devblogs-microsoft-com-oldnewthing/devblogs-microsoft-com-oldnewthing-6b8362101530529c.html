@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Comparing exception behavior of magic statics, std::call_once, and std::async | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Comparing exception behavior of magic statics, std::call_once, and std::async</h1>
+        <div class="meta">The Old New Thing 2026-09-18T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260918-00/?p=112709">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-6b8362101530529c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Do you try again or give up? The post Comparing exception behavior of magic statics, &lt;CODE&gt;std::&lt;WBR&gt;call_&lt;WBR&gt;once&lt;/CODE&gt;, and &lt;CODE&gt;std::&lt;WBR&gt;async&lt;/CODE&gt; appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>We&#8217;ve been comparing <a title="Magic statics vs. std::call_once" href="https://devblogs.microsoft.com/oldnewthing/20260916-00/?p=112703"> magic statics, <code>std::<wbr />call_<wbr />once</code></a>, and <a title="std::call_once vs. std::async" href="https://devblogs.microsoft.com/oldnewthing/20260917-00/?p=112706"> <code>std::<wbr />async</code></a>, but one thing we haven&#8217;t considered is their behavior in the event of an exception.</p>
+<p>For magic statics, if an exception occurs during initialization of the static, then the static is considered not to have been initialized. The exception propagates, and the next time the function is called, the language will try to initialize the static again.</p>
+<p>For <code>call_<wbr />once</code>, if an exception occurs during execution of the lambda, then the call is considered not to have occurred. The exception propagates, so the next time you call <code>call_<wbr />once</code> with the same <code>once_<wbr />flag</code>, it will try to call it.</p>
+<p>But <code>std::<wbr />async</code> is different. If an exception occurs during execution of the invocable, then the exception is saved, and when you ask the future or shared future for the result, the exception is rethrown. It does <i>not</i> try to execute the invocable again.</p>
+<p>Let&#8217;s summarize this in a table.</p>
+<table class="cp3" border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th> </th>
+<th>Before</th>
+<th>After success</th>
+<th>After exception</th>
+</tr>
+<tr>
+<td>Magic static</td>
+<td>Uninitialized</td>
+<td>Initialized</td>
+<td>Uninitialized</td>
+</tr>
+<tr>
+<td><tt>std::<wbr />call_<wbr />once</tt></td>
+<td>Uninitialized</td>
+<td>Initialized</td>
+<td>Uninitialized</td>
+</tr>
+<tr>
+<td><tt>std::<wbr />async</tt></td>
+<td>Uninitialized</td>
+<td>Initialized</td>
+<td>Failed</td>
+</tr>
+</tbody>
+</table>
+<p>Or we can do it in a state diagram.</p>
+<table title="From a box labeled Uninitialized, there is an arrow labeled success that goes to Initialized. There is an arrow labeled async fail that goes to Failed. And an arrow labeled magic static fail and call_once fail that goes from Uninitialized back to itself." border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td>magic static fail<br />
+<tt>call_once</tt> fail<br />
+⮏</td>
+<td valign="bottom"><tt>async</tt> fail</td>
+<td>&nbsp;</td>
+</tr>
+<tr>
+<td>Uninitialized</td>
+<td>→</td>
+<td>Failed</td>
+</tr>
+<tr>
+<td>↓ success</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+</tr>
+<tr>
+<td>Initialized</td>
+</tr>
+</tbody>
+</table>
+<p>Going back to the choice between <code>std::<wbr />call_<wbr />once</code> and <code>std::<wbr />async</code>, you have to think about what you want to happen if an exception occurs while trying to initialize the variable. If you want to try again, then use <code>std::<wbr />call_<wbr />once</code>. If you want to remember the failure and keep rethrowing it, then use <code>std::<wbr />async</code>.</p>
+<p>If you are indifferent, then I would suggest <code>std::<wbr />call_<wbr />once</code>, because it is much lighter weight.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260918-00/?p=112709">Comparing exception behavior of magic statics, &lt;CODE&gt;std::&lt;WBR&gt;call_&lt;WBR&gt;once&lt;/CODE&gt;, and &lt;CODE&gt;std::&lt;WBR&gt;async&lt;/CODE&gt;</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
