@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shrinking a Fedora virtual disk | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Shrinking a Fedora virtual disk</h1>
+        <div class="meta">Entropic Thoughts 2026-09-23T22:00:00Z</div>
+        <div class="links">
+          <a href="https://entropicthoughts.com/shrinking-fedora-virtual-disk">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/entropicthoughts-com/entropicthoughts-com-bd67aa2b26152f42.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I have a weird setup for my laptop. In summary, I have been irrationally scared of running Fedora on bare, dual-GPU metal, so I run it in a virtual machine with Hyper-V on Windows as a hypervisor. The idea was to let Windows manage GPUs and power management stuff like hibernation, and then use Fedora as my main UI to the computer. This has worked surprising…</div>
+        <div class="content">
+          <html>
+  <body><h1>Shrinking a Fedora virtual disk</h1><p><img src="https://entropicthoughts.com/image/banner/shrinking-a-fedora-virtual-disk.jpg" alt="shrinking-a-fedora-virtual-disk.jpg"/>
+</p><p>
+<a href="https://entropicthoughts.com/enhanced-session-hyper-v-fedora-40-selinux">I have a weird setup for my laptop</a>. In summary, I have been irrationally scared
+of running Fedora on bare, dual-gpu metal, so I run it in a virtual machine
+with Hyper-V on Windows as a hypervisor. The idea was to let Windows manage
+gpus and power management stuff like hibernation, and then use Fedora as my main
+ui to the computer.
+</p><p>
+This has worked surprisingly well, but that’s only because my expectations were
+low to begin with. The vm can barely access the hardware of the underlying
+machine: it can’t use the gpu1 Which means Linux runs the pure-software
+Mesa <pre>llvmpipe</pre> to do rasterisation in the cpu. This in turn means (a) I get a
+slideshow when I visit web pages that use WebGL for animation, and (b) common
+extensions that some applications rely on, like <pre>EGL_KHR_image_pixmap</pre>, aren’t
+available., it can’t use the front-facing camera2 So if I need to share my
+screen in a meeting, I have to join twice: once on my phone for its camera, and
+once on my computer to share the screen. That is, if the screen sharing does not
+rely on <pre>EGL_KHR_image_pixmap</pre> which again is unavailable under <pre>llvmpipe</pre> …,
+Linux <a href="https://entropicthoughts.com/limiting-process-memory-with-systemd-run">starts thrashing weirdly</a> when the vm runs out of memory3 My hack here
+has been to allocate a smaller amount of memory to the vm than I expect to
+need at peak pressure, then when the vm starts thrasing, I have spare capacity
+to give it a couple of more gb of memory in the vm settings, to get it
+unstuck for long enough to terminate the misbehaving process. Of course, this
+can only be done so many times before memory runs out on the host, so I
+occasionally have to shut the vm down fully and dial back its memory
+assignment., among other quirks I’ve learned to work around. Thus, I’ve wanted
+to re-install on bare metal for a while, but! problem!
+</p><p>Come on a journey with me. It’s got a hero with hubris, mistakes, tension, and a cliffhanger.</p><h1><a href="https://entropicthoughts.com#the-main-problem-of-size">The main problem of size</a></h1>
+<p>During a transition period, I want to have two copies of the Fedora installation4 Keeping the virtual one in Windows, and adding a physical one on disk. If something misbehaves on bare metal, I can continue using the vm until I have time to fix the bare metal installation. This ties into my aversion toward emergency maintenance: I’d rather spend the time up front to be able to schedule maintenance when it suits me better, than go forward quickly and then suddenly have to deal with unexpected problems when it doesn’t fit into my life., and I couldn’t figure out how to fit it in:</p><ul><li>The disk in the machine is 430 gb.</li><li>Of this, the vm disk file(s) used 290 gb.</li><li>Windows itself used around 100 gb.</li></ul><p>This works out to 40 gb of free space for a new Linux partition. Since 40 gb is much smaller than 290 gb, I wouldn’t be able to run a second copy, which meant I couldn’t migrate to a bare metal installation.</p><p>Yesterday I decided to start doing something about it, and it turned into a much bigger adventure than I had expected. The way it happened was devious, too: the process started with a bunch of quick wins, giving me more and more confidence, until … well, you’ll see.</p><h1><a href="https://entropicthoughts.com#freeing-up-space">Freeing up space</a></h1>
+<p>
+I started simple: I ran WinDirStat to find out what occupied space on the
+Windows end, and was able to delete some old drivers5 With Driver Store
+Explorer. and superseded update files6 With the Dism command.. Most
+importantly, I cleared out the <pre>hiberfil.sys</pre>7 Which was huge because this
+machine has a lot of ram. by turning off hibernation support8 I don’t
+really need it in Windows anyway, because I can just save the state of the vm
+to “hibernate” Linux, and then turn off the computer proper if I’m going to
+transport it for a longer time than the battery can keep it alive in
+suspension..
+</p><p>
+I did the same investigation on the Linux side. Since Fedora defaults to Btrfs
+with compression and deduplication, the regular <pre>du</pre> command might not
+accurately report sizes, so I learned about <pre>btdu</pre> which was nice enough to work
+with.9 I especially like its sampling approach, which gets answers quickly
+and refines them over time. Since it samples offsets on disk rather than files,
+it also doesn’t suffer from the sort of biases one might expect due to <a href="https://entropicthoughts.com/it-takes-long-to-become-gaussian">the
+heavy-tailed nature of file sizes</a>. Clean-up mostly involved deleting large
+downloaded files I kept just in case they’d be needed10 And some local
+language models I practically never use because they’re too slow in the vm
+since it can’t use the gpu., garbage-collecting the Nix store11 I also now
+added a systemd timer to run garbage collection of it weekly., pruning unused
+container images, removing stale package caches12 Pip and Stack, primarily.,
+etc.
+</p><p>Through this, I managed to reduce disk usage in Windows by 30 %, and in Fedora by nearly 70 %. This meant of the 430 gb available on the disk, I now theoretically had</p><ul><li>The vm using 90 gb.</li><li>Windows using 70 gb.</li><li>Spare capacity of 270 gb, which is plenty of space to mirror a 90 gb Fedora installation.</li></ul><p>
+However, none of the Linux clean-up passed through to the actual virtual disk
+file, because while the files were unlinked, the file system still had a claim
+on that space.13 It might have worked to <pre>fstrim</pre> to tell the disk that the
+space is free, but by the time I realised that I had already reduced the size of
+the file system, and <pre>fstrim</pre> only informs the disk of unused space in the file
+system, so it wouldn’t affect anything outside of it. There’s also <pre>blkdiscard</pre>
+which can be used for the same effect on arbitrary disk offsets (i.e. also
+outside the file system) but running that is scary: what if I fat finger a
+number and accidentally <pre>blkdiscard</pre> data I care about? I realised there was a
+way to solve two problems at once: if I shrink the space available to Fedora so
+it’s smaller than
+</p><p>\[\frac{\textrm{virtual usage} + \textrm{spare capacity} - \textrm{margin}}{2} =\]</p><p>\[= \frac{90 + 270 - 60}{2} = 150\;\textrm{GB}\]</p><p>then (a) that shrunken disk will definitely be passed through to the virtual disk file, and (b) it would be literally impossible to fill the virtual disk to the point where it can no longer be mirrored.</p><h1><a href="https://entropicthoughts.com#shrinking-a-btrfs-file-system">Shrinking a Btrfs file system</a></h1>
+<p>Fortunately, Btrfs makes it really easy to shrink a file system. The command is</p><pre><pre>sudo btrfs filesystem resize 150G /
+</pre></pre>
+<p>and it will move Btrfs chunks from outside the first 150 gb into that space, and then truncate the size of the file system. Unfortunately, chunks are typically 1 gb each, so if there are more than 150 chunks used in the filesystem, the command will fail due to lack of space. The upside is that it fails safe, so we can just try it and see if it works.</p><p>If it fails, the solution is to consolidate chunks. In my case, I started with 290 gb of data on a file system that was 300 gb in size. This means Btrfs likely used all of 300 chunks to store this data, and the chunks were on average 290/300=96 % used. After cleaning, when there were only 90 gb of data left, Btrfs would still have used the same 300 chunks, but they would only have been 90/300=30 % used on average. These chunks can be consolidated into, say, 120 chunks at 75 % utilisation instead, which would fit into a file system of 150 gb.</p><p>A command like</p><pre><pre>sudo btrfs balance start -dusage=50 -musage=50 /
+</pre></pre>
+<p>will aggressively consolidate chunks. It will find chunks that are at less than 50 % utilisation (counting either data or metadata), and create new chunks to hold the data from multiple such under-utilised chunks. If there’s not enough space to create new chunks, this command can fail (safely). If it fails, we can perform the consolidation in stages.14 Why doesn’t Btrfs do this on its own? I have no idea.</p><p>First we delete any chunks that are completely unused.</p><pre><pre>sudo btrfs balance start -dusage=0 /
+</pre></pre>
+<p>Then we can move data from chunks that are less than 5 % filled.</p><pre><pre>sudo btrfs balance start -dusage=5 /
+</pre></pre>
+<p>The data from chunks that are less than 5 % filled is so little data15 A few times 50 mb at worst. Btrfs can probably sweep all of it up from the entire disk and put it into one new chunk.16 Maybe Btrfs can even move this data into existing chunks? I’m not fully sure how the balancing algorithm works. This means we free up multiple chunks at the cost of just one additional chunk.</p><p>Then we move data from chunks that are 20 % used or less.</p><pre><pre>sudo btrfs balance start -dusage=20 /
+</pre></pre>
+<p>This probably requires creating multiple new chunks to store the data, but in the previous command we just liberated that capacity, so it has a better chance of succeeding now. This should free up a good number of additional chunks.</p><p>
+Then we try the first <pre>balance</pre> command again to perform a final pass, combining
+all chunks that are at 50 % utilisation or lower. If we have significantly less
+data than the size we’re trying to resize the file system to, this final
+consolidation pass should have freed up enough space for the <pre>resize</pre> command to
+complete.
+</p><p>We are now at a point where the Linux disk usage can’t grow beyond where a second copy of the Linux disk is possible. But we haven’t seen any of this space saving on the physical disk yet, because the virtual disk file is still 290 gb.</p><h1><a href="https://entropicthoughts.com#resizing-the-partition">Resizing the partition</a></h1>
+<p>The robustest way to pass the space savings through to the virtual disk file at this point is to reduce the size of the partition that holds this file system to match the file system size. This can probably be done precisely, but I’m not good at this so I winged it.</p><p>Note that we are now entering the territory of somewhat dangerous operations. But the problems I encountered in the previous steps were easy enough to fix, and at this point in the process, despite my lack of skill with the finer details of disk and partition management, I felt strong and confident enough to improvise this part. Maybe a bad idea.</p><p>First we look at where the partitions start and end today.</p><pre><pre>sudo parted /dev/sda unit GiB print
+</pre></pre>
+<p>It goes without saying, but if you do this, make sure you have the right device file, that you look at the right partition, etc. In my case, I wanted to resize partition 3, which started 1.6 gb into the disk.</p><p>Then we decide on a new size for the partition. This is where one could compute a new size that precisely matches the file system, but I decided to add a couple of gb to the file system size. That way, (a) I don’t have to do meticulous calculations, and (b) in case the file system gets full, it can be grown by a few gb to get breathing room to fix stuff.</p><p>
+The <pre>parted</pre> subcommand we will use to resize the partition is called
+<pre>resizepart</pre>, but look at how it’s described in the man page:
+</p><blockquote>
+<p>
+<pre>resizepart &lt;partition&gt; &lt;end&gt;</pre>
+</p><p>Change the end position of partition.</p></blockquote><p>In other words, we’re not going to set the size, we’re going to set the end position. Thus, in addition to the new size, we have to add in the start value we discovered above, or we might end up with a partition that’s much smaller than we desired. I computed the new end of the partition as something like:</p><p>\[\textrm{start} + \textrm{file system size} + \textrm{margin} =\] \[= 1.6 + 150 + 4 \approx 156\;\textrm{GB}\]</p><p>
+and specified this to <pre>parted</pre>:
+</p><pre><pre>sudo parted /dev/sda resizepart 3 156GiB
+</pre></pre>
+<p>With this! We can power off the virtual machine, and ask Windows to shrink the file backing the virtual hard drive.</p><p>But with that! We have also made a mistake. We just don’t know it yet.</p><h1><a href="https://entropicthoughts.com#shrinking-the-virtual-hard-drive">Shrinking the virtual hard drive</a></h1>
+<p>If we have checkpointing enabled for the virtual machine, the first thing to do is merge the checkpoints with the base virtual disk file. We can do this in the Hyper-V gui by right-clicking the root of the checkpoint tree and clicking Delete checkpoint subtree in the context menu. This starts the process of merging checkpoints, and you get no progress bar, and no way of telling how long it’ll take.17 For all the previous commands that have also lacked progress bars, there have at least been a way to tell, ahead of time, roughly how much work will be performed, and at what rate the work actually happens. This lets you draw your own primitive progress bar.</p><p>The only indication that merging has stopped is one of two things can happen:</p><ul><li>If the <pre>.avhdx</pre> files representing the checkpoints disappear from the
+directory containing the virtual disk, the merge is complete.</li><li>If Windows starts warning that the disk is full, then the merge has failed because there was insufficient space to merge. See, before the checkpoint files are removed, all their contents are moved into the base file. This means that while merging, the base file grows without any reclamation of space from the checkpoint files.</li></ul><p>The second case is particularly confusing, because the Hyper-V gui no longer lists the checkpoints, but they are still powering the vm. Except, of course, we shouldn’t boot the vm in this state, because the disk is completely full and there’s no room for the checkpoint file to grow further. We also can’t turn off checkpointing while the vm boots off a checkpoint file.</p><p>Fortunately, while Hyper-V merges checkpoint data into the base file, it marks the corresponding data as unused in the checkpoint file. This means even after a partially completed merge, we can reduce the size of the checkpoint file with the command</p><pre><pre>Optimize-VHD -Path "&lt;VM name&gt;_&lt;guid&gt;.avhdx" -Mode Full
+</pre></pre>
+<p>This takes a while to run (with a progress bar!), and once it’s completed, the checkpoint file will be smaller. Then we ask Hyper-V to continue the aborted merge. How? Oh, there’s no button for that. You try booting the vm and then you discover by accident that this resumes the merge. How? It’s not indicated anywhere, silly! You just notice that the boot takes a very long time, and the base virtual disk file grows faster than during a normal boot.</p><p>If the continued merge runs into disk space issues again, we perform the same dance: shrink checkpoint file, boot again to resume.</p><p>Once the merge is complete, there’s a base virtual disk file that’s now 290 gb. But this time, a lot of what’s on it is no longer formatted for use, so we can shrink it significantly.</p><pre><pre>Optimize-VHD -Path "&lt;VM name&gt;.vhdx" -Mode Full
+</pre></pre>
+<p>This reduces the base virtual disk file to around the 150 gb of the underlying partition and file system.</p><h1><a href="https://entropicthoughts.com#repairing-an-unbootable-system">Repairing an unbootable system</a></h1>
+<p>Remember that mistake? This is where it comes back. Thinking I’m done with sysadmin work for the day, I try to start up the virtual machine to perform some actual work, but it won’t boot.</p><p>The partition table is stored twice on the disk: a main partition table at the start of the disk, and a backup partition table at the end of the disk. The main partition table is fine, but the backup partition table got corrupted somewhere in the process. I don’t fully understand what goes on at such a low level, but I think the backup partition table is expected to be located just after the last partition. When we set a new end position for the last partition, we didn’t move the backup partition table up next to it, so the Linux boot process finds junk where the backup partition table is expected, and refuses to boot.</p><p>When this happens, Dracut, which manages the early part of the boot process, eventually drops us into an emergency recovery shell. We should be able to repair the backup partition table from the main one in this shell, but some permission error I don’t remember prevented me from doing so.</p><p>
+But no worries18 I type, resting comfortably in my chair now. At the time, my
+hands were very sweaty!. We can download a Fedora installation iso, insert it
+in the virtual machine, reboot, and repair from that.19 Okay, not quite that
+simple. I had trouble getting the live gnome system to accept input in the
+virtual machine, so I had to modify the boot parameters in grub to get a
+console instead. When running <pre>lsblk</pre> on the device from the live iso, it
+listed no partitions, confirming there was a problem.
+</p><p>
+I flailed about a bit with both <pre>parted</pre> and <pre>sfdisk</pre> to repair the partition
+table, but didn’t figure the right thing out. I went to <pre>gdisk</pre>, which seemed
+more user-friendly. For example <pre>sgdisk -p</pre> helpfully diagnosed the exact
+problem: there were still three partitions, the main partition table was fine,
+but the backup table was erroneous.
+</p><p>
+The subcommand <pre>sgdisk -e</pre> is described by the man page as
+</p><blockquote>
+<p>
+<pre>-e</pre>, <pre>--move-second-header</pre>
+</p><p>Move backup gpt data structures to the end of the disk.</p></blockquote><p>
+Exactly what was needed! After that command <pre>lsblk</pre> recognised the partitions
+again, and I could boot into my ordinary system on the virtual machine.
+</p><h1><a href="https://entropicthoughts.com#continued-adventures">Continued adventures</a></h1>
+<p>For the time being, I’ve stopped there. That took long enough and was scary enough that I need to focus on other things for a while. But I do still want to move to a bare metal Fedora, and after the steps above I’m closer to it than I’ve been in a long time.</p><p>The next step will be to reduce the size of the Windows partition from the full 430 gb to 270 gb, leaving 160 gb unallocated to be filled in later by the Fedora installer. Windows is able to reduce its main partition during operation, but only if there are no unmovable files in the way. In my case, there are unmovable files in the way, so I need to figure out how to get rid of them first.</p><p>
+Once I have shrunk the Windows partition and installed a fresh Fedora on the
+remaining space, I think there’s a chance I might be able to mount the <pre>.vhdx</pre>
+file from the Windows partition as a device in Linux (!), which would in turn mean
+that I might be able to <pre>btrfs send</pre> and <pre>btrfs receive</pre> the contents of my home
+directory instead of having to do … something … to copy it manually.
+</p><p>I expect to run into twelve other problems before then, though, and that’ll have to happen some other day.</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
