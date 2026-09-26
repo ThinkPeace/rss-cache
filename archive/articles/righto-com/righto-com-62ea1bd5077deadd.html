@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reverse-engineering the vintage Intel 8087&#x27;s tangent algorithm: more than CORDIC | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Reverse-engineering the vintage Intel 8087&#x27;s tangent algorithm: more than CORDIC</h1>
+        <div class="meta">Ken Shirriff&#x27;s blog 2026-09-26T16:20:56.564000Z</div>
+        <div class="links">
+          <a href="http://www.righto.com/2026/09/8087-tangent-cordic.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/righto-com/righto-com-62ea1bd5077deadd.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I hope you&#x27;re not tired of the 8087, because I have another article about Intel&#x27;s floating-point chip. 1 In 1980, Intel introduced the 8087, making floating-point operations much faster in the IBM PC and other systems. In this article, I look at the algorithm behind the chip&#x27;s tangent instruction. One popular approach for trigonometric functions is an algor…</div>
+        <div class="content">
+          <p>I hope you're not tired of the 8087, because I have another article about
+Intel's floating-point chip.<span id="fnref:posts"><a class="ref" href="#fn:posts">1</a></span>
+In 1980, Intel introduced the 8087, making floating-point operations much faster
+in the IBM PC and other systems.
+In this article, I look at the algorithm behind the chip's tangent instruction.
+One popular approach for trigonometric functions is an algorithm called CORDIC.
+Another approach is a polynomial approximation. The 8087 combined the two
+to obtain both high accuracy and high performance.
+The 8087 provided an enormous speedup over the 8086 microprocessor, computing a tangent in
+90 microseconds rather than 13,000 microseconds.<span id="fnref:emulator"><a class="ref" href="#fn:emulator">2</a></span></p>
+<p>By examining the circuitry and microcode of the 8087,
+I can explain the algorithm behind the tangent instruction, called <code>FPTAN</code>.
+To explore the 8087's circuitry, I popped the lid off a chip with a chisel
+and created a high-resolution image with a microscope.
+The microcode ROM is the large rectangular region in the center of the die, holding the 1648 micro-instructions that control the chip.
+The bottom half of the chip (red box) is the datapath, the circuitry that performs floating-point calculations on 80-bit values.<span id="fnref:bits"><a class="ref" href="#fn:bits">3</a></span></p>
+<p><a href="https://static.righto.com/images/8087-fptan/8087-datapath-zoom-diagram.jpg"><img alt="A close-up of the 8087's datapath, showing functional blocks that are used by FPTAN. Click this image (or any other) for a larger version." class="hilite" height="730" src="https://static.righto.com/images/8087-fptan/8087-datapath-zoom-diagram-w600.jpg" title="A close-up of the 8087's datapath, showing functional blocks that are used by FPTAN. Click this image (or any other) for a larger version." width="600" /></a><div class="cite">A close-up of the 8087's datapath, showing functional blocks that are used by <code>FPTAN</code>. Click this image (or any other) for a larger version.</div></p>
+<p>Zooming in on the datapath shows the relevant functional units.
+The exponent ROM holds fixed exponent values that the algorithms need.
+The constant ROM holds constants, including the constants used by the CORDIC algorithm.
+The shifter is a large component; it shifts a 64-bit value left or right by arbitrary amounts.
+The adder is the heart of the 8087's calculations; as well as providing addition and subtraction, it is used in a loop for multiplication, division, and square roots.
+The B register holds one input to the adder, while multiple sources can provide the other input. The sum register holds the adder's output.
+The eight stack registers and the temporary registers hold floating-point numbers.
+Finally, the shift register holds 16 status bits for the CORDIC calculations.</p>
+<h2>The CORDIC algorithm</h2>
+<p>CORDIC is a clever algorithm for quickly computing transcendental functions
+with simple hardware: it uses shift and add instructions along with table lookups,
+but doesn't need multiplication or division.
+This algorithm dates back to 1956, when it was developed for the B-58 Hustler,
+the first bomber capable of flying at Mach 2.
+The aircraft had an analog navigation computer, but analog components provided limited accuracy.
+Engineer Jack Volder was given the task of designing a digital computer to replace
+the analog computer.<span id="fnref:birth-of-cordic"><a class="ref" href="#fn:birth-of-cordic">7</a></span>
+One key problem was that an analog computer can easily generate sines and cosines
+with an electromechanical device called a resolver.
+But trigonometric functions are difficult to produce digitally, especially with the
+slow transistors of that era.</p>
+<p><a href="https://static.righto.com/images/8087-fptan/b58.jpg"><img alt="A Convair B-58A Hustler, on display in San Antonio, TX (details)." class="hilite" height="258" src="https://static.righto.com/images/8087-fptan/b58-w600.jpg" title="A Convair B-58A Hustler, on display in San Antonio, TX (details)." width="600" /></a><div class="cite">A Convair B-58A Hustler, on display in San Antonio, TX (<a href="https://www.portsanantonio.us/B-58">details</a>).</div></p>
+<p>Jack Volder came up with a fast way to calculate trigonometric functions
+with simple hardware.
+He called the algorithm&mdash;and the computer that implemented it&mdash;CORDIC: "COordinate Rotation DIgital Computer".
+CORDIC converts an angle to a vector, where
+the vector's coordinates provide the necessary trig functions.
+The trick is to break down the angle into a sequence of special angles, angles that
+make vector rotation easy.
+These special angles are precomputed and stored in a table, so the CORDIC calculation
+can be performed quickly, even on 1950s hardware.
+Each CORDIC iteration provides an additional bit of accuracy, so the algorithm converges
+rapidly. CORDIC became popular, including in <a href="https://archived.hpcalc.org/laporte/TheSecretOfTheAlgorithms.htm">scientific calculators</a>, which used decimal CORDIC instead of binary.</p>
+<h2>Some trigonometry</h2>
+<p>I'll try to keep the math to a minimum, but in this section I'll give a quick explanation
+of how CORDIC works.
+The diagram below reviews how trig functions are related to the coordinates of a point.
+Suppose you have an angle θ; it specifies a point <em>(X, Y)</em> on the unit circle. 
+The basic formulas are <em>X=cos θ</em>, <em>Y=sin θ</em>, and <em>Y/X = tan θ</em>.
+Thus, if you can determine the coordinate <em>(X, Y)</em>, then you can determine the value of the
+trig functions.
+If the point is <em>not</em> on the unit circle, e.g. <em>(X', Y')</em>, then you can still easily determine
+tan θ. (Spoiler: this is what the 8087 does.) However, sin θ and cos θ become messy.<span id="fnref:sin"><a class="ref" href="#fn:sin">4</a></span></p>
+<p><a href="https://static.righto.com/images/8087-fptan/trig.jpg"><img alt="The relationship between an angle, the X and Y coordinates, and the trig functions." class="hilite" height="210" src="https://static.righto.com/images/8087-fptan/trig-w300.jpg" title="The relationship between an angle, the X and Y coordinates, and the trig functions." width="300" /></a><div class="cite">The relationship between an angle, the X and Y coordinates, and the trig functions.</div></p>
+<p>If you've done any computer graphics, you've probably seen how a rotation matrix can rotate a point by an angle. (If you're not familiar with rotation matrices, you can read about them <a href="https://en.wikipedia.org/wiki/Rotation_matrix">here</a> or just trust that it works.)
+Multiplying a point <em>(X, Y)</em> by the rotation matrix yields the new point <em>(X', Y')</em> as shown below.</p>
+<p><a href="https://static.righto.com/images/8087-fptan/rotate.jpg"><img alt="A point can be rotated by using a rotation matrix." class="hilite" height="228" src="https://static.righto.com/images/8087-fptan/rotate-w250.jpg" title="A point can be rotated by using a rotation matrix." width="250" /></a><div class="cite">A point can be rotated by using a rotation matrix.</div></p>
+<p>Unfortunately, since the rotation matrix (1, below) requires <em>sin</em> and <em>cos</em>, it doesn't seem like it helps solve our problem.
+However, we can divide the matrix by <em>cos θ</em>; this seems even less helpful since now the matrix (2) needs <em>tan</em>, which is what we want to evaluate. (Moreover, the vector's length will grow.)
+But the key to CORDIC is to use special angles, <em>α<sub>n</sub> = arctan(2<sup>-n</sup>)</em>.
+When we substitute one of these special angles into the matrix, we get matrix (3), which is easy to evaluate in hardware: multiplying by a power of 2 can be done by shifting the bits.</p>
+<p><a href="https://static.righto.com/images/8087-fptan/matrices.jpg"><img alt="Simplifying the rotation matrix." class="hilite" height="110" src="https://static.righto.com/images/8087-fptan/matrices-w400.jpg" title="Simplifying the rotation matrix." width="400" /></a><div class="cite">Simplifying the rotation matrix.</div></p>
+<p>Applying matrix (3) to the point <em>(X,Y)</em> gives the equations (4).
+These are key equations for the CORDIC process.
+The important thing is that these equations are fast and easy to compute in machine language or
+hardware, as the only operations are addition, subtraction, and binary shifting.</p>
+<p>With that background, we can see how CORDIC works.
+First, we break down the desired input angle into a combination of special angles that
+adds up to the desired angle.<span id="fnref:proof"><a class="ref" href="#fn:proof">5</a></span>
+Then we apply the rotation formula above for each special angle, 
+starting with the unit vector (1, 0). The result is a point
+<em>(X, Y)</em> at the desired angle, and then the desired tangent is simply <em>Y/X</em>.<span id="fnref:typical-cordic"><a class="ref" href="#fn:typical-cordic">6</a></span>
+Since the table of special angles is precomputed, the <em>arctan</em> operations don't slow down the process.
+As an aside, after the first few terms, the special angles approach <em>2<sup>-n</sup></em>,
+so they shrink by roughly a factor of 2 at each step.</p>
+<p>To summarize, the CORDIC algorithm consists of looping through a table of stored angles.
+If the stored angle is less than the desired angle, the stored angle is subtracted from the
+desired angle to yield a new desired angle and the equations above (shifts, add, and subtract) are applied to yield a new vector.
+At the end, the tangent of the original angle is given by <em>Y/X</em>.</p>
+<h2>The rational polynomial approximation</h2>
+<p>The accuracy of CORDIC depends on the number of terms that are used. With 16 terms, the
+accuracy is approximately 2<sup>-16</sup>, or 16 bits of accuracy.
+To get 64 bits of accuracy would require calculating 64 terms (and a table of 64 special angles).
+To get an answer faster, the 8087 uses 16 bits of CORDIC and uses another algorithm for
+the remaining angle.
+(The remaining angle is the gap between the sum of special CORDIC angles and the desired angle,
+so it is very small, around 2<sup>-16</sup>.)</p>
+<p>For the remaining angle, the 8087 uses a <a href="https://en.wikipedia.org/wiki/Pad%C3%A9_approximant">Padé approximant</a>, which is the ratio of two polynomials.
+There's a whole family of Padé approximations, depending on the order of the polynomials.
+The 8087 uses a simple formula: <i>3x/(3-x<sup>2</sup>)</i>.<span id="fnref:pade"><a class="ref" href="#fn:pade">8</a></span>
+Although this approximation is simple, it is very accurate for small values; its error is proportional to <em>x<sup>4</sup></em>.
+Since <em>x&lt;2<sup>-16</sup></em>, the error will be less than <em>2<sup>-64</sup></em>, meeting the 64-bit accuracy
+requirement for the 8087.
+Moreover, the 8087 doesn't need to perform the division in the rational polynomial since
+<code>FPTAN</code> returns a separate numerator and denominator. Thus, the division is "free".</p>
+<p><a href="https://static.righto.com/images/8087-fptan/function-comparison.jpg"><img alt="The tangent function (red), rational approximation (blue), and Taylor series (green).
+Disclaimer: The Taylor series isn't as bad as it appears, since the relevant range is very close to 0.
+Graph generated with Desmos." class="hilite" height="342" src="https://static.righto.com/images/8087-fptan/function-comparison-w320.jpg" title="The tangent function (red), rational approximation (blue), and Taylor series (green).
+Disclaimer: The Taylor series isn't as bad as it appears, since the relevant range is very close to 0.
+Graph generated with Desmos." width="320" /></a><div class="cite">The tangent function (red), rational approximation (blue), and Taylor series (green).
+Disclaimer: The Taylor series isn't as bad as it appears, since the relevant range is very close to 0.
+Graph generated with Desmos.</div></p>
+<p>If you've studied calculus, you might think that a Taylor series polynomial is the way to go,
+but the ratio of two polynomials is better.
+(One reason is that tangent blows up to infinity at π/2.
+A polynomial won't blow up, but the ratio of polynomials can, so it fits the tangent function better.)
+The graph above compares the tangent function (red), the rational approximation (blue),
+and the third-order Taylor series (green).</p>
+<h2>Putting the pieces together: the 8087 algorithm</h2>
+<p>The 8087's tangent algorithm has three parts: determining the CORDIC decision bits (called <a href="https://web.archive.org/web/20220204062801if_/http://home.citycable.ch/pierrefleur/Jacques-Laporte/Meggitt_62.pdf">pseudo-division</a>),
+computing the rational approximation, and applying the rotation equations based on the
+CORDIC decision bits (called pseudo-multiplication).<span id="fnref:nave"><a class="ref" href="#fn:nave">9</a></span></p>
+<p>In more detail, the first step determines which special angles to add to approximate the
+input angle. 
+Each special angle is compared to the remaining input angle and subtracted if it is smaller.
+If the angle is subtracted, a 1 is recorded; otherwise, a 0 is recorded.
+Since this process is similar to how long division subtracts (or doesn't subtract) successive
+shifted versions of the divisor, generating 1s or 0s for the quotient, the process is known as pseudo-division.
+Note that the rotations are not applied in this step. Instead, this step decides which rotations
+to apply later.</p>
+<p>The diagram below shows this process applied to the input angle 0.95 radians.<span id="fnref:range"><a class="ref" href="#fn:range">10</a></span>
+The process generates the sequence of bits
+<em>[1,0,0,1,0,1,0,1,0,0,1,0,0,1,1,1]</em>,
+where the leftmost bit indicates <em>arctan(2<sup>0</sup>)</em> and so forth.
+The angle is reduced by roughly a factor of 2 at each step, so the residual angle is
+very small.</p>
+<p><a href="https://static.righto.com/images/8087-fptan/diagram1.jpg"><img alt="In the first phase of the CORDIC algorithm&mdash;pseudo-division&mdash;the input angle is reduced by special angles, leaving a residual angle at the end. (&quot;rad&quot; is radians, not the unit of radiation.)" class="hilite" height="279" src="https://static.righto.com/images/8087-fptan/diagram1-w350.jpg" title="In the first phase of the CORDIC algorithm&mdash;pseudo-division&mdash;the input angle is reduced by special angles, leaving a residual angle at the end. (&quot;rad&quot; is radians, not the unit of radiation.)" width="350" /></a><div class="cite">In the first phase of the CORDIC algorithm&mdash;pseudo-division&mdash;the input angle is reduced by special angles, leaving a residual angle at the end. ("rad" is radians, not the <a href="https://en.wikipedia.org/wiki/Rad_(radiation_unit)">unit of radiation</a>.)</div></p>
+<p>Next, the tangent of the remaining angle is calculated with the rational approximation
+function, <i>3x/(3-x<sup>2</sup>)</i>.
+The result is used as the initial vector for the next step.
+The division is not performed here; instead, the numerator becomes <em>Y</em> in the initial vector
+and the denominator becomes <em>X</em>. Thus, the expensive division step is avoided, since it
+happens implicitly in the answer.
+Multiplying by 3 is easy (shift left and add), so the only expensive operation at this
+step is squaring the angle, which requires a full 64-bit multiplication.</p>
+<p>The final step applies each CORDIC rotation if the corresponding decision bit from the first step is
+1.
+Since this is somewhat analogous to binary multiplication, which adds the multiplicand
+at each step if the multiplier bit is 1, this step is known as pseudo-multiplication.
+As described earlier, each rotation is computed with shifts, addition, and subtraction,
+so each rotation is inexpensive.
+Each rotation in this step corresponds to an angle reduction in the first step.
+The rotations are applied in
+reverse order&mdash;the smallest one first&mdash;to reduce rounding error.
+To accomplish this, the decision bits are stored in a 16-bit shift register in the
+first step, and shifted out in opposite order in this step.</p>
+<p><a href="https://static.righto.com/images/8087-fptan/diagram2.jpg"><img alt="In the last phase of the CORDIC algorithm&mdash;pseudo-multiplication&mdash;a vector is rotated multiple times by applying shifts and adds. The final vector provides the tangent." class="hilite" height="310" src="https://static.righto.com/images/8087-fptan/diagram2-w420.jpg" title="In the last phase of the CORDIC algorithm&mdash;pseudo-multiplication&mdash;a vector is rotated multiple times by applying shifts and adds. The final vector provides the tangent." width="420" /></a><div class="cite">In the last phase of the CORDIC algorithm&mdash;pseudo-multiplication&mdash;a vector is rotated multiple times by applying shifts and adds. The final vector provides the tangent.</div></p>
+<p>The diagram above shows the process applied to the input 0.95. 
+The initial vector (green) comes from the rational approximation function; it is very close to
+(3, 0), but slightly rotated due to the tiny residual angle.
+Each rotation step generates a new vector that matches the angle from the corresponding
+step in the first part; I show two of the rotation matrices.
+Note that the vectors diverge from the circle&mdash;a consequence of dividing each matrix by <em>cos &theta;</em>&mdash;but this doesn't
+affect the tangent.</p>
+<p>The <code>FPTAN</code> instruction is somewhat peculiar as it doesn't return the tangent directly.
+Instead, it returns the Partial Tangent: the two coordinate values
+(<code>X</code> and <code>Y</code>) that can be divided to produce the tangent.
+One might wonder why the chip didn't do the division automatically.
+The motivation was that division
+was slow back then, and omitting the division allowed for optimizations in some cases.</p>
+<h2>Relevant hardware details of the 8087</h2>
+<p>In this section, I'll explain some features of the 8087 that are important for the microcode implementation of <code>FPTAN</code>.</p>
+<p>The 8087 supports a variety of data types,
+but internally, everything is stored as an 80-bit floating-point number called a "temporary real".
+A number has three parts: a sign bit, a 15-bit exponent, and a 64-bit significand (the fractional part),
+In most cases, a floating-point number is represented by <i>sign</i> &times; <i>significand</i> × 2<sup><i>exponent</i></sup>.
+The advantage of floating-point numbers is that the exponent allows them to cover a huge range, from very small to very large.
+The significand is a 64-bit binary number of the form <code>1.bbb…</code>:
+a leading 1, followed by the binary point (the binary equivalent of the decimal point) and the rest of the bits.<span id="fnref:leading-one"><a class="ref" href="#fn:leading-one">11</a></span>
+One important detail is that the exponent is stored with a "bias" of 16383 added to it. Thus, the stored exponent is always positive, even if the real
+exponent is negative. For instance, an exponent of 1 is stored as <code>0x4000</code>, and an exponent of -16 is stored as <code>0x3fef</code>.</p>
+<p><a href="https://static.righto.com/images/8087-fptan/registers.jpg"><img alt="The 80-bit temporary real format and the register formats. The dot indicates the binary point, analogous to the decimal point." class="hilite" height="209" src="https://static.righto.com/images/8087-fptan/registers-w550.jpg" title="The 80-bit temporary real format and the register formats. The dot indicates the binary point, analogous to the decimal point." width="550" /></a><div class="cite">The 80-bit temporary real format and the register formats. The dot indicates the binary point, analogous to the decimal point.</div></p>
+<p>To use the 8087, a programmer stores values in its eight internal registers, organized as a stack. Each register holds an 80-bit floating-point number.
+To optimize performance,
+each value in the register stack also has an associated "tag" value:
+zero, valid, special, or empty.
+A value of zero is tagged as <em>zero</em>.
+A "normal" floating-point value is tagged as <em>valid</em>. If the value is infinity, Not a Number (NaN), or a denormalized value,
+then it is tagged as <em>special</em>.
+Finally, an <em>empty</em> tag indicates that a register does not hold a value; this allows detection of
+stack underflow (reading an empty register) or stack overflow (storing to a non-empty
+register).</p>
+<p>The 8087 also has temporary registers that it uses internally: <code>tmpA</code>, <code>tmpB</code>, and <code>tmpC</code>.
+(These registers are heavily used for the tangent calculation.)
+<code>tmpA</code> and <code>tmpB</code> are 80-bit registers, along
+with two tag bits.
+However, <code>tmpC</code> is different: it doesn't have a sign, exponent, or tag.
+Moreover,
+the significand is 68 bits; <code>tmpC</code> has an additional
+bit to prevent overflow and three additional low-order bits for rounding, known as
+<em>guard</em>, <em>round</em>, and <em>sticky</em>.</p>
+<p>In the microcode,
+each 16-bit micro-instruction performs one low-level operation.
+Many of the operations move data from one register to another.
+Other operations provide conditional jumps, subroutine calls, and returns.
+A bit shift operation takes two micro-instructions: the first moves a value to the shifter and
+configures the direction and amount of shift. The second micro-instruction (which may be
+a distance after the first) moves the result from the shifter to a destination.</p>
+<p>Similarly, addition takes two micro-instructions. The first micro-instruction
+specifies the first argument to add and selects various options such as
+carry and rounding.
+(For subtraction, an option complements the second argument.)
+The second argument always comes from the <code>B</code> register, which confusingly is
+unrelated to the <code>tmpB</code> register.
+The second micro-instruction moves the result from the sum register to a destination.</p>
+<h2>Implementation of the tangent algorithm in microcode</h2>
+<p>In this section, I'll discuss some highlights of the tangent microcode.
+The listing below shows the 8087's microcode, along with my comments.
+Each line indicates a 16-bit micro-instruction.
+The control flow is a bit complicated, so I've put a flowchart in the footnotes.<span id="fnref:flowchart"><a class="ref" href="#fn:flowchart">12</a></span></p>
+<pre class="microcode">
+<span>FPTAN:</span>
+#1039 st(0) -> tmpA        <span>store argument in tmpA</span>
+#1040 stackPtr--           <span>check if room on stack to push result</span>
+#1041 stack overflow?
+#1042 jmp #1022 if tmp empty/special/overflow/div <span>exit if bad argument or stack overflow</span>
+#1043 jmp #1045 if tmpA:tag ZERO <span>is argument 0?</span>
+#1044 except:precision     <span>precision exception except for 0</span>
+#1045 expconst 0x3ff0      <span>Test if exponent >= -16</span>
+#1046 adder: tmpA:exp + 0 cin=1 <span>argument exponent + 1</span>
+#1047 expConst -> Breg
+#1048 adder: sumreg:frac - Breg cin=1 <span>subtract -15</span>
+#1049 jmp #1061 if adder pos <span>CORDIC if exponent >= -16</span>
+#1050 expconst 0x3fff      <span>non-CORDIC path:</span>
+#1051 tmpA:exp -> Breg     <span>check original exponent</span>
+#1052 expConst -> tmpB:frac <span>against exponent 0</span>
+#1053 adder: tmpB:frac - Breg cin=1 <span>subtract</span>
+#1054 sumreg:frac -> expConv <span>3fff - exp (i.e. -exp unbiased)</span>
+#1055 sumreg:frac -> shiftcount
+#1056 jmp #1082 if exponent[6:14] != 0 <span>if exp > -64 goto rational approximation</span>
+#1057 high bit -> tmpB:frac <span>otherwise return original argument</span>
+#1058 expConst -> tmpB:sign,exp <span>push 1 for X (denom): result is orig angle</span>
+#1059 tmpB -> st(0)
+#1060 RNI
+#1061 expconst 0x0010      <span>CORDIC path</span>
+#1062 sumreg:frac -> loopcounter <span>loopcounter = exp + 16</span>
+#1063 tmpA:frac -> tmpC    <span>tmpC = original angle</span>
+#1064 trig const -> Breg/rnd
+#1065 adder: tmpC - Breg cin=1, roundmode <span>subtract first CORDIC angle</span>
+#1066 adder sign -> cordic, shl <span>save bit  in shift register</span>
+#1067 jmp #1079 if not adder pos
+#1068 sumreg:frac,rnd -> tmpC
+#1069 adder: tmpA:exp + 0 cin=1 <span>increment exp if first angle used</span>
+#1070 sumreg:frac -> tmpA:exp
+#1071 jmp #1079
+#1072 shift tmpC L 0 bytes, 1 bits <span>top of CORDIC scan loop</span>
+#1073 shift L -> tmpC      <span>shift angle left</span>
+#1074 trig const -> Breg/rnd
+#1075 adder: tmpC - Breg cin=1, roundmode <span>subtract CORDIC angle</span>
+#1076 adder sign -> cordic, shl <span>save decision bit in shift register</span>
+#1077 jmp #1079 if not adder pos
+#1078 sumreg:frac,rnd -> tmpC
+#1079 jmp #1072 if not const latch zero <span>bottom of CORDIC scan loop</span>
+#1080 tmpC -> tmpA:frac    <span>update tmpA, tmpB</span>
+#1081 expConst -> shiftcount <span>16 -> shiftcount (otherwise based on exponent)</span>
+#1082 tmpA:frac -> tmpB:frac <span>Padé approximation</span>
+#1083 tmpA:frac -> Breg    <span>tmpA = ang</span>
+#1084 call SQUARE          <span>square the angle</span>
+#1085 shift sumreg:frac R count byte bit
+#1086 shift R -> sumreg:frac <span>shift twice to scale square</span>
+#1087 shift sumreg:frac R count byte bit
+#1088 shift R -> Breg      <span>Breg = ang^2</span>
+#1089 1.1 -> tmpB:frac     <span>3 (with exp 1)</span>
+#1090 adder: tmpB:frac - Breg cin=0
+#1091 sumreg:frac -> tmpB:frac <span>tmpB (X) = 3-ang^2</span>
+#1092 shift tmpA:frac R 0 bytes, 1 bits
+#1093 shift R -> Breg/rnd
+#1094 adder: tmpA:frac + Breg cin=0, roundmode <span>ang + ang/2</span>
+#1095 sumreg:sign,frac,rnd -> tmpC <span>tmpC (Y) = 3×ang with appropriate exponent</span>
+#1096 expconst 0x3ff0      <span>exponent -15</span>
+#1097 expConst -> Breg
+#1098 adder: tmpA:exp - Breg cin=1
+#1099 jmp #1118 if not adder pos <span>skip if exponent too small</span>
+#1100 shift tmpC R 0 bytes, 1 bits <span>CORDIC pseudo-multiplication path</span>
+#1101 #15 -> loopcounter
+#1102 shift R -> tmpC
+#1103 jmp #1113 if not cordic[0] <span>CORDIC: if saved decision bit...</span>
+#1104 shift tmpC R loopcount <span>send tmpC (Y) to shifter</span>
+#1105 tmpC -> Breg/rnd     <span>send tmpC to adder</span>
+#1106 adder: tmpB:frac + Breg cin=0, roundmode <span>tmpB (X) not shifted because tmpC scaled</span>
+#1107 sumreg:sign,frac,rnd -> tmpC <span>tmpC = tmpC + tmpB (implicit >>n)</span>
+#1108 shift R -> sumreg:frac,rnd <span>shifted old tmpC to sumreg</span>
+#1109 shift sumreg:frac,rnd R loopcount <span>shift right again because tmpC scaled</span>
+#1110 shift R -> Breg/rnd  <span>and send to B reg</span>
+#1111 adder: tmpB:frac - Breg cin=1, roundmode
+#1112 sumreg:frac,rnd -> tmpB:frac <span>tmpB = tmpB - tmpC>>n</span>
+#1113 cordic shr           <span>shift out shift register bit</span>
+#1114 shift tmpC R 0 bytes, 1 bits <span>start shift of tmpC (Y)</span>
+#1115 jmp #1118 if cordic==0 <span>done if shift register empty</span>
+#1116 shift R -> tmpC      <span>shift tmpC (Y) right</span>
+#1117 jmp #1103 if not const latch zero <span>done if counter at zero</span>
+#1118 expconst 0x3fff      <span>CORDIC done</span>
+#1119 tmpB:frac -> sumreg:frac <span>Test top bit of tmpB (X)</span>
+#1120 jmp #1124 if reg bit 63 <span>If set, use exponent 0</span>
+#1121 expconst 0x3ffe      <span>Otherwise, use exponent -1 and</span>
+#1122 shift sumreg:frac L 0 bytes, 1 bits <span>shift left one bit to normalize</span>
+#1123 shift L -> tmpB:frac
+#1124 expConst -> tmpB:sign,exp <span>store exponent in tmpB</span>
+#1125 tmpC -> tmpA:frac    <span>store tmpC (Y) in tmpA</span>
+#1126 tmpC -> sumreg:frac,sign
+#1127 jmp #1132 if not sumreg[64] <span>test overflow bit</span>
+#1128 shift tmpC R 0 bytes, 1 bits <span>if set, normalize by shifting right</span>
+#1129 shift R -> tmpA:frac
+#1130 adder: tmpA:exp + 0 cin=1 <span>and increment exponent by 1</span>
+#1131 sumreg:frac -> tmpA:exp
+#1132 tmpB -> st(0)        <span>tmpB to top of stack: X (denom)</span>
+#1133 stackPtr++
+#1134 tmpA -> st(0)        <span>tmpA to st(1): Y (numerator)</span>
+#1135 stackPtr--
+#1136 RNI                  <span>End of FPTAN</span>
+</pre>
+
+<p>The <code>FPTAN</code> microcode starts at address <code>#1039</code> (decimal).
+The microcode starts by moving the argument from the top of the stack to the <code>tmpA</code> register.
+If the top value is empty, this indicates a stack underflow. If the next element on
+the stack (the position that will hold the result) is not empty, this indicates a stack
+overflow. In either case, the microcode indicates an "invalid" exception and ends the instruction.</p>
+<p>One peculiar feature of the 8087 is that it flags a result with a "precision" exception if
+the result is not exact. (This happens very frequently, even for, say, 1/10.)
+The only tangent that the 8087 can compute precisely is <em>tan(0)</em>, so all other inputs
+result in a precision exception (<code>#1044</code>).</p>
+<p>Next, the argument's exponent is tested, splitting the execution into three paths.
+If the exponent is -64 or less, the argument is so small that
+the tangent equals the argument, within the accuracy of the system.<span id="fnref:comparison"><a class="ref" href="#fn:comparison">13</a></span>
+In this case (<code>#1057</code>), the original argument is returned unchanged (with the denominator 1 pushed), and the code ends.
+The second case is if the argument's exponent is -17 or less. In this case,
+the CORDIC step is skipped, and the routine jumps directly to the rational approximation (<code>#1082</code>).</p>
+<h3>CORDIC pseudo-division</h3>
+<p>The most interesting case is the CORDIC path (<code>#1061</code>), taken if the exponent is between -1 and -16.
+Conceptually, the code performs 16 CORDIC steps, using 16 stored angles.
+However, the code is optimized, skipping the large angles for smaller
+inputs.
+Specifically, the loop counter is initialized based on the
+exponent of the input angle (<code>#1062</code>).
+The CORDIC pseudo-division loop (<code>#1061</code>-<code>#1080</code>) tests the angles, subtracting ones that aren't too big.<span id="fnref:first-step"><a class="ref" href="#fn:first-step">14</a></span></p>
+<p>The decision results are recorded in a 16-bit shift register, located on the far right side of the die.
+Presumably, this is where the layout had some unused space.
+Since the shift register is loaded and unloaded serially, it doesn't need access to the
+internal fraction bus, just two lines to shift the bits in and out, so the shift
+register could be located in otherwise unused space.</p>
+<p>The code is optimized to use 64-bit integer arithmetic rather than floating-point arithmetic.
+This makes it tricky to understand the code since values
+must be viewed more as fixed-point numbers with
+implicit exponents.
+These exponents are not stored anywhere, but can be determined by analyzing the algorithm.
+Even the angle constants in the ROM do not have explicit exponents.<span id="fnref:rom-exponents"><a class="ref" href="#fn:rom-exponents">15</a></span>
+Moreover, the implicit exponents change for each step through the loop to preserve accuracy.
+Roughly speaking, each cycle of the loop reduces the values by a factor of 2, and the
+angle constants shrink accordingly.
+If the values had a fixed exponent, they would end up with 16 leading zeros, wasting
+precision. But by scaling the values each cycle (with a left shift),
+the numbers continue to use the full 64 bits.
+In other words, the hardware is performing fast integer arithmetic, but mathematically
+you can think of it as fixed-point with exponents that don't physically exist in the chip.
+See the table in the footnotes<span id="fnref:details"><a class="ref" href="#fn:details">16</a></span> for details on how the implicit exponents change through
+the loop.</p>
+
+
+<h3>Rational polynomial approximation</h3>
+<p>After the CORDIC pseudo-division loop, the microcode calculates the rational polynomial
+approximation (<code>#1082</code>).
+The small-angle path rejoins the execution flow here.
+The microcode to calculate the polynomial approximation has a few interesting features.
+The most time-consuming part is the <code>SQUARE</code> routine, which multiplies a fixed-point number by itself.
+Multiplication is complicated, so I'll give the details in a later post.
+But in brief, the 8087 uses Booth's Algorithm to
+multiply by two bits at a time (radix 4), so it is twice as fast as regular binary
+multiplication.
+The loop to perform the shifts and adds is implemented in hardware, rather than microcode.
+That is, one microcode instruction performs 32 additions: the hardware tests the
+bits, does the appropriate add or subtract, updates the loop counter, and loops.
+For performance, the shifting is done with specialized shifters, not the 8087's general-purpose
+shifter.</p>
+<p>Except for the square, the polynomials are calculated with additions rather than multiplications.
+The constant 3 doesn't come from the constant ROM, but from special-purpose transistors that
+set the top two bits of the significand; this is usually used to supply an NaN.
+(If the implicit exponent is 1, this corresponds to 3.)
+Subtracting the square yields the numerator. For the denominator, the angle is shifted
+right (i.e. divided by 2) and added to itself. 
+This performs a multiplication by 3 (technically by 1.5, but increasing the implicit
+exponent to 1 turns this into 3).
+It would be expensive to divide the numerator by the denominator; instead, the numerator
+and denominator are used as the initial Y and X values for the following CORDIC steps.</p>
+<h3>CORDIC pseudo-multiplication</h3>
+<p>Next is the CORDIC loop where the rotations are applied to the vector (<code>#1100</code>).
+The rotations are applied in the reverse order from how they were computed in the first step:
+the smallest rotations are applied first to preserve accuracy.
+Bits are shifted out of the shift register to indicate if the rotation should be applied or
+not. As soon as the shift register is all zeros, the loop stops.
+In other words, smaller angles go through the loop just a few times, not the full 16 times.</p>
+<p><a href="https://static.righto.com/images/8087-fptan/rom.jpg"><img alt="A close-up of the microcode ROM under the microscope. A transistor is formed where a vertical polysilicon line crosses doped silicon (pink). The 8087's ROM is unusual: it uses four transistor sizes, so it stores two bits per transistor, twice the density of a regular ROM." class="hilite" height="297" src="https://static.righto.com/images/8087-fptan/rom-w450.jpg" title="A close-up of the microcode ROM under the microscope. A transistor is formed where a vertical polysilicon line crosses doped silicon (pink). The 8087's ROM is unusual: it uses four transistor sizes, so it stores two bits per transistor, twice the density of a regular ROM." width="450" /></a><div class="cite">A close-up of the microcode ROM under the microscope. A transistor is formed where a vertical polysilicon line crosses doped silicon (pink). The 8087's ROM is unusual: it uses four transistor sizes, so it stores two bits per transistor, twice the density of a regular ROM.</div></p>
+<p>The rotations are applied by shifts and adds (or subtracts), but keeping track of the
+implicit exponents is a bit tricky.
+Since the vector starts almost horizontal, the X value is approximately 3, and the Y value
+is around 2<sup>-16</sup>.
+As the vector rotates, X remains roughly 3, but Y potentially increases by a factor of 2
+each time.
+To provide the maximum accuracy for each number,
+the exponent for X (<code>tmpB</code>) is 1, while the exponent for Y (<code>tmpC</code>) starts off at
+-14 and increases by 1 each loop as Y is shifted right.
+(Remember that these exponents are not stored anywhere but are implicit.)
+Since the two registers have different (implicit) exponents, the values must be shifted
+before adding.
+The shift amounts aren't intuitive; the table<span id="fnref2:details"><a class="ref" href="#fn:details">16</a></span> in the
+footnotes may help clarify.</p>
+<p>After the CORDIC loop, 
+the final part of the code (<code>#1118</code>) normalizes the <code>X</code> and <code>Y</code> values, creating the floating-point
+values that are returned from the instruction.
+Recall that these aren't "real" floating-point values at this point, so they
+may need adjustment.
+Specifically, if <code>X</code> doesn't have a
+leading 1, it is shifted left one position, while if <code>Y</code> has two leading digits, it
+is shifted right one position. In either case, the exponent is adjusted accordingly.
+The <code>X</code> and <code>Y</code> values are put on the stack (<code>#1132</code>) to complete the instruction.</p>
+<h2>Conclusions</h2>
+<p>The <code>FPTAN</code> instruction is fairly slow as 8087 instructions go, due to its complexity.
+The documentation says that it takes typically 450 clock cycles.
+(The time has a large range; depending on the value, it can take 30 to 540 clock cycles.)
+For the value I examined (0.95), 33% of the time is in the CORDIC
+pseudo-division, 15% in the rational polynomial (mostly the squaring operation), 47% in the CORDIC pseudo-multiplication, and 5% overhead.</p>
+<p>CORDIC is a popular way to compute trig functions, but there are alternatives such as polynomials.
+The 8087 is unusual because it combines CORDIC and a rational polynomial.
+For the Pentium, Intel moved from CORDIC to polynomial approximations;
+the Pentium's <a href="https://www.righto.com/2025/03/pentium-multiplier-adder-reverse-engineered.html">fast multiplication circuitry</a> made polynomials practical.
+Nowadays, Intel has libraries such as MKL (Math Kernel Library)
+and 
+Short Vector Math Library (SVML) that provide highly optimized implementations tailored
+to Intel hardware. These libraries are said to use polynomial approximations,
+using parallel instructions (SIMD) for performance, rather than specialized hardware.
+With these libraries, x87 operations and 80-bit floats are <a href="https://learn.microsoft.com/en-us/windows/win32/dxtecharts/sixty-four-bit-programming-for-game-developers#porting-applications-to-64-bit-platforms:~:text=The%20x87%2C%20MMX%2C%20and%203DNow!%20instruction%20sets%20are%20deprecated%20in%2064%2Dbit%20modes.">mostly obsolete</a>.
+Nonetheless, I hope you've enjoyed this look at an original 8087 algorithm.</p>
+<p>I plan to continue reverse-engineering the 8087 microcode;
+for updates, follow me on
+ Bluesky (<a href="https://bsky.app/profile/righto.com">@righto.com</a>),
+Mastodon (<a href="https://oldbytes.space/@kenshirriff">@kenshirriff@oldbytes.space</a>),
+or <a href="http://www.righto.com/feeds/posts/default">RSS</a>.
+I've been working on this with the members of the "Opcode Collective", especially Smartest Blob and Gloriouscow, who converted the
+ROM images to microcode data and extensively analyzed the contents.
+See the <a href="https://github.com/a-mcego/granite/tree/main/tools/8087mc">8087 repository</a> on GitHub for more.
+AI statement: Despite the presence of the em dash, no AI was used in the writing of this article (<a href="https://www.righto.com/p/index.html#ai">details</a>). The Opcode Collective used an ML algorithm to classify each ROM cell to extract the microcode.</p>
+<h2>Notes and references</h2>
+<div class="footnote">
+<ol>
+<li id="fn:posts">
+<p>If you want more on the 8087, here's a list of my previous 8087 posts, newest to oldest:
+<br><a href="https://www.righto.com/2026/09/8087-microcode-reverse-engineering-fscale.html">Microcode in Intel's 8087 floating-point chip: the scale instruction</a>
+<br><a href="https://www.righto.com/2026/06/intel-8087-adder-reverse-engineered.html">The adder at the heart of Intel's 8087 floating-point chip</a>
+<br><a href="https://www.righto.com/2026/05/microcode-inside-intel-8087-floating.html">Microcode inside the Intel 8087 floating-point chip: register exchange</a>
+<br><a href="https://www.righto.com/2026/02/8087-instruction-decoding.html">Instruction decoding in the Intel 8087 floating-point chip</a>
+<br><a href="https://www.righto.com/2025/12/8087-microcode-conditions.html">Conditions in the Intel 8087 floating-point chip's microcode</a>
+<br><a href="https://www.righto.com/2025/12/8087-stack-circuitry.html">The stack circuitry of the Intel 8087 floating point chip, reverse-engineered</a>
+<br><a href="https://www.righto.com/2020/05/die-analysis-of-8087-math-coprocessors.html">Die analysis of the 8087 math coprocessor's fast bit shifter</a>
+<br><a href="https://www.righto.com/2020/05/extracting-rom-constants-from-8087-math.html">Extracting ROM constants from the 8087 math coprocessor's die</a>
+<br><a href="https://www.righto.com/2018/09/two-bits-per-transistor-high-density.html">Two bits per transistor: high-density ROM in Intel's 8087 floating point chip</a>
+<br><a href="https://www.righto.com/2018/08/inside-die-of-intels-8087-coprocessor.html">Inside the die of Intel's 8087 coprocessor chip, root of modern floating point</a>
+<br>&#160;<a class="footnote-backref" href="#fnref:posts" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+</li>
+<li id="fn:emulator">
+<p>Intel's <a href="https://archive.org/details/8086familyusersm00inte/page/n16/mode/1up]">documentation</a>
+provides a performance comparison of the 8087 versus floating-point operations emulated on the 8086.
+The speedup varies depending on the instruction, but is typically almost a factor of 100.
+This speedup made the 8087 chip highly desirable for numerical applications such as CAD and spreadsheets.&#160;<a class="footnote-backref" href="#fnref:emulator" title="Jump back to footnote 2 in the text">&#8617;</a></p>
+</li>
+<li id="fn:bits">
+<p>Internally, the 8087 uses 80 bits to hold floating-point values: one bit for the sign,
+15 bits for the exponent, and 64 bits for the significand.
+However, the 8087 uses three extra low-order bits for rounding, called Guard, Round, and Sticky. These bits ensure that a value is always rounded in the right direction.
+Some parts of the datapath have additional bits for sign or overflow: the shifter is 68 bits wide, and the <a href="https://www.righto.com/2026/06/intel-8087-adder-reverse-engineered.html">adder</a> is 69 bits wide.
+For the most part, I'll ignore these extra bits and refer to the datapath as 64 bits wide.&#160;<a class="footnote-backref" href="#fnref:bits" title="Jump back to footnote 3 in the text">&#8617;</a></p>
+</li>
+<li id="fn:sin">
+<p>To compute <em>sin θ</em> from the 8087's <em>X</em> and <em>Y</em> values, the typical formula
+is <em>sin θ = Y/sqrt(X<sup>2</sup>+Y<sup>2</sup>)</em>; <em>cos θ</em> is similar.&#160;<a class="footnote-backref" href="#fnref:sin" title="Jump back to footnote 4 in the text">&#8617;</a></p>
+</li>
+<li id="fn:proof">
+<p>The special angles (in degrees) are approximately
+45°, 26.6°, 14°, 7.1°, 3.6°, 1.8°, 0.9°, … 
+You might wonder if adding up the special angles will always converge to
+the desired angle θ.
+A proof can be found <a href="https://www.wseas.us/e-library/conferences/2007hangzhou/papers/560-120.pdf">here</a>.
+Note that <em>arctan(2<sup>-n</sup>)</em> rapidly approaches <em>2<sup>-n</sup></em> (in radians), so it's kind of
+like a binary fraction expression, cutting the gap approximately in half each time.&#160;<a class="footnote-backref" href="#fnref:proof" title="Jump back to footnote 5 in the text">&#8617;</a></p>
+</li>
+<li id="fn:typical-cordic">
+<p>The CORDIC implementation in the 8087 is somewhat different from the
+typical use of CORDIC, which finds <em>sin</em> and <em>cos</em>.
+In this approach, <em>all</em> the special angles are used, but an angle is either added or
+subtracted at each step, resulting in convergence to the desired angle.
+Recall that since the matrix is scaled by <em>1/sin α<sub>i</sub></em> at each step, the ending
+vector is no longer a unit vector. As a result, <em>cos</em> and <em>sin</em> don't match
+the final vector <em>(X, Y)</em>.</p>
+<p>The trick is that if all the special angles are used, the overall scaling factor ends
+up being the same, simply the product of all the <em>cos α<sub>i</sub></em> factors.
+(It doesn't matter if the rotation is positive or negative because
+<em>cos α<sub>i</sub> = cos -α<sub>i</sub></em>.)
+Thus, the overall scaling factor can be precomputed and the initial unit vector can be
+prescaled by this amount. 
+The result is that the final vector <em>(X, Y)</em> yields (<em>cos θ, sin θ</em>) directly, which is what we
+want.</p>
+<p>The key point is that there are two CORDIC approaches: using positive and negative angles,
+or using or omitting angles. (The first case multiplies each angle by +1 or -1, while the
+second case multiplies each angle by 1 or 0.) Most CORDIC implementations use the
+first approach, while the 8087 uses the second approach.&#160;<a class="footnote-backref" href="#fnref:typical-cordic" title="Jump back to footnote 6 in the text">&#8617;</a></p>
+</li>
+<li id="fn:birth-of-cordic">
+<p>Jack Volder, the creator of CORDIC, wrote an article,
+<a href="https://web.archive.org/web/20160304064804/http://late-dpedago.urv.cat/site_media/papers/fulltext_2.pdf">The Birth of CORDIC</a>, that describes the history in detail, as well as
+including photos of the B-58 navigation computer.
+Volder's original articles from 1959 are <a href="https://dl.acm.org/doi/10.1145/1457838.1457886">The CORDIC Computing Technique</a> and <a href="https://doi.org/10.1109/TEC.1959.5222693">The CORDIC Trigonometric Computing Technique</a>.</p>
+<p><a href="https://static.righto.com/images/8087-fptan/cordic-ii.jpg"><img alt="The CORDIC-II digital computer system. Photo by General Dynamics, from &quot;The Birth of CORDIC&quot;." class="hilite" height="459" src="https://static.righto.com/images/8087-fptan/cordic-ii-w500.jpg" title="The CORDIC-II digital computer system. Photo by General Dynamics, from &quot;The Birth of CORDIC&quot;." width="500" /></a><div class="cite">The CORDIC-II digital computer system. Photo by General Dynamics, from "The Birth of CORDIC".</div></p>
+<p>The photo above shows the CORDIC II computer that was used on the B-58 aircraft. It was a 30-bit serial computer, running at 198.4 kHz and weighing a hefty 134 pounds.
+It was implemented with diode-transistor logic (DTL) gates, using 2498 transistors and 4265 diodes, and had a drum memory (visible at the top) for storage, holding the equivalent of 39 kilobytes.
+Interestingly, the CORDIC operations were implemented as basic instructions in the
+instruction set, rather than subroutines; a CORDIC instruction took 5 ms, the same speed as a 
+multiplication or division.&#160;<a class="footnote-backref" href="#fnref:birth-of-cordic" title="Jump back to footnote 7 in the text">&#8617;</a></p>
+</li>
+<li id="fn:pade">
+<p>This Padé approximation is called the [1,2] approximation since the numerator is a
+first-order polynomial and the denominator is a second-order polynomial.
+Padé approximations can be derived from the continued fraction expansion of tan.
+See <a href="https://web.mae.ufl.edu/uhk/PADE-LATEST.pdf">Constructing Padé Approximates</a>.</p>
+<p>By the way, if you've taken calculus, you might think that a Taylor series is a good
+way to approximate a function.
+Unfortunately, a Taylor series is bad at approximating a function over an interval,
+rather than a point.
+You're much better off using a polynomial that minimizes the maximum error over the
+interval, as in the <a href="https://www.righto.com/2025/01/pentium-floating-point-ROM.html">Pentium</a>.&#160;<a class="footnote-backref" href="#fnref:pade" title="Jump back to footnote 8 in the text">&#8617;</a></p>
+</li>
+<li id="fn:nave">
+<p>The 8087's algorithm is described in
+<a href="https://linkinghub.elsevier.com/retrieve/pii/0165607483901515">Implementation of transcendental functions on a numerics processor</a> by Rafi Nave, who led the hardware design of the 8087.&#160;<a class="footnote-backref" href="#fnref:nave" title="Jump back to footnote 9 in the text">&#8617;</a></p>
+</li>
+<li id="fn:range">
+<p>The valid argument range for <code>FPTAN</code> is documented as <em>0&lt;θ&lt;π/4</em>, so the demonstration value that I use, 0.95, is outside
+the documented range.
+I find the range puzzling, since the first CORDIC constant is <em>arctan(1)</em>, <em>π/4</em>,
+which will only be useful for inputs above <em>π/4</em>.
+Thus, the 8087 uses a scarce ROM entry and an extra loop cycle to handle values outside
+the permitted range.
+I have two hypotheses about this. Perhaps the 8087 was implemented for a larger
+argument range, but the numerical error was larger than expected, so the range
+was truncated.
+Alternatively, the <code>FPATAN</code> arctan instruction might need the first CORDIC constant
+and it was easier to use the same constant loop for <code>FPTAN</code> and <code>FPATAN</code>.
+(I haven't examined <code>FPATAN</code> yet to confirm this.)
+In any case, the code works with 0.95; I use it as an example because
+the angles are larger and more visible.</p>
+<p>Another peculiarity is that the documentation is inconsistent about whether 0 is
+in the range or not. The book <a href="https://link.amazon/B031RmZKC">The 8087 Primer</a> by
+the principle architects of the 8087 and 8086 states that the argument range excludes
+0, a decision that was made to simplify the microcode.
+However, looking at the microcode (<code>#1044</code>) shows that the code explicitly checks for
+a zero input and handles the case.</p>
+<p><code>FPTAN</code> appears to work for values almost up to <em>π/2</em>, with
+some accuracy loss as the result approaches infinity near <em>π/2</em>.
+However, the values from 1 to <em>π/2</em> (which are outside the defined range and have an exponent of 0) probably work by coincidence,
+not by design.
+The larger exponent results in an additional loop iteration;
+the lookup of trig constants wraps around the algorithm starts with the last constant, <em>atan(2</sup>-15)</em>.
+But due to scaling, this value ends up being interpreted as approximately 2. Since this CORDIC angle is
+greater than <em>π/2</em>, it is skipped.
+The algorithm then proceeds with the remaining constants, executing properly.</p>
+<p>Footnote to the footnote:  Although the mathematical meaning of "range" is the <em>output</em> of a function,
+Intel uses it to describe the <em>input</em> of a function, which mathematicians call the domain.&#160;<a class="footnote-backref" href="#fnref:range" title="Jump back to footnote 10 in the text">&#8617;</a></p>
+</li>
+<li id="fn:leading-one">
+<p>One difference between the 8087's temporary real format and the external formats is that
+in the temporary real, the leading 1 digit is explicitly stored in the number.
+In the external formats, the leading 1 is implicit and not stored in the number,
+providing one additional bit of accuracy, but making arithmetic more complicated.&#160;<a class="footnote-backref" href="#fnref:leading-one" title="Jump back to footnote 11 in the text">&#8617;</a></p>
+</li>
+<li id="fn:flowchart">
+<p>The flowchart below shows the control flow for the <code>FPTAN</code> microcode.
+The main blocks are the CORDIC pseudo-division, the rational approximation,
+and the CORDIC pseudo-multiplication. (Click it for a large image.)</p>
+<p><a href="https://static.righto.com/images/8087-fptan/flowchart.jpg"><img alt="Flowchart of the FPTAN microcode." class="hilite" height="988" src="https://static.righto.com/images/8087-fptan/flowchart-w400.jpg" title="Flowchart of the FPTAN microcode." width="400" /></a><div class="cite">Flowchart of the FPTAN microcode.</div></p>
+<p><!-- -->&#160;<a class="footnote-backref" href="#fnref:flowchart" title="Jump back to footnote 12 in the text">&#8617;</a></p>
+</li>
+<li id="fn:comparison">
+<p>The comparisons take multiple micro-instructions, for example, selecting a constant such as <code>0x3ff0</code> (recall that exponents are biased by 16383 or <code>0x3fff</code>, so <code>0x3ff0</code> corresponds to -15), moving the constant to the adder,
+subtracting the constant from the exponent, and branching on the result.&#160;<a class="footnote-backref" href="#fnref:comparison" title="Jump back to footnote 13 in the text">&#8617;</a></p>
+</li>
+<li id="fn:first-step">
+<p>The first step of the CORDIC algorithm (<code>#1061</code>-<code>#1068</code>) is handled separately.
+It took me a while to figure out why the first step of the CORDIC algorithm is special.
+The cause is that the CORDIC angles are close to <em>2<sup>-n</sup></em>, but not exactly.
+Thus, the number of CORDIC cycles does not change exactly when the exponent of the input angle changes.
+This is a problem because the number of pseudo-division cycles depends on the exponent,
+but the number of pseudo-multiplication cycles depends on the largest CORDIC angle used.
+Since the numbers are scaled in both loops, a mismatch in the number of cycles leaves
+the result off by a factor of 2. The first CORDIC step tests if the first CORDIC constant
+is used and increments the <code>tmpA</code> exponent by 1 to counteract this.
+(Don't worry if this doesn't make sense.)&#160;<a class="footnote-backref" href="#fnref:first-step" title="Jump back to footnote 14 in the text">&#8617;</a></p>
+</li>
+<li id="fn:rom-exponents">
+<p>The constant ROM in the 8087 holds the significands, but not the exponents.
+When I originally extracted the constants from the constant ROM, back in 2020 (<a href="https://www.righto.com/2020/05/extracting-rom-constants-from-8087-math.html">link</a>),
+I couldn't find the exponents, so I came up with plausible exponents that resulted in meaningful
+values.
+The 8087 has a separate exponent ROM.
+Now that I've examined the microcode, I can see that the exponents in the exponent ROM
+are unrelated to the significands in the constant ROM.
+I'm glad I didn't waste much time trying to figure out the exponents back then :-)&#160;<a class="footnote-backref" href="#fnref:rom-exponents" title="Jump back to footnote 15 in the text">&#8617;</a></p>
+</li>
+<li id="fn:details">
+<p>The following table shows the calculations at each step of the algorithm, using
+0.95 as the input.
+Note that the calculations are done with integer arithmetic;
+the exponents (gray) are not stored as part of the numbers, but
+are implied by the algorithm.
+The exponents change in each step, so as the values get smaller during the pseudo-division stage, the exponents
+get smaller too, ensuring that the values can use most of the available bits.
+The opposite happens during pseudo-multiplication: the values start off small and
+grow as the vector is rotated; the exponent is increased each step to counteract this.
+Unlike "real" floating-point numbers, the bit representations are not normalized; sometimes
+they have two 1 digits to the left of the binary point, and sometimes they
+have leading zeros.
+That is, the exponents are fixed for each step; they don't change based on the
+value.</p>
+<p></p>
+<p></p></p><div class="cordic"><table class="cordic">
+<tr><th>operation</th><th>bits</th><th>value</th><th>flag</th><th>reg</th></tr></p>
+<p><tr><td>load with θ</td><td><span>&nbsp;1.1110011…<span>×2<sup>-1</sup><span></span></td><td>0.9500</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>0</sup>)</td><td><span><span>&nbsp;1.1001001…</span><span>×2<sup>-1</sup><span></span></td><td><span>0.7854</span></td><td>1</td><td>const</td></tr>
+<tr><td>sub angle</td><td><span>&nbsp;0.0101010…<span>×2<sup>-1</sup><span></span></td><td>0.1646</td><td></td><td>tmpC</td></tr>
+<tr><td>shift left</td><td><span>&nbsp;0.1010100…<span>×2<sup>-2</sup><span></span></td><td>0.1646</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-1</sup>)</td><td><span><span>&nbsp;1.1101101…</span><span>×2<sup>-2</sup><span></span></td><td><span>0.4636</span></td><td>0</td><td>const</td></tr>
+<tr><td>shift left</td><td><span>&nbsp;1.0101000…<span>×2<sup>-3</sup><span></span></td><td>0.1646</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-2</sup>)</td><td><span><span>&nbsp;1.1111010…</span><span>×2<sup>-3</sup><span></span></td><td><span>0.2450</span></td><td>0</td><td>const</td></tr>
+<tr><td>shift left</td><td><span>10.1010001…<span>×2<sup>-4</sup><span></span></td><td>0.1646</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-3</sup>)</td><td><span><span>&nbsp;1.1111110…</span><span>×2<sup>-4</sup><span></span></td><td><span>0.1244</span></td><td>1</td><td>const</td></tr>
+<tr><td>sub angle</td><td><span>&nbsp;0.1010010…<span>×2<sup>-4</sup><span></span></td><td>0.04025</td><td></td><td>tmpC</td></tr>
+<tr><td>shift left</td><td><span>&nbsp;1.0100100…<span>×2<sup>-5</sup><span></span></td><td>0.04025</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-4</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-5</sup><span></span></td><td><span>0.06242</span></td><td>0</td><td>const</td></tr>
+<tr><td>shift left</td><td><span>10.1001001…<span>×2<sup>-6</sup><span></span></td><td>0.04025</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-5</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-6</sup><span></span></td><td><span>0.03124</span></td><td>1</td><td>const</td></tr>
+<tr><td>sub angle</td><td><span>&nbsp;0.1001001…<span>×2<sup>-6</sup><span></span></td><td>0.009007</td><td></td><td>tmpC</td></tr>
+<tr><td>shift left</td><td><span>&nbsp;1.0010011…<span>×2<sup>-7</sup><span></span></td><td>0.009007</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-6</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-7</sup><span></span></td><td><span>0.01562</span></td><td>0</td><td>const</td></tr>
+<tr><td>shift left</td><td><span>10.0100111…<span>×2<sup>-8</sup><span></span></td><td>0.009007</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-7</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-8</sup><span></span></td><td><span>0.007812</span></td><td>1</td><td>const</td></tr>
+<tr><td>sub angle</td><td><span>&nbsp;0.0100111…<span>×2<sup>-8</sup><span></span></td><td>0.001195</td><td></td><td>tmpC</td></tr>
+<tr><td>shift left</td><td><span>&nbsp;0.1001110…<span>×2<sup>-9</sup><span></span></td><td>0.001195</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-8</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-9</sup><span></span></td><td><span>0.003906</span></td><td>0</td><td>const</td></tr>
+<tr><td>shift left</td><td><span>&nbsp;1.0011100…<span>×2<sup>-10</sup><span></span></td><td>0.001195</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-9</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-10</sup><span></span></td><td><span>0.001953</span></td><td>0</td><td>const</td></tr>
+<tr><td>shift left</td><td><span>10.0111001…<span>×2<sup>-11</sup><span></span></td><td>0.001195</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-10</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-11</sup><span></span></td><td><span>0.0009766</span></td><td>1</td><td>const</td></tr>
+<tr><td>sub angle</td><td><span>&nbsp;0.0111001…<span>×2<sup>-11</sup><span></span></td><td>0.0002181</td><td></td><td>tmpC</td></tr>
+<tr><td>shift left</td><td><span>&nbsp;0.1110010…<span>×2<sup>-12</sup><span></span></td><td>0.0002181</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-11</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-12</sup><span></span></td><td><span>0.0004883</span></td><td>0</td><td>const</td></tr>
+<tr><td>shift left</td><td><span>&nbsp;1.1100100…<span>×2<sup>-13</sup><span></span></td><td>0.0002181</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-12</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-13</sup><span></span></td><td><span>0.0002441</span></td><td>0</td><td>const</td></tr>
+<tr><td>shift left</td><td><span>11.1001001…<span>×2<sup>-14</sup><span></span></td><td>0.0002181</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-13</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-14</sup><span></span></td><td><span>0.0001221</span></td><td>1</td><td>const</td></tr>
+<tr><td>sub angle</td><td><span>&nbsp;1.1001001…<span>×2<sup>-14</sup><span></span></td><td>0.00009604</td><td></td><td>tmpC</td></tr>
+<tr><td>shift left</td><td><span>11.0010010…<span>×2<sup>-15</sup><span></span></td><td>0.00009604</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-14</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-15</sup><span></span></td><td><span>0.00006104</span></td><td>1</td><td>const</td></tr>
+<tr><td>sub angle</td><td><span>&nbsp;1.0010010…<span>×2<sup>-15</sup><span></span></td><td>0.00003500</td><td></td><td>tmpC</td></tr>
+<tr><td>shift left</td><td><span>10.0100101…<span>×2<sup>-16</sup><span></span></td><td>0.00003500</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>cmp atan(2<sup>-15</sup>)</td><td><span><span>&nbsp;1.1111111…</span><span>×2<sup>-16</sup><span></span></td><td><span>0.00003052</span></td><td>1</td><td>const</td></tr>
+<tr><td>sub angle</td><td><span>&nbsp;0.0100101…<span>×2<sup>-16</sup><span></span></td><td>0.000004482</td><td></td><td>tmpC</td></tr>
+<tr class="top1"><td>X approx</td><td><span>&nbsp;1.0111111…<span>×2<sup>1</sup><span></span></td><td>3.0000</td><td></td><td>tmpB</td></tr>
+<tr class="bot1"><td>Y approx</td><td><span>&nbsp;0.0011100…<span>×2<sup>-14</sup><span></span></td><td>0.00001345</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>Y += 2<sup>-15</sup>X</td><td><span>&nbsp;1.1011100…<span>×2<sup>-14</sup><span></span></td><td>0.0001050</td><td>1</td><td>tmpC</td></tr>
+<tr><td>X -= 2<sup>-15</sup>Y<sub>old</sub></td><td><span>&nbsp;1.0111111…<span>×2<sup>1</sup><span></span></td><td>3.0000</td><td></td><td>tmpB</td></tr>
+<tr><td>shift right</td><td><span>&nbsp;0.1101110…<span>×2<sup>-13</sup><span></span></td><td>0.0001050</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>Y += 2<sup>-14</sup>X</td><td><span>10.0101110…<span>×2<sup>-13</sup><span></span></td><td>0.0002881</td><td>1</td><td>tmpC</td></tr>
+<tr><td>X -= 2<sup>-14</sup>Y<sub>old</sub></td><td><span>&nbsp;1.0111111…<span>×2<sup>1</sup><span></span></td><td>3.0000</td><td></td><td>tmpB</td></tr>
+<tr><td>shift right</td><td><span>&nbsp;1.0010111…<span>×2<sup>-12</sup><span></span></td><td>0.0002881</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>Y += 2<sup>-13</sup>X</td><td><span>10.1010111…<span>×2<sup>-12</sup><span></span></td><td>0.0006543</td><td>1</td><td>tmpC</td></tr>
+<tr><td>X -= 2<sup>-13</sup>Y<sub>old</sub></td><td><span>&nbsp;1.0111111…<span>×2<sup>1</sup><span></span></td><td>3.0000</td><td></td><td>tmpB</td></tr>
+<tr><td>shift right</td><td><span>&nbsp;1.0101011…<span>×2<sup>-11</sup><span></span></td><td>0.0006543</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>shift right</td><td><span>&nbsp;0.1010101…<span>×2<sup>-10</sup><span></span></td><td>0.0006543</td><td>0</td><td>tmpC</td></tr>
+<tr class="top"><td>shift right</td><td><span>&nbsp;0.0101010…<span>×2<sup>-9</sup><span></span></td><td>0.0006543</td><td>0</td><td>tmpC</td></tr>
+<tr class="top"><td>Y += 2<sup>-10</sup>X</td><td><span>&nbsp;1.1101010…<span>×2<sup>-9</sup><span></span></td><td>0.003584</td><td>1</td><td>tmpC</td></tr>
+<tr><td>X -= 2<sup>-10</sup>Y<sub>old</sub></td><td><span>&nbsp;1.0111111…<span>×2<sup>1</sup><span></span></td><td>3.0000</td><td></td><td>tmpB</td></tr>
+<tr><td>shift right</td><td><span>&nbsp;0.1110101…<span>×2<sup>-8</sup><span></span></td><td>0.003584</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>shift right</td><td><span>&nbsp;0.0111010…<span>×2<sup>-7</sup><span></span></td><td>0.003584</td><td>0</td><td>tmpC</td></tr>
+<tr class="top"><td>shift right</td><td><span>&nbsp;0.0011101…<span>×2<sup>-6</sup><span></span></td><td>0.003584</td><td>0</td><td>tmpC</td></tr>
+<tr class="top"><td>Y += 2<sup>-7</sup>X</td><td><span>&nbsp;1.1011101…<span>×2<sup>-6</sup><span></span></td><td>0.02702</td><td>1</td><td>tmpC</td></tr>
+<tr><td>X -= 2<sup>-7</sup>Y<sub>old</sub></td><td><span>&nbsp;1.0111111…<span>×2<sup>1</sup><span></span></td><td>3.0000</td><td></td><td>tmpB</td></tr>
+<tr><td>shift right</td><td><span>&nbsp;0.1101110…<span>×2<sup>-5</sup><span></span></td><td>0.02702</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>shift right</td><td><span>&nbsp;0.0110111…<span>×2<sup>-4</sup><span></span></td><td>0.02702</td><td>0</td><td>tmpC</td></tr>
+<tr class="top"><td>Y += 2<sup>-5</sup>X</td><td><span>&nbsp;1.1110111…<span>×2<sup>-4</sup><span></span></td><td>0.1208</td><td>1</td><td>tmpC</td></tr>
+<tr><td>X -= 2<sup>-5</sup>Y<sub>old</sub></td><td><span>&nbsp;1.0111111…<span>×2<sup>1</sup><span></span></td><td>2.9991</td><td></td><td>tmpB</td></tr>
+<tr><td>shift right</td><td><span>&nbsp;0.1111011…<span>×2<sup>-3</sup><span></span></td><td>0.1208</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>shift right</td><td><span>&nbsp;0.0111101…<span>×2<sup>-2</sup><span></span></td><td>0.1208</td><td>0</td><td>tmpC</td></tr>
+<tr class="top"><td>Y += 2<sup>-3</sup>X</td><td><span>&nbsp;1.1111101…<span>×2<sup>-2</sup><span></span></td><td>0.4957</td><td>1</td><td>tmpC</td></tr>
+<tr><td>X -= 2<sup>-3</sup>Y<sub>old</sub></td><td><span>&nbsp;1.0111110…<span>×2<sup>1</sup><span></span></td><td>2.9840</td><td></td><td>tmpB</td></tr>
+<tr><td>shift right</td><td><span>&nbsp;0.1111110…<span>×2<sup>-1</sup><span></span></td><td>0.4957</td><td></td><td>tmpC</td></tr>
+<tr class="top"><td>shift right</td><td><span>&nbsp;0.0111111…<span>×2<sup>0</sup><span></span></td><td>0.4957</td><td>0</td><td>tmpC</td></tr>
+<tr class="top"><td>shift right</td><td><span>&nbsp;0.0011111…<span>×2<sup>1</sup><span></span></td><td>0.4957</td><td>0</td><td>tmpC</td></tr>
+<tr class="top"><td>Y += 2<sup>0</sup>X</td><td><span>&nbsp;1.1011110…<span>×2<sup>1</sup><span></span></td><td>3.4797</td><td>1</td><td>tmpC</td></tr>
+<tr><td>X -= 2<sup>0</sup>Y<sub>old</sub></td><td><span>&nbsp;1.0011111…<span>×2<sup>1</sup><span></span></td><td>2.4884</td><td></td><td>tmpB</td></tr>
+<tr><td>final X</td><td><span>&nbsp;1.0011111…<span>×2<sup>1</sup><span></span></td><td>2.4884</td><td></td><td>tmpB</td></tr>
+<tr><td>final Y</td><td><span>&nbsp;1.1011110…<span>×2<sup>1</sup><span></span></td><td>3.4797</td><td></td><td>tmpA</td></tr>
+</table>
+</div>&#160;<a class="footnote-backref" href="#fnref:details" title="Jump back to footnote 16 in the text">&#8617;</a><a class="footnote-backref" href="#fnref2:details" title="Jump back to footnote 16 in the text">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
