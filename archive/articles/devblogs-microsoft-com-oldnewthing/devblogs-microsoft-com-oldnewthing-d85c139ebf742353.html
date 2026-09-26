@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Debugging walkthrough: Access violation on nonsense instruction, episode 3 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Debugging walkthrough: Access violation on nonsense instruction, episode 3</h1>
+        <div class="meta">The Old New Thing 2026-09-25T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260925-00/?p=112731/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-d85c139ebf742353.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Trying to figure out what the interloper was trying to. The post Debugging walkthrough: Access violation on nonsense instruction, episode 3 appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>A customer reported that their employees were randomly getting &#8220;memory write errors&#8221;.</p>
+<p>This was their way of interpreting <a title="Why does the access violation error message put the operation in quotation marks, redux" href="https://devblogs.microsoft.com/oldnewthing/20151106-00/?p=92012"> the error message</a></p>
+<blockquote class="q"><p>The instruction at &#8220;XX&#8221; referenced memory at &#8220;YY&#8221;. The memory could not be &#8220;written&#8221;.</p></blockquote>
+<p>Okay, so what we have here is an access violation.</p>
+<p>The strange thing was that this access violation was happening across multiple unrelated programs, rather than all occurring in a single program or family of programs. So there is some sort of broader problem here, rather than just a single buggy program.</p>
+<p>Opening one of the crash dumps shows this:</p>
+<pre>eax=0013d354 ebx=0049a000 ecx=009e9a9f edx=03111160 esi=009e9aa0 edi=009e9aa0
+eip=009e9aa7 esp=003cfda4 ebp=003cfdb0 iopl=0         nv up ei pl nz ac pe cy
+cs=0023  ss=002b  ds=002b  es=002b  fs=0053  gs=002b             efl=00010217
+WerFault!wmainCRTStartup+0x7:
+009e9aa7 0000            add     byte ptr [eax],al          ds:002b:0013d354=??
+0:000&gt;
+</pre>
+<p>That <code>add byte ptr [eax], al</code> should immediately tell you that we are not executing valid code: <a title="Debugging walkthrough: Access violation on nonsense instruction, episode 2" href="https://devblogs.microsoft.com/oldnewthing/20150313-00/?p=44473"> It is the instruction that you get if you try to execute zeroes</a>. You can see the zeroes in the second column.</p>
+<p>All of the crash dumps look like this, just with different process names.</p>
+<p>Let&#8217;s disassemble from the start of the function to see how we got here.</p>
+<pre>0:000&gt; u .-7
+WerFault!wmainCRTStartup:
+009e9aa0 90              nop
+009e9aa1 49              dec     ecx
+009e9aa2 ba6011f102      mov     edx,2F11160h
+009e9aa7 0000            add     byte ptr [eax],al ← died here
+009e9aa9 0000            add     byte ptr [eax],al
+009e9aab 41              inc     ecx
+009e9aac ffe2            jmp     edx
+009e9aae cc              int     3
+</pre>
+<p>This doesn&#8217;t look like the proper start of a function.</p>
+<p>I mean, one clue is that it starts with a single-byte <code>nop</code>, rather than a <a title="Why do Windows functions all begin with a pointless MOV EDI, EDI instruction?" href="https://devblogs.microsoft.com/oldnewthing/20110921-00/?p=9583"> <code>mov edi, edi</code>, as is customary for x86-32 code</a>.¹</p>
+<p>And then of course there is the chunk of four <code>00</code> bytes in the middle of the instruction stream.</p>
+<p>What I thought was interesting is that if you take out those four <code>00</code> bytes, then the <code>dec ecx</code> and <code>inc ecx</code> cancel out, and what&#8217;s left looks like a detour: It loads an absolute address into <code>edx</code> and then jumps to it.</p>
+<p>This looks to me like a failed attempt to detour the function. The next step is to try to figure out what they were trying to do.</p>
+<p>Well, it looks like it&#8217;s trying to detour to a function at <code>0x02f11160</code>, so let&#8217;s see what the debugger can tell us about that.</p>
+<pre>0:000&gt; !address 0x2f11160
+
+Usage:              &lt;unknown&gt;
+Base address:       02f11000
+End address:        02f12000
+Region Size:        00001000 (4.000 kB)
+State:              00001000 MEM_COMMIT
+Protect:            00000020 PAGE_EXECUTE_READ
+Type:               00020000 MEM_PRIVATE
+Allocation Base:    02f10000
+Allocation Protect: 00000004 PAGE_READWRITE
+</pre>
+<p>So this is a mystery 4KB allocation of executable memory.</p>
+<p>Maybe there are some interesting strings in that memory block.</p>
+<pre>0:000&gt; !strings 02f11000 02f12000
+02f11080 --------
+02f11148 ----------------
+02f11472 C:\Program Files\Common Files\Contoso\injcore.dll
+02f11545 IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
+</pre>
+<p>Okay, well, that path to a DLL kind of catches them red-handed. I bet the &#8220;inj&#8221; stands for &#8220;injection&#8221;. But what were they trying to do?</p>
+<p>I figured, &#8220;Hm, the extra four zero bytes come right after the constant they were trying to load, so if I change the <code>mov edx</code> to a <code>mov rdx</code>, it would be the upper half of a 64-bit constant, and then this would look okay again.</p>
+<p>Now, this is a 32-bit process (evidenced by the 32-bit instruction pointer), so there is no <code>mov rdx</code> instruction. That instruction requires a 64-bit process.</p>
+<p>But wait, what if they got confused and <i>thought</i> it was a 64-bit process?</p>
+<p>Let&#8217;s disassemble these bytes as if they had been injected into a 64-bit process.</p>
+<p>The way I do this is to load up a sacrificial 64-bit debug session and just patch into it the bytes that I want to study. For poetic irony, I will load the 64-bit <tt>WerFault.exe</tt> into the debugger as a dump file.</p>
+<pre>C:\&gt; windbgx -z C:\Windows\System32\WerFault.exe
+
+Executable search path is: 
+ModLoad: 00000001`40000000 00000001`400a1000   C:\Windows\System32\WerFault.exe
+WerFault!wmainCRTStartup:
+00000001`40002480 sub     rsp,28h
+0:000&gt; eb . 90 49 ba 60 11 f1 02 00 00 00 00 41 ff e2 cc
+0:000&gt; u .
+WerFault!wmainCRTStartup
+00000001`40002480 nop
+00000001`40002481 mov     r10,2F11160h
+00000001`4000248b jmp     r10
+00000001`4000248e int     3
+</pre>
+<p>Okay, now it makes much more sense. This is a 64-bit detour that loads an absolute jump target into a 64-bit register (<code>r10</code>) and then jumps to it.</p>
+<p>They injected 64-bit code into a 32-bit process!</p>
+<p>This also explains why the crashes are sporadic: The customer&#8217;s employees run 64-bit processes most of the time, but on occasion, something will run a 32-bit process, and those are the ones that are crashing.</p>
+<p>Upon further discussion with the customer, we learned that Contoso is an anti-malware program that they use. <a title="Tricks from product support: We're not smart enough to debug the problem, can you help us?" href="https://devblogs.microsoft.com/oldnewthing/20241203-00/?p=110601"> We advised them to disable it temporarily</a> to confirm that it was the source of the problem, but they didn&#8217;t want to disable their anti-malware software.</p>
+<p>Okay, so we advised them to check with the vendor to see if an update is available. They were resistant to changing their anti-malware software without first putting it through their internal validation. They considered this a Windows problem, and they demanded a Windows solution.</p>
+<p>We are still working to convince the customer that they need to re-evaluate their anti-malware software.²</p>
+<p>¹ Even if this were a 64-bit process, <a title="Why don't Windows functions begin with a pointless MOV EDI,EDI instruction on x86-64?" href="https://devblogs.microsoft.com/oldnewthing/20221109-00/?p=107373"> Windows components don&#8217;t begin functions with a single-byte <code>nop</code> or any other single-byte instruction</a>. It would use a two-byte <code>nop</code> if it uses one at all.</p>
+<p>² This is a downside of communicating with the customer through a customer liaison: My colleague explained that relaying this level of detail through a customer liaison who is not sufficiently technical to be familar with debugging puts us at a disadvantage because the liaison can&#8217;t stand up to the customer pushback. This is a case where we may have to let the engineers talk directly to the customer.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260925-00/?p=112731/">Debugging walkthrough: Access violation on nonsense instruction, episode 3</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
