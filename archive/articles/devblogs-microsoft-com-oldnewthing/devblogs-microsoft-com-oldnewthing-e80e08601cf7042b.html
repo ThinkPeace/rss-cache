@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>C++ reminder: Function-local static variables are initialized only once, even if it looks like they get initialized multiple times | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>C++ reminder: Function-local static variables are initialized only once, even if it looks like they get initialized multiple times</h1>
+        <div class="meta">The Old New Thing 2026-09-28T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20260928-00/?p=112738/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-e80e08601cf7042b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Only on first execution. The post C++ reminder: Function-local static variables are initialized only once, even if it looks like they get initialized multiple times appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>When you write a static variable inside a function, it is initialized only once, specifically <a title="Magic statics vs. std::call_once" href="https://devblogs.microsoft.com/oldnewthing/20260916-00/?p=112703"> at the first time that execution reaches the variable&#8217;s declaration</a>, If execution reaches the variable again in the future, no initialization occurs. It just retains its old value.</p>
+<p>Some time ago, I noted an attempt to fix a lifetime issue by making a variable static.</p>
+<p>The original code used this header from an external widget library:</p>
+<pre>// widget.h
+struct WidgetController
+{
+    virtual WidgetKind GetKind() = 0;
+    virtual WidgetFlags GetFlags() = 0;
+    virtual void OnOpening() = 0;
+    ⟦ and so on ⟧
+};
+
+std::shared_ptr&lt;Widget&gt;
+    MakeWidget(std::shared_ptr&lt;WidgetController&gt; const&amp; controller);
+</pre>
+<p>The idea is that you give it a <code>Widget­Controller</code> object that the widget consults at various times, allowing you to customize the widget behavior.</p>
+<p>The application code called it like this:</p>
+<pre>// The basic Widget controller provides information but
+// does not override any default behaviors.
+
+struct BasicWidgetInfo
+{
+    WidgetKind kind;
+    WidgetFlags flags;
+    ⟦ and so on ⟧
+};
+
+struct BasicWidgetController : WidgetController
+{
+    BasicWidgetController(BasicWidgetInfo const&amp; info) :
+        m_info(info) {}
+
+    WidgetKind GetKind() override { return m_info.kind; }
+    WidgetFlags GetFlags() override { return m_info.flags; }
+
+    // Do not customize any dynamic actions.
+    void OnOpening() override { }
+    ⟦ and so on ⟧
+
+private:
+    BasicWidgetInfo const&amp; m_info;
+}
+
+struct Gadget
+{
+    std::shared_ptr&lt;Widget&gt; m_widget;
+
+    void CreateWidget(GadgetFlags flags)
+    {
+        BasicWidgetInfo info = {
+            WidgetKind::Vanilla,
+            WidgetFlags::Openable |
+            (flags &amp; GadgetFlags::ClosableWidget ?
+                WidgetFlags::Closable : WidgetFlags::None)
+        };
+
+        auto controller = std::make_shared&lt;BasicWidgetController&gt;(info);
+
+        m_widget = MakeWidget(controller);
+    }
+
+    ⟦ other gadget stuff ⟧
+};
+</pre>
+<p>The catch is that the <code>Widget­Options</code> constructor takes a reference to a <code>Gadget­Options</code> and saves the reference. Later, when the widget asks the controller for the flags, the controller will look up the answer in the <code>BasicWidgetInfo</code> structure, but that <code>BasicWidgetInfo</code> had already destructed when <code>Create­Custom­Widget</code> returned, so it returns garbage (or possibly even crashes).</p>
+<p>This is a use-after-free bug.</p>
+<p>To solve this problem, they made the <code>info</code> static. Static objects continue to exist even after the function returns.</p>
+<pre>    void CreateWidget(GadgetFlags flags)
+    {
+        <span>static</span> BasicWidgetInfo info = {
+            WidgetKind::Vanilla,
+            WidgetFlags::Openable |
+            (flags &amp; GadgetFlags::ClosableWidget ?
+                WidgetFlags::Closable : WidgetFlags::None)
+        };
+
+        auto controller = std::make_shared&lt;BasicWidgetController&gt;(info);
+
+        m_widget = MakeWidget(controller);
+    }
+</pre>
+<p>Now the program doesn&#8217;t crash. Yay!</p>
+<p>However, there is a catch: If two Gadgets both try to create a widget, all of them will have the same options as the first one, because function-local static variables are shared among all instances of a class and are initialized only the first time execution reaches the variable. Whatever flags were passed when you called it the first time get locked into the <code>info</code>, and it doesn&#8217;t matter what flags you pass subsequent times because <code>info</code> has already been initialized; it&#8217;s not going to initialize again.</p>
+<p>If you want it to initialize each time, then you have to modify it each time.</p>
+<pre>    void CreateWidget(GadgetFlags flags)
+    {
+        <span>static BasicWidgetInfo info;</span>
+        <span>info = {                    </span>
+            WidgetKind::Vanilla,
+            WidgetFlags::Openable |
+            (flags &amp; GadgetFlags::ClosableWidget ?
+                WidgetFlags::Closable : WidgetFlags::None)
+        };
+
+        auto controller = std::make_shared&lt;BasicWidgetController&gt;(info);
+
+        m_widget = MakeWidget(controller);
+    }
+</pre>
+<p>This time, we set the values as a step separate from construction, which means that it executes each time, and the <code>info</code> gets updated with the most recent flags.</p>
+<p>Of course, this is still a problem if two Gadgets create Widgets with overlapping lifetime, because the two <code>Basic­Widget­Controller</code>s are sharing the same <code>info</code>. At the second call to <code>Create­Widget</code>, its updates to <code>info</code> secretly alter the values being used by the first one.</p>
+<p>Plus, of course, if <code>Create­Widget</code> is called by two threads simultaneously, you have a data race on the writes to the <code>info</code> variable, and then the results will be unpredictable.</p>
+<p>The underlying problem is that the <code>Basic­Widget­Controller</code> wants to extend the lifetime of its <code>info</code>, but a reference gives you no way to do it, so it has to rely on the kindness of strangers.</p>
+<p>One idea would be to put the <code>info</code> somewhere else, so that its lifetime can be extended some other way. Maybe you put it in the <code>Gadget</code>:</p>
+<pre>struct Gadget
+{
+    std::shared_ptr&lt;Widget&gt; m_widget;
+    <span>BasicWidgetInfo m_info;</span>
+
+    void CreateWidget(GadgetFlags flags)
+    {
+        <span>m_info = {</span>
+            WidgetKind::Vanilla,
+            WidgetFlags::Openable |
+            (flags &amp; GadgetFlags::ClosableWidget ?
+                WidgetFlags::Closable : WidgetFlags::None)
+        };
+
+        auto controller = std::make_shared&lt;BasicWidgetController&gt;(<span>m_info</span>);
+
+        m_widget = MakeWidget(controller);
+    }
+
+    ⟦ other gadget stuff ⟧
+};
+</pre>
+<p>Now your job is to make sure that the <code>m_info</code> is not destructed before the last shared pointer to the <code>Basic­Widget­Controller</code>. This is tricky, since you don&#8217;t really know when the last shared pointer to the <code>Basic­Widget­Controller</code> will be destructed, although you might have some heuristics given that its lifetime is probably tied to the <code>Widget</code>.</p>
+<p>Is there a way to hook into the destruction of the final <code>shared_ptr</code>?</p>
+<p>Yes, and in fact we already used that feature without realizing it.</p>
+<p>You can use an aliasing shared pointer that points at a <code>Basic­Widget­Controller</code> but whose lifetime controls both a <code>Basic­Widget­Controller</code> and its associated <code>Basic­Widget­Info</code>.</p>
+<pre>struct BasicWidgetControllerWithInfo
+{
+    BasicWidgetControllerWithInfo(BasicWidgetInfo const&amp; info) :
+        m_info(info),
+        m_controller(m_info) {}
+
+    // The m_info must come before the m_controller because the
+    // m_controller initializer depends on the m_info.
+    BasicWidgetInfo m_info;
+    BasicWidgetController m_controller;
+};
+
+    void CreateWidget(GadgetFlags flags)
+    {
+        BasicWidgetInfo info = {
+            WidgetKind::Vanilla,
+            WidgetFlags::Openable |
+            (flags &amp; GadgetFlags::ClosableWidget ?
+                WidgetFlags::Closable : WidgetFlags::None)
+        };
+
+        auto controllerAndInfo = std::make_shared&lt;BasicWidgetControllerWithInfo(info);
+
+        <span>auto controller = std::shared_ptr&lt;BasicWidgetController&gt;(</span>
+        <span>    controllerAndInfo, &amp;controllerAndInfo-&gt;m_controller);</span>
+
+        m_widget = MakeWidget(controller);
+    }
+
+    ⟦ other gadget stuff ⟧
+};
+</pre>
+<p>We use an aliasing constructor with a pointer to the controller, but telling it to control the lifetime of the <code>Basic­Widget­Controller­With­Info</code>.</p>
+<p>Of course, all of this is a problem of the application&#8217;s own creation. They should just fix the <code>Basic­Widget­Controller</code> to <i>copy</i> the <code>Basic­Widget­Info</code> instead of taking a reference.</p>
+<pre>struct BasicWidgetController : WidgetController
+{
+    BasicWidgetController(BasicWidgetInfo const&amp; info) :
+        m_info(info) {}
+
+    WidgetKind GetKind() override { return m_info.kind; }
+    WidgetFlags GetFlags() override { return m_info.flags; }
+
+    // Do not customize any dynamic actions.
+    void OnOpening() override { }
+    ⟦ and so on ⟧
+
+private:
+    BasicWidgetInfo <span>/* <span>const&amp;</span> */</span> m_info;
+}
+</pre>
+<p>Now the original code works again.</p>
+<pre>    void CreateWidget(GadgetFlags flags)
+    {
+        BasicWidgetInfo info = {
+            WidgetKind::Vanilla,
+            WidgetFlags::Openable |
+            (flags &amp; GadgetFlags::ClosableWidget ?
+                WidgetFlags::Closable : WidgetFlags::None)
+        };
+
+        auto controller = std::make_shared&lt;BasicWidgetController&gt;(info);
+
+        m_widget = MakeWidget(controller);
+    }
+</pre>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20260928-00/?p=112738/">C++ reminder: Function-local static variables are initialized only once, even if it looks like they get initialized multiple times</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
