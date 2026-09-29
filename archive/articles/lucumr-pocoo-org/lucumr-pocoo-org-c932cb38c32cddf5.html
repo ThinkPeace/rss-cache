@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deser: Rethinking Rust Serialization | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Deser: Rethinking Rust Serialization</h1>
+        <div class="meta">Armin Ronacher&#x27;s Thoughts and Writings 2026-09-29T00:00:00Z</div>
+        <div class="links">
+          <a href="https://lucumr.pocoo.org/2026/9/29/deser/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/lucumr-pocoo-org/lucumr-pocoo-org-c932cb38c32cddf5.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Serde is an amazing serialization library for Rust and it has been a huge reason why I felt productive with it for years. However already while at Sentry I got quite frustrated with some of the limitations with it but actually replacing Serde is tricky because of the might that it has in the ecosystem. Also because it’s quite hard to actually do better with…</div>
+        <div class="content">
+          <p><a href="https://serde.rs/">Serde</a> is an amazing serialization library for Rust and it
+has been a huge reason why I felt productive with it for years.  However already
+while at Sentry I got quite frustrated with some of the limitations with it but
+actually replacing Serde is tricky because of the might that it has in the
+ecosystem.  Also because it&#8217;s quite hard to actually do better without also
+making some potentially painful compromises.</p>
+<p>Here are three examples of Serde corner cases that show poor interactions of
+Serde features or unexpected limitations:</p>
+<details><summary>A number that is a map</summary>
+<p>An internally tagged enum, with <code>serde_json</code>&#8216;s <code>arbitrary_precision</code> feature
+turned on:</p>
+<div class="highlight"><pre><span></span><span class="cp">#[derive(Deserialize)]</span>
+<span class="cp">#[serde(tag = </span><span class="s">&quot;type&quot;</span><span class="cp">)]</span>
+<span class="k">enum</span><span class="w"> </span><span class="nc">Shape</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Circle</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">radius</span><span class="p">:</span><span class="w"> </span><span class="kt">f64</span><span class="w"> </span><span class="p">},</span>
+<span class="p">}</span>
+
+<span class="n">serde_json</span><span class="p">::</span><span class="n">from_str</span><span class="p">::</span><span class="o">&lt;</span><span class="n">Shape</span><span class="o">&gt;</span><span class="p">(</span><span class="s">r#&quot;{&quot;type&quot;: &quot;Circle&quot;, &quot;radius&quot;: 1.5}&quot;#</span><span class="p">)</span>
+<span class="c1">// error: invalid type: map, expected f64</span>
+</pre></div>
+<p>Serde&#8217;s data model has no place for arbitrary precision numbers, so <code>serde_json</code>
+uses in-band signalling with a map with a magic key.  The enum has to buffer the
+fields until it has seen the tag, and the buffer does not know about the magic
+key.  Because Cargo features are unified, it&#8217;s enough for any crate in your
+dependency graph to turn the feature on.</p>
+</details>
+<details><summary>Flattening breaks integer keys</summary>
+<div class="highlight"><pre><span></span><span class="cp">#[derive(Deserialize)]</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Stats</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">scores</span><span class="p">:</span><span class="w"> </span><span class="nc">HashMap</span><span class="o">&lt;</span><span class="kt">u32</span><span class="p">,</span><span class="w"> </span><span class="kt">u32</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="cp">#[derive(Deserialize)]</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Report</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">name</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<span class="w">    </span><span class="cp">#[serde(flatten)]</span>
+<span class="w">    </span><span class="n">stats</span><span class="p">:</span><span class="w"> </span><span class="nc">Stats</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="n">serde_json</span><span class="p">::</span><span class="n">from_str</span><span class="p">::</span><span class="o">&lt;</span><span class="n">Report</span><span class="o">&gt;</span><span class="p">(</span><span class="s">r#&quot;{&quot;name&quot;: &quot;x&quot;, &quot;scores&quot;: {&quot;42&quot;: 23}}&quot;#</span><span class="p">)</span>
+<span class="c1">// error: invalid type: string &quot;42&quot;, expected u32 at line 1 column 35</span>
+</pre></div>
+<p><code>Stats</code> on its own parses <code>{&quot;scores&quot;: {&quot;42&quot;: 23}}</code> just fine.  JSON keys are
+always strings, and <code>serde_json</code> only turns them into integers if the type asks
+for one.  However once <code>flatten</code> buffers the value, <code>&quot;42&quot;</code> is just a string.
+The error also points at the end of the document rather than at the key.</p>
+</details>
+<details><summary>Adapters do not compose</summary>
+<div class="highlight"><pre><span></span><span class="k">fn</span><span class="w"> </span><span class="nf">from_hex</span><span class="o">&lt;&#39;</span><span class="na">de</span><span class="p">,</span><span class="w"> </span><span class="n">D</span><span class="p">:</span><span class="w"> </span><span class="nc">Deserializer</span><span class="o">&lt;&#39;</span><span class="na">de</span><span class="o">&gt;&gt;</span><span class="p">(</span><span class="n">d</span><span class="p">:</span><span class="w"> </span><span class="nc">D</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="kt">u32</span><span class="p">,</span><span class="w"> </span><span class="n">D</span><span class="p">::</span><span class="n">Error</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">..</span><span class="p">.</span><span class="w"> </span><span class="p">}</span>
+
+<span class="cp">#[derive(Deserialize)]</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Theme</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cp">#[serde(deserialize_with = </span><span class="s">&quot;from_hex&quot;</span><span class="cp">)]</span>
+<span class="w">    </span><span class="n">primary</span><span class="p">:</span><span class="w"> </span><span class="kt">u32</span><span class="p">,</span>
+<span class="w">    </span><span class="cp">#[serde(deserialize_with = </span><span class="s">&quot;from_hex&quot;</span><span class="cp">)]</span>
+<span class="w">    </span><span class="n">accent</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="kt">u32</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1">//error[E0308]: `?` operator has incompatible types</span>
+<span class="c1">//  |</span>
+<span class="c1">//  |     #[serde(deserialize_with = &quot;from_hex&quot;)]</span>
+<span class="c1">//  |                                ^^^^^^^^^^ expected `Option&lt;u32&gt;`, found `u32`</span>
+<span class="c1">//  |</span>
+<span class="c1">//help: try wrapping the expression in `Some`</span>
+<span class="c1">//  |</span>
+<span class="c1">//  |     #[serde(deserialize_with = Some(&quot;from_hex&quot;))]</span>
+<span class="c1">//  |                                +++++          +</span>
+</pre></div>
+<p>A function cannot be passed as a type parameter, so there is no way to apply
+<code>from_hex</code> to the inside of an <code>Option</code>, a <code>Vec</code> or a map.  You write another
+function for every wrapper, and once you have <code>from_opt_hex</code> the field is no
+longer optional unless you also remember to add <code>#[serde(default)]</code>.</p>
+</details>
+<p>None of these are bugs that are easy to fix in Serde.  They fall out of its
+design, and that design is protected by Serde&#8217;s stability guarantees.</p>
+<p>Back in 2022 I started an experiment called
+<a href="https://github.com/mitsuhiko/deser">Deser</a>.  It&#8217;s a serialization library for
+Rust that takes the user experience of <a href="https://serde.rs/">Serde</a> and puts it on
+top of a completely different architecture inspired by
+<a href="https://github.com/dtolnay/miniserde">miniserde</a>.  I never really finished it
+and it sat around for a few years.  I picked it back up, and it has now reached
+a point where I think it&#8217;s worth looking at.  Even just to inspire others to
+see if they want to explore the space.</p>
+<h2>The Name And Idea</h2>
+<p>The name is Serde with its two halves swapped.  Deser is Serde but the other way
+around.  In Serde, a type drives the deserialization process: a <code>Deserialize</code>
+impl asks the deserializer for the kind of value it expects, the format calls
+back into a visitor.  Every nested value is handled by recursion which makes
+Serde deserialization inherently grow the stack with each level of nesting.</p>
+<p>Deser on the other hand turns this around and the format tells the type of the
+next value and pushes events into a sink.  When a sink hits the start of a
+nested value, it doesn&#8217;t call into it but hands back a new sink to a driver,
+which keeps all state on the heap (in fact, in an arena).  On the way out,
+emitters return their nested values instead of recursing into them.</p>
+<p>That also means that Deser cannot support formats like protobuf that are not
+self describing.  They are in fact quite intentionally left out of the design
+entirely.  Which is one way to say: if you want to &#8220;fix&#8221; Serde, you need to
+make some other compromises.</p>
+<p>Most of the reasons for Deser&#8217;s ideas go back to <a href="https://github.com/getsentry/relay">Sentry
+Relay</a>, which processes enormous amounts of
+untrusted JSON.  Over the years when I was at Sentry we ran into the same set of
+problems again and again, and many of them are not really bugs in Serde but
+consequences of its design.  Serde&#8217;s stability guarantees mean that a lot of
+them cannot be fixed without breaking every format and every hand written
+implementation.  Most of these problems come from three decisions:</p>
+<ol>
+<li>
+<p><strong>One set of traits for all formats.</strong>  Serde serves both self describing
+formats (JSON, YAML, TOML, …) and formats where the reader has to know the
+type upfront (postcard, bincode, protobuf, …).  That is incredibly useful,
+but it means that some features only work with some formats, and you find out
+at runtime.  In case of Serde it also has some odd wrinkles where a derived
+struct quietly accepts an array in place of an object in JSON for instance.</p>
+</li>
+<li>
+<p><strong>A fixed data model that loses information when buffering.</strong>  Internally
+tagged enums, untagged enums and <code>flatten</code> need to buffer values before
+they know what to do with them.  The buffer can&#8217;t hold everything the format
+knew, errors lose their location and extensions to the ecosystem rely on
+in-band signalling to express things such as arbitrary precision numbers.</p>
+</li>
+<li>
+<p><strong>Recursion on the call stack.</strong>  Every level of nesting uses stack space.
+Formats protect against this with a recursion limit, but the moment you go
+through a code path that doesn&#8217;t have one (writing, dynamic values), deeply
+nested data can take down your process.  It also means that a
+deserialization cannot be paused while you wait for more input.</p>
+</li>
+</ol>
+<p>Many of the corresponding Serde issues have been open for years, and I wrote
+about <a href="/2021/11/14/abusing-serde/">abusing Serde</a> before.  People have tried
+different angles on this over the years.  Some went minimal and dropped most
+features to get fast compiles and no recursion.  dtolnay&#8217;s own
+<a href="https://github.com/dtolnay/miniserde">miniserde</a> is the best example of that,
+and deser&#8217;s trait design was originally modelled after it.  Other recent
+attempts went for runtime reflection, or for a new data model with a focus on
+binary formats.</p>
+<p>If you want to read up on all of the collected challenges with Serde&#8217;s design,
+I maintain <a href="https://github.com/mitsuhiko/deser/blob/main/SERDE.md">a lengthy list here</a>.</p>
+<h2>Dethroning Serde</h2>
+<p>First of all I don&#8217;t think it&#8217;s likely that one can replace Serde.  <a href="https://smallcultfollowing.com/babysteps/blog/2022/04/17/coherence-and-crate-level-where-clauses/">The orphan
+rule</a>
+entrenches Serde incredibly well in the ecosystem.  But some things are within
+the reach of a crate author&#8217;s control.  In case of Deser it&#8217;s completeness.</p>
+<p>Deser today implements all important self describing formats from YAML, JSON,
+TOML, CBOR, JSON5 and the likes, but also XML and plist to really close the gap.
+XML in particular is something Serde has declined to support, and it shows
+(more on that below).  At the very least format support should not be the
+reason not to use Deser.</p>
+<p>The second problem usually is that actually solving Serde&#8217;s issues comes at a
+significant cost in compile time and/or runtime performance.  Deser is no
+different.  While Deser&#8217;s compile times are a bit better than Serde&#8217;s, the
+binary bloat is quite a bit worse and the runtime performance is mixed.  It&#8217;s
+roughly comparable if you look at the numbers but depending on the format
+structure you are losing significantly from some of the tradeoffs.</p>
+<p>That said, it&#8217;s now in a state where it&#8217;s at least in principle a drop-in
+replacement where the tradeoffs might work well for users.</p>
+<h2>Deser&#8217;s Design</h2>
+<p>Deser does not try to be significantly different than Serde on the surface
+level.  For most uses you derive <code>Serialize</code> and <code>Deserialize</code> and then start
+using it with your format implementing crate of choice.  Most attributes are
+very similar, though they are taking Rust expressions instead of strings.</p>
+<div class="highlight"><pre><span></span><span class="k">use</span><span class="w"> </span><span class="n">deser</span><span class="p">::{</span><span class="n">Serialize</span><span class="p">,</span><span class="w"> </span><span class="n">Deserialize</span><span class="p">};</span>
+
+<span class="cp">#[derive(Debug, Serialize, Deserialize)]</span>
+<span class="cp">#[deser(rename_all = </span><span class="s">&quot;camelCase&quot;</span><span class="cp">)]</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">Account</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">id</span><span class="p">:</span><span class="w"> </span><span class="kt">u64</span><span class="p">,</span>
+<span class="w">    </span><span class="n">account_holder</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<span class="w">    </span><span class="cp">#[deser(default)]</span>
+<span class="w">    </span><span class="n">is_deactivated</span><span class="p">:</span><span class="w"> </span><span class="kt">bool</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="kd">let</span><span class="w"> </span><span class="n">account</span><span class="p">:</span><span class="w"> </span><span class="nc">Account</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">deser_json</span><span class="p">::</span><span class="n">from_str</span><span class="p">(</span><span class="n">json</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+</pre></div>
+<p>The difference in the design would become more apparent if you implement a
+serializer or deserializer yourself.  Instead of visitors that call into each
+other recursively, deserializing a type creates a
+<em>sink</em> which receives events that are directly emitted by the parser, and
+<em>serializing produces emitters</em> that hand out values.  Nested sinks and emitters
+are handed back to a driver, which keeps them on the heap.  This design, which is
+entirely stolen from miniserde, gives some interesting consequences:</p>
+<ul>
+<li><strong>No stack overflows.</strong>  You can arbitrarily nest structures without issues.
+For untrusted input you set limits with a layer, and you pick the number
+that you are comfortable with, which is independent of your stack space.</li>
+<li><strong>Suspendable.</strong>  Because the state lives in the driver, a deserialization
+can be fed input as it arrives.  It&#8217;s also <code>Send</code>, so it can move between
+threads while you wait on IO which makes it much nicer to use with tokio.
+Formats like JSON, CBOR and MessagePack can be parsed as a stream if you
+so desire.</li>
+<li><strong>An extensible data model.</strong>  The core data model is small and made of atoms,
+maps and sequences.  For all else, there are extension values (<code>DateTime</code>,
+<code>Uuid</code>, etc.) that also all carry a fallback for formats that don&#8217;t understand
+them.  Unlike Serde this means it does not rely on in-band signalling of
+objects with magic keys to smuggle values through.</li>
+<li><strong>Lossless buffering.</strong>  When a value has to be buffered (for instance because
+the tag of an internally tagged enum comes last), Deser records the events
+together with everything the format knew about them.  Protocol specific
+extension types or error locations all survive.</li>
+<li><strong>Layers</strong> are a middleware system that sit between the format and your types
+and can track things like paths, enforce safety limits, rename keys or redact
+values without having to touch specific code paths.</li>
+<li><strong>Native flattening</strong> that doesn&#8217;t buffer at all.</li>
+</ul>
+<p>On top of that are a lot of things that I just wanted to have:</p>
+<ul>
+<li>Allow enum tags to be of any type, not just strings</li>
+<li>Adapters that compose (<code>as = Option&lt;Vec&lt;DisplayFromStr&gt;&gt;</code>)</li>
+<li>Enabling validation as an adapter</li>
+<li>derive attributes that are real Rust expressions instead of strings</li>
+<li>bytes as a core functionality in the data model</li>
+<li>duplicate keys rejected by default and errors that point at the problem</li>
+</ul>
+<p>Here is a small configuration type that shows a few of these together:</p>
+<div class="highlight"><pre><span></span><span class="k">use</span><span class="w"> </span><span class="n">deser</span><span class="p">::</span><span class="n">adapters</span><span class="p">::</span><span class="n">DisplayFromStr</span><span class="p">;</span>
+<span class="k">use</span><span class="w"> </span><span class="n">deser</span><span class="p">::</span><span class="n">de</span><span class="p">::</span><span class="n">Recording</span><span class="p">;</span>
+<span class="k">use</span><span class="w"> </span><span class="n">deser</span><span class="p">::{</span><span class="n">Deserialize</span><span class="p">,</span><span class="w"> </span><span class="n">Serialize</span><span class="p">};</span>
+<span class="k">use</span><span class="w"> </span><span class="n">deser_encoding</span><span class="p">::</span><span class="n">Hex</span><span class="p">;</span>
+<span class="k">use</span><span class="w"> </span><span class="n">deser_validate</span><span class="p">::{</span><span class="n">Check</span><span class="p">,</span><span class="w"> </span><span class="n">NonEmpty</span><span class="p">,</span><span class="w"> </span><span class="n">Range</span><span class="p">};</span>
+<span class="k">use</span><span class="w"> </span><span class="n">ipnet</span><span class="p">::</span><span class="n">IpNet</span><span class="p">;</span>
+
+<span class="cp">#[derive(Debug, Serialize, Deserialize)]</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">Config</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// at least one 256-bit key, each written as hex</span>
+<span class="w">    </span><span class="cp">#[deser(as = Check&lt;NonEmpty, Vec&lt;Hex&gt;&gt;)]</span>
+<span class="w">    </span><span class="n">secret_keys</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="p">[</span><span class="kt">u8</span><span class="p">;</span><span class="w"> </span><span class="mi">32</span><span class="p">]</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">    </span><span class="c1">// `IpNet` knows nothing about deser, but has `FromStr` and `Display`</span>
+<span class="w">    </span><span class="cp">#[deser(as = Option&lt;Vec&lt;DisplayFromStr&gt;&gt;)]</span>
+<span class="w">    </span><span class="n">allowed_networks</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">IpNet</span><span class="o">&gt;&gt;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">listeners</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">Listener</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="cp">#[derive(Debug, Serialize, Deserialize)]</span>
+<span class="cp">#[deser(tag = </span><span class="s">&quot;type&quot;</span><span class="cp">, rename_all = </span><span class="s">&quot;snake_case&quot;</span><span class="cp">)]</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">enum</span><span class="w"> </span><span class="nc">Listener</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Unix</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">path</span><span class="p">:</span><span class="w"> </span><span class="nc">PathBuf</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="n">Tcp</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">host</span><span class="p">:</span><span class="w"> </span><span class="nc">IpAddr</span><span class="p">,</span>
+<span class="w">        </span><span class="cp">#[deser(as = Check&lt;Range&lt;1, 65535&gt;&gt;)]</span>
+<span class="w">        </span><span class="n">port</span><span class="p">:</span><span class="w"> </span><span class="kt">u16</span><span class="p">,</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="c1">// types this version does not know are kept and written back</span>
+<span class="w">    </span><span class="cp">#[deser(other)]</span>
+<span class="w">    </span><span class="n">Other</span><span class="p">(</span><span class="cp">#[deser(tag)]</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="n">Recording</span><span class="p">),</span>
+<span class="p">}</span>
+</pre></div>
+<p>Adapters are types, so <code>Hex</code> can go inside a <code>Vec</code>, and <code>DisplayFromStr</code> inside
+a <code>Vec</code> inside an <code>Option</code>.  Validators are adapters too, so
+<code>Check&lt;NonEmpty, Vec&lt;Hex&gt;&gt;</code> decodes the keys and then checks that there is at
+least one.  The catch-all variant keeps the tag and a recording of everything
+else in case someone wants to process it later.</p>
+<p>Errors are something I care a lot about, so here is what happens when a value
+is wrong:</p>
+<div class="highlight"><pre><span></span><span class="n">secret_keys</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08&quot;</span><span class="p">]</span>
+<span class="n">allowed_networks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;10.0.0.0/8&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;fd00::/8&quot;</span><span class="p">]</span>
+
+<span class="k">[[listeners]]</span>
+<span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;unix&quot;</span>
+<span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;/run/app.sock&quot;</span>
+
+<span class="k">[[listeners]]</span>
+<span class="n">host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;127.0.0.1&quot;</span>
+<span class="n">port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
+<span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;tcp&quot;</span>
+
+<span class="k">[[listeners]]</span>
+<span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;quic&quot;</span>
+<span class="n">host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;::1&quot;</span>
+<span class="n">alpn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;h3&quot;</span><span class="p">]</span>
+</pre></div>
+<div class="highlight"><pre><span></span><span class="kd">let</span><span class="w"> </span><span class="n">config</span><span class="p">:</span><span class="w"> </span><span class="nc">Config</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">deser_toml</span><span class="p">::</span><span class="n">Deserializer</span><span class="p">::</span><span class="n">from_str</span><span class="p">(</span><span class="n">input</span><span class="p">)</span>
+<span class="w">    </span><span class="p">.</span><span class="n">deserialize_with</span><span class="p">(</span><span class="o">|</span><span class="n">driver</span><span class="o">|</span><span class="w"> </span><span class="n">driver</span><span class="p">.</span><span class="n">push_layer</span><span class="p">(</span><span class="n">PathLayer</span><span class="p">::</span><span class="n">new</span><span class="p">()))</span><span class="o">?</span><span class="p">;</span>
+</pre></div>
+<p>Note that here the tag of the internally tagged enum comes last which means that
+the values have to be buffered until the tag is known.  In Serde this is tricky
+and we would lose the location if we used some tricks to add it.  With Deser
+however, with the path layer enabled Deser you where in the structure the
+problem is:</p>
+<div class="highlight"><pre><span></span>Unexpected: invalid value: must be between 1 and 65535 at line 10 column 8 (path: listeners[1].port)
+</pre></div>
+<h2>Deser Meta Data</h2>
+<p>Deser really wants to be extensible, and XML is a more extreme example of the
+differences between Deser and Serde.  Here is an Atom entry that mixes in Dublin
+Core for the authors:</p>
+<div class="highlight"><pre><span></span><span class="k">use</span><span class="w"> </span><span class="n">chrono</span><span class="p">::{</span><span class="n">DateTime</span><span class="p">,</span><span class="w"> </span><span class="n">Utc</span><span class="p">};</span>
+<span class="k">use</span><span class="w"> </span><span class="n">deser</span><span class="p">::</span><span class="n">Deserialize</span><span class="p">;</span>
+<span class="k">use</span><span class="w"> </span><span class="n">deser_value</span><span class="p">::</span><span class="n">Value</span><span class="p">;</span>
+<span class="k">use</span><span class="w"> </span><span class="n">deser_xml</span><span class="p">::</span><span class="n">DeserializerConfig</span><span class="p">;</span>
+
+<span class="n">deser_xml</span><span class="p">::</span><span class="n">namespace</span><span class="o">!</span><span class="p">(</span>
+<span class="w">    </span><span class="n">atom</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;http://www.w3.org/2005/Atom&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">dc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;http://purl.org/dc/elements/1.1/&quot;</span><span class="p">,</span>
+<span class="p">);</span>
+
+<span class="cp">#[derive(Debug, Deserialize)]</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Entry</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cp">#[deser(rename = atom!(</span><span class="s">&quot;title&quot;</span><span class="cp">))]</span>
+<span class="w">    </span><span class="n">title</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<span class="w">    </span><span class="cp">#[deser(rename = dc!(</span><span class="s">&quot;creator&quot;</span><span class="cp">))]</span>
+<span class="w">    </span><span class="n">creators</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">    </span><span class="cp">#[deser(rename = atom!(</span><span class="s">&quot;updated&quot;</span><span class="cp">))]</span>
+<span class="w">    </span><span class="n">updated</span><span class="p">:</span><span class="w"> </span><span class="nc">DateTime</span><span class="o">&lt;</span><span class="n">Utc</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1">// entries we understand, and everything else is kept as it is</span>
+<span class="cp">#[derive(Debug, Deserialize)]</span>
+<span class="cp">#[deser(untagged)]</span>
+<span class="k">enum</span><span class="w"> </span><span class="nc">Item</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Entry</span><span class="p">(</span><span class="n">Entry</span><span class="p">),</span>
+<span class="w">    </span><span class="n">Other</span><span class="p">(</span><span class="n">Value</span><span class="p">),</span>
+<span class="p">}</span>
+
+<span class="kd">let</span><span class="w"> </span><span class="n">item</span><span class="p">:</span><span class="w"> </span><span class="nc">Item</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DeserializerConfig</span><span class="p">::</span><span class="n">new</span><span class="p">()</span>
+<span class="w">    </span><span class="p">.</span><span class="n">resolve_namespaces</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+<span class="w">    </span><span class="p">.</span><span class="n">from_str</span><span class="p">(</span><span class="s">r#&quot;</span>
+<span class="s">        &lt;entry xmlns=&quot;http://www.w3.org/2005/Atom&quot;</span>
+<span class="s">               xmlns:d=&quot;http://purl.org/dc/elements/1.1/&quot;&gt;</span>
+<span class="s">          &lt;title&gt;Deser&lt;/title&gt;</span>
+<span class="s">          &lt;d:creator&gt;John&lt;/d:creator&gt;</span>
+<span class="s">          &lt;updated&gt;2026-09-29T21:00:00Z&lt;/updated&gt;</span>
+<span class="s">          &lt;d:creator&gt;Jane&lt;/d:creator&gt;</span>
+<span class="s">        &lt;/entry&gt;</span>
+<span class="s">    &quot;#</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+</pre></div>
+<p>XML uses namespaces which means that names need to be matched by their namespace,
+not by the prefix the document happens to use.  Here the document says <code>d:</code> and
+the type says <code>dc!</code>.  <code>atom!(&quot;title&quot;)</code> is just the string
+<code>{http://www.w3.org/2005/Atom}title</code>, which works because attributes are
+expressions.  The two creators are collected into one <code>Vec</code> even though there is
+another element between them, and the text of <code>updated</code> goes straight into a
+<code>chrono</code> datetime.  Because the enum is untagged, the entry has to be buffered
+before a variant is picked, and deser&#8217;s buffer keeps both creators.  So the
+result is an <code>Entry</code> with John and Jane.</p>
+<p>quick-xml, the most popular XML crate for Serde, drops the prefixes and ignores
+namespaces entirely, so a <code>&lt;x:title&gt;</code> from some other namespace is happily
+accepted as the title of the entry.  The split list part though is considerably
+worse.  A plain <code>Entry</code> fails with a duplicate field error for <code>creator</code>, unless
+you turn on the <code>overlapped-lists</code> feature (which, remember, is a global
+additive flag that any crate could set).  That feature makes quick-xml read
+ahead to the end of the element and buffer everything in between, without a
+limit unless you set one.</p>
+<p>But the feature only helps when quick-xml is hooked up to the struct directly
+and no buffering is taking place.  Wrap the struct in the untagged enum and
+Serde buffers the entry itself.  Read from that buffer, <code>Entry</code> sees <code>creator</code>
+twice and fails again.  The fallback is a map, which keeps only the last
+<code>creator</code>, and there is no error.  With or without the feature you get this:</p>
+<div class="highlight"><pre><span></span><span class="n">Other</span><span class="p">({</span><span class="s">&quot;creator&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="s">&quot;$text&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Jane&quot;</span><span class="p">},</span><span class="w"> </span><span class="s">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="s">&quot;$text&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Deser&quot;</span><span class="p">},</span><span class="w"> </span><span class="o">..</span><span class="p">.})</span>
+</pre></div>
+<p>Notice how John is gone.</p>
+<p>Format specific extension types such as TOML datetimes are another case.  TOML
+has them natively, Serde&#8217;s data model does not, so the <code>toml</code> crate passes them
+on as a map with a magic key.  In Deser a datetime is an extension value, which
+formats that know it keep and all others write as a string:</p>
+<div class="highlight"><pre><span></span><span class="kd">let</span><span class="w"> </span><span class="n">value</span><span class="p">:</span><span class="w"> </span><span class="nc">Value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">deser_toml</span><span class="p">::</span><span class="n">from_str</span><span class="p">(</span><span class="s">&quot;released = 2026-09-29T21:00:00+02:00&quot;</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+
+<span class="n">deser_json</span><span class="p">::</span><span class="n">to_string</span><span class="p">(</span><span class="o">&amp;</span><span class="n">value</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+<span class="c1">// {&quot;released&quot;:&quot;2026-09-29T21:00:00+02:00&quot;}</span>
+<span class="n">deser_toml</span><span class="p">::</span><span class="n">to_string</span><span class="p">(</span><span class="o">&amp;</span><span class="n">value</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+<span class="c1">// released = 2026-09-29T21:00:00+02:00</span>
+</pre></div>
+<p>The same with <code>serde_json::Value</code> gives you
+<code>{&quot;released&quot;:{&quot;$__toml_private_datetime&quot;:&quot;2026-09-29T21:00:00+02:00&quot;}}</code>, and
+reading the value into a <code>chrono::DateTime</code> fails outright with <code>invalid type: map, expected an RFC 3339 formatted date and time string</code>.</p>
+<h2>The Cost</h2>
+<p>So now that you know Deser is at least in theory cool, at what cost?</p>
+<p>It is not free.  The design relies on dynamic dispatch and on sinks and emitters
+that live on the heap, and that has considerable runtime overhead.  In my own
+measurements for JSON, Deser reads somewhere between 33% faster and 60% slower
+than <code>serde_json depending</code> on the data.  On average it&#8217;s about 10% slower for
+reading.  Writes are between three times as fast and 70% slower and a wash on
+average.  For YAML and TOML it&#8217;s noticeably faster than the Serde based crates,
+but that is more about the format implementations than the architecture.</p>
+<p>Compile times slightly are better, but not dramatically so.  Because it doesn&#8217;t
+monomorphize everything, release builds of derived code are about 2.3 times as
+fast as with Serde and that get a tiny bit better in practice for your own code
+as less recompilation is necessary.</p>
+<p>To make Deser&#8217;s design work at all, it also uses <code>unsafe</code> internally.  Most of
+this is to keep the chain of borrowed sinks on the heap.  I feel like this is
+fine in the days of Miri and agents, but I know it makes some folks uneasy.</p>
+<p>And well, the biggest cost is that it&#8217;s just not Serde.</p>
+<h2>How Much Is There?</h2>
+<p>Quite a lot actually which might be surprising.  In addition to the core
+there is support for <a href="https://github.com/mitsuhiko/deser/tree/main/deser-derive">derive</a>.</p>
+<p>It supports all flavorts of JSON you can think of:
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-json">JSON</a>,
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-jsonc">JSONC</a>,
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-json5">JSON5</a> and
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-hj">HJSON</a>.  (Fun fact here:
+they are all generated out of <a href="https://github.com/mitsuhiko/deser/tree/main/deser-template-json">one shared parser template</a>)
+For binary handling it supports
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-cbor">CBOR</a> and
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-msgpack">MessagePack</a>.
+Additionally it does
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-yaml">YAML</a> 1.1 and 1.2,
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-toml">TOML</a>,
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-xml">XML</a> and all three
+flavors of Apple&#8217;s <a href="https://github.com/mitsuhiko/deser/tree/main/deser-plist">plist</a>
+as well as <a href="https://github.com/mitsuhiko/deser/tree/main/deser-csv">CSV/TSV</a>,
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-urlencoded">urlencoded data</a> and
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-env">environment variables</a>.
+For more crazy contraptions you can
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-path">attach path info</a> or
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-location">capture location data</a>
+as well as support for
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-debug">debug printing</a>.
+You can perform <a href="https://github.com/mitsuhiko/deser/tree/main/deser-validate">validation</a>
+as you parse, opt into different
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-encoding">binary encodings</a>
+in addition to base64, you can
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-serde">bridge to serde</a> or
+capture
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-value">dynamic values</a>,
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-transcode">transcode</a>
+between formats or hook it up with
+<a href="https://github.com/mitsuhiko/deser/tree/main/deser-tokio">tokio</a>.</p>
+<p>For documentation see <a href="https://docs.rs/deser/latest/deser/">docs.rs/deser</a>
+and the code itself is <a href="https://github.com/mitsuhiko/deser">on GitHub</a> alongside
+<a href="https://github.com/mitsuhiko/deser/tree/main/examples">many examples</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
