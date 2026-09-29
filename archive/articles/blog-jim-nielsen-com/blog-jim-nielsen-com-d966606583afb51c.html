@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VLM Enhanced Metadata For My Icon Galleries | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>VLM Enhanced Metadata For My Icon Galleries</h1>
+        <div class="meta">Jim Nielsen’s Blog 2026-09-29T19:00:00Z</div>
+        <div class="links">
+          <a href="https://blog.jim-nielsen.com/2026/icon-galleries-vlm/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/blog-jim-nielsen-com/blog-jim-nielsen-com-d966606583afb51c.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Confession: I got nerd-sniped by Sam Henri Gold’s request for my icon galleries: I&#x27;d like to humbly request artwork-level searching in macosicongallery.com What follows is a train-of-thought blog post as I play with what an implementation might look like. I’ve actually long-wanted something like this, e.g. let me search for “coffee” and show me all icons th…</div>
+        <div class="content">
+          <p>Confession: I got <a href="https://hachyderm.io/@samhenrigold/117133572687168943" >nerd-sniped by Sam Henri Gold’s request</a> for my icon galleries:</p>
+<blockquote>
+<p>I&#39;d like to humbly request artwork-level searching in macosicongallery.com</p>
+</blockquote>
+<p>What follows is a train-of-thought blog post as I play with what an implementation might look like.</p>
+<hr>
+<p>I’ve actually long-wanted something like this, e.g. let me search for “coffee” and show me all icons that have some depiction of coffee in them.</p>
+<p>Similarly, I’ve wanted some kind of “related” representation for icons. I have this today via existing metadata, e.g. “Show me other icons in the category ‘Productivity’” or “Show me other icons tagged as ‘orange’”. But I’ve wanted a more robust representation of this, so if you were looking at an icon that had a microphone in it, the site would say “Here are other icons that also have microphones in them.” And the relationship would be rich/smart enough to know that “microphone” was meant broadly, i.e. dynamic mics, condenser mics, ribbon mics, etc.</p>
+<p>So how would you do this? I could go through every icon one-by-one and classify/tag any attribute of its design that comes to mind, but that would take ages! Seems like a good use case for a vision model.</p>
+<h2 id="trying-clip">Trying CLIP</h2>
+<p>First, I’ll look at Sam’s suggestion: run every image through CLIP.</p>
+<p>I’m not familiar with CLIP so I start with a little research: What is it? How would I use it? And most importantly: is it free/open (because I ain’t spending a ton of money to send my thousands of icon PNGs to an AI provider via their API)?</p>
+<p>Ok, so CLIP will take an image and spit back an embedding (basically a bunch of numbers representing features of the image). When you do it with multiple images, you can then compare those embeddings to see what the model considers similar (and, if you like, set a threshold for what constitutes a “match”).</p>
+<p>After getting a sense of the task in front of me, I work with the LLM to come up with a proof of concept. I don’t need to fit this into my existing site. I just want to <a href="https://blog.jim-nielsen.com/2026/use-llm-to-add-color-metadata/" >make one-off HTML pages</a> where I can feel out, “Can this process create anything useful? What’s the amount of work required?”</p>
+<ul>
+<li>Write a script that runs a sampling of icons through CLIP’s image encoder<ul>
+<li>Read the file locally, e.g. <code>./ios/256/${icon.id}.png</code></li>
+<li>256x256 pixel icons seem to be enough, as the CLIP model I’m using preprocesses them to ~224px anyway.</li>
+</ul>
+</li>
+<li>Create a dataset representing the “embeddings” (an array of numbers) for each icon that I get from CLIP, e.g. <code>Array&lt;{ id: String, embedding: Array&lt;number&gt; }&gt;</code></li>
+<li>Create a dataset representing the top matches between different embeddings, e.g. <code>{ [id: String]: [id, id, …] }</code></li>
+<li>Create a <code>clip.html</code> file has both datasets (plus supplementary icon metadata I already have), render all the sampled icons, and support an <code>onclick</code> for each icon that shows the <code>related[id]</code> icons.</li>
+</ul>
+<p>This is enough to create a single HTML file where I can click on an icon and see other icons that look like it.</p>
+<p>However, I realize quickly that I’ll need to process my entire icon library to really get a good sense for how well these are matching. So I do that.</p>
+<p><em>[Computer goes brrrr…]</em></p>
+<p>Ok, now when I click on an icon that looks like a camera, I see other icons that look like cameras.</p>
+<p class="image-container"><img src="https://cdn.jim-nielsen.com/blog/2026/vlm-clip-related-camera.png" width="611" height="496" alt="Linx Camera Effects app icon with a grid of visually similar camera app icons and their similarity scores" />
+
+</p><p>Or if I click on an icon that has a checkmark in it, I see other icons with checkmarks in them — sort-of.</p>
+<p class="image-container"><img src="https://cdn.jim-nielsen.com/blog/2026/vlm-clip-related-checkmarks.png" width="608" height="499" alt="Things app icon with a grid of visually similar checkmark and task app icons and their similarity scores" data-og-image />
+
+</p><p>But the results aren’t that great unless an icon is visually distinctive. <a href="https://mastodon.social/@jimniels/117134745480956733" >I share some thoughts with Sam.</a> He has a few other suggestions I follow.</p>
+<h2 id="dinov2-siglip2-and-more">DINOv2, SigLIP2, and More</h2>
+<p>Sam mentions SigLIP2 so I start with that as a keyword. The LLM recommends DINOv2 so I say, “Let’s try it”.</p>
+<p>I give that a try, creating a separate dataset and prototype (e.g. <code>embeddings-dinov2.json</code> and <code>embeddings-dinov2.html</code>) so I can continue to view these different prototypes and compare their outputs.</p>
+<p>It’s fine. Different from CLIP. Honestly not much better.</p>
+<p>So I figure let’s try another one. I go with SigLIP2. I ask the LLM to create a page where I can compare the results.</p>
+<p class="image-container"><img src="https://cdn.jim-nielsen.com/blog/2026/vlm-compare-clip-siglip2.gif" width="960" height="586" alt="Animated comparison of visually similar app icon results using CLIP and SigLIP 2" />
+
+</p><p>Seems like six of one, half dozen of another. One does better on some kinds of icons, worse on others. The LLM recommends that, at this point, I be done shopping models. They’re roughly the same class of tool with different tradeoffs. None are breakthroughs.</p>
+<p>So now what?</p>
+<h2 id="try-tagging-icons-with-keywords">Try Tagging Icons With Keywords</h2>
+<p>Sam recommends another approach:</p>
+<blockquote>
+<p>You could also try handing all icons over to a VLM, having it write up a description, and embedding THAT text against what people might search for.</p>
+</blockquote>
+<p>A thoroughly detailed person might’ve done this from the start, e.g. for an icon that’s a checkmark, add the keyword “checkmark” to its metadata.</p>
+<p>That would take me forever to go back through all my icons and do — a perfect task for a computer that never tires.</p>
+<p>So I give this a try. First I need a free/open VLM. After a little research I decide to try Moondream via <a href="https://ollama.com" >Ollama</a>.</p>
+<p>I have the machine go through each image and caption it, then pull out “tags” from the caption. For the <a href="https://www.iosicongallery.com/icons/clear-todos-2021-01-10/" >Clear app icon</a>, I get data like this:</p>
+<pre><code class="language language-json">{
+  &quot;id&quot;: &quot;clear-todos-2021-01-10&quot;,
+  &quot;caption&quot;: &quot;The image features a red and orange gradient background, with a white checkmark in the center. The checkmark is slightly tilted to the right, giving it a dynamic appearance. The background transitions from red at the top to orange at the bottom, creating a sense of depth and movement. The checkmark is the main object in the image, occupying most of the space and drawing attention to itself.&quot;,
+  &quot;tags&quot;: [
+    &quot;red&quot;,
+    &quot;orange&quot;,
+    &quot;gradient&quot;,
+    &quot;white&quot;,
+    &quot;checkmark&quot;,
+    &quot;slightly&quot;,
+    &quot;tilted&quot;,
+    &quot;dynamic&quot;,
+    &quot;appearance&quot;,
+    &quot;transitions&quot;,
+    &quot;creating&quot;,
+    &quot;sense&quot;,
+    &quot;depth&quot;,
+    &quot;movement&quot;,
+    &quot;object&quot;,
+    &quot;occupying&quot;
+  ]
+}
+</code></pre>
+<p>Then the LLM creates a single <code>search.html</code> file where I can test icon matches by searching for tag overlaps (or choosing one of the popular ones).</p>
+<p>So, for example, on the search page I can click on “checkmark” and see all the icons with a checkmark.</p>
+<p class="image-container"><img src="https://cdn.jim-nielsen.com/blog/2026/vlm-search-tags-checkmark.png" width="1140" height="844" alt="Search results for app icons tagged with “checkmark,” showing a grid of matching icons" />
+
+</p><p>Or click on “fox” and see all the icons with a fox.</p>
+<p class="image-container"><img src="https://cdn.jim-nielsen.com/blog/2026/vlm-search-tags-fox.png" width="685" height="415" alt="Search results for app icons tagged with “fox,” showing a grid of matching icons" />
+
+</p><p>Matches are pretty spot to be honest.</p>
+<p>But that’s a different kind of test than what I was doing with CLIP.</p>
+<ul>
+<li>CLIP: click on an icon and see other icons like it.</li>
+<li>Tags: click on a keyword and see other icons with that keyword.</li>
+</ul>
+<p>Can I leverage tags for the same kind of “related icons” work that CLIP is doing?</p>
+<h2 id="clip-vs-tags">CLIP vs. Tags</h2>
+<p>I get the LLM to cook up a single-page HTML file where I can compare “click on this icon and find other icons like it” where I’m using embeddings from CLIP vs. matching on keywords.</p>
+<p>The results seem to fare much better for CLIP. For example, here I matched on what I think of as a “checkmark icon”.</p>
+<p class="image-container"><img src="https://cdn.jim-nielsen.com/blog/2026/vlm-clip-vs-tags.png" width="833" height="414" alt="Comparison of CLIP- and tag-based related app icons for Things 3. CLIP returns visually similar checkmark icons, while tag matching returns a more varied set of icons sharing similar descriptive tags." />
+
+</p><p>You can see the approach that matches on tags didn’t work too great. I believe this is because with my simple tag-overlap approach, a distinctive keyword like “checkmark” gets diluted amongst generic tags like “square”, “blue”, and “simple”.</p>
+<p>Whereas with CLIP, if you click on an icon with a checkmark, you get other checkmarks (and not other icons that also have related tags like “square”, “blue” and “simple”).</p>
+<p>Which all makes sense. Pushing on the implementation here could help, but that’s separate work to do.</p>
+<h2 id="so-now-what">So Now What?</h2>
+<p>I’m not sure.</p>
+<p>While doing all of this was an interesting technical exercise, there are a few important considerations I need to think through before implementing anything, such as:</p>
+<ul>
+<li>What kind of functionality do I actually want?<ul>
+<li>A “related icons” feature? Does it match on keywords or embeddings?</li>
+<li>A “search” feature that matches on keywords?</li>
+<li>Both?</li>
+</ul>
+</li>
+<li>How do I build these features into my codebase now, given the thousands of icons that already exist?</li>
+<li>How do I maintain this feature in the future?<ul>
+<li>e.g. every time I add a new icon to my gallery, is a VLM now a dependency of this project?</li>
+</ul>
+</li>
+<li>Given all the above, what’s the time and money cost?</li>
+</ul>
+<p>I’m very picky about adding new dependencies to these icon projects. I like to think that’s why I’ve been able to maintain and continue contributing to them after so many years — because I make it easy on myself (good job, Past Jim).</p>
+<p>So, for example, if I make a VLM a dependency of this project such that every time I add a new icon I have to run it through to create the embeddings, that’s a big dependency cost IMO. I’m not sure I want to do that.</p>
+<p>That said, Apple now ships <a href="https://developer.apple.com/videos/play/wwdc2026/334/" >foundation models in macOS 27</a> available through the CLI (go ahead, try typing <code>fm</code> in your Terminal if you’re on Golden Gate). So if my Mac continues to be the primary machine where I add/update metadata for my icon projects, using <code>fm</code> would be a really easy/low-cost way to process each new icon to generate a caption and keywords for matching in search.</p>
+<p>But again, I don’t know if I want to do that. I wrote this post to try and work through what I want to do, but I am still undecided.</p>
+<p>So I guess the only thing for me to do at this point is hit “Publish” on this post and keep simmering on a decision.</p>
+
+    <hr />
+    
+
+    <p>
+      Reply via:
+      
+
+      <a
+        href="mailto:jimniels%2Bblog@gmail.com?subject=Re:%20blog.jim-nielsen.com/2026/icon-galleries-vlm/"
+        >Email</a
+      >
+      · <a href="https://mastodon.social/@jimniels">Mastodon</a> ·
+
+      <a href="https://bsky.app/profile/jim-nielsen.com">Bluesky</a>
+    </p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
