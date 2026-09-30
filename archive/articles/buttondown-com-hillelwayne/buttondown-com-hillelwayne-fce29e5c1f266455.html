@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>What TLA+ can and can&#x27;t check | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>What TLA+ can and can&#x27;t check</h1>
+        <div class="meta">Computer Things 2026-09-30T13:27:03Z</div>
+        <div class="links">
+          <a href="https://buttondown.com/hillelwayne/archive/what-tla-can-and-cant-check/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/buttondown-com-hillelwayne/buttondown-com-hillelwayne-fce29e5c1f266455.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Last week Boris Cherny, the inventor of Claude Code, mentioned that Opus was able to use TLA+ 1 to find race conditions in code. And now everybody on the internet is talking about formal verification. As a long-time educator ( 1 2 ) and advocate of TLA+, this is really exciting! TLA+ is great at designing complex concurrent systems and making sure they&#x27;re b…</div>
+        <div class="content">
+          <p>Last week Boris Cherny, the inventor of Claude Code, mentioned that Opus was able to use TLA+<sup id="fnref:tla"><a class="footnote-ref" href="#fn:tla">1</a></sup> to find race conditions in code.</p>
+<div>
+<blockquote class="twitter-tweet">
+    <a href="https://twitter.com/bcherny/status/2102543349102338309" target="_blank"></a>
+</blockquote>
+
+</div>
+<p>And now everybody on the internet is talking about formal verification. </p>
+<p>As a long-time educator (<a href="https://link.springer.com/book/10.1007/978-1-4842-3829-5" target="_blank">1</a> <a href="https://learntla.com/" target="_blank">2</a>) and <a href="https://newsletter.pragmaticengineer.com/p/formal-methods-with-hillel-wayne" target="_blank">advocate</a> of TLA+, this is really exciting! TLA+ is great at designing complex concurrent systems and making sure they're bug-free.<sup id="fnref:antithesis"><a class="footnote-ref" href="#fn:antithesis">2</a></sup> As a long-time advocate of level-headedness, this new euphoria worries me. I read a lot of people saying that formal methods will solve the problem of agentic software development once and for all, and that's nonsense.</p>
+<p>Enough words have been spilled about the weaknesses of TLA+ in terms of what it can guarantee, like how <a href="https://buttondown.com/hillelwayne/archive/what-if-the-spec-doesnt-match-the-code/" target="_blank">correct designs don't automatically translate into correct code</a>. So I'd like to focus on a different limitation for this newsletter: to verify a property, we need to have a property to verify! So what are the properties that TLA+ can't even express?</p>
+<p>(This assumes some basic knowledge of TLA+. If you're a total beginner, check out those [1] [2] things above or <a href="https://buttondown.com/hillelwayne/archive/tla-from-first-principles/" target="_blank">read here</a>.)</p>
+<h2>What TLA+ can check</h2>
+<p>TLA+ divides the system into a set of behaviors. Each behavior is a sequence of states, like "light one is green, then yellow, then red". In each state we can express a regular boolean expressions like "Light four is green" or "All lights are red." We can also modify expressions with three "temporal" logical operators:</p>
+<ul>
+<li><code>[]P</code> ("always P") is true if P is true in the current state <em>and every</em> future state. Example: <code>[](at_most_one_green)</code> is true if every state going forward has no more than one green light.</li>
+<li><code>P'</code> ("P prime") is true if P is true in the next state. Example: <code>light="green" &amp;&amp; light'="red"</code> is true if the light changes from green to red.</li>
+<li><code>&lt;&gt;P</code> ("eventually P") is true if P is true in the current state <em>or in at least one</em> future state. Example: <code>&lt;&gt;(light4 = "yellow")</code> is true if light4 is yellow or is yellow in a future state. </li>
+</ul>
+<p>When we say that P is a property of the system, we mean it is true in the initial state of every behavior. So if we check the property <code>[]P</code>, that means that <code>[]P</code> is true in every initial state, and then by the definition of "always" means that P is true in every future state from that initial state, meaning it is true in every state of every behavior. We call this an <strong>invariant</strong>, and is one of the most foundational properties we check in TLA+.</p>
+<p>We can also compose <code>[]</code> with primes to get <strong>action properties</strong>, or change variants. <code>[](x' &gt;= x)</code> is true if the new value of x is always greater than equal to the old value of x. Another fun one is <code>[](P =&gt; P')</code>: once P is true, it can never become false again. The actual TLA+ is a little more complicated because of a thing called "stutter-invariance", but that's extra details. Action properties and invariants are both <strong>safety</strong> properties, which roughly means "something bad never happens". <a href="https://www.hillelwayne.com/post/safety-and-liveness/" target="_blank">I wrote an article on safety and liveness here</a>.</p>
+<p>Liveness, btw, is "something good always happens". All liveness properties are based off of <code>&lt;&gt;</code>. By itself, <code>&lt;&gt;P</code> just means "P is true in at least one state of every behavior", which is usually too weak to be a good system property. But with composition, we can make more interesting liveness properties:</p>
+<ul>
+<li><code>[]&lt;&gt;P</code> is true if, in every state, P is true in at least one future state. This can represent recovery mechanisms like "If the nodes have a new leader election, they will eventually agree on a leader."</li>
+<li><code>&lt;&gt;[]P</code> is true if, at some point in time, P becomes true and remains true forever. This is great for showing that algorithms terminate with the correct results.</li>
+<li><code>[](P =&gt; &lt;&gt;Q)</code> is true if, for every state where P is true, there is a future state where Q is true. This can do things like show that P eventually causes Q, or that "all messages put on the queue are eventually in a reader's history." Parsing the formula is a little confusing, so we have the sugar <code>P ~&gt; Q</code> (P leads to Q).</li>
+</ul>
+<p>There's a couple of other operators, like <code>ENABLED</code> and <code>&lt;&lt;A&gt;&gt;_v</code>, which open up other tricks, but the majority of the stuff we check are invariants, action properties, and liveness. And <a href="https://buttondown.com/hillelwayne/archive/refinement-without-specification/" target="_blank">refinement</a>, which is a combination of safety and liveness and a topic unto itself. </p>
+<h2>What TLA+ can't do</h2>
+<p>Let's start with the obvious one: if you don't know how to represent your property as a logical formula, then TLA+ can't help you. Nor can any formal method. If you can't formalize the human notion of a bird, you can't prove your app recognizes birds. And, unfortunately, a lot of important properties we care about fall into this category.</p>
+<p>Next, the overly specific things. TLA+ safety properties work on the level of either individual states (invariants) or single step (action properties). You can't natively define a property over two or more steps, like "pressing <code>delete</code> and then <code>undo</code> gives you back the original state", or "once <code>power</code> is pressed, the computer turns on within ten steps". We also can't define properties on floating point operations or over <a href="https://buttondown.com/hillelwayne/archive/physical-vs-logical-time/" target="_blank">real time, just logical time</a>.</p>
+<p>Now for limit that most interests me. TLA+ properties are implicitly quantified over all behaviors. I said that checking <code>[]P</code> means "P is true in every state," but what it actually means is "for all behaviors, <code>[]P</code> is true of that behavior's initial state." Any property TLA+ can check of the system must be a property that is true for every individual behavior.</p>
+<p>What does that leave out? A lot more than you'd expect!</p>
+<p>For one, we can't do "there <em>exists</em> a behavior where P is true". So we can't say that P is possible, even if we don't actually reach it. One example of this would be proving that a game is winnable. We call these <a href="https://buttondown.com/hillelwayne/archive/proving-whats-possible" target="_blank">reachability properties</a>. More advanced reachability properties would be things like "P is reachable from every initial state" or "P is reachable from any state where Q is true".</p>
+<p>We also can't define properties over a <em>set</em> of behaviors. This is called a <strong>hyperproperty</strong>. Say we we're modeling phone hardware and want to verify that energy saving mode always uses less energy than normal mode. The property is "any sequence of actions uses no more power in energy saving mode than in regular mode." To refute this, you'd need to give me two behaviors that were identical <em>except</em> one starts in energy saving mode and the other does not, and the regular mode uses less power. One single behavior isn't enough to cut it, so this is impossible to naturally check in TLA+. </p>
+<p>Hyperproperties might seem niche but they cover a <a href="https://en.wikipedia.org/wiki/Non-interference_(security)" target="_blank">ton of security properties</a> and all statistical properties ("the 95%ile response time is 5ms").</p>
+<p>Finally, and this one's a little more academic, we can't define properties over the state space as a whole. We can't say, for example, that there's only one path from state X to Y. I don't know how useful this would be in practice. Most of these kinds of "metaproperties" seem like they have potential to be meaningful, I just don't know what specifically.</p>
+<h3>What "TLA+" "can" "do"</h3>
+<p>I kind of oversimplified when I said that TLA+ can't do these things. I mean that <em>if</em> you are writing a spec, and that spec directly corresponds to the system you want to build, then TLA+ can't express these as properties of your system. But you can <a href="https://www.hillelwayne.com/post/software-mimicry/" target="_blank">mimic</a> two-step properties with <a href="https://learntla.com/topics/aux-vars.html#" target="_blank">auxiliary variables</a>, like storing all state changes in a <code>state_history</code> sequence and defining the property as an invariant on that sequence. You can mimic some hyperproperties with <a href="https://www.hillelwayne.com/post/hyperproperties/" target="_blank">self-composition</a>, where each behavior of the self-composed spec is two behaviors of the actual system. The main TLA+ model checker (TLC) can check the most basic reachability properties with the new <a href="https://github.com/tlaplus/tlaplus/issues/860" target="_blank">REACHABLE keyword</a> and some state-space properties with <a href="https://github.com/tlaplus/tlaplus/blob/master/tlatools/org.lamport.tlatools/src/tlc2/module/TLCGetSet.java" target="_blank"><code>TLCGet</code></a>. Andrew Helwer has a <a href="https://ahelwer.ca/post/2026-09-26-reachability/" target="_blank">crazy post about mimicking "always reachable"</a> with fairness and "machine closure."</p>
+<p>These are useful hacks, but they're still hacks. Each one takes a lot of cleverness to figure out and comes with serious drawbacks. Auxiliary variables ruin refinements, self-composition exponentiates your state space, etc. Hacks don't compose well with the other TLA+ features and don't cover all the intricacies of properties you'd want to express. And worst of all, they make your models look <em>weird</em> and <em>messy</em> and not correspond to your actual systems. </p>
+<p>You could also use a different tool with a different focus. CTL can do reachability properties, PRISM probabilistic properties, etc. They trade off by being worse at things that TLA+ can do, and of course none of them handle properties we can't express logically.</p>
+<p>Ultimately TLA+ is pretty good at picking a lot of low hanging fruit- invariants and liveness cover many things we care about, and TLA+ is reasonably good at expressing and checking them. There's a lot of potential (and a <a href="https://buttondown.com/hillelwayne/archive/llms-are-bad-at-vibing-specifications/" target="_blank">a lot of pitfalls</a>) in using TLA+ to check vibe code. But there are also many things it cannot even express, let alone check. </p>
+<hr />
+<h1><a href="https://www.youtube.com/watch?v=8Xrvyu5tV28" target="_blank">Logic for Programmers Talk Online</a></h1>
+<p>Thanks to everybody who came to last week's livestream! You can watch the whole thing <a href="https://www.youtube.com/watch?v=8Xrvyu5tV28" target="_blank">here</a>.</p>
+<div class="footnote">
+<hr />
+<ol>
+<li id="fn:tla">
+<p>"Temporal logic of actions". It's a specification language used to find bugs in concurrent systems. <a href="https://buttondown.com/hillelwayne/archive/what-does-tla-mean-anyway/" target="_blank">Here's an explanation of the name</a>.&#160;<a class="footnote-backref" href="#fnref:tla" title="Jump back to footnote 1 in the text">&#8617;</a></p>
+</li>
+<li id="fn:antithesis">
+<p>(And as for the question of why a person so evangelical about formal methods <a href="https://antithesis.com/" target="_blank">joined a testing company</a>, well, there should be an article on their blog about that soon.)&#160;<a class="footnote-backref" href="#fnref:antithesis" title="Jump back to footnote 2 in the text">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
