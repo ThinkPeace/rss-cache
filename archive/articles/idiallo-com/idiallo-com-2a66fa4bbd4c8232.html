@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why My Asus Laptop Kept Rebooting After Sleep and How to Fix it | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why My Asus Laptop Kept Rebooting After Sleep and How to Fix it</h1>
+        <div class="meta">Software and Tech stories from an Insider - iDiallo.com 2026-10-04T02:30:00Z</div>
+        <div class="links">
+          <a href="https://idiallo.com/blog/asus-laptop-keeps-rebooting-after-sleep">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/idiallo-com/idiallo-com-2a66fa4bbd4c8232.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Three years ago, I bought an Asus laptop, specifically the Zenbook Pro 17. It&#x27;s a powerful machine and works just fine for my needs, but it had one problem that made me want to either return it or throw it out the window. I would work on projects for hours on end and close the lid when I was done. I haven&#x27;t manually shut down a computer in more than 10 year…</div>
+        <div class="content">
+          <p>Three years ago, I bought an Asus laptop, specifically the Zenbook Pro 17. It's a powerful machine and works just fine for my needs, but it had one problem that made me want to either return it or throw it out the window.</p>			<p>I would work on projects for hours on end and close the lid when I was done. I haven't manually shut down a computer in more than 10 years. I only do so after a forced update or during a debugging session. So I would close the lid, and a couple of hours later I would open it back up. Instead of waking from sleep, the computer would start from scratch as if it had been turned off and the battery was nearly dead.</p>
+<p>That meant everything I had open was closed. I'm lucky that most of the applications I run can restore a previous session, but it was extremely annoying. I had a similar issue with my previous Asus, and I had blamed Windows for it. The computer often woke from sleep just so Microsoft could perform an update, which used up all my battery. Sometimes I would open my backpack to find a dead laptop that was warm to the touch.</p>
+<p>I've written this blog post at least five times. Each time I thought I had solved the issue, but then it came back. This time, though, I think I have finally resolved it.</p>
+<p>So if you have an Asus laptop running Windows and you experience this very annoying issue, you are not alone. In my case, the culprit was the Wi-Fi adapter, specifically the MediaTek Wi-Fi 6E MT7922.</p>
+<h2>The Solution</h2>
+<p>On Windows:</p>
+<ol>
+<li>Open <strong>Device Manager</strong>.</li>
+<li>Expand <strong>Network adapters</strong>.</li>
+<li>Right-click the MediaTek device and click <strong>Properties</strong>.</li>
+<li>Click the <strong>Advanced</strong> tab.</li>
+<li>In the <strong>Property</strong> box, select <strong>Power Saving</strong>.</li>
+<li>In the <strong>Value</strong> field, select <strong>Disabled</strong>.</li>
+</ol>
+<p>That's it. After three years of annoying restarts, this finally solved my problem. Now let me explain what was going on.</p>
+<hr />
+<h2>What Was Happening (based on Windows Event Viewer)</h2>
+<p>When the laptop lid is closed, Windows initiates "Modern Standby." In this state, the screen turns off to save power, but the system remains partially active to maintain background network connectivity.</p>
+<p>Shortly after, Windows attempts to transition into a deeper low-power state and disconnects the network adapter to conserve battery. However, the MediaTek Wi-Fi driver (<code>mtkwlex</code>) fails to handle this low-power transition properly. About a minute later, it generates Event ID 1033 errors referencing a network device path (specifically <code>\Device\NDMP3</code> in my logs).</p>
+<p>Because the driver's error message resource is missing or corrupted, Windows Event Viewer cannot interpret the error and displays a generic warning instead:</p>
+<blockquote>
+<p><em>"The description for Event ID 1033 from source mtkwlex cannot be found. Either the component that raises this event is not installed on your local computer or the installation is corrupted..."</em></p>
+</blockquote>
+<p>Because the Wi-Fi driver fails to sleep, it keeps the system partially awake. This causes abnormal background battery drain and heat buildup, which is exacerbated when the laptop is in an enclosed space like a bag.</p>
+<p>In response to this abnormal drain, Windows triggers <strong>Event 507: "Austerity Battery Drain Budget Exceeded."</strong> It's important to note that this event is Windows <em>intentionally waking the laptop up</em> to prevent the battery from dying completely. However, because the Wi-Fi driver is already in a crashed or unstable kernel state, the system fails to recover from this forced wake-up. The result is a silent system crash or thermal shutdown, followed by <strong>Event 12 ("The operating system started")</strong>, which confirms the laptop rebooted.</p>
+<hr />
+<h2>The Result</h2>
+<p>With the fix in place, the Wi-Fi device no longer attempts to enter its power-saving sleep mode, so it never crashes. The ultimate solution would be a fixed MT7922 driver, but try as I might, I haven't been able to find one online.</p>
+<p>It's been three weeks so far, and I've been able to resume my work without coming back to a crashed computer. I hope this helps someone else.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
