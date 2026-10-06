@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A Terminal Protocol for Program Status (OSC 7501) | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A Terminal Protocol for Program Status (OSC 7501)</h1>
+        <div class="meta">Mitchell Hashimoto 2026-10-06T00:00:00Z</div>
+        <div class="links">
+          <a href="https://mitchellh.com/writing/program-status-osc7501">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/mitchellh-com/mitchellh-com-7ab22c709a22cb42.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary"></div>
+        <div class="content">
+          <html>
+  <body><h1><a href="https://mitchellh.com/">Mitchell Hashimoto</a></h1><h1>A Terminal Protocol for Program Status (OSC 7501)</h1><p>I wrote a specification for a new terminal escape sequence:
+<a href="https://www.superlogical.com/rex/docs/build/program-status">OSC 7501, the Program Status Protocol</a>.
+It lets any program tell the terminal what it's doing: idle, working,
+waiting on the user, finished, or failed, and why.</p><p>For example, here is how <a href="https://developer.hashicorp.com/terraform">Terraform</a>
+could indicate that it is blocked waiting for user input, with the
+message "Apply 3 to add, 1 to change, 0 to destroy?" (base64-encoded). A terminal (or any
+other tool running Terraform) could show this information however it feels
+appropriate: a notification, an inbox, a status icon, etc.</p><pre><pre>ESC ] 7501 ; state=blocked:kind=permission:app=terraform:msg=QXBwbHkgMyB0byBhZGQsIDEgdG8gY2hhbmdlLCAwIHRvIGRlc3Ryb3k/ ESC \</pre></pre><p>This post covers why I think this protocol needs to exist, why the existing approaches aren't good enough (especially for coding agents), and how the protocol works.</p><p>This is a completely generic, terminal-native specification and protocol.
+It emerged from my work on <a href="https://mitchellh.com/writing/superlogical">Superlogical</a> and
+<a href="https://ghostty.org/">Ghostty</a> but <a href="https://www.superlogical.com/rex/docs/build/program-status">the specification</a> has no product-specific
+functionality or language. It is designed as an idiomatic, well-formed
+specification that any terminal developer will find familiar.</p><h2><a href="https://mitchellh.com#the-problem"/>The Problem</h2>
+<p>Long-running work is common in terminals: builds, deployments, package upgrades, data processing, and, more and more today, coding agents. These programs alternate between working on their own, waiting on the user, and finishing. Meanwhile, users usually go off and do something else and want to know when the work finishes or needs them.</p><p>Aspects of this problem have been solved in various ways going back decades.
+For example, some terminals monitor the active foreground process and have
+features to notify when it changes. Or, they wait for some time period of
+"quiet" (for various definitions) output. The specification
+also <a href="https://www.superlogical.com/rex/docs/build/program-status#relationship-to-other-sequences">lists the reasons why existing sequences aren't enough</a>.</p><p>Ultimately, I felt there wasn't a cohesive, interaction-agnostic, generic solution to this problem that conveyed progress, blocking, completion, and trees of tasks. And it wasn't possible to cobble together pre-existing sequences to achieve it robustly, either.</p><h2><a href="https://mitchellh.com#singling-out-agentic-inboxes"/>Singling Out "Agentic Inboxes"</h2>
+<p>Don't care about AI, LLMs, etc.? Skip this section. The problem is generic and applies in a compelling way without bringing in AI. It's particularly nasty with AI so I want to call it out, but if you don't care about any of that, just skip this.</p><p>It's now increasingly common for people to run many long-running agents for any number of reasons: background research, issue monitoring, bug fixing, large features, etc. Each one works for a while and then stops to ask for permission, ask a question, or report it's done.</p><p>From this, a new category of tool has emerged that I'll simply call
+the agentic inbox: a single view across every running agent showing
+which are working, which are done, and which are waiting on you.
+<a href="https://herdr.dev/">Herdr</a>, <a href="https://cmux.com/">cmux</a>, and
+<a href="https://github.com/asheshgoplani/agent-deck">Agent Deck</a> are a few examples
+of <a href="https://github.com/andyrewlee/awesome-agent-orchestrators">hundreds</a>.</p><p>Without a dedicated protocol, they solve the agent status problem in two ways: heuristics and non-terminal APIs.</p><h3><a href="https://mitchellh.com#heuristics"/>Heuristics</h3>
+<p>The first approach is to guess by reading the screen or the window title and matching it against known patterns.</p><p>Herdr is a good example because it does this well and documents it
+openly. Its <a href="https://herdr.dev/docs/agents/#detection-manifests">detection manifests</a>
+are TOML rules that classify an agent as idle, working, or blocked. Here is
+<a href="https://github.com/herdrdev/herdr/blob/3d9d2b18dab139ba226ebc5a1c9a9f2c9c3ee4df/src/detect/manifests/claude.toml#L7-L14">the first of 16 rules</a>
+for Claude Code:</p><pre><pre>[[rules]]
+id = "osc_title_working"
+state = "working"
+priority = 1100
+region = "osc_title"
+visible_working = true
+# Braille covers &lt;= 2.1.227; half-circles are the 2.1.228 busy spinner.
+regex = ['^[\x{2800}-\x{28FF}\x{25D0}-\x{25D3}] ']</pre></pre><p>Claude Code is considered "working" if its window title starts with a
+Braille spinner character or, as of version 2.1.228, a half-circle one.
+The <a href="https://github.com/herdrdev/herdr/commits/master/src/detect/manifests/claude.toml">history of that file</a>
+shows ten changes in three months for just Claude Code.</p><p>This isn't a criticism of Herdr. Its maintainers are doing the best
+possible job with the tools available. But it demonstrates well the
+benefit <a href="https://www.superlogical.com/rex/docs/build/program-status">a unified protocol</a> would have.</p><h3><a href="https://mitchellh.com#non-terminal-apis"/>Non-Terminal APIs</h3>
+<p>The second approach is to have the program report its own state through
+an inbox-specific, out-of-band API such as
+<a href="https://herdr.dev/docs/socket-api/#agent-state-reporting">Herdr's socket API</a>
+or <a href="https://cmux.com/docs/notifications"><pre>cmux notify</pre></a>. This is better
+than heuristics in some ways, because the program that actually knows its state is the
+one reporting it. But every program has to integrate with every inbox
+separately, and a local socket doesn't work over SSH or from within a
+container without extra bridging. The pty already works across all of this.</p><h2><a href="https://mitchellh.com#the-program-status-protocol"/>The Program Status Protocol</h2>
+<p><a href="https://www.superlogical.com/rex/docs/build/program-status">OSC 7501</a> is a terminal native answer to this problem. The program
+reports its own state directly via the pty that it always has, using a
+format that is safe to send everywhere (well-behaved terminals ignore
+unknown OSCs).</p><p>The body of the sequence is a <a href="https://www.superlogical.com/rex/docs/build/program-status#syntax">list of <pre>key=value</pre> pairs</a> separated by <pre>:</pre>.
+The only required key is <a href="https://www.superlogical.com/rex/docs/build/program-status#states"><pre>state</pre></a>, which is one of:</p><table><tr><th><pre>state</pre></th><th>Meaning</th></tr><tr><td><pre>idle</pre></td><td>At rest, waiting for the user's next instruction.</td></tr><tr><td><pre>working</pre></td><td>Running. May include a <pre>progress</pre> percentage.</td></tr><tr><td><pre>done</pre></td><td>Finished. The result is ready and the user hasn't seen it yet.</td></tr><tr><td><pre>blocked</pre></td><td>Can't continue until the user does something. <pre>kind</pre> says what (<pre>permission</pre>, <pre>question</pre>, or <pre>auth</pre>) and <pre>msg</pre> says why.</td></tr><tr><td><pre>error</pre></td><td>Failed and stopped.</td></tr></table><p><a href="https://www.superlogical.com/rex/docs/build/program-status#keys">Optional keys</a> include <pre>app</pre>, a stable
+machine-readable program name like <pre>cargo</pre> or <pre>claude-code</pre>, and <pre>msg</pre>,
+a single human-readable line encoded as base64.</p><p>Programs that run several things at once can report multiple records
+using <a href="https://www.superlogical.com/rex/docs/build/program-status#records-and-ids">hierarchical ids</a>. A <a href="https://www.superlogical.com/rex/docs/build/program-status#several-records">deploy tool</a>
+can be <pre>working</pre> at the root while
+<pre>us-east</pre> pushes an image at 40% and <pre>eu-west</pre> is <pre>blocked</pre> waiting for
+approval to deploy to production. Both are true at the same time, and
+the terminal decides what to show. A <pre>clear</pre> state removes records.</p><p>Here's a <a href="https://www.superlogical.com/rex/docs/build/program-status#a-shell-function">complete integration</a> for a shell script to wrap <pre>rsync</pre>
+to participate in this protocol:</p><pre><pre>status() {
+  printf '\e]7501;state=%s:msg=%s\e\\' "$1" "$(printf '%s' "$2" | base64 | tr -d '\n')"
+}
+status working "Syncing photos"
+rsync -a ~/Photos backup:/photos &amp;&amp; status done "Photos synced" || status error "rsync failed"</pre></pre><p>Trivial to script with plain old POSIX <pre>sh</pre>.
+No SDK, no sockets, no environment variables, no JSON.
+No bias towards specific GUI presentations. No bias to any specific
+workload (like AI). A well-formed, generic foundation to build functionality
+above that anyone and everyone can participate with.</p><p>The <a href="https://www.superlogical.com/rex/docs/build/program-status">full spec</a>
+covers the rest: <a href="https://www.superlogical.com/rex/docs/build/program-status#states">record lifetime</a>,
+<a href="https://www.superlogical.com/rex/docs/build/program-status#feature-detection">feature detection</a>,
+<a href="https://www.superlogical.com/rex/docs/build/program-status#terminfo">terminfo</a>, <a href="https://www.superlogical.com/rex/docs/build/program-status#limits">size limits</a>,
+and <a href="https://www.superlogical.com/rex/docs/build/program-status#security">security</a>. It's short. I wrote it all by hand. Please read it.</p><h2><a href="https://mitchellh.com#implement-it"/>Implement It</h2>
+<p>I wrote <a href="https://www.superlogical.com/rex/docs/build/program-status">this specification</a> based on my experience maintaining a terminal
+emulator for many years now. It is written in a way that is easy for
+application developers to emit, and easy for terminal emulators to consume
+and parse.</p><p>I've already implemented this protocol twice. We have one implementation
+in <a href="https://github.com/ghostty-org/ghostty/pull/14560">libghostty</a> and
+I have a parallel implementation in <a href="https://www.superlogical.com/rex">Rex</a>.
+I've also implemented it as a proof-of-concept in Terraform, Claude Code,
+Codex, and Homebrew via either plugins or forks. In each case, the
+implementation was no more than a dozen lines.</p><p>I've been in contact with the maintainers of many popular terminal programs and emulators and they've helped review and shape the specification. But if you have any more feedback, I'm happy to hear it.</p><p>If you've implemented the specification please let me know via email (mail icon in the footer) and I'll add you to the list of tools that implement this. Thank you.</p><p>I'd like us all to stop guessing what programs are doing by reading their screens or process trees. The program already knows. Let's give it a way to tell us!</p></body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
