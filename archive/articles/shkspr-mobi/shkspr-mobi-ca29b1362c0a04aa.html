@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Una Watch - SDK and Writing Your First App | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Una Watch - SDK and Writing Your First App</h1>
+        <div class="meta">Terence Eden’s Blog 2026-10-06T11:34:25Z</div>
+        <div class="links">
+          <a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/shkspr-mobi/shkspr-mobi-ca29b1362c0a04aa.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I don&#x27;t know why hardware manufacturers find it so hard to write decent documentation. As I&#x27;ve said before you need to actually test your readme. The Una Watch development instructions are scattered across a bunch of different files. So here&#x27;s how to go from zero to your first &quot;Hello, World!&quot; Glance app with the minimum of fuss. This all assumes a fairly mo…</div>
+        <div class="content">
+          <p>I don't know why hardware manufacturers find it so hard to write decent documentation. As I've said before <a href="https://shkspr.mobi/blog/2025/10/how-to-actually-test-your-readme/">you need to <em>actually</em> test your readme</a>.  The Una Watch development instructions are scattered across a bunch of different files.</p>
+
+<p>So here's how to go from zero to your first "Hello, World!" Glance app with the minimum of fuss.</p>
+
+<p>This all assumes a fairly modern Debian / Ubuntu / Pop OS Linux.</p>
+
+<h2 id="prerequisites"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#prerequisites">Prerequisites</a></h2>
+
+<p>This installs most of the tools you will need:</p>
+
+<pre><code class="language-bash">sudo apt update
+sudo apt install -y git python3 python3-pip cmake build-essential
+</code></pre>
+
+<h2 id="stm32cubeclt"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#stm32cubeclt">STM32CubeCLT</a></h2>
+
+<p>Visit <a href="https://www.st.com/en/development-tools/stm32cubeclt.html">https://www.st.com/en/development-tools/stm32cubeclt.html</a> and download the Linux version of the tool. Inexplicably, you need to give your email address. I recommend giving a disposable one from <a href="https://10minutemail.com/">https://10minutemail.com/</a></p>
+
+<p>After downloading, unzip the file.</p>
+
+<p>On the command line, <code>cd</code> into the directory containing the unzipped file.</p>
+
+<pre><code class="language-bash">chmod +x stm32cubeclt_*.sh
+sudo ./stm32cubeclt_*.sh
+</code></pre>
+
+<p>You will need to agree to their licence. Just hit <code>y</code>.</p>
+
+<p>That installs everything in <code>/opt/st/stm32cubeclt_1.22.0/</code></p>
+
+<p>You will need to make that available to your PATH.</p>
+
+<pre><code class="language-bash">export PATH="/opt/st/stm32cubeclt_1.22.0/GNU-tools-for-STM32/bin:$PATH"
+</code></pre>
+
+<h2 id="clone-the-repo"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#clone-the-repo">Clone the repo</a></h2>
+
+<p>You will need to copy <a href="https://github.com/UNAWatch/una-sdk/">the Una SDK</a>. I keep my git repos in <code>~/git/</code> - you will need the location of the directory later.</p>
+
+<pre><code class="language-bash">cd ~/git/
+git clone git@github.com:UNAWatch/una-sdk.git
+cd una-sdk/
+git submodule update --init ThirdParty/lvgl
+</code></pre>
+
+<p>Then update all the Python dependencies.</p>
+
+<pre><code class="language-bash">export UNA_SDK="$PWD"
+python3 -m pip install --upgrade pip
+python3 -m pip install -r "$UNA_SDK/Utilities/Scripts/app_packer/requirements.txt"
+</code></pre>
+
+<h2 id="check-it-has-all-worked"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#check-it-has-all-worked">Check it has all worked</a></h2>
+
+<p>Paste this into your terminal. Check for any errors.</p>
+
+<pre><code class="language-bash">which arm-none-eabi-gcc || true
+which cmake || true
+which make || true
+which python3 || true
+python3 -m pip --version
+arm-none-eabi-gcc --version || true
+cmake --version || true
+make --version || true
+</code></pre>
+
+<h2 id="build-the-demo-app"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#build-the-demo-app">Build the demo app</a></h2>
+
+<p>If all of the above has worked, you should be able to build the demo app with:</p>
+
+<pre><code class="language-bash">cd /tmp
+mkdir -p MyAlarm
+cp -r "$UNA_SDK/Examples/Apps/Alarm/"* MyAlarm
+mkdir -p MyAlarm/build
+cmake -G "Unix Makefiles" -S MyAlarm/Software/Apps/Alarm-CMake -B MyAlarm/build
+cmake --build MyAlarm/build
+</code></pre>
+
+<h2 id="make-it-permanent"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#make-it-permanent">Make it permanent</a></h2>
+
+<p>Store the paths permanently. If you put cloned the Una SDK to somewhere other than <code>~/git/</code> you'll need to edit this next bit of code:</p>
+
+<pre><code class="language-bash">echo 'export UNA_SDK="$HOME/git/una-sdk"' &gt;&gt; ~/.bashrc
+echo 'export PATH="/opt/st/stm32cubeclt_1.22.0/GNU-tools-for-STM32/bin:$PATH"' &gt;&gt; ~/.bashrc
+source ~/.bashrc
+</code></pre>
+
+<h2 id="build-a-glance-app"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#build-a-glance-app">Build a Glance app</a></h2>
+
+<p>At the moment, the only way to build a GUI app is using the Windows only (Booooo!) TouchGFX<sup id="fnref:windoze"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#fn:windoze" class="footnote-ref" title="Just after I wrote this, the SDK was updated to allow LVGL which should work on Linux. There's no documentation for it yet that I could find." role="doc-noteref">0</a></sup>. So, instead, we'll make a "Hello World" glance. All it will do is draw some text.</p>
+
+<p>The <code>GlanceFloors</code> demo app is the simplest one to copy.</p>
+
+<pre><code class="language-bash">cd $UNA_SDK/Examples/Apps/
+cp -r  GlanceFloors/ GlanceHello
+</code></pre>
+
+<p>Use an IDE or a text editor to open up the new GlanceHello directory.</p>
+
+<ul>
+<li>Rename the directory <code>GlanceHello/Software/App/GlanceFloors-CMake/</code> to <code>GlanceHello/Software/App/GlanceHello-CMake/</code></li>
+<li>Edit the file <code>GlanceHello/Software/App/GlanceFloors-CMake/CMakeLists.txt</code> - specifically the <code># App configuration</code> section.</li>
+<li>Change the <code>APP_NAME</code> to <code>GlanceHello</code></li>
+<li>Change the <code>APP_USER_NAME</code> to <code>Hello</code></li>
+</ul>
+
+<p>For a demo, you can leave the <code>DEV_ID</code> and <code>APP_ID</code> as their default values.</p>
+
+<h2 id="minimum-viable-app"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#minimum-viable-app">Minimum viable app</a></h2>
+
+<p>You will need to edit two more files.</p>
+
+<p>In <code>GlanceHello/Software/Libs/Header/Service.hpp</code> remove the following lines:</p>
+
+<pre><code class="language-CPP">SDK::Sensor::Connection mSensorFloors;
+uint32_t                mFloorsValue;
+bool                    mDataReceived;
+</code></pre>
+
+<p>Then save the file.</p>
+
+<p>Edit <code>GlanceHello/Software/Libs/Source/Service.cpp</code> and replace its entire contents with this:</p>
+
+<pre><code class="language-CPP">#include "Service.hpp"
+#include "SDK/Messages/CommandMessages.hpp"
+#include "SDK/Messages/MessageGuard.hpp"
+
+Service::Service(SDK::Kernel &amp;kernel)
+    : mKernel(kernel)
+    , mGlanceUI()
+    , mGlanceTitle()
+    , mGlanceValue()
+{}
+
+Service::~Service(){}
+
+void Service::run()
+{
+    while (true) {
+        SDK::MessageBase *msg;
+        if(!mKernel.comm.getMessage(msg)) {
+            continue;
+        }
+
+        switch (msg-&gt;getType()) {
+
+            case SDK::MessageType::EVENT_GLANCE_START:
+                if (configGui()) {
+                    createGuiControls();
+                } else {
+                    mKernel.comm.releaseMessage(msg);
+                    mKernel.sys.exit(0);
+                }
+                break;
+
+            case SDK::MessageType::COMMAND_APP_STOP:
+            case SDK::MessageType::EVENT_GLANCE_STOP:
+                mKernel.comm.releaseMessage(msg);
+                return;
+                break;
+
+            case SDK::MessageType::EVENT_GLANCE_TICK:
+                onGlanceTick();
+                break;
+
+            default:
+                break;
+        }
+
+        mKernel.comm.releaseMessage(msg);
+    }
+}
+
+void Service::onGlanceTick()
+{
+    if (mGlanceUI.isInvalid()) {
+        if (auto upd = SDK::make_msg&lt;SDK::Message::RequestGlanceUpdate&gt;(mKernel)) {
+            upd-&gt;name           = APP_NAME;
+            upd-&gt;controls       = mGlanceUI.data();
+            upd-&gt;controlsNumber = static_cast&lt;uint32_t&gt;(mGlanceUI.size());
+            upd.send(100);
+        }
+
+        mGlanceUI.setValid();
+}
+}
+
+bool Service::configGui()
+{
+    bool status = false;
+    if (auto gc = SDK::make_msg&lt;SDK::Message::RequestGlanceConfig&gt;(mKernel)) {
+        if (gc.send(100) &amp;&amp; gc.ok()) {
+            if (gc-&gt;maxControls &gt;= 3) {
+                mGlanceUI.setWidth(gc-&gt;width);
+                mGlanceUI.setHeight(gc-&gt;height);
+                status = true;
+            }
+        }
+    }
+    return status;
+}
+
+void Service::createGuiControls()
+{
+    mGlanceTitle = mGlanceUI.createText();
+    mGlanceTitle.pos({ kTitleX, kTitleY }, { kTitleW, kTitleH })
+        .font(GlanceFont_t::GLANCE_FONT_POPPINS_SEMIBOLD_20)
+        .color(GlanceColor_t::GLANCE_COLOR_TEAL)
+        .setText("Hello, World!")
+        .alignment(GlanceAlignH_t::GLANCE_ALIGN_H_CENTER);
+    mGlanceValue = mGlanceUI.createText();
+    mGlanceValue.pos({ 0, kValueY }, { 200, kValueH })
+        .font(GlanceFont_t::GLANCE_FONT_POPPINS_SEMIBOLD_20)
+        .color(GlanceColor_t::GLANCE_COLOR_WHITE)
+        .setText("I know C++")
+        .alignment(GlanceAlignH_t::GLANCE_ALIGN_H_CENTER);
+}
+</code></pre>
+
+<p>Save the file.</p>
+
+<h2 id="compile-it"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#compile-it">Compile it</a></h2>
+
+<p>On the command line</p>
+
+<pre><code class="language-bash">cd $UNA_SDK/Examples/Apps/GlanceHello/Software/App/GlanceHello-CMake
+cmake -G "Unix Makefiles" -S . -B build
+cmake --build build
+</code></pre>
+
+<p>It should finish with a success message of <code>[100%] Built target GlanceHelloApp</code></p>
+
+<h2 id="copying-it-to-your-watch"><a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#copying-it-to-your-watch">Copying it to your watch</a></h2>
+
+<ul>
+<li>Plug your watch into your computer with a USB-C cable.</li>
+<li>On your computer, open the watch's filesystem.</li>
+<li>Open the <code>Apps</code> directory.</li>
+<li>Create a new directory.</li>
+<li>Name the new directory with the string of characters from the <code>APP_ID</code> which is set in <code>CMakeLists.txt</code></li>
+<li>The app is stored in <code>GlanceHello/Output/</code> and will be called <code>Hello_1.5.0-rc5.uapp</code> or similar.</li>
+<li>Copy the <code>.uapp</code> file from your computer to the directory you just created on the watch.</li>
+<li>Eject the watch.</li>
+<li>Unplug the cable.</li>
+<li>Restart the watch by pressing the "Up" button until you get to "Power Off", then press "Select", then press "Select" again.</li>
+<li>Turn the watch on by holding down "Select".</li>
+<li>Once the watch has fully restarted, press the "Down" button until you see the "Hello" glance.</li>
+</ul>
+
+<p>If it has worked, you should see this:</p>
+
+<img src="https://shkspr.mobi/blog/wp-content/uploads/2026/09/cpp.webp" alt="A watch displaying &quot;Hello World&quot; and &quot;I know C++&quot;. The latter if off centre because I don't know C++." width="1926" height="2048" class="aligncenter">
+
+<p>Hurrah! Treat yourself to a beer 🍻</p>
+
+<div id="footnotes" role="doc-endnotes">
+<hr aria-label="Footnotes">
+<ol start="0">
+
+<li id="fn:windoze">
+<p>Just after I wrote this, the SDK was updated to allow <a href="https://lvgl.io/">LVGL</a> which should work on Linux. There's no documentation for it yet that I could find.&nbsp;<a href="https://shkspr.mobi/blog/2026/10/una-watch-sdk-and-writing-your-first-app/#fnref:windoze" class="footnote-backref" role="doc-backlink">↩︎</a></p>
+</li>
+
+</ol>
+</div>
+<img src="https://shkspr.mobi/blog/wp-content/themes/edent-wordpress-theme/info/okgo.php?ID=76095&amp;HTTP_REFERER=RSS" alt="" width="1" height="1" loading="eager">
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
