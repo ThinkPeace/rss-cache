@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>On Git Refs | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>On Git Refs</h1>
+        <div class="meta">matklad 2026-10-07T00:00:00Z</div>
+        <div class="links">
+          <a href="https://matklad.github.io/2026/10/07/git-ref.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/matklad-github-io/matklad-github-io-674f2ae2bd795467.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I have recently improved my mental model of Git. Consider these two git commands:</div>
+        <div class="content">
+          <header>
+  <h1>On Git Refs</h1>
+  <time class="meta" datetime="2026-10-07">Oct 7, 2026</time>
+</header>
+<p>I have recently improved my mental model of Git. Consider these two git commands:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-title function_">$</span> git fetch origin master</span>
+<span class="line"><span class="hl-title function_">$</span> git switch -c my-feature origin/master</span></code></pre>
+
+</figure>
+<p>Do you understand why is it <code>origin master</code> in one command, and <code>origin/master</code>
+in the other? I didn’t, until a few weeks ago!</p>
+<p>My understanding was that git is a content-addressable database. Git stores
+commits, a commit is identified by the hash of its content, and the content
+of a commit is, primarily:</p>
+<ul>
+<li>
+a memory-less snapshot of a state of the codebase at a given point in time,
+</li>
+<li>
+a list of (hashes of) parent commits.
+</li>
+</ul>
+<p>That was enough git for me to understand <code>git log</code> output and get me out of any
+botched rebase without having to re-clone the repo (For roughly half of my
+career, I <em>was</em> re-cloning the repo. No shame in that! Learning git is useful,
+but it’s not the <em>highest</em> priority thing to learn when you start).</p>
+<hr>
+<p>I now understand that git not only comes with an append-only (“immutable”)
+content-addressable database, but is also a boring mutable key-value store.</p>
+<p>Git has a mutable map whose keys are strings, and whose values are
+content-addressed objects. The keys are conventionally formatted as file system
+paths, and you can usually inspect the state of the mapping by listing
+<code>.git/refs</code> directory:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-title function_">$</span> eza -T .git/refs</span>
+<span class="line"><span class="hl-output">.git/refs</span></span>
+<span class="line"><span class="hl-output">├── heads</span></span>
+<span class="line"><span class="hl-output">│   ├── make</span></span>
+<span class="line"><span class="hl-output">│   ├── master</span></span>
+<span class="line"><span class="hl-output">│   ├── my-feature</span></span>
+<span class="line"><span class="hl-output">│   └── pbd-adt</span></span>
+<span class="line"><span class="hl-output">├── origin</span></span>
+<span class="line"><span class="hl-output">├── remotes</span></span>
+<span class="line"><span class="hl-output">│   └── origin</span></span>
+<span class="line"><span class="hl-output">│       ├── context-switches</span></span>
+<span class="line"><span class="hl-output">│       ├── gh-pages</span></span>
+<span class="line"><span class="hl-output">│       ├── HEAD</span></span>
+<span class="line"><span class="hl-output">│       ├── make</span></span>
+<span class="line"><span class="hl-output">│       └── master</span></span>
+<span class="line"><span class="hl-output">└── tags</span></span>
+<span class="line"><span class="hl-output"></span></span>
+<span class="line"><span class="hl-title function_">$</span> cat .git/refs/heads/master</span>
+<span class="line"><span class="hl-output">b59148228e52f7c615ead7fdd4e91001994ad50f</span></span>
+<span class="line"><span class="hl-output"></span></span>
+<span class="line"><span class="hl-title function_">$</span> git show-ref refs/heads/master</span>
+<span class="line"><span class="hl-output">b59148228e52f7c615ead7fdd4e91001994ad50f refs/heads/master</span></span></code></pre>
+
+</figure>
+<p>What makes this <code>refs</code> KV infrastructure confusing is that:</p>
+<ul>
+<li>
+It powers many distinct user-visible git features, but refs themselves are an
+implementation detail.
+</li>
+<li>
+It is a bit of a leaky abstraction, refs are <em>almost</em> invisible in the
+day-to-day usage.
+</li>
+<li>
+Git CLI uses shorthand notation for refs and many default arguments, which
+makes it not obvious that a particular CLI argument is a ref.
+</li>
+<li>
+And, as usual, git likes to give several names to one thing, and re-uses the
+same name for distinct things.
+</li>
+</ul>
+<p>Branches, tags, and git notes are all just refs!</p>
+<hr>
+<p>The structure becomes much more obvious once you elaborate all CLI shortcuts. The original command</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-title function_">$</span> git fetch origin master</span></code></pre>
+
+</figure>
+<p>then becomes</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-title function_">$</span> git fetch \</span>
+<span class="line">    https://github.com/matklad/matklad.github.io \</span>
+<span class="line">    refs/heads/master:refs/remotes/origin/master</span></code></pre>
+
+</figure>
+<p>The first argument of <code>fetch</code> (<code>https://...</code>) is a location of a remote
+repository. Git will “dial” that address, and will transfer some data from that
+computer locally over the network.</p>
+<p>The second argument is a <code>source:target</code> pair of string keys (refs). The
+<code>source</code> is a key on the remote repo, the <code>target</code> is the name of a local key,
+and fetch as a whole asks git to read a value from a remote repository and save
+it locally under a different name.</p>
+<p>To avoid typing repository URLs all the time, git assigns them symbolic names,
+with <code>origin</code> being the conventional name for the primary remote repository:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-title function_">$</span> git fetch origin \</span>
+<span class="line">    refs/heads/master:refs/remotes/origin/master</span></code></pre>
+
+</figure>
+<p><code>refs/heads/master</code> is a fully elaborated name of a branch on the remote repo.
+That is, branch <code>my-feature</code> is just a
+<code class="display">refs/heads/my-feature</code>
+ref. It could
+have been
+<span class="display"><code>refs/branch/my-feature</code>,</span>
+but it isn’t :)</p>
+<p>I don’t know the specific shorthand rules, but, generally, git allows you to
+spell only the suffix of a ref:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-title function_">$</span> git fetch origin \</span>
+<span class="line">    master:refs/remotes/origin/master</span></code></pre>
+
+</figure>
+<p><code>refs/remotes/origin/master</code> is the name of the local ref we’ll use to store the
+result. It would seem natural to just use the same name locally as the one on
+the remote, but this only works if there’s a single remote. If there are two
+upstream repositories (for example, your fork, and the original repo you forked
+from), their ref names will collide. That’s why we want to namespace the refs
+for remote called <code>foo</code> under <code>refs/remotes/foo</code>. And <code>origin</code> is just a
+conventional name for <em>the</em> remote in simple setups.</p>
+<p>Again, it would be more natural to <em>directly</em> mirror remote ref structure
+locally:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line">refs/ heads/my-branch -&gt; refs/ remotes/origin/ heads/my-branch</span></code></pre>
+
+</figure>
+<p>but git strips the redundant heads component. And this <code>-heads</code>,
+<code>+remotes/$remote</code> mapping is built in, which compresses the command to</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-title function_">$</span> git fetch origin master</span></code></pre>
+
+</figure>
+<p>It’s worth reflecting <em>why</em> it works this way. Git model is offline first.
+What’s more, it assumes <em>explicit</em> synchronization points. Rather than
+synchronizing with the remote repository in background when there’s
+connectivity, git requires explicit <code>fetch</code> and <code>push</code> operations to transfer
+bytes over the wire. In this paradigm, it is useful to model the state of the
+remote party at the moment when we talked to them the last time. Theory of mind!</p>
+<p>This <em>hopefully</em> deconfuses git’s concept of local and remote branches. Consider
+the <code>main</code> branch. It exists on the remote named <code>origin</code> as <code>refs/heads/main</code>.
+When you synchronize your local repository with <code>origin</code>, you get
+<span class="display"><code>refs/remotes/origin/main</code> —</span>
+you current best knowledge about the the state of
+<code>main</code> on the <code>origin</code>.</p>
+<p>And then there’s your local <code>refs/heads/main</code>. It typically starts pointing at
+the same commit as
+<span class="display"><code>refs/remotes/origin/main</code>.</span>
+But, when you make a commit, <code>refs/heads/main</code> advances, but
+<code class="display">refs/remotes/origin/main</code>
+stays the same.</p>
+<p>When you try to push your local commit to origin, you will get a conflict, if
+the <code>main</code> branch on the <code>origin</code> advanced in the meanwhile. In that case, git
+automatically updates
+<code class="display">refs/remotes/origin/main</code>
+(as that’s just a local mirror of the remote state), but then it’s on you to
+update <code>refs/heads/main</code> and push it again.</p>
+<p>Revisiting the full example:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-title function_">$</span> git fetch origin master</span>
+<span class="line"><span class="hl-title function_">$</span> git switch -c my-feature origin/master</span></code></pre>
+
+</figure>
+<p>The first command looks up the URL for the <code>origin</code> remote in <code>.git/config</code> and
+makes a network request to that machine. As a result, the local
+<code>refs/remotes/origin/master</code> gets updated to the same commit as
+<code>refs/heads/master</code> remotely (the commit and its ancestors are transferred
+locally as a result).</p>
+<p>The second command creates a <code>refs/heads/my-feature</code> ref (a branch), whose
+starting point is <code>refs/remotes/origin/master</code>. It is an example of a leaky
+abstraction.</p>
+<p>The second argument there is a (shorthand of a) ref, so you can do</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line">$ git switch -c my-feature \</span>
+<span class="line">    refs/remotes/origin/master</span></code></pre>
+
+</figure>
+<p>But, although the first argument <em>creates</em> a ref, it isn’t a ref itself. In
+other words, if you try to elaborate it as well</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line">$ git switch -c refs/heads/my-feature \</span>
+<span class="line">    refs/remotes/origin/master</span></code></pre>
+
+</figure>
+<p>you’ll get</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line">refs/heads/refs/heads/my-feature</span></code></pre>
+
+</figure>
+<p>That’s all! I am pretty sure this isn’t particularly useful, but maybe it is
+interesting!</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
