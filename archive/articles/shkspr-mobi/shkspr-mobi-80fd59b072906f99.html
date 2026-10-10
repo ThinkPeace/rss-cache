@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Some quick thoughts on Unit Testing ActivityPub | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Some quick thoughts on Unit Testing ActivityPub</h1>
+        <div class="meta">Terence Eden’s Blog 2026-10-10T11:34:15Z</div>
+        <div class="links">
+          <a href="https://shkspr.mobi/blog/2026/10/some-thoughts-on-unit-testing-activitypub/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/shkspr-mobi/shkspr-mobi-80fd59b072906f99.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I&#x27;ll be radically honest here - I never really got the idea of &quot;Test Driven Development&quot;. I&#x27;m much more of a &quot;telnet into production and damn the consequences&quot; kind of guy. Look, it&#x27;s much more fun and my cardiologist recommends severe shocks every now and again. The essence of unit testing is pretty simple: Feed a function some data See how it responds Sen…</div>
+        <div class="content">
+          <p>I'll be radically honest here - I never really got the idea of "Test Driven Development". I'm much more of a "telnet into production and damn the consequences" kind of guy. Look, it's much more fun and my cardiologist recommends severe shocks every now and again.</p>
+
+<p>The essence of unit testing is pretty simple:</p>
+
+<ol>
+<li>Feed a function some data</li>
+<li>See how it responds</li>
+</ol>
+
+<p>Send it good data and if it returns "true" the test passes. Send it bad data and make sure it returns false. Easy peasy lemon squeezy.</p>
+
+<p>As part of my <a href="https://shkspr.mobi/blog/2026/08/activitybot-is-the-recipient-of-an-nlnet-grant/">NLnet funded work on ActivityBot</a>, I'm writing some proper tests for my bot framework. I am hopeful that some of them will be useful to other projects doing similar things.</p>
+
+<p>There are four major classes of tests - here are the problems I've found while writing them.</p>
+
+<h2 id="basic-text-validation"><a href="https://shkspr.mobi/blog/2026/10/some-thoughts-on-unit-testing-activitypub/#basic-text-validation">Basic text validation</a></h2>
+
+<p>A basic test might be how to validate that an ActivityPub username is valid. Typically it would be something like <code>@edent@mastodon.social</code> - what assumptions do we make with that? It starts with an <code>@</code> and has another <code>@</code> somewhere in it, dividing into two parts, the user and the server.  The server has to be a valid domain name - but that can include non-ASCII Internationalised Domain Names and Emoji domains.</p>
+
+<p>What about the user part? Is it just A-Z and 0-9? Can it have dots? What about apostrophes like an email address?</p>
+
+<p>Basically, how easy is it find the specifications for all the various component parts of ActivityPub? Not very!</p>
+
+<h2 id="message-validation"><a href="https://shkspr.mobi/blog/2026/10/some-thoughts-on-unit-testing-activitypub/#message-validation">Message validation</a></h2>
+
+<p>What does a <a href="https://www.rfc-editor.org/info/rfc7033/">WebFinger response</a> look like? Which parts are mandatory and what values can they contain?</p>
+
+<p>With any message that your project generates, how can you be sure that other ActivityPub servers will understand it?</p>
+
+<p>Similarly, when we receive a follow message from an external server, what should it look like?</p>
+
+<p>There are some <a href="https://github.com/steve-bate/fediverse-jsonschema">JSON Schemas</a> which can be used to validate some type of messages.</p>
+
+<p>But, again, there are <em>many</em> scattered specifications.</p>
+
+<h2 id="signature-verification"><a href="https://shkspr.mobi/blog/2026/10/some-thoughts-on-unit-testing-activitypub/#signature-verification">Signature verification</a></h2>
+
+<p>As I've written about before, <a href="https://shkspr.mobi/blog/2026/09/a-reasonably-practical-guide-to-validating-rfc-9421-http-signatures-for-activitypub-in-php/">HTTP Signatures are difficult</a>. There are two main problems. The first is verifying signatures.</p>
+
+<p>In order to do that, you need to gather a bunch of signatures and then find a way to replay them into the test. So I'm in the process of saving signatures which I can then share with others.</p>
+
+<p>The second problem is <em>generating</em> signatures.  Sure, you can run tests on the signatures - but there's only one <em>real</em> way to test whether they're acceptable…</p>
+
+<h2 id="communicating-with-others"><a href="https://shkspr.mobi/blog/2026/10/some-thoughts-on-unit-testing-activitypub/#communicating-with-others">Communicating with others</a></h2>
+
+<p>Passing tests means nothing if you can't communicate with others and they can't communicate with you.</p>
+
+<p>Some tests are easier than others. Sending a signed request should be easy and repeatable. But receiving messages isn't easily automated. It requires being able to control an external server and asking that to send messages.</p>
+
+<p>With the <a href="https://docs.joinmastodon.org/client/intro/">Mastodon API</a> it is possible to make requests which will interact with your server - but only if it is a <em>public</em> server.</p>
+
+<h2 id="putting-it-all-together"><a href="https://shkspr.mobi/blog/2026/10/some-thoughts-on-unit-testing-activitypub/#putting-it-all-together">Putting it all together</a></h2>
+
+<p>I'm putting <a href="https://gitlab.com/edent/activity-bot/-/tree/main/tests?ref_type=heads">all my tests online</a>. I'm also sharing a <a href="https://gitlab.com/edent/activity-bot/-/tree/main/tests/headers?ref_type=heads">collection of messages and signatures</a> which you can use in your tests.</p>
+
+<p>I'd love to know if you find them useful.</p>
+<img src="https://shkspr.mobi/blog/wp-content/themes/edent-wordpress-theme/info/okgo.php?ID=75774&amp;HTTP_REFERER=RSS" alt="" width="1" height="1" loading="eager">
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
