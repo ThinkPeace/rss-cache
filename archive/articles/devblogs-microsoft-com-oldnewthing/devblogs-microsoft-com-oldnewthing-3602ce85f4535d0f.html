@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>C++ futures part 2: The mental model for std::promise, std::packaged_task | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>C++ futures part 2: The mental model for std::promise, std::packaged_task</h1>
+        <div class="meta">The Old New Thing 2026-10-13T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20261013-00/?p=112769/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-3602ce85f4535d0f.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Building things out of the state. The post C++ futures part 2: The mental model for &lt;CODE&gt;std::promise&lt;/CODE&gt;, &lt;CODE&gt;std::packaged_task&lt;/CODE&gt; appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p><a title="C++ futures part 1: The mental model" href="https://devblogs.microsoft.com/oldnewthing/20261012-00/?p=112767"> Last time</a>, we looked at the &#8220;state&#8221; that powers the <code>std::promise</code>, <code>std::packaged_task</code>, <code>std::async</code>, <code>std::future</code>, and <code>std::shared<wbr />future</code> classes. Now we&#8217;ll see how that &#8220;state&#8221; (which I call the <code>source</code>) gets used and passed around.</p>
+<p>The lifetime of the <code>source</code> is managed by a <code>std::<wbr />shared_<wbr />ptr&lt;source&lt;T&gt;&gt;</code>. Everybody who has a reference to the source uses this shared pointer.</p>
+<p>The simplest case is <code>std::promise</code>. The operations on <code>std::promise</code> pretty much map directly to the operations on the <code>source</code> we laid out last time.</p>
+<p>The next more complicated case is the <code>std::<wbr />packaged_task</code>. This takes a callable and saves it for later. You can then call <code>get_future</code> to get a future and hand it to somebody as an IOU for &#8220;A value will appear here someday.&#8221;</p>
+<p>When you want to produce a value, you invoke the <code>packaged_task</code> with whatever parameters you want to pass to the original callable. The result of the invocation (either a value or an exception) is then stored in the <code>source</code> object, which can then be retrieved by the future.</p>
+<p>You can imagine a packaged task as just wrapping a promise:</p>
+<pre>template&lt;typename R, typename... Args&gt;
+class packaged_task
+{
+    std::promise&lt;R&gt; p;
+    std::function&lt;R(Args...)&gt; func;
+
+public:
+    template&lt;typename F&gt;
+    packaged_task(F&amp;&amp; f) : func(std::forward&lt;F&gt;(f)) {}
+
+    auto get_future() { return p.get_future(); }
+
+    void operator()(Args... args) {
+        try {
+            p.set_value(func(args...));
+        } catch (...) {
+            promise.set_exception(std::current_exception());
+        }
+    }
+};
+</pre>
+<p>When you invoke it, it calls the stored callable with the arguments and puts the result in the promise.</p>
+<p>Okay, those were the easy cases of pushing values into the <code>source</code>. Next time, we&#8217;ll look at the messy case: <code>std::<wbr />async</code>.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20261013-00/?p=112769/">C++ futures part 2: The mental model for &lt;CODE&gt;std::promise&lt;/CODE&gt;, &lt;CODE&gt;std::packaged_task&lt;/CODE&gt;</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
