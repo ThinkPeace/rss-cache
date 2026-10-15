@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>C++ futures part 3: The mental model for std::async | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>C++ futures part 3: The mental model for std::async</h1>
+        <div class="meta">The Old New Thing 2026-10-14T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20261014-00/?p=112774/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-fe45fd36a1aceef4.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Doing things later in different ways. The post C++ futures part 3: The mental model for &lt;CODE&gt;std::async&lt;/CODE&gt; appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p><a title="C++ futures part 2: The mental model for std::promise, std::packaged_task" href="https://devblogs.microsoft.com/oldnewthing/20261013-00/?p=112769"> We continue our study of C++ futures</a> with <code>std::<wbr />async</code>.</p>
+<p>The more complex case is the <code>std::<wbr />async</code>. You give <code>std::<wbr />async</code> a callable and optional parameters to pass to that callable, and you also specify how and when you want the callable to be invoked. You get two axes: Do you want it to be calculated immediately or on demand? Do you want the calculation to happen on the thread that requests the value or on its own thread?</p>
+<p>Now, you&#8217;d think you could fill out the table like this:</p>
+<table border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th> </th>
+<th>Immediate</th>
+<th>On demand (&#8220;deferred&#8221;)</th>
+</tr>
+<tr>
+<th>Same thread</th>
+<td>Call now and save the value</td>
+<td>Call when waited</td>
+</tr>
+<tr>
+<th>New thread (&#8220;async&#8221;)</th>
+<td>Start the thread now</td>
+<td>Start the thread when waited</td>
+</tr>
+</tbody>
+</table>
+<p>However, that&#8217;s not what the C++ standard says.</p>
+<p>The C++ standard disallows asking for an immediate value on the same thread. There&#8217;s really no value to doing it that way, since there is no actual &#8220;future&#8221;; it all happens in the present! &#8220;This future could have been a function call.&#8221;</p>
+<pre>auto f = std::async({}, calculator);
+
+auto result = f.get();
+</pre>
+<p>This would, in theory, mean &#8220;Immediately call the calculator and wait for it to produce a value. Store it in the <code>source</code> and return a future that fetches the value from that source.&#8221; But that&#8217;s the same as just</p>
+<pre>auto result = calculator();
+</pre>
+<p>I&#8217;m guessing that the C++ standard disallows it because there&#8217;s no point.</p>
+<p>The C++ standard also says that if you combine both <code>std::<wbr />launch::<wbr />deferred</code> and <code>std::<wbr />launch::<wbr />async</code>, it doesn&#8217;t mean that you get a calculation that lazy-starts on its own thread. Instead, the standard says that the implementation can choose which flag to honor and which to ignore.</p>
+<p>So really, the table is</p>
+<table border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th> </th>
+<th>Immediate</th>
+<th>On demand (&#8220;deferred&#8221;)</th>
+</tr>
+<tr>
+<th>Same thread</th>
+<td>Illegal</td>
+<td>Call when waited</td>
+</tr>
+<tr>
+<th>New thread (&#8220;async&#8221;)</th>
+<td>Start the thread now</td>
+<td>Dealer&#8217;s choice</td>
+</tr>
+</tbody>
+</table>
+<p>In all cases, the result of the callable (either a value or an exception) is stored in the <code>source</code>.</p>
+<p>Now, I noted that there&#8217;s no point to asking <code>std::<wbr />async</code> for an immediate on-thread calculation. But maybe you want to do it anyway because you are interfacing with some other component that expects to receive a <code>future</code>. How could you get the same result?</p>
+<p>We&#8217;ll look at that next time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20261014-00/?p=112774/">C++ futures part 3: The mental model for &lt;CODE&gt;std::async&lt;/CODE&gt;</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
