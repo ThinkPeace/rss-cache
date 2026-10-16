@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>C++ futures part 5: std::future and std::shared_future | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>C++ futures part 5: std::future and std::shared_future</h1>
+        <div class="meta">The Old New Thing 2026-10-16T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20261016-00/?p=112778/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-b99dbd884b602925.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Getting the results back out. The post C++ futures part 5: &lt;CODE&gt;std::&lt;WBR&gt;future&lt;/CODE&gt; and &lt;CODE&gt;std::&lt;WBR&gt;shared_future&lt;/CODE&gt; appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p><a title="C++ futures part 4: What if I want an immediate on-thread std::async?" href="https://devblogs.microsoft.com/oldnewthing/20261015-00/?p=112776"> Wrapping up our quick introduction to the C++ futures library</a>, we come to the last two parts: <code>std::<wbr />future</code> and <code>std::<wbr />shared_future</code>.</p>
+<p>The <code>std::<wbr />future</code> is the starting point. It is a move-only class that this takes the <code>source</code> and forwards its <code>wait</code> and <code>wait_for</code> methods to the <code>source</code>, and forwards its <code>get</code> method to <code>consume</code>.</p>
+<p>Forwarding the <code>get</code> to <code>consume</code> means that you can call <code>get</code> only once.</p>
+<p>The idea is that <code>std::<wbr />future</code> is for the case where there is exactly one consumer of the value. Since it is move-only, you can&#8217;t copy it; you can only give it away and transfer the power to retrieve the value to the recipient.</p>
+<p>The <code>std::<wbr />future</code> has a method called <code>shared()</code>. This transfers the <code>source</code> from the <code>future</code> to a <code>shared_<wbr />future</code> object. The <code>shared_<wbr />future</code> also forwards its <code>wait</code> and <code>wait_for</code> methods to the <code>source</code>, but instead of forwarding its <code>get</code> to the <code>source::<wbr />consume</code>, <code>shared_<wbr />future::<wbr />get()</code> just calls <code>source::<wbr />get</code> to get a reference to the value storage.</p>
+<p>This is what makes the &#8220;shared future&#8221; shared: The <code>shared_<wbr />future</code> is copyable, so you can have multiple people all with their own <code>shared_<wbr />future</code> that share the same <code>source</code>, and each one can separately wait for the value and retrieve the value as many times as they want.</p>
+<p>The downside of <code>shared_<wbr />future</code> is that you always get a const reference, so if you want to perform non-const operations on the result, you&#8217;ll have to make a copy and operate on the copy. And that&#8217;s not possible at all if the result is itself a move-only type, since you can&#8217;t move out of a const reference.</p>
+<p>You can see that at the end of the day, all of the pieces of the futures library are just different ways of manipulating the invisible <code>source</code>. Some components push values into the <code>source</code>, and others pull values out of the <code>source</code>.</p>
+<p>It took me a while to realize that the most important part of the whole futures library is something you can&#8217;t even see.</p>
+<p><b>Bonus chatter</b>: All the names in the futures library are horrible. I mean, really, &#8220;packaged task&#8221;?</p>
+<p>Here&#8217;s my attempt to give the pieces better names:</p>
+<table border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th>Old name</th>
+<th>New name</th>
+</tr>
+<tr>
+<td>promise</td>
+<td>promise_source</td>
+</tr>
+<tr>
+<td>packaged_task</td>
+<td>function_promise_source</td>
+</tr>
+<tr>
+<td>async(deferred)</td>
+<td>make_lazy_promise</td>
+</tr>
+<tr>
+<td>async(async)</td>
+<td>make_thread_promise</td>
+</tr>
+<tr>
+<td>future</td>
+<td>promise</td>
+</tr>
+<tr>
+<td>shared_future</td>
+<td>shared_promise</td>
+</tr>
+</tbody>
+</table>
+<p>I admit, these names aren&#8217;t all that good either. But I prefer to use the word &#8220;promise&#8221; to refer to the thing that &#8220;promises&#8221; to produce a value. And the pattern <code>promise_source</code> / <code>promise</code> makes the relationship between the two much clearer: A promise source is a thing that makes promises. And it avoids the hilarity of a non-async <code>async()</code>.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20261016-00/?p=112778/">C++ futures part 5: &lt;CODE&gt;std::&lt;WBR&gt;future&lt;/CODE&gt; and &lt;CODE&gt;std::&lt;WBR&gt;shared_future&lt;/CODE&gt;</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
