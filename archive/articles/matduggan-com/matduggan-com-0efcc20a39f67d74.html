@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ClickHouse Will Let You Be Wrong at Scale | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>ClickHouse Will Let You Be Wrong at Scale</h1>
+        <div class="meta">matduggan.com 2026-10-20T14:01:12Z</div>
+        <div class="links">
+          <a href="https://matduggan.com/clickhouse-will-let-you-be-wrong-at-scale/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/matduggan-com/matduggan-com-0efcc20a39f67d74.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">So I&#x27;ve posted before how I think ClickHouse is great. Its columnar storage is fast, it has amazing compression. I won&#x27;t bore you with those details, you can see them all here: https://matduggan.com/clickhouse-is-winning-the-observability-wars/ However all technology is great</div>
+        <div class="content">
+          <p>So I&apos;ve posted before how I think ClickHouse is great. Its columnar storage is fast, it has amazing compression. I won&apos;t bore you with those details, you can see them all here: <a href="https://matduggan.com/clickhouse-is-winning-the-observability-wars/">https://matduggan.com/clickhouse-is-winning-the-observability-wars/</a></p><p>However all technology is great until you try to do something atypical with it. </p><p>What I wanted was a realistic torture test: network firewall telemetry, on the order of 2 billion rows a day of mixed-vendor syslog, parsed at ingest into wide typed tables with a 14-day TTL. The dashboards needed to do two things at once in Grafana: fast lookup of individual log lines, and fast visualizations where you can stack ad-hoc filters on top of each other across every panel simultaneously.</p><p>I learned a lot of things about ClickHouse. Also some things about myself, not all flattering. </p><h3 id="tldr">TL;DR</h3><p>This ended up being significantly harder than I thought it would be, and part of that is that I made a ton of mistakes. Don&apos;t email me mean comments. I&apos;m writing this up as a warning to the people coming behind me, and I&apos;ll own every mistake as we go.</p><p>For the happy OTel path, CH is very easy. Few hundred metrics, couple million logs a day, several thousand traces, not a problem. For the more complex custom route, CH is extremely <em>powerful</em> but it&apos;s hard to use. </p><p>The theme of the whole project is that <strong>this stack fails silently.</strong> ClickHouse is the most agreeable coworker you&apos;ll ever have because it never says you are wrong, it just lets you be super wrong. A query that looks fine reads 84x more rows than it should. A misconfigured filter just doesn&apos;t apply. A projection that never routes still returns correct numbers, slowly. Once I understood that ClickHouse will never tell me that I did something wrong and that I had to figure out I did something wrong, we got along fine. </p><p>You have to build verification habits before you build anything else. <code>system.query_log</code> is your friend, your bartender, the lovable dog in a horror movie. This is the only thing in the system that says you messed up. </p><p>Here are the lessons I learned. Hopefully they save someone else from going down the same path I did. </p><h3 id="setup">Setup</h3><p>So we&apos;re not doing anything weird here. </p><ul><li>ClickHouse is a 2 shard x 3 replicas setup underneath the Altinity operator. Every table is a <code>ReplicatedMergeTree</code> wrapped in <code>Distributed</code> tables and Grafana only ever queries the wrapper. </li><li>Grafana is the official <code>grafana-clickhouse-datasource</code> plugin, 25 panels and then ad-hoc filters up at the top that apply to every panel at once. </li><li>Hard guardrails we cannot break. <code>max_rows_to_read</code> = 1 billion, <code>max_bytes_to_read</code> = 100 GB, <code>max_execution_time</code> = 60s, all in <code>throw</code> mode. I can raise these but the entire point of this process was to operate <em>inside</em> of the CH model for data and try to leave those alone. </li></ul><h3 id></h3><h2 id="lesson-1-dont-handwrite-the-filters">Lesson 1: Don&apos;t handwrite the filters</h2><p>My first draft of the dashboard wrote filters the way I&apos;d typically write them in normal SQL, by adding a guard so the query stays valid regardless of what the user picks. </p><pre><code class="language-sql">WHERE (empty({{observer}}) OR observer IN {{observer}})
+</code></pre><p>This would end up being quite the stupid decision. </p>
+<!--kg-card-begin: html-->
+<table>
+<thead>
+<tr>
+<th>predicate</th>
+<th>rows read</th>
+<th>time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observer = &apos;one-device&apos;</code> (direct)</td>
+<td>3.05M</td>
+<td>115 ms</td>
+</tr>
+<tr>
+<td> <code>(empty(...) OR col IN ...)</code> guard</td>
+<td><strong>257.64M</strong></td>
+<td>1,134 ms</td>
+</tr>
+</tbody>
+</table>
+<!--kg-card-end: html-->
+<p>Eighty-four times the rows, ten times the time, same answer. Why is this so much worse? I&apos;m not entirely sure. My best guess is that the guard keeps primary-key pruning from engaging, so you get a full partition scan with post-filtering. I clearly measured the effect but I&apos;m not exactly sure how to prove the <em>mechanism</em>. <code>EXPLAIN</code> was my only savior here. </p><p>The fix was to stop putting in the WHERE-clause filtering by hand and use Grafana ad-hoc filtering. The key learning here is <em>how</em> the plugin does that and why it makes a difference. It does <strong>not</strong> rewrite your WHERE clause. It appends the filter as a ClickHouse query setting, <code>additional_table_filters</code>, which means it is applied at <em>planning</em> time and prunes exactly like a hand-written query. </p>
+<!--kg-card-begin: html-->
+<table>
+<thead>
+<tr>
+<th>form</th>
+<th>rows read</th>
+<th>time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>no filter</td>
+<td>256.90M</td>
+<td>1,265 ms</td>
+</tr>
+<tr>
+<td>hand-written <code>WHERE observer = &apos;...&apos;</code></td>
+<td>4.67M</td>
+<td>170 ms</td>
+</tr>
+<tr>
+<td><strong>ad-hoc filter</strong></td>
+<td><strong>4.67M</strong></td>
+<td>284 ms</td>
+</tr>
+</tbody>
+</table>
+<!--kg-card-end: html-->
+<figure class="kg-card kg-image-card kg-card-hascaption"><img src="https://matduggan.com/content/images/2026/10/image-5.png" class="kg-image" alt loading="lazy" width="361" height="466"><figcaption><span>In case you don&apos;t know what the grafana ad hoc filter looks like</span></figcaption></figure><h2 id="lesson-2-sort-keys-matter-sorta-dad-joke-you-are-welcome">Lesson 2: Sort keys matter sorta (dad joke, you are welcome)</h2><p>When I first set up the main table, I did the following:</p><pre><code class="language-sql">ORDER BY (observer, action, application, toStartOfHour(Timestamp), Timestamp)
+</code></pre><p>The logic made sense at the time, even if it didn&apos;t end up holding up. We&apos;re sorting by network device first since of all of these, there are going to be the least number of network devices. But what I didn&apos;t really think about is that every panel is time-bound because of course they are, that&apos;s how Grafana works. In ClickHouse only the <strong>front</strong> of the sort key gets the fast lookup path. Obvious in retrospect, but stumped me for a hot minute. I thought I was structuring this by lowest cardinality (device) and then out to most cardinality, which logically made sense. </p><p>If all you want is information on the right way to do this, you can find that here: <a href="https://clickhouse.com/blog/working-with-time-series-data-and-functions-ClickHouse">https://clickhouse.com/blog/working-with-time-series-data-and-functions-ClickHouse</a> and <a href="https://oneuptime.com/blog/post/2026-03-31-clickhouse-choose-order-by-key/view">https://oneuptime.com/blog/post/2026-03-31-clickhouse-choose-order-by-key/view</a></p><h4 id="what-does-order-by-mean-in-clickhouse">What does ORDER BY mean in ClickHouse?</h4><p>What&apos;s important to understand about this index is that it&apos;s not the same as like MySQL necessarily. It&apos;s the physical layout, the rows are written to disk in sorted order like a phone book sorted by lastname, firstname. </p><p>ClickHouse by design doesn&apos;t keep a very large &quot;bookmark list&quot;, every 8192 rows (called a granule), it writes down the sort-key values at that spot. That bookmark list is the primary key. </p><p>So the Fast lookup only works for a prefix of the sort columns:</p><ul><li>&quot;All the Smiths&quot; &#x2192; jump straight to the S section. Fast.</li><li>&quot;Everyone named John&quot; &#x2192; Johns are scattered through every last-name section &#x2192; you read the whole book. Slow.</li><li>Their table also splits data into <strong>daily partitions</strong> (separate files per day). That&apos;s a coarse filter that works no matter what the sort key is (remember this, it becomes important)</li></ul><h4 id="why-is-timestamp-in-there-twice">Why is timestamp in there twice?</h4><p>Everyone asked me why I did that, let me explain. </p><p>The two entries are not the same thing. </p><ul><li><code>toStartOfHour(Timestamp)</code> &#x2014; the <strong>hour bucket</strong>. It rounds 14:37:22 down to 14:00:00. This is the &quot;cutoff&quot;</li><li><code>Timestamp</code> &#x2014; the exact time.</li></ul><p>Within any fixed (observer, action, application) group, sorting by (hour, exact-time) produces exactly the same order as sorting by (exact-time) alone &#x2014; the hour is just a rounded copy of the same value, so it can never re-order two rows.</p><p>So my first design was basically this <code>(observer, action, application, hour, Timestamp)</code>.</p><p>So time sat at position four, and the most common predicate in the dashboard was aimed at the worst-positioned column. The tail-logs panel with ORDER BY Timestamp DESC LIMIT 1000, a multi-hour window, measured before the guardrails went up, read 291.8M rows, 158 GiB, in 18.9 seconds; with one observer filter, 23.1M rows, 936 ms. The newest rows sit at the end of each device&#x2019;s block so a newest-N query has to walk every device&apos;s block to find the tail.</p><p><strong>The fix:</strong></p><ul><li><code>(toStartOfHour(Timestamp), observer, action, application, Timestamp)</code> &#x2014; puts the bucket first, so an hour range is one contiguous block. All the Smiths together. </li></ul><figure class="kg-card kg-image-card kg-card-hascaption"><img src="https://matduggan.com/content/images/2026/10/image-3.png" class="kg-image" alt loading="lazy" width="370" height="300"><figcaption><span>All the Smiths together</span></figcaption></figure><p>Here&apos;s what makes this decision consequential: <strong><code>MODIFY ORDER BY</code> can&apos;t reorder, prepend, or absorb existing columns.</strong> You can only append columns added in the same <code>ALTER</code>. Get the key wrong on day one and the fix is not an ALTER; it&apos;s a new table, ~520 GiB of backfill per shard under live ingest, and an atomic swap. Ask me how I know. MODIFY ORDER BY turns out to be less &apos;modify&apos; and more &apos;build a second house next door, carry everything over by hand, then swap the mailboxes.</p><p>After all those lessons, I ended up running a benchmark that was the kind of beautiful baby benchmark you dream of where it confirms you solved every problem. An identical aggregate query, <strong>156 ms vs 1,690 ms. 10.8x faster!</strong> I felt great about that for most of an afternoon, which is how long it took to notice that 88% of the old table&apos;s partition had tiered to S3 while the new table sat entirely on local NVMe. We had benchmarked a Ferrari against a tractor and concluded the tractor was slow. Which is true. It is also not the thing we measured. Excellent work.</p><p>The same-tier control with both on NVMe produced no noticeable query differences. So was it worth reorganizing? I&apos;m not sure! I think?</p><p>This took a long time to do, so triple check this part. </p><h2 id="lesson-3-projections-are-trickier-than-i-thought">Lesson 3: Projections are trickier than I thought</h2><p>So when you first run across projections in ClickHouse, they seem pretty great. </p><figure class="kg-card kg-image-card"><img src="https://matduggan.com/content/images/2026/10/image-4.png" class="kg-image" alt loading="lazy" width="2000" height="1050" srcset="https://matduggan.com/content/images/size/w600/2026/10/image-4.png 600w, https://matduggan.com/content/images/size/w1000/2026/10/image-4.png 1000w, https://matduggan.com/content/images/size/w1600/2026/10/image-4.png 1600w, https://matduggan.com/content/images/2026/10/image-4.png 2400w" sizes="(min-width: 720px) 720px"></figure><p>A <a href="https://clickhouse.com/docs/data-modeling/projections" rel="noopener noreferrer">projection</a> is not a separate table you manage. It&apos;s an alternative physical ordering of the same data, stored inside the same table. Think of it this way: your table is a book sorted by chapter number. A projection is an index at the back, sorted by topic. </p><p>When a query matches your projection, it should just automagically read from the projection instead of the base table. You don&apos;t need to change the query, which is great. New data populates the projection on INSERT, which is what you want for this sort of stuff. </p><p>Think of it like this:</p><ul><li>Every table stores data in parts, which are directories on disk. </li><li>When you add a projection, each part directory gets a subdirectory for the projection data with an anonymous table with its own columns, index, granultes. </li><li>Projection parts merge at the same time as main table parts, so there&apos;s no lag like what you can experience with materialized views. </li><li>Projections don&apos;t backfill by default but you <em>can</em> backfill them, which is a mistake that I made initially where I added one, nothing was better and I assumed I had messed up. </li></ul><p>Projections are great for network firewall data because the data doesn&apos;t need to change shape. I just need to optimize my querying of the data for specific usecases. </p><p>The biggest misunderstanding about how projections worked is that I made a lot of assumptions about how expression matching worked. I assumed (for no good reason) that expression matching was loose and that CH would do a lot of work to ensure my query was routed to the projection. <code>count()</code> and <code>sum(duration)</code> won&apos;t be used by a query asking for <code>avg(duration)</code>, which didn&apos;t occur to me until I read this: <a href="https://obsessiondb.com/blog/clickhouse-projections-complete-guide">https://obsessiondb.com/blog/clickhouse-projections-complete-guide</a></p><p>Also every filter column must be in the projection&apos;s GROUP BY. This means a filter on an absent column &#x2192; full fallback to raw. This was a <em>fucking nightmare to debug </em>until I figured this out. </p>
+<!--kg-card-begin: html-->
+<table>
+<thead>
+<tr>
+<th>WHERE clause</th>
+<th>routed?</th>
+<th>rows read</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><em>(none)</em></td>
+<td>yes</td>
+<td>2,022</td>
+</tr>
+<tr>
+<td><code>toStartOfHour(Timestamp) &gt;= X</code></td>
+<td>yes</td>
+<td>2,022</td>
+</tr>
+<tr>
+<td><code>toStartOfInterval(Timestamp, INTERVAL 1 HOUR) &gt;= X</code></td>
+<td><strong>no</strong></td>
+<td>12,373,248</td>
+</tr>
+<tr>
+<td><code>Timestamp &gt;= X</code> (raw)</td>
+<td><strong>no</strong></td>
+<td>12,373,248</td>
+</tr>
+</tbody>
+</table>
+<!--kg-card-end: html-->
+<p></p><p>Here are the basic lessons you must understand to do a large scale project. </p><ul><li>The query&#x2019;s aggregates must be a subset of the projection&#x2019;s &#x2014; count() and sum(duration) won&#x2019;t serve avg(duration).</li><li>Every filter column must be in the projection&#x2019;s GROUP BY &#x2014; otherwise, silent fallback to raw.</li><li>The time predicate must use the projection&#x2019;s own expression: toStartOfHour(Timestamp) &gt;= X routes; toStartOfInterval(Timestamp, INTERVAL 1 HOUR) &gt;= X &#x2014; identical values &#x2014; does not. Same query: 2,022 rows versus 12,373,248. It doesn&#x2019;t reason about equivalence. It&#x2019;s a bouncer with a laminated list, and toStartOfInterval is toStartOfHour&#x2019;s identical twin in a different jacket.</li></ul><p>All of this was figured out when I started just obsessively checking <code>query_log</code>. In order to use projections in ClickHouse you have to verify the routing every single time. </p><p>Here are my mistakes in no particular order with projections:</p><ul><li>Projections don&apos;t automatically backfill which is fine but be aware when you run your benchmark and nothing has changed. </li><li>You gotta think <em>really hard</em> before you add a projection. It&apos;s effectively a copy of the data, so make sure your ORDER BY is correct before you try to layer projections on top of it. </li><li><code>system.projection_parts</code> GROUP BY partition tells you the coverage of your projection. You need this in order to know whether the query has access to enough historical projection data for you to actually materialize the thing you want to show. </li></ul><h2 id="lesson-4-grafana-clickhouse-plugin-has-a-lot-of-sharp-edges">Lesson 4: Grafana ClickHouse Plugin has a lot of sharp edges</h2><p>I like Grafana, I love the ClickHouse Plugin group of maintainers, all good vibes over here. But I misunderstood how much this plugin was going to do for me vs what I had to do myself. This is the part of the review where I say nice things and then hand you a first-aid kit.</p><ol><li>A wrong table name in the ad-hoc filter config is silently ignored. An unqualified table key instead of the schema-qualified one returned <strong>79,350,116 rows where the correct key returned 2,314,678</strong>. A typo produces a confidently wrong dashboard. The only reliable test: change a filter, confirm the number actually changes, per panel.</li><li>Grafana&apos;s ad-hoc filter UI offers one operator and one value per key. There is no way to express <code>observer = A OR observer = B</code> through the filter box &#x2014; a long-standing upstream limitation (<a href="https://github.com/grafana/grafana/issues/10918">grafana/grafana#10918</a>, still open for cross-column boolean OR).</li><li>Grafana&apos;s time handling and panel model will surprise you in every possible way. Hour-bucket edges are a correctness defect factory. </li></ol><p>You will not have any idea that the thing you wrote is wrong until you check it by hand or it blows up. My advice is to configure your dashboards to blow up early and often so you don&apos;t find out months later that you messed up the query. </p><h3 id="conclusion">Conclusion </h3><p>ClickHouse is a good tool, but the more complex the thing you try to do with it, the more sharp edges you&apos;ll find. I&apos;m also surprised at the ecosystem lacking stuff I expected. I wanted a linter. I got a side quest to make my own. I had trouble getting a full-fledged real migration utility for rolling out changes with advice about impact and cost and then confirming I can always roll back. There are still real gaps in this ecosystem people should be aware of. </p><p>As always if I got it wrong (or you know something I don&apos;t), email me. </p><h2 id="-1"></h2>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
