@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why didn’t we use Ro­Register­For­Apartment­Shutdown to clean up the unmarshalable delegate? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why didn’t we use Ro­Register­For­Apartment­Shutdown to clean up the unmarshalable delegate?</h1>
+        <div class="meta">The Old New Thing 2026-10-21T14:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20261021-00/?p=112786/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-adbd5d82da5b5c38.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Too many requirements, some of which bring us full circle. The post Why didn’t we use &lt;CODE&gt;Ro­Register­For­Apartment­Shutdown&lt;/CODE&gt; to clean up the unmarshalable delegate? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>In my attempt to <a title="Creating a fake agile wrapper that is technically agile but is not useful outside its home apartment" href="https://devblogs.microsoft.com/oldnewthing/20260803-00/?p=112582"> create a fake agile wrapper that is technically agile but is not useful outside its home apartment</a>, <a href="https://devblogs.microsoft.com/oldnewthing/20260803-00/?p=112582&amp;commentid=144559#comment-144559"> Luca Bacci suggested, among other things</a>, using the <code>Ro­Register­For­Apartment­Shutdown</code> function.</p>
+<p>The <code>Ro­Register­For­Apartment­Shutdown</code> function is nice, but it doesn&#8217;t suit our needs.</p>
+<p>One problem is that the object registered for apartment shutdown must be agile. (If you pass a non-agile object, the call fails.) That means that our wrapper must be agile. If we put the non-marshalable non-agile object inside our wrapper, we now have an agile object (the wrapper) that holds a non-agile object (the original object) as a member, which creates the risk that the wrapper will run down in the wrong apartment. The normal way of fixing that is to use <code>Ro­Get­Agile­Reference</code> to create an agile wrapper around the non-agile object, and store that agile wrapper in our container object.</p>
+<p>This puts us back where we started: We are trying to implement that agile wrapper!</p>
+<p>Even if we got past that problem, we have another problem: At apartment shutdown, COM calls the wrapper object&#8217;s <code>UnInitialize</code> method, and there&#8217;s a warning on the using the <code>Ro­Unregister­For­Apartment­Shutdown</code> function:</p>
+<blockquote class="q"><p><b>Warning</b>: Don&#8217;t call the <code>Ro­Unregister­For­Apartment­Shutdown</code> function from the <code>OnUninitialize</code> callback.</p></blockquote>
+<p>But wait, what if the destructor of the object we are wrapping wants to call <code>Ro­Unregister­For­Apartment­Shutdown</code>? It might happen indirectly because it has its own reference to another object, that in turn tries to call <code>Ro­Unregister­For­Apartment­Shutdown</code>.</p>
+<p>For example, it might hold another fake agile wrapper whose <code>UnInitialize</code> method has already been called! (We can work around that in our agile wrapper by nulling out the non-agile pointer so we don&#8217;t double-release, but maybe there&#8217;s some other object that uses <code>Ro­Unregister­For­Apartment­Shutdown</code> that is less resilient to this scenario.)</p>
+<p>Another requirement of <code>Ro­Unregister­For­Apartment­Shutdown</code> is that it must be called from the same apartment that registered. This doesn&#8217;t quite put us back where we started, but it makes things more complicated because the whole point of the exercise is to find a way to release the object without having to try to switch to the apartment. I guess what we could do is use <code>IContext­Callback</code> to try to switch back to the apartment to release the original object and unregister the apartment shutdown callback. If the apartment switch fails, then we assume it&#8217;s because the apartment has already run down, so we assume that the <code>IApartment­Shutdown::<wbr />On­Uninitialize</code> method was called, and it released the object for us. (Of course, that still creates the problem that we are cleaning up inside the <code>On­Uninitialize</code> callback, which meas that nobody else can unregister their apartment shutdown callback.)</p>
+<p>The last note on this is that the implementation is written on the assumption that there are not a lot of apartment shutdown callbacks. Registration is <var>O</var>(1), but unregistration is <var>O</var>(<var>n</var>) because it does a linear search through all of the apartment&#8217;s registered shutdown callbacks to find the one being unregistered. By comparison, the Global Interface Table is designed on the assumption that it will have to manage a lot of objects, so it can look up its cookies in <var>O</var>(1) time. The proposed alternate design would register and unregister a lot of apartment shutdown callbacks, so it&#8217;s pushing the apartment shutdown callback list into a usage pattern it wasn&#8217;t optimized for.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20261021-00/?p=112786/">Why didn&#8217;t we use &lt;CODE&gt;Ro&shy;Register&shy;For&shy;Apartment&shy;Shutdown&lt;/CODE&gt; to clean up the unmarshalable delegate?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
