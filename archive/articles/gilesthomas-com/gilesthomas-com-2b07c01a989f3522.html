@@ -1,0 +1,1016 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RMSNorm | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>RMSNorm</h1>
+        <div class="meta">Giles&#x27; blog 2026-10-23T18:40:00Z</div>
+        <div class="links">
+          <a href="https://www.gilesthomas.com/2026/10/rmsnorm">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/gilesthomas-com/gilesthomas-com-2b07c01a989f3522.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Normalisation is an essential part of LLMs. In the GPT-2 code, we use LayerNorm in a bunch of different places -- in each Transformer block, we do it just before we feed our incoming context vectors into the multi-head attention module, and then again before we feed the result through the FFN: ...and we also do one more round just before we project our cont…</div>
+        <div class="content">
+          <p>Normalisation is an essential part of LLMs.  In the GPT-2 code, we use
+<a href="/2025/07/llm-from-scratch-16-layer-normalisation">LayerNorm</a> in a bunch of different
+places -- in each Transformer block, we do it just before we feed our incoming
+context vectors into the multi-head attention module, and then again before we
+feed the result through the FFN:</p>
+
+<p><img src="/diagrams/gpt-2-to-moe/transformers-block.svg" alt="A GPT-2-style Transformers block" title="A GPT-2-style Transformers block"></p>
+
+<p>...and we also do one more round just before we project our context vectors into
+vocab space via the output head.</p>
+
+<p>We do that to make the model more trainable; it helps to prevent vanishing or exploding
+gradients, by constraining the vectors going into our attention, feed-forward and output head
+modules so that they have a reasonably stable set of statistical properties.</p>
+
+<p>And when (<a href="/2026/07/llm-from-scratch-34b-building-and-training-gpt-2-small-in-jax#multiple-layers">as part of my black-box reimplementation of GPT-2 in JAX</a>)
+I tried training an almost-complete model without LayerNorm, training completely failed
+after about 100 steps -- the loss went up to the kind of level that I'd expect from
+an uninitialised model, and stayed there despite another 700 or so training steps.
+(Later on in this post I'll show results from a similar run.)</p>
+
+<p>So, normalisation is important.  But it doesn't have to be LayerNorm specifically --
+if you look at the currently-popular open models, a lot of them use something
+called RMSNorm instead, and I wanted to look into why that might be.</p>
+
+<p>In this post I'll go through the differences between LayerNorm and RMSNorm, and show
+the results of training a few GPT-2 small style models using each.</p>
+<h3 id="the-principle">The principle</h3>
+
+<p>RMSNorm was introduced in <a href="https://arxiv.org/abs/1910.07467">a 2019 paper by Biao Zhang and Rico Sennrich</a> <sup class="footnote-ref" id="fnref-1"><a href="#fn-1">1</a></sup>,
+which is a surprisingly easy read.  They note that
+most people at the time felt that a critical part of LayerNorm -- which they are
+explicitly comparing their new system to -- is that it does mean normalisation.  But
+they were less sure that it was the important bit, and felt that scale normalisation was
+its real benefit.</p>
+
+<p>Let's dig into what that means.  Firstly, a refresher on LayerNorm.</p>
+
+<h4 id="layernorm">LayerNorm</h4>
+
+<p>Our normalisation layer in the diagram above is being fed with a bunch of context
+vectors -- one for each token in each sequence in our batch.  LayerNorm deals with each
+of them separately <sup class="footnote-ref" id="fnref-2"><a href="#fn-2">2</a></sup>.  For each one, it performs two steps:</p>
+
+<ul>
+<li>Normalises the context vector so that its mean is zero, and its variance is one.</li>
+<li>Scales and shifts (aka biases) the resulting normalised vector by trainable amounts.</li>
+</ul>
+
+<p>Let's work through that.  We'll go through the normalisation first; say you start with a context vector of</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x00028;</mo><mtable><mtr><mtd><mn>2</mn></mtd></mtr><mtr><mtd><mn>4</mn></mtd></mtr><mtr><mtd><mn>6</mn></mtd></mtr></mtable><mo>&#x00029;</mo></mrow></math>
+
+<p>Its mean is <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mo stretchy="false">&#x00028;</mo><mn>2</mn><mo>&#x0002B;</mo><mn>4</mn><mo>&#x0002B;</mo><mn>6</mn><mo stretchy="false">&#x00029;</mo><mo>&#x0002F;</mo><mn>3</mn><mo>&#x0003D;</mo><mn>4</mn></mrow></math>.  If you subtract that from each element, you get</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x00028;</mo><mtable><mtr><mtd><mo>&#x02212;</mo><mn>2</mn></mtd></mtr><mtr><mtd><mn>0</mn></mtd></mtr><mtr><mtd><mn>2</mn></mtd></mtr></mtable><mo>&#x00029;</mo></mrow></math>
+
+<p>...which has a mean of <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mo stretchy="false">&#x00028;</mo><mo>&#x02212;</mo><mn>2</mn><mo>&#x0002B;</mo><mn>0</mn><mo>&#x0002B;</mo><mn>2</mn><mo stretchy="false">&#x00029;</mo><mo>&#x0002F;</mo><mn>3</mn><mo>&#x0003D;</mo><mn>0</mn></mrow></math>.  So that sorts out the mean part of it.
+I'll call this "re-centring" below -- hopefully it's obvious why!</p>
+
+<p>To make the variance one, we need to divide each element by the standard deviation (SD)
+of the whole vector (see <a href="/2025/07/llm-from-scratch-16-layer-normalisation#the-variance">my previous LayerNorm post</a> for details as to why).</p>
+
+<p>The SD is the square root of the variance, and the variance is
+calculated by squaring each item's difference from the mean,
+adding them all together, and then dividing it by the number of elements <sup class="footnote-ref" id="fnref-3"><a href="#fn-3">3</a></sup>.</p>
+
+<p>Now, there's a neat trick that you can do here.  As we have already set our mean to zero
+in the previous step, each number in our vector is already exactly equal to its difference
+from the mean.  So we can just square them element-wise, and take the average of that,
+which will give us our variance:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mfrac><mrow><mo stretchy="false">&#x00028;</mo><mo>&#x02212;</mo><mn>2</mn><msup><mo stretchy="false">&#x00029;</mo><mn>2</mn></msup><mo>&#x0002B;</mo><msup><mn>0</mn><mn>2</mn></msup><mo>&#x0002B;</mo><msup><mn>2</mn><mn>2</mn></msup></mrow><mrow><mn>3</mn></mrow></mfrac><mo>&#x0003D;</mo><mfrac><mrow><mn>8</mn></mrow><mrow><mn>3</mn></mrow></mfrac><mo>&#x0003D;</mo><mn>2</mn><mstyle displaystyle="false" scriptlevel="0"><mfrac><mrow><mn>2</mn></mrow><mrow><mn>3</mn></mrow></mfrac></mstyle></mrow></math>
+
+<p>Again, SD is the square root of the variance, so here it's <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msqrt><mrow><mn>2</mn><mstyle displaystyle="false" scriptlevel="0"><mfrac><mrow><mn>2</mn></mrow><mrow><mn>3</mn></mrow></mfrac></mstyle></mrow></msqrt><mo>&#x02248;</mo><mn>1.63</mn></mrow></math>.
+Dividing our already-recentred numbers by that gives us a normalised context
+vector of</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x00028;</mo><mtable><mtr><mtd><mo>&#x02212;</mo><mn>2</mn><mo>&#x0002F;</mo><mn>1.63</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr><mtr><mtd><mn>0</mn><mo>&#x0002F;</mo><mn>1.63</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr><mtr><mtd><mn>2</mn><mo>&#x0002F;</mo><mn>1.63</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr></mtable><mo>&#x00029;</mo><mo>&#x0003D;</mo><mo>&#x00028;</mo><mtable><mtr><mtd><mo>&#x02212;</mo><mn>1.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr><mtr><mtd><mn>0</mn></mtd></mtr><mtr><mtd><mn>1.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr></mtable><mo>&#x00029;</mo></mrow></math>
+
+<p>We can sanity-check that the result has a variance of 1 -- remember it's just the
+average of the elements squared:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mfrac><mrow><mo stretchy="false">&#x00028;</mo><mo>&#x02212;</mo><mn>1.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo><msup><mo stretchy="false">&#x00029;</mo><mn>2</mn></msup><mo>&#x0002B;</mo><msup><mn>0</mn><mn>2</mn></msup><mo>&#x0002B;</mo><mn>1.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><msup><mo>&#x0002E;</mo><mn>2</mn></msup></mrow><mrow><mn>3</mn></mrow></mfrac><mo>&#x0003D;</mo><mfrac><mrow><mn>3</mn></mrow><mrow><mn>3</mn></mrow></mfrac><mo>&#x0003D;</mo><mn>1</mn></mrow></math>
+
+<p>So, that's the normalisation part of LayerNorm.  We've recentred our context vector on its mean, and made
+it have a variance of one.</p>
+
+<p>Now that we've normalised our context vector, we need to scale and shift it.  Intuitively
+that feels a bit like undoing the careful work we've done to fix the mean to zero and
+the variance to one.  But it's worth remembering that what we're trying to do with our
+normalisation is make the results have stable statistical properties; what the ideal specific
+properties might be is something that the network should be learning.  So the first phase
+gets everything into a well-known state, then the shift/scale goes from there to the
+shape that the network learns that it actually needs.</p>
+
+<p>Both of these operations are done with trainable vectors of the same size as the
+context vectors -- that is, the scale vector is <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> long, and so is the
+shift vector.  They're applied element-wise.  So let's say our scale vector was</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x00028;</mo><mtable><mtr><mtd><mn>3</mn></mtd></mtr><mtr><mtd><mn>2</mn></mtd></mtr><mtr><mtd><mn>1</mn></mtd></mtr></mtable><mo>&#x00029;</mo></mrow></math>
+
+<p>After normalisation, our original context vector was</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x00028;</mo><mtable><mtr><mtd><mo>&#x02212;</mo><mn>1.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr><mtr><mtd><mn>0</mn></mtd></mtr><mtr><mtd><mn>1.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr></mtable><mo>&#x00029;</mo></mrow></math>
+
+<p>So we multiply that element-wise by the scale vector, and we get:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x00028;</mo><mtable><mtr><mtd><mo>&#x02212;</mo><mn>1.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mi>&#x000D7;</mi><mn>3</mn></mtd></mtr><mtr><mtd><mn>0</mn><mi>&#x000D7;</mi><mn>2</mn></mtd></mtr><mtr><mtd><mn>1.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mi>&#x000D7;</mi><mn>1</mn></mtd></mtr></mtable><mo>&#x00029;</mo><mo>&#x0003D;</mo><mo>&#x00028;</mo><mtable><mtr><mtd><mo>&#x02212;</mo><mn>3.66</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr><mtr><mtd><mn>0</mn></mtd></mtr><mtr><mtd><mn>1.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr></mtable><mo>&#x00029;</mo></mrow></math>
+
+<p>...and that's the scaling done.  Similarly, if our shift vector was</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x00028;</mo><mtable><mtr><mtd><mn>10</mn></mtd></mtr><mtr><mtd><mn>11</mn></mtd></mtr><mtr><mtd><mn>12</mn></mtd></mtr></mtable><mo>&#x00029;</mo></mrow></math>
+
+<p>...then applying it to the scaled vector would be:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x00028;</mo><mtable><mtr><mtd><mo>&#x02212;</mo><mn>3.66</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002B;</mo><mn>10</mn></mtd></mtr><mtr><mtd><mn>0</mn><mo>&#x0002B;</mo><mn>11</mn></mtd></mtr><mtr><mtd><mn>1.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002B;</mo><mn>12</mn></mtd></mtr></mtable><mo>&#x00029;</mo><mo>&#x0003D;</mo><mo>&#x00028;</mo><mtable><mtr><mtd><mn>6.34</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr><mtr><mtd><mn>11</mn></mtd></mtr><mtr><mtd><mn>13.22</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr></mtable><mo>&#x00029;</mo></mrow></math>
+
+<p>...and with that, we've completed our LayerNorm.</p>
+
+<p>But it took quite a lot of calculations; let's list them out:</p>
+
+<ul>
+<li>Working out the mean: for a context vector of length <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math>, we have <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>1</mn></mrow></math> additions,
+then one division.</li>
+<li>Recentring on the mean: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> subtractions.</li>
+<li>Working out the variance: we can use our recentred vector for the differences, so
+that's done, but we need to get the squares of all of the numbers, which is <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> multiplications,
+add them together using <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>1</mn></mrow></math> additions, and then do one division.</li>
+<li>Variance to standard deviation: one square root.</li>
+<li>Dividing it all by the SD: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> divisions.</li>
+<li>Scaling by the scale vector: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> multiplications</li>
+<li>Shifting by the shift vector: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> additions</li>
+</ul>
+
+<p>So in total we have, per context vector in our batch:</p>
+
+<ul>
+<li>Additions/subtractions: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>1</mn><mo>&#x0002B;</mo><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x0002B;</mo><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>1</mn><mo>&#x0002B;</mo><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x0003D;</mo><mn>4</mn><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>2</mn></mrow></math></li>
+<li>Divisions: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>1</mn><mo>&#x0002B;</mo><mn>1</mn><mo>&#x0002B;</mo><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x0003D;</mo><mn>2</mn><mo>&#x0002B;</mo><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math></li>
+<li>Multiplications: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x0002B;</mo><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x0003D;</mo><mn>2</mn><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math></li>
+<li>Square roots: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>1</mn></mrow></math></li>
+</ul>
+
+<p>Let's look at RMSNorm next to see how it compares.</p>
+
+<h4 id="rmsnorm">RMSNorm</h4>
+
+<p>The idea behind RMSNorm is to try to get away with doing fewer calculations.  In particular,
+we skip working out the mean -- we don't even try to re-centre our context vectors.
+Instead, we just scale them down to the same length.  To do that, we work out
+an average length for each vector -- specifically, the Root Mean Square (RMS, of course) -- and then divide each number
+in it by that.  That done, we do the same scale trick that we did with LayerNorm, but
+not the shift -- more about that later.</p>
+
+<p>Let's work through that in numbers again; we can start with the same context vector:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x00028;</mo><mtable><mtr><mtd><mn>2</mn></mtd></mtr><mtr><mtd><mn>4</mn></mtd></mtr><mtr><mtd><mn>6</mn></mtd></mtr></mtable><mo>&#x00029;</mo></mrow></math>
+
+<p>The mean square of that is, as you might expect, the mean of the squares of all of the
+numbers in it:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mtext>MS</mtext><mo>&#x0003D;</mo><mfrac><mrow><msup><mn>2</mn><mn>2</mn></msup><mo>&#x0002B;</mo><msup><mn>4</mn><mn>2</mn></msup><mo>&#x0002B;</mo><msup><mn>6</mn><mn>2</mn></msup></mrow><mrow><mn>3</mn></mrow></mfrac><mo>&#x0003D;</mo><mfrac><mrow><mn>4</mn><mo>&#x0002B;</mo><mn>16</mn><mo>&#x0002B;</mo><mn>36</mn></mrow><mrow><mn>3</mn></mrow></mfrac><mo>&#x0003D;</mo><mfrac><mrow><mn>56</mn></mrow><mrow><mn>3</mn></mrow></mfrac><mo>&#x0003D;</mo><mn>18</mn><mstyle displaystyle="false" scriptlevel="0"><mfrac><mrow><mn>2</mn></mrow><mrow><mn>3</mn></mrow></mfrac></mstyle></mrow></math>
+
+<p>The <em>root</em> mean square is the square root of that, which is about 4.32, so we divide
+through by that:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo>&#x00028;</mo><mtable><mtr><mtd><mn>2</mn><mo>&#x0002F;</mo><mn>4.32</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr><mtr><mtd><mn>4</mn><mo>&#x0002F;</mo><mn>4.32</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr><mtr><mtd><mn>6</mn><mo>&#x0002F;</mo><mn>4.32</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr></mtable><mo>&#x00029;</mo><mo>&#x0003D;</mo><mo>&#x00028;</mo><mtable><mtr><mtd><mn>0.46</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr><mtr><mtd><mn>0.92</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr><mtr><mtd><mn>1.38</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><mo>&#x0002E;</mo></mtd></mtr></mtable><mo>&#x00029;</mo></mrow></math>
+
+<p>You might intuitively expect the RMS of that resulting vector to be one, and
+of course it is; the mean square is:</p>
+
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mfrac><mrow><mn>0.46</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><msup><mo>&#x0002E;</mo><mn>2</mn></msup><mo>&#x0002B;</mo><mn>0.92</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><msup><mo>&#x0002E;</mo><mn>2</mn></msup><mo>&#x0002B;</mo><mn>1.38</mn><mo>&#x0002E;</mo><mo>&#x0002E;</mo><msup><mo>&#x0002E;</mo><mn>2</mn></msup></mrow><mrow><mn>3</mn></mrow></mfrac><mo>&#x0003D;</mo><mfrac><mrow><mn>3</mn></mrow><mrow><mn>3</mn></mrow></mfrac><mo>&#x0003D;</mo><mn>1</mn></mrow></math>
+
+<p>...and again, we square root that to get RMS which is again 1.</p>
+
+<p>So you can see that by dividing by the RMS, we're going to re-scale all of our context
+vectors so that they have a new RMS of one.  But their means can be all over the place
+-- we've not tried to do anything to fix them.</p>
+
+<p>That's our abbreviated normalisation; once that's done, just like with LayerNorm,
+we apply an elementwise scaling operation by a trainable
+scale vector -- but we don't shift it.  Interestingly,
+in the original paper, they give equations both with and without the shift -- equation (4),
+in which they first present it, doesn't have a shift, but equation (5), which they call a general form, does.  It's not clear to me which one they actually used
+in their tests, but it's worth noting (and thanks to GPT-6 Astra for digging this up for me)
+that the <a href="https://github.com/bzhangGo/rmsnorm/blob/master/rmsnorm_torch.py">code on GitHub</a> posted
+by one of the authors has an optional <code>bias</code> that is switched off by default.</p>
+
+<p>Anyway, the fashion these days appears to be to use RMSNorm without a shift, and to me that makes
+intuitive sense; we've normalised the scale of the values in our context vector via the
+division by the RMS, so "fixing" that to get desirable statistical properties makes sense.
+But we didn't normalise the means, so the numbers coming out do not have a stable baseline
+for us to adjust with a shift.  We could add one anyway of course, but there's no intuitive
+need to add a "new mean" back in to replace an old one that was never removed in the first place.  It's a bit fuzzy, perhaps,
+but it makes some kind of sense.</p>
+
+<p>So let's stick with the popular version without shift: how many calculations do we save by doing RMSNorm?</p>
+
+<ul>
+<li>Working out the squares of all of the numbers: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> multiplications.</li>
+<li>Averaging them to get the mean square: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>1</mn></mrow></math> additions, then one division.</li>
+<li>Getting the RMS from that: one square root</li>
+<li>Dividing all of the numbers by the RMS: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> divisions</li>
+<li>Scaling by the scale vector: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> multiplications</li>
+</ul>
+
+<p>So that gives us a total of:</p>
+
+<ul>
+<li>Additions/subtractions: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>1</mn></mrow></math></li>
+<li>Divisions: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>1</mn><mo>&#x0002B;</mo><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math></li>
+<li>Multiplications: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x0002B;</mo><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x0003D;</mo><mn>2</mn><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math></li>
+<li>Square roots: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>1</mn></mrow></math></li>
+</ul>
+
+<p>In terms of differences with LayerNorm we have:</p>
+
+<ul>
+<li>Additions/subtractions: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mo stretchy="false">&#x00028;</mo><mn>4</mn><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>2</mn><mo stretchy="false">&#x00029;</mo><mo>&#x02212;</mo><mo stretchy="false">&#x00028;</mo><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>1</mn><mo stretchy="false">&#x00029;</mo><mo>&#x0003D;</mo><mn>3</mn><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>1</mn></mrow></math> fewer</li>
+<li>Divisions: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mo stretchy="false">&#x00028;</mo><mn>2</mn><mo>&#x0002B;</mo><msub><mi>d</mi><mtext>emb</mtext></msub><mo stretchy="false">&#x00029;</mo><mo>&#x02212;</mo><mo stretchy="false">&#x00028;</mo><mn>1</mn><mo>&#x0002B;</mo><msub><mi>d</mi><mtext>emb</mtext></msub><mo stretchy="false">&#x00029;</mo><mo>&#x0003D;</mo><mn>1</mn></mrow></math> fewer.</li>
+<li>Multiplications: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>2</mn><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x02212;</mo><mn>2</mn><msub><mi>d</mi><mtext>emb</mtext></msub><mo>&#x0003D;</mo><mn>0</mn></mrow></math> difference</li>
+<li>Square roots: <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>1</mn><mo>&#x02212;</mo><mn>1</mn><mo>&#x0003D;</mo><mn>0</mn></mrow></math> difference.</li>
+</ul>
+
+<p>So, it's certainly cheaper -- significantly fewer addition/subtraction operations.
+The question is, is that saving in training time worth it?</p>
+
+<p>In the paper, they train various models of various sorts (including an early Transformer model)
+and come to the conclusion that it is; they got similar, or in some cases better, loss with
+RMSNorm than with their LayerNorm training runs.  And, of course, the fact that it's widely
+used in current open LLMs suggests the same.</p>
+
+<p>Would it work well for my own models?  And what kind of performance improvement
+would I get, if any?</p>
+
+<p>It was time to write some code and train some models.</p>
+
+<h3 id="the-code">The code</h3>
+
+<p>The PyTorch code for RMSNorm was pretty trivial:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">RMSNorm</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">emb_dim</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">emb_dim</span> <span class="o">=</span> <span class="n">emb_dim</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">emb_dim</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">eps</span> <span class="o">=</span> <span class="n">RMSNORM_EPS</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+        <span class="n">squares</span> <span class="o">=</span> <span class="n">xs</span> <span class="o">**</span> <span class="mi">2</span>
+        <span class="n">mean_squares</span> <span class="o">=</span> <span class="n">squares</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">rms</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">eps</span> <span class="o">+</span> <span class="n">mean_squares</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">xs</span> <span class="o">/</span> <span class="n">rms</span><span class="p">)</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
+</code></pre>
+</div>
+
+<p>Our incoming batch of context vectors is shaped <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>b</mi><mi>&#x000D7;</mi><mi>n</mi><mi>&#x000D7;</mi><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math>,
+where <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>b</mi></mrow></math> is the batch size and <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>n</mi></mrow></math> is the sequence length.  In the <code>forward</code> method, just as in the worked example
+above, we get the square of everything, then work out the mean across that
+last <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> dimension so that we have per-context-vector means, keeping the dimensions
+stable with that <code>keepdim=True</code> so that we wind up with a <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>b</mi><mi>&#x000D7;</mi><mi>n</mi><mi>&#x000D7;</mi><mn>1</mn></mrow></math> result
+rather than a <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>b</mi><mi>&#x000D7;</mi><mi>n</mi></mrow></math> one.</p>
+
+<p>We then take the square root to work out the RMS, but we add on a tiny <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003F5;</mi></mrow></math> first so that it will
+never be zero (which would cause a divide-by-zero in the next step).  And finally
+we divide the incoming numbers by that adjusted RMS, multiply by our trainable scaling
+vector, and we're done.</p>
+
+<p>One thing that is worth noting; to me it would be a bit more natural to add on
+the <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003F5;</mi></mrow></math> in the division, like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="n">rms</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">mean_squares</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">xs</span> <span class="o">/</span> <span class="p">(</span><span class="n">rms</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">eps</span><span class="p">))</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
+</code></pre>
+</div>
+
+<p>However, I had the LayerNorm code from the book in front of me as I wrote it, and noticed
+that it adds on its own <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>&#x003F5;</mi></mrow></math> before the square root, like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="n">mean</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">var</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">unbiased</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">norm_x</span> <span class="o">=</span> <span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="n">mean</span><span class="p">)</span> <span class="o">/</span> <span class="n">torch</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">var</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">eps</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">*</span> <span class="n">norm_x</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">shift</span>
+</code></pre>
+</div>
+
+<p>...so I decided to keep it consistent.  When I later looked at the docs for PyTorch's
+built-in RMSNorm class, I saw that it did the same thing as mine, so it seemed to be the
+"right" way to do it.  The two alternatives have very different behaviour when
+numbers get close to zero, so it was important to be consistent.</p>
+
+<p>And having mentioned PyTorch's built-in RMSNorm, let's dig into that a bit.</p>
+
+<h3 id="the-built-in-pytorch-classes">The built-in PyTorch classes</h3>
+
+<p>A little while ago, I noticed that by
+<a href="/2026/08/built-in-gelu">using PyTorch's built-in GELU module</a> rather than the hand-rolled one
+from the code in <a href="https://sebastianraschka.com/">Sebastian Raschka</a>'s book
+"<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (from Scratch)</a>",
+I got a significant speedup when training on my local machine -- from 21,000 tokens/second
+to 25,000.</p>
+
+<p>PyTorch also has its own built-in <a href="https://docs.pytorch.org/docs/2.14/generated/torch.nn.LayerNorm.html"><code>LayerNorm</code></a> and
+<a href="https://docs.pytorch.org/docs/2.14/generated/torch.nn.RMSNorm.html"><code>RMSNorm</code></a> modules.</p>
+
+<p>Now, while I felt that the book could actually have used the PyTorch GELU, it 100%
+made sense that it showed you the code for LayerNorm -- after all, "Build a Large
+Language Model (by Bolting Together Random Bits of PyTorch)" doesn't have the same
+ring to it.  And likewise in this set of experiments I wanted to try running my own
+RMSNorm.</p>
+
+<p>But given that the point of RMSNorm is meant to be speeding up training, it felt
+like it would be worth seeing how that speedup might compare to using built-in modules
+rather than hand-rolling our own.  After all, the built-in modules can use fused
+kernels, and that can be a huge advantage.  Rather than doing each of the separate steps in the Python code above
+by dropping down into CUDA, doing the calculations, and then returning to Python
+to find out what the next step is, the whole thing can be coded in a single CUDA routine
+that can be run in one go.  Even better, that routine can be optimised as a whole --
+stuff that's used frequently can be kept in registers,
+things can be laid out so that the cache is used efficiently, and so on -- whereas with
+the Python implementation, everything would need to be in the main VRAM at the end of each step.
+Definitely a win.  My guess is that this is a large part of why the built-in
+GELU is faster, so I expected serious speedups from using PyTorch's normalisation classes.</p>
+
+<p>That meant that I wanted my code to be able to switch easily between different kinds
+of normalisation.</p>
+
+<h3 id="normalisation-switching-code">Normalisation-switching code</h3>
+
+<p>As I mentioned at the start of this post, the original GPT-2 code used LayerNorm
+in three places:</p>
+
+<ul>
+<li>Twice in each Transformers block:
+<ul>
+<li>before the MHA and</li>
+<li>before the FFN.</li>
+</ul></li>
+<li>At the end, just before the output head.</li>
+</ul>
+
+<p>The code for the Transformers bit looked like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">TransformersBlock</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="o">...</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">norm1</span> <span class="o">=</span> <span class="n">LayerNorm</span><span class="p">(</span><span class="n">cfg</span><span class="p">[</span><span class="s2">&quot;emb_dim&quot;</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">norm2</span> <span class="o">=</span> <span class="n">LayerNorm</span><span class="p">(</span><span class="n">cfg</span><span class="p">[</span><span class="s2">&quot;emb_dim&quot;</span><span class="p">])</span>
+        <span class="o">...</span>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">inputs</span><span class="p">):</span>
+        <span class="o">...</span>
+        <span class="n">shortcut</span> <span class="o">=</span> <span class="n">x</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">norm1</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">att</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+        <span class="o">...</span>
+
+        <span class="n">shortcut</span> <span class="o">=</span> <span class="n">x</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">norm2</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">x</span><span class="p">,</span> <span class="n">this_block_moe_routing_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ff</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="o">...</span>
+</code></pre>
+</div>
+
+<p>...and the output head bit like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">GPTModel</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="o">...</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">final_norm</span> <span class="o">=</span> <span class="n">LayerNorm</span><span class="p">(</span><span class="n">cfg</span><span class="p">[</span><span class="s2">&quot;emb_dim&quot;</span><span class="p">])</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">in_idx</span><span class="p">):</span>
+        <span class="o">...</span>
+        <span class="n">x</span><span class="p">,</span> <span class="n">moe_routing_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">trf_blocks</span><span class="p">((</span><span class="n">x</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">final_norm</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+        <span class="n">logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">out_head</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="o">...</span>
+</code></pre>
+</div>
+
+<p>That code is essentially the same as Raschka's from the book, with a couple of
+(inactive in this post's experiments) <a href="/2026/09/gpt-2-to-moe">tweaks to support mixture-of-experts models</a>.</p>
+
+<p>I wanted a config flag -- in that <code>cfg</code> dictionary -- to control the kind of normalisation
+we used.  It seemed pretty clear that so long as the various classes we wanted to use in place
+of the existing <code>LayerNorm</code> implementation were compatible with it, we could just swap
+them in.  So I replaced the existing lines that created <code>LayerNorms</code> with:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="bp">self</span><span class="o">.</span><span class="n">norm1</span> <span class="o">=</span> <span class="n">make_norm</span><span class="p">(</span><span class="n">cfg</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">norm2</span> <span class="o">=</span> <span class="n">make_norm</span><span class="p">(</span><span class="n">cfg</span><span class="p">)</span>
+        <span class="o">...</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">final_norm</span> <span class="o">=</span> <span class="n">make_norm</span><span class="p">(</span><span class="n">cfg</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>...and defined <code>make_norm</code> like this:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">make_norm</span><span class="p">(</span><span class="n">cfg</span><span class="p">):</span>
+    <span class="n">norm_type</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;norm_type&quot;</span><span class="p">,</span> <span class="s2">&quot;handrolled_layernorm&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">norm_type</span> <span class="o">==</span> <span class="s2">&quot;handrolled_layernorm&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">LayerNorm</span><span class="p">(</span><span class="n">cfg</span><span class="p">[</span><span class="s2">&quot;emb_dim&quot;</span><span class="p">])</span>
+    <span class="k">elif</span> <span class="n">norm_type</span> <span class="o">==</span> <span class="s2">&quot;pytorch_layernorm&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">nn</span><span class="o">.</span><span class="n">LayerNorm</span><span class="p">(</span><span class="n">normalized_shape</span><span class="o">=</span><span class="n">cfg</span><span class="p">[</span><span class="s2">&quot;emb_dim&quot;</span><span class="p">],</span> <span class="n">eps</span><span class="o">=</span><span class="n">LAYERNORM_EPS</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">norm_type</span> <span class="o">==</span> <span class="s2">&quot;handrolled_rmsnorm&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">RMSNorm</span><span class="p">(</span><span class="n">cfg</span><span class="p">[</span><span class="s2">&quot;emb_dim&quot;</span><span class="p">])</span>
+    <span class="k">elif</span> <span class="n">norm_type</span> <span class="o">==</span> <span class="s2">&quot;pytorch_rmsnorm&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">nn</span><span class="o">.</span><span class="n">RMSNorm</span><span class="p">(</span>
+            <span class="n">normalized_shape</span><span class="o">=</span><span class="n">cfg</span><span class="p">[</span><span class="s2">&quot;emb_dim&quot;</span><span class="p">],</span> <span class="n">eps</span><span class="o">=</span><span class="n">RMSNORM_EPS</span><span class="p">,</span>
+            <span class="n">elementwise_affine</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+    <span class="k">elif</span> <span class="n">norm_type</span> <span class="o">==</span> <span class="s2">&quot;no_norm&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">nn</span><span class="o">.</span><span class="n">Identity</span><span class="p">()</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown &lt;!--CODE_BLOCK_15744--&gt; of </span><span class="si">{</span><span class="n">norm_type</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>That gave us the option for the original "hand-rolled" LayerNorm from Raschka, my own RMSNorm
+implementation, their respective PyTorch implementations, and a no-normalisation
+option that I felt would be worth running a test against.  The explicit setting of
+<code>eps</code> for the PyTorch implementations made sure that they would be as similar as possible <sup class="footnote-ref" id="fnref-4"><a href="#fn-4">4</a></sup>.
+I set <code>elementwise_affine=True</code> for the PyTorch <code>RMSNorm</code> out of an abundance of caution --
+it's the default value anyway.</p>
+
+<p>One thing I was initially concerned with, but which turned out to be a non-issue, was
+weight initialisation.  In many of my tests I've found that the models I've been training
+can perform significantly better or worse just based on the random weights they get prior
+to training.  If you change which modules make up your model -- say by swapping out a
+LayerNorm for an RMSNorm -- then if those modules consume different amounts of randomness when they're being
+created, all subsequently-created modules will get different random number results when
+their weights are initialised and the results of your tests will be polluted by that.</p>
+
+<p>However, on looking at the code again, I realised that there was nothing to worry about here.
+Raschka's LayerNorm and my own RMSNorm do not use any randomness, because their trainable
+parameters are set to ones and zeros -- and the PyTorch implementations do the same.
+I was actually a little sad about that because it meant that I couldn't use a bit of code
+I was rather proud of, but it did simplify things. <sup class="footnote-ref" id="fnref-5"><a href="#fn-5">5</a></sup></p>
+
+<p>That all seemed to work -- I did short test training runs with each of the settings
+locally to confirm that loss dropped.  It was time to test things out.</p>
+
+<h3 id="the-training-runs">The training runs</h3>
+
+<p>I was, as usual, going to train models from scratch that were based on GPT-2 small, with two
+differences:</p>
+
+<ul>
+<li>No weight tying.</li>
+<li>No bias on the QKV matrices.</li>
+</ul>
+
+<p>These models come out at roughly 163M parameters, which is very small, but was hopefully
+large enough to show interesting results.</p>
+
+<p>For the training runs, I would:</p>
+
+<ul>
+<li>Use no dropout.</li>
+<li>Schedule the learning rate: a warmup over the first 5% from zero to 0.0014, then
+a cosine decay down to 0.00014.</li>
+<li>Train for the <a href="/2026/08/chinchilla-check">Chinchilla-optimal</a> ~20 tokens per parameter.</li>
+</ul>
+
+<p>Training models is expensive -- for others I've been doing with models of this scale,
+it takes about 2 days to train them locally on my RTX 3090, or costs about US$40 if
+I use DDP to train them on an 8x A100 machine with 40 GiB/GPU (which takes about 2h30m).</p>
+
+<p>So I didn't want to train tons of them, and decided that a sensible minimum set would be:</p>
+
+<ul>
+<li>One with the old LayerNorm.</li>
+<li>One with the PyTorch LayerNorm.</li>
+<li>One with my hand-rolled RMSNorm.</li>
+<li>One with PyTorch's RMSNorm.</li>
+</ul>
+
+<p>I also wanted to do a quick test with no normalisation just to confirm that training
+failed.</p>
+
+<p>I did these all on <a href="https://lambda.ai/">Lambda</a> -- there were some issues with instance availability,
+but <a href="https://github.com/gpjt/lambda-manager"><code>lambda-manager</code></a> once again proved its
+usefulness.  I was able to start three instances and spread the training runs across them.</p>
+
+<p>All tests were run with the usual set of commands to make sure that the library
+versions and so on were the same:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="go">git clone https://github.com/gpjt/ddp-base-model-from-scratch.git</span>
+<span class="go">cd ddp-base-model-from-scratch/</span>
+<span class="go">./setup_lambda.sh</span>
+<span class="go">uv sync</span>
+<span class="go">uv run torchrun --nproc_per_node=8 ddp_train.py CONFIG datasets</span>
+</code></pre>
+</div>
+
+<p>...with <code>CONFIG</code> set to each of the training run configurations I'd created:</p>
+
+<ul>
+<li><a href="https://github.com/gpjt/ddp-base-model-from-scratch/tree/bbc13c63c05672b54200a5e9a760c43ba2334579/runs/8xa100m40-rmsnorm-1-hand-layernorm"><code>8xa100m40-rmsnorm-1-hand-layernorm</code></a></li>
+<li><a href="https://github.com/gpjt/ddp-base-model-from-scratch/tree/bbc13c63c05672b54200a5e9a760c43ba2334579/runs/8xa100m40-rmsnorm-2-pytorch-layernorm"><code>8xa100m40-rmsnorm-2-pytorch-layernorm</code></a></li>
+<li><a href="https://github.com/gpjt/ddp-base-model-from-scratch/tree/bbc13c63c05672b54200a5e9a760c43ba2334579/runs/8xa100m40-rmsnorm-3-hand-rmsnorm"><code>8xa100m40-rmsnorm-3-hand-rmsnorm</code></a></li>
+<li><a href="https://github.com/gpjt/ddp-base-model-from-scratch/tree/bbc13c63c05672b54200a5e9a760c43ba2334579/runs/8xa100m40-rmsnorm-4-pytorch-rmsnorm"><code>8xa100m40-rmsnorm-4-pytorch-rmsnorm</code></a></li>
+<li><a href="https://github.com/gpjt/ddp-base-model-from-scratch/tree/bbc13c63c05672b54200a5e9a760c43ba2334579/runs/8xa100m40-rmsnorm-5-no-norm"><code>8xa100m40-rmsnorm-5-no-norm</code></a></li>
+</ul>
+
+<p>Each configuration was identical apart from the <code>norm_type</code>, plus a small extra difference
+for the no-norm test, which (conveniently enough) we'll look at now.</p>
+
+<h3 id="results">Results</h3>
+
+<p>Let's look at the no-normalisation test first.  From previous experience, I suspected that it was likely to go
+bad fast, so I set it to checkpoint and log training loss every 10 global steps instead
+of every 617.  And, indeed, by step 530 it started logging a consistent loss of <code>nan</code> on
+every training step, so I force-quit it at step 640.</p>
+
+<p>The training loss looked like this:</p>
+
+<p><img src="/post-assets/rmsnorm/no-norm-loss-chart.png" alt="Loss chart without normalisation" title="Loss chart without normalisation" /></p>
+
+<p>You can see that loss started rising at step 500, and then after that it didn't
+even try to log it.  Gradients also zoomed off the top of the chart:</p>
+
+<p><img src="/post-assets/rmsnorm/no-norm-grad-norm-chart.png" alt="Gradients chart without normalisation" title="Gradients chart without normalisation" /></p>
+
+<p>So, that was reassuring!  As expected, training a Transformer-based LLM without
+any kind of normalisation doesn't work well.</p>
+
+<p>The other training runs were much less eventful -- they all completed normally, and
+I downloaded the models, and ran my normal held-back test set through them to get
+a comparable quality metric.  Here's what I got:</p>
+
+<table>
+<thead>
+<tr>
+  <th>Model</th>
+  <th>Training time (s)</th>
+  <th>Tokens/sec</th>
+  <th>Test loss</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><a href="https://huggingface.co/gpjt/8xa100m40-rmsnorm-1-hand-layernorm"><code>gpjt/8xa100m40-rmsnorm-1-hand-layernorm</code></a></td>
+  <td>9,358</td>
+  <td>348,364</td>
+  <td>3.595336</td>
+</tr>
+<tr>
+  <td><a href="https://huggingface.co/gpjt/8xa100m40-rmsnorm-2-pytorch-layernorm"><code>gpjt/8xa100m40-rmsnorm-2-pytorch-layernorm</code></a></td>
+  <td>8,324</td>
+  <td>391,659</td>
+  <td>3.571158</td>
+</tr>
+<tr>
+  <td><a href="https://huggingface.co/gpjt/8xa100m40-rmsnorm-3-hand-rmsnorm"><code>gpjt/8xa100m40-rmsnorm-3-hand-rmsnorm</code></a></td>
+  <td>9,134</td>
+  <td>356,899</td>
+  <td>3.601292</td>
+</tr>
+<tr>
+  <td><a href="https://huggingface.co/gpjt/8xa100m40-rmsnorm-4-pytorch-rmsnorm"><code>gpjt/8xa100m40-rmsnorm-4-pytorch-rmsnorm</code></a></td>
+  <td>8,289</td>
+  <td>393,294</td>
+  <td>3.572383</td>
+</tr>
+</tbody>
+</table>
+
+<p>The links go to the models themselves on Hugging Face.</p>
+
+<p>These are really interesting!  Let's look at training speed first.</p>
+
+<h4 id="training-speed">Training speed</h4>
+
+<p>What we're meant to be looking into here is the performance characteristics of
+RMSNorm versus LayerNorm, so let's compare like vs like.  The hand-rolled RMSNorm was indeed a bit faster to train
+than the hand-rolled LayerNorm, but only about 2.5% faster, both in terms of training
+time and tokens per second.  For the runs using the built-in PyTorch modules it was an even closer-run thing -- only
+0.5% improvement for RMSNorm.</p>
+
+<p>Without doing tons of extra training runs I can't say safely what the noise level is
+for this kind of thing, but my gut feeling (based on having trained
+more than 60 of these models now) is that the 2.5% difference is <em>probably</em> real, while
+the 0.5% one could well just be noise.  In particular, it's worth noting that both
+of the "hand-rolled" training runs happened on the same instance (by chance), though
+the PyTorch ones were on different ones, which makes the 2.5% number more trustworthy.</p>
+
+<p>But on to the elephant in the room: the difference between the fused PyTorch implementations and the hand-rolled ones
+is <em>much</em> bigger.  With LayerNorm, it took 11%
+less time to run.  The speedup for RMSNorm was a little smaller, at just less than 10%.
+That is <em>definitely</em> not noise, and completely eclipses the speedup from switching
+the kind of normalisation! <sup class="footnote-ref" id="fnref-6"><a href="#fn-6">6</a></sup></p>
+
+<p>Now let's take a look at the quality of our models.</p>
+
+<h4 id="test-loss">Test loss</h4>
+
+<p>Again, we'll start with the like vs like comparison.  Hand-rolled RMSNorm got
+a test loss that was <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>3.601292</mn><mo>&#x02212;</mo><mn>3.595336</mn><mo>&#x0003D;</mo><mn>0.005956</mn></mrow></math> worse than the hand-rolled
+LayerNorm.  That's a tiny difference.</p>
+
+<p>Similarly, the PyTorch RMSNorm got <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>3.572383</mn><mo>&#x02212;</mo><mn>3.571158</mn><mo>&#x0003D;</mo><mn>0.001225</mn></mrow></math> worse loss than
+the PyTorch LayerNorm.</p>
+
+<p>I'm tempted to say that those numbers were within the noise.  However, I don't have
+any numbers to back that up -- when I <a href="/2026/04/llm-from-scratch-32i-interventions-what-is-in-the-noise">looked into noise previously</a>
+I did measurements for variations in weight initialisation, and for runs with
+the same initial weights but different random seeds for the post-model-initialisation
+steps, but those runs used dropout, which the ones in this experiment did not.</p>
+
+<p>In theory, my training loop should be entirely deterministic; no randomness is used
+after the initial weight initialisation.  <a href="/2026/04/llm-from-scratch-32i-interventions-what-is-in-the-noise">A while back</a>
+I did two training runs on 8x A100 machines with the same config, months apart, and the Safetensors files were identical bit-for-bit.</p>
+
+<p>But what we did here was start with a specific set of initial weights, and then see what happened
+when we trained them with different normalisation settings.  It's certainly conceivable
+that some initial weights might be "in a better place" for training with LayerNorm while others were
+in a better place for RMSNorm.</p>
+
+<p>So while the fact that both were a little bit worse with RMSNorm is interesting, I'd really need to
+train a bunch of different models to get any certainty here.  Best to chalk it up to
+noise for now.</p>
+
+<p>Now, back to that elephant... Once again, the big difference here is not between
+LayerNorm and RMSNorm, but between hand-rolled and built-in PyTorch implementations.
+For LayerNorm, the PyTorch version got <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>3.595336</mn><mo>&#x02212;</mo><mn>3.571158</mn><mo>&#x0003D;</mo><mn>0.024178</mn></mrow></math> lower -- better! --
+loss than the hand-rolled one.  And for RMSNorm, the difference was <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>3.601292</mn><mo>&#x02212;</mo><mn>3.572383</mn><mo>&#x0003D;</mo><mn>0.028909</mn></mrow></math>.</p>
+
+<p>Those are not super-small differences.  Based on the various <a href="/2026/04/llm-from-scratch-32j-interventions-trying-to-train-a-better-model-in-the-cloud">interventions</a>
+I tested against the GPT-2 code, that's larger than the improvements I got
+from switching to full-fat 32-bit rather than using Automatic Mixed Precision (AMP -- at 0.012558), more than
+I got from adding on gradient clipping (0.013209), and more than adding on bias to the
+QKV weights (0.022141).</p>
+
+<p>I'd need to do significantly more training runs in order to find out if this was
+due to some kind of noise, and I'll not spend that time and money now.  It feels like
+there are two possibilities:</p>
+
+<ol>
+<li>It's noise due to numerical differences -- some kind of rounding thing, for example.  Imagine a
+tiny difference right at the start of training -- a single parameter gets updated to
+0.11892473 with the hand-rolled code, but to 0.11892474 with the fused code.
+That slightly changes the results from the next training step, so the gradients
+are different, and now the model diverges a bit more.  As we continue over 33,000
+training steps over 3.2B tokens, you can imagine that the models could diverge
+quite a lot.  We're on a choppy ride over the loss landscape, always trying to head
+downwards, and a small change near the start can drastically change where we end up.</li>
+<li>Alternatively: maybe there's something systematic that makes the PyTorch implementations <em>better</em> in this case?</li>
+</ol>
+
+<p>On the one hand, the fact that the results were consistent is interesting.  If the PyTorch models
+had both been better than the hand-rolled ones but by different amounts, then that would
+be easy to ascribe to chance (I make it a 25% probability, though you could argue for
+1/6).  But the fact that the improvements were so similar is harder to explain.</p>
+
+<p>On the other hand, a systematic difference would be <em>really weird</em>, at least to me.  I'm confident that my hand-rolled
+implementations match the PyTorch ones in terms of the maths -- not only have I checked and double-checked
+the code, but the LayerNorm one was written by someone expert in the field, and I've
+also run them past both Claude Opus 5.5 and GPT-6 Astra, both on high thinking levels, to
+check that there are no differences <sup class="footnote-ref" id="fnref-7"><a href="#fn-7">7</a></sup>.  So while I can't rule errors out, I've done
+a lot to try to eliminate them.</p>
+
+<p>For now, I think I'll loosely chalk this up to noise too.  I've seen weird
+coincidences crop up before -- regular readers might remember that in my
+<a href="/2026/10/low-rank-vocab-matrices">post on LoRE</a>, the loss delta of using it on
+the input side only, when added to the delta of adding it to the output side
+only, was almost exactly the same as the delta for adding it to both ends.  That repro'd
+over two separate random seeds and really looked like it was a thing -- only to disappear
+with a change to a part of the code that should not have affected it if it had been
+a real additive effect.  More Tests Needed.</p>
+
+<p>I think an interesting
+set of experiments to test that would be not only to try with different random seeds,
+but also to try with different weight initialisation strategies entirely.  What would these
+results look like if, instead of using PyTorch's default initialisation, we used the one
+they describe in the GPT-2 paper?  (More on that in an upcoming post.)</p>
+
+<p>But back to this experiment: what can the results that we have right now tell us?</p>
+
+<h3 id="wrapping-up">Wrapping up</h3>
+
+<p>I started this set of experiments with two goals: to understand how RMSNorm works,
+and to see if I could show similar results to the original paper -- that it gets
+comparable loss to LayerNorm, with a noticeable saving in training time.</p>
+
+<p>I'm happy with the first part of that -- and hopefully if you're reading this, the "how
+it works" part is clear for you too!</p>
+
+<p>The loss was, I think, also as expected.  Again, I'd need to do a much larger-scale
+experiment with various starting weights to be sure, but the fact that the difference
+between RMSNorm and LayerNorm was so small was certainly reassuring.</p>
+
+<p>The training speed was a much less impressive result.  With hand-rolled code, the
+2.5% speedup looked potentially real, but it pretty much vanished when I switched
+to PyTorch's built-in classes.</p>
+
+<p>The big difference, of course, was that between PyTorch's built-in classes and the
+hand-rolled ones.  The speedup from using fused kernels for this stuff was not such
+a big surprise, especially after the similar improvement from using the built-in GELU.
+It would certainly be interesting to see if using <a href="https://docs.pytorch.org/docs/2.14/generated/torch.compile.html"><code>torch.compile</code></a>
+narrowed the gap, though.</p>
+
+<p>But the improved loss was definitely interesting.  Again, I'd need to do a ton
+of training runs to see if that was real or noise.  It seems most likely that
+it was noise, but the fact that the effect was positive for PyTorch in both cases, and
+was by such a similar amount, keeps nagging at me.</p>
+
+<p>One remaining question aside from that, though: RMSNorm wasn't obviously significantly
+faster, especially if you use fused kernels, and while it wasn't obviously worse than LayerNorm, it didn't appear to be
+better -- so what explains its popularity in so many open weights models?</p>
+
+<p>The first thing I thought was that maybe it's something that becomes more effective in terms of
+cost reductions as
+models get larger.  However, having thought it through, I think that exactly the opposite
+is true -- its effects get even smaller as we scale up.</p>
+
+<p>Remember that -- in terms of calculations --
+RMSNorm saved <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>3</mn><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> additions/subtractions for each context vector.  That would scale smoothly
+as <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> was increased, and of course the number of RMSNorms would increase
+proportionally as the model gained more layers.  So I think that the absolute compute reduction
+in terms of calculations saved would scale roughly linearly with each of width and depth.</p>
+
+<p>But other aspects of the model's cost scale more than linearly with width.  For example, in
+GPT-2, our FFNs map from <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> to <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mn>4</mn><msub><mi>d</mi><mtext>emb</mtext></msub></mrow></math> and back again; that means
+that the number of calculations scales as <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>O</mi><mo stretchy="false">&#x00028;</mo><msup><mrow><msub><mi>d</mi><mtext>emb</mtext></msub></mrow><mn>2</mn></msup><mo stretchy="false">&#x00029;</mo></mrow></math>.  More modern implementations
+use SwiGLU, but I believe that the scaling is of the same order.</p>
+
+<p>And that's not even
+to mention the fact that modern models have longer context, and while the norms scale
+linearly with the sequence length (and the RMSNorm savings do too), full attention
+is <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>O</mi><mo stretchy="false">&#x00028;</mo><msup><mi>n</mi><mn>2</mn></msup><mo stretchy="false">&#x00029;</mo></mrow></math> on that.</p>
+
+<p>So if we're only getting, say,
+0.5% improvement for these tiny 163M parameter models with a 1,024 token context length, it would be an even smaller
+<em>percentagewise</em> improvement for larger ones.</p>
+
+<p>Even if that wasn't the case, the amount is pretty small:  DeepSeek
+V3 was widely reported to have cost US$6M to train (excluding R&amp;D and a bunch of other stuff,
+but that's actually the correct number to use here).  So even if we ignore all of the
+above and use it directly, that would just be a US$30,000
+saving from using RMSNorm.  And that's basically an upper bound -- we'd expect it to
+be significantly less.</p>
+
+<p>Another possibility, though, is that it's an architectural thing.  These open models
+have a bunch of differences to the GPT-2-style code I've been using here.  They use
+RoPE for position encoding, and SwiGLU for the feed-forward networks.  Mistral has multiple
+differences in the attention mechanism.  On the face of it, I don't see any obvious reasons
+why those might speed up RMSNorm, but I can certainly
+imagine that they might "prefer" one form of normalisation over another, resulting in better loss.  So perhaps
+that's what people have found.</p>
+
+<p>But there are plenty of other possibilities.  If people have generally found that it's just
+as good as LayerNorm, then perhaps it's just a fashion -- one model uses it, then the
+next one has no particular reason to move back, and so on.  And there is a general move
+towards dropping biases from LLMs (for example, from the QKV weights), and RMSNorm
+would fit that.  And anyway, it is a bit simpler!</p>
+
+<p>Whatever the reason: if RMSNorm is that little bit simpler than LayerNorm, by skipping the recentring
+aspect of normalisation, is there something even simpler that could work even better?
+While discussing the subject with Claude Opus 5.5, it mentioned <a href="https://arxiv.org/abs/2503.10622">"Transformers without Normalization"</a> <sup class="footnote-ref" id="fnref-8"><a href="#fn-8">8</a></sup>,
+which is a really interesting paper -- one of the authors has a neat intro
+<a href="https://jiachenzhu.github.io/DyT/">on GitHub</a>.  They noticed that the transformations
+that normalisation layers tend to learn wind up looking a bit like the S-shaped mappings
+you get from the <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>tanh</mi></mrow></math> function, so tried using that instead with a system they called
+Dynamic Tanh (DyT) -- and got good results!</p>
+
+<p>The first sentence in this post was "Normalisation is an essential part of LLMs".  Was that
+wrong?  I suppose that depends on what you mean by "normalisation" -- could you regard
+their <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mrow><mi>tanh</mi></mrow></math> trick as being normalisation of some kind? -- though given that
+<a href="https://en.wikipedia.org/wiki/Yann_LeCun">Yann LeCun</a> was a co-author on the paper I should probably be a bit hesitant to disagree
+with his definition of it ;-)</p>
+
+<p>I think their DyT system is something for a follow-on post, though.  For now: RMSNorm seems to be essentially
+the same in terms of model quality, and maybe slightly faster than LayerNorm for the models
+I've been playing with, at least if you don't use the fused modules.</p>
+
+<p>But using
+the fused PyTorch modules instead of hand-rolling our own normalisation is a huge win for
+speed.  The loss improvement that came with it in this experiment is very interesting,
+but I'd certainly want to do quite a lot of extra experiments before claiming it was real!</p>
+
+<p>For now, I think I'll say that I'm happy that I learned how RMSNorm worked, but I don't
+think I'll add it in as a standard part of my training runs.  And the further experiments
+can go on the pile with the hundreds of other things I'll look into later.  Once I've learned
+about RoPE, and SwiGLU, and all of the rest of it...</p>
+
+<p>Thanks for reading!</p>
+
+<div class="footnotes">
+<hr />
+<ol>
+<li id="fn-1">
+<p>Linkrot-safe citation: Biao Zhang, &amp; Rico Sennrich. (2019). Root Mean Square Layer Normalization.&#160;<a href="#fnref-1" class="footnoteBackLink" title="Jump back to footnote 1 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-2">
+<p>There was an earlier normalisation technique called BatchNorm which operated
+across the whole batch, but that seems to have dropped out of favour.  The paper
+has some discussion of why that was.&#160;<a href="#fnref-2" class="footnoteBackLink" title="Jump back to footnote 2 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-3">
+<p>Or by the number of elements minus one if we're using <a href="https://mathworld.wolfram.com/BesselsCorrection.html">Bessel's correction</a>.
+I'll use the version without in this post, but the maths works out either way.&#160;<a href="#fnref-3" class="footnoteBackLink" title="Jump back to footnote 3 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-4">
+<p>Raschka's LayerNorm implementation does not use Bessel's correction, which makes
+it compatible with the original GPT-2 code; specifically, it uses the <code>unbiased</code>
+kwarg:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">var</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">unbiased</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>Per <a href="https://docs.pytorch.org/docs/2.14/generated/torch.var.html">the PyTorch docs for <code>var</code></a>,
+this is the pre-PyTorch 2.0 way of saying:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="n">var</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">correction</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>From the <a href="https://docs.pytorch.org/docs/2.14/generated/torch.nn.LayerNorm.html">docs for <code>LayerNorm</code></a></p>
+
+<blockquote>
+  <p>The variance is calculated via the biased estimator, equivalent to <code>torch.var(input, correction=0)</code>.</p>
+</blockquote>
+
+<p>So that matches nicely.&#160;<a href="#fnref-4" class="footnoteBackLink" title="Jump back to footnote 4 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-5">
+<p>Just in case I want to use it in the future, here it is:</p>
+
+<div class="codehilite">
+<pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">contextlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">contextmanager</span>
+
+<span class="o">...</span>
+
+<span class="nd">@contextmanager</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">stable_rng</span><span class="p">():</span>
+    <span class="n">after_seed</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">getrandbits</span><span class="p">(</span><span class="mi">63</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">yield</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">after_seed</span><span class="p">)</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">manual_seed</span><span class="p">(</span><span class="n">after_seed</span><span class="p">)</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">manual_seed_all</span><span class="p">(</span><span class="n">after_seed</span><span class="p">)</span>
+</code></pre>
+</div>
+
+<p>With that, you can wrap anything that might draw variable amounts of randomness
+from the various random-number generators in a <code>with stable_rng():</code> block, and
+you can be sure that the state will be stable afterwards regardless.</p>
+
+<p>Using that in some of my earlier code would have been much easier than the various
+contortions I went through to ensure that different routes through the code drew
+the same amount regardless of the model's configuration.&#160;<a href="#fnref-5" class="footnoteBackLink" title="Jump back to footnote 5 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-6">
+<p>One possibility that occurs to me: the fact that the LayerNorm got more of a speedup might be due to an inefficiency in the
+hand-rolled code having been addressed in the PyTorch implementation.
+Remember, what we started with was written as educational code to explain how
+LayerNorm works, so it does this:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="n">mean</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">var</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">unbiased</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">norm_x</span> <span class="o">=</span> <span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="n">mean</span><span class="p">)</span> <span class="o">/</span> <span class="n">torch</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">var</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">eps</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">*</span> <span class="n">norm_x</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">shift</span>
+</code></pre>
+</div>
+
+<p>Now, remember that in the explanation of LayerNorm <a href="#layernorm">above</a>, I noted that
+once you've recentred the vector, you can re-use that to work out variance, because
+the recentred vector is already a list of differences from the mean.  So you could rewrite
+the above more efficiently as:</p>
+
+<div class="codehilite">
+<pre><span></span><code>        <span class="n">mean</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">recentered</span> <span class="o">=</span> <span class="n">x</span> <span class="o">-</span> <span class="n">mean</span>
+        <span class="n">var</span> <span class="o">=</span> <span class="p">(</span><span class="n">recentered</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">norm_x</span> <span class="o">=</span> <span class="n">recentered</span> <span class="o">/</span> <span class="n">torch</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">var</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">eps</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">*</span> <span class="n">norm_x</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">shift</span>
+</code></pre>
+</div>
+
+<p>That would save us two calculations of the mean and the differences from it, so would
+hopefully speed things up.</p>
+
+<p>Or, of course, it could have just been noise, or something completely different :-)&#160;<a href="#fnref-6" class="footnoteBackLink" title="Jump back to footnote 6 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-7">
+<p>I was going to put a defensive "FWIW" against the "I got an LLM to check it out"
+bit there, but these days, for this kind of thing, I think it's unnecessary.&#160;<a href="#fnref-7" class="footnoteBackLink" title="Jump back to footnote 7 in the text.">&#8617;</a></p>
+</li>
+
+<li id="fn-8">
+<p>Zhu, J., Chen, X., He, K., LeCun, Y., &amp; Liu, Z. (2025). Transformers without Normalization.
+In <em>Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)</em>.&#160;<a href="#fnref-8" class="footnoteBackLink" title="Jump back to footnote 8 in the text.">&#8617;</a></p>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
