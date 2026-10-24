@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Interesting systemd features you may not know about | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Interesting systemd features you may not know about</h1>
+        <div class="meta">Martin Alderson 2026-10-24T00:00:00Z</div>
+        <div class="links">
+          <a href="https://martinalderson.com/posts/interesting-systemd-features/?utm_source=rss&amp;utm_medium=rss&amp;utm_campaign=feed">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/martinalderson-com/martinalderson-com-290dc6eb3f6cc708.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Memory caps, run time limits, sleep inhibitors, better cron and path units - systemd features that turn out to be handy for running throwaway agent-written code.</div>
+        <div class="content">
+          <p>I've always thought of systemd as a fairly boring piece of plumbing, that boots your system and runs background services. I also knew there was enormous controversy when it first came out, but I hadn't really dived much into it past this.</p>
+<p>Systemd actually has tonnes of interesting features, that I think are <em>even</em> more useful for running throwaway agent-written code.</p>
+<p>Note this is all Linux only - sorry Mac users, there's no real equivalent of systemd on macOS (launchd covers some of the cron-style stuff, but not the resource limits).</p>
+<h2>Easy memory/CPU caps per process</h2>
+<p>You may have experienced this before. You have an agent write a script, perhaps to do some data analysis. It has a terrible memory leak, and suddenly your machine freezes and (hopefully) the kernel resumes after a bit with an OOM error.</p>
+<p>I've had this a few times, and it's very annoying. Turns out systemd has an easy way to limit processes and any subprocesses, with <code>MemoryMax</code> and <code>CPUQuota</code>.   These actually use the same underlying cgroup limits as Docker would.</p>
+<p>If you want to for example run Claude Code with 4GB of memory max and only 2 CPU cores to avoid it burning through all your RAM, it's as simple as running this:</p>
+<pre><code>systemd-run --user --scope -p MemoryMax=4G -p CPUQuota=200% claude
+</code></pre>
+<p>You can obviously run any command this way. Bonus point, if you use <code>systemd-cgtop</code> instead of <code>top</code> (or <code>btop</code>), you can see memory use and CPU use per cgroup.</p>
+<p>PS: systemd does also have sandboxing features (<code>ProtectHome</code>, <code>ReadWritePaths</code> and friends), which you'd think would be perfect for agents. But there are so many footguns with it that it's too long to explain in this article - I'll maybe do a follow up one day.</p>
+<h2>Limiting how long a process can run for</h2>
+<p>Similarly to the above, if you want to limit e.g. an autonomous agent to only run for 30min max, you can just use the <code>RuntimeMaxSec</code> argument. For example, if you want to run OpenCode to investigate something but don't want it spending more than 30 minutes, you can simply run:</p>
+<pre><code>systemd-run --user --same-dir --unit=opencode-agent \
+  -p RuntimeMaxSec=30m \
+  ~/.opencode/bin/opencode run --standalone --auto \
+  &quot;Fix the failing tests in this repo and summarise what you changed&quot;
+
+# follow it:   journalctl --user -u opencode-agent -f
+
+</code></pre>
+<p>NB: the <code>--standalone</code> arg is required, because OpenCode by default will run its work on a background server which you may already have running, which will bypass the time limit.</p>
+<h2>Inhibiting sleep</h2>
+<p>This one is likely more useful for laptops, but if you want to run a process and close your laptop, <code>systemd-inhibit</code> is a good way to do that. You can combine with the former one to make sure it expires after a while to avoid draining your battery entirely:</p>
+<pre><code>systemd-run --user --same-dir --unit=claude-agent \
+  -p RuntimeMaxSec=30m \
+  systemd-inhibit --what=sleep:idle:handle-lid-switch --why=&quot;claude agent run&quot; \
+  ~/.local/bin/claude -p \
+  &quot;Fix the failing tests in this repo and summarise what you changed&quot;
+</code></pre>
+<h2>Better cron</h2>
+<p>More obvious, but systemd has a lot of features that a simple cron doesn't. I'd recommend reading the <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html">full man page</a> for full details, but there are some cool features there. For example, one I use all the time is <code>Persistent</code>, so if your computer is off/sleeping, it will run the task when it comes back online. This is really useful if like me you want an agent to summarise something and notify you every week.</p>
+<p>Equally, the <code>OnSuccess</code> and <code>OnFailure</code> arguments are helpful. If you define a slack or email unit, you can easily pipe results of runs. It's also a good place to put 'dead man's handle' calls to the likes of Healthchecks.io.</p>
+<p>Another nice one is adding a random delay to your cron jobs, if you have a bunch of machines hitting a service at say 1am. You can have it randomly delay the start a bit with <code>RandomizedDelaySec</code> to avoid a huge spike in load.</p>
+<h2>Path units</h2>
+<p>This is a really cool one I did not know about until I researched this article. Effectively it fires when something in a folder changes.</p>
+<pre><code># ~/.config/systemd/user/agent-inbox.path
+[Path]
+DirectoryNotEmpty=%h/agent-inbox
+
+[Install]
+WantedBy=default.target
+</code></pre>
+<pre><code># ~/.config/systemd/user/agent-inbox.service
+[Unit]
+OnSuccess=slack-notify.service
+
+[Service]
+Type=exec
+RuntimeMaxSec=30m
+MemoryMax=4G
+ExecStart=/bin/sh -c YOUR_COMMAND_HERE
+</code></pre>
+<p>So you could use this for watching a folder, and every time it changes, triggering something. If you have a folder of e.g. expenses or invoices, you can just drop files in there and have the agent categorise them for you as new files get added.</p>
+<p>Overall, if like me you thought systemd was only really useful for running daemons and not much more, it's definitely worth diving into. Often it provides a lot of the plumbing you need without having to roll your own, especially for the huge amount of almost &quot;disposable&quot; software you tend to end up with these days.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
