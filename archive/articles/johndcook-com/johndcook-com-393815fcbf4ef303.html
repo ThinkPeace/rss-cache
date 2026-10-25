@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Computing polar triangles with linear algebra | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Computing polar triangles with linear algebra</h1>
+        <div class="meta">John D. Cook 2026-10-25T01:01:55Z</div>
+        <div class="links">
+          <a href="https://www.johndcook.com/blog/2026/10/24/computing-polar-triangles/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/johndcook-com/johndcook-com-393815fcbf4ef303.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The previous post defined the polar triangle of a spherical triangle in terms of its sides and angles, but it doesn’t construct the triangle. It only specifies one of a family of triangles located anywhere on the sphere. How do we know that polar triangles exist? There is a geometric construction that starts with a […] The post Computing polar triangles wit…</div>
+        <div class="content">
+          <p>The <a href="https://www.johndcook.com/blog/2026/10/24/polar-triangle/">previous post</a> defined the polar triangle of a spherical triangle in terms of its sides and angles, but it doesn&#8217;t construct the triangle. It only specifies one of a family of triangles located anywhere on the sphere.</p>
+<p>How do we know that polar triangles exist? There is a geometric construction that starts with a spherical triangle and constructs a unique new spherical triangle, and one can show that this new triangle has the angles and sides described in the previous post.</p>
+<p>There is also a linear algebraic construction of polar triangles, and that&#8217;s the topic of this post. In a nutshell, take your sphere to be the unit sphere in 3D. Write the coordinates of each vertex as the columns of a matrix. Invert that matrix and normalize each row. Then the rows are the coordinates of the polar vertices.</p>
+<p>This process is an involution: the polar of the polar of a triangle is the original triangle.</p>
+<p>The following Python code illustrates the process described above. It begins with a triangle on the globe with vertices <em>A</em>, <em>B</em>, and <em>C</em> at Chicago, Quito, and Paris respectively. It computes the polar triangle, then computes the polar of that, and shows that the result is the original triangle.</p>
+<p>In case you&#8217;re curious,</p>
+<ul>
+<li><em>A</em>′ is at 40.77° N, 168.33° W</li>
+<li><em>B</em>′ is at 34.53° S, 35.70° W</li>
+<li><em>C</em>′ is at 10.00° N, 11.43° E</li>
+</ul>
+<pre>
+import numpy as np
+
+def latlon_to_cartesian(lat_deg, lon_deg):
+    lat = np.radians(lat_deg)
+    lon = np.radians(lon_deg)
+    x = np.cos(lat) * np.cos(lon)
+    y = np.cos(lat) * np.sin(lon)
+    z = np.sin(lat)
+    return np.array([x, y, z])
+
+def cartesian_to_latlon(v):
+    v = v / np.linalg.norm(v)
+    lat = np.degrees(np.arcsin(np.clip(v[2], -1, 1)))
+    lon = np.degrees(np.arctan2(v[1], v[0]))
+    return lat, lon
+
+def polar_triangle(M):
+    """
+    Polar triangle via matrix inversion.
+    M: 3×3 matrix with columns = unit vectors of the original vertices.
+    Returns 3×3 matrix whose columns are the polar unit vectors.
+    """
+    Minv = np.linalg.inv(M)
+    # Normalize each row of the inverse (rows are parallel to the polar directions)
+    polar_rows = Minv / np.linalg.norm(Minv, axis=1, keepdims=True)
+    return polar_rows.T          # columns = polar vertices
+
+# Original vertices (Chicago, Quito, Paris)
+A = latlon_to_cartesian(41.85003, -87.65005)
+B = latlon_to_cartesian(-0.22985, -78.52495)
+C = latlon_to_cartesian(48.85341,  2.3488)
+
+M = np.column_stack([A, B, C])
+print("M (columns = original vertices):\n", M)
+print("det(M) =", np.linalg.det(M))
+
+# Polar triangle
+M_prime = polar_triangle(M)
+print("\nM' (columns = polar vertices):\n", M_prime)
+
+print("\nPolar geographic coordinates (lat, lon):")
+for name, col in zip(["A'", "B'", "C'"], range(3)):
+    print(name, cartesian_to_latlon(M_prime[:, col]))
+
+# Polar of the polar
+M_double = polar_triangle(M_prime)
+print("\nPolar-of-polar matrix:\n", M_double)
+print("max |difference from original M| =",
+      np.max(np.abs(M_double - M)))
+</pre>The post <a href="https://www.johndcook.com/blog/2026/10/24/computing-polar-triangles/">Computing polar triangles with linear algebra</a> first appeared on <a href="https://www.johndcook.com/blog">John D. Cook</a>.
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
