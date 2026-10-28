@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>This Week in Source Control: 28 October 2026 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>This Week in Source Control: 28 October 2026</h1>
+        <div class="meta">Andrew Nesbitt 2026-10-28T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/10/28/this-week-in-source-control.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-cc53a1bd1abd4278.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Releases, advisories, and articles from across version control and forges</div>
+        <div class="content">
+          <p>Alongside package management, I follow new features and security fixes in source control clients and in the forges that host repositories, since a lot of what I build, like <a href="https://github.com/git-pkgs">git-pkgs</a>, reads git repositories and calls forge APIs. <a href="/2026/10/24/this-week-in-package-management.html">This Week in Package Management</a> has been published every Saturday since May, and I kept putting git releases and forge news in its Elsewhere section.</p>
+
+<p>Starting this week, I’m publishing that material as a separate roundup on Wednesdays. It covers clients like git, jj, gitoxide, Sapling, Mercurial and Git LFS, and forges like GitHub, GitLab, Forgejo, Gitea, Codeberg, sourcehut, Radicle and Tangled. Package managers resolving git dependencies and CI systems like GitHub Actions are covered in the Saturday post.</p>
+
+<p>This first issue covers the fortnight since 11 October, with links from release feeds for those tools and forges, the <a href="https://lobste.rs/t/vcs">Lobsters vcs tag</a>, Hacker News and my boosts on <a href="https://mastodon.social/@andrewnez">Mastodon</a>. In that fortnight Anthropic, GitHub, Entire and Enroute each published a post about rebuilding source control or git hosting for the volume of pushes and checkouts from coding agents.</p>
+
+<h2 id="scaling">Scaling</h2>
+
+<p><a href="https://www.anthropic.com/engineering/redesigning-source-control">Redesigning source control at Anthropic</a> (Anthropic Engineering) describes Scion, an in-house version control system that replaced git for the company’s monorepo in five months. Merges went from around 2,500 a day in May to over 30,000 a day in September. The main branch history is almost 100 GB, and CI performs around 25 million checkouts a day. Scion is designed for clients that are always online. The server stores changesets in a write-ahead log on Spanner and runs blame, history and merge queries server-side, and clients fetch only the trees and blobs they request through regional caches. Anthropic reports the new infrastructure uses 200x less CPU and memory than the git mirror fleet it replaced. In <a href="https://simonwillison.net/2026/Oct/13/redesigning-source-control-at-anthropic/">notes on the post</a>, Simon Willison compares it to centralised systems like Subversion.</p>
+
+<p><a href="https://sunshowers.io/posts/anthropic-mononoke/">Anthropic’s Scion is heavily inspired by Mononoke</a> (sunshowers) points out that Scion’s “derived data” for fast blame and history queries matches the design of Mononoke, the server side of Meta’s Sapling. The original post credited Sapling only for “hard-won lessons”. <a href="https://sunshowers.io/posts/anthropic-mononoke-2/">A follow-up</a> compares Scion’s changesets with Mononoke’s Bonsai changesets. Anthropic has since updated its post with more detail on the projects Scion is based on.</p>
+
+<p><a href="https://github.blog/engineering/architecture-optimization/the-bridge-to-agent-scale-git-infrastructure/">The bridge to agent-scale Git infrastructure</a> (Eleanor White and Victoria Dye, GitHub Blog) covers the move of GitHub’s repositories to Azure. Most repositories have two of their five replicas there, and Azure serves about half of Git traffic. Moving the busiest repositories was blocked by a repository-wide lock that every write held across a 25ms cross-region round trip. Spokes is switching to per-reference serialisation, so only writes to the same ref wait for each other, which gave 3-4x write throughput in internal tests. Object storage then joins the write quorum as a “virtual replica”, so read replicas can be stateless.</p>
+
+<p><a href="https://entire.com/blog/the-git-forge-for-agent-human-collaboration">Entire</a>, a new git forge from a company co-founded by former GitHub CEO Thomas Dohmke, is built for repositories where coding agents and people push to the same branches. Its git server replicates each repository across regions, and the company’s <a href="https://github.com/entireio/forgemark">forgemark</a> benchmark reports pushes up to 89x faster than GitHub and 6x faster than Cursor Origin. Review happens through Trails, which run configured checks and agent-run evaluations in Daytona or E2B sandboxes on every push instead of a pull request diff. Agent sessions and prompts are synced into the repository and indexed for later agents to search.</p>
+
+<p><a href="https://enroute.sh/blog/everyone-is-doing-git-on-s3-wrong">Everyone is doing Git on S3 wrong</a> (Enroute) looks at the write-ahead log designs for git on object storage that followed Cursor’s Continuity. Those designs send every push to a repository through one primary, and every replica keeps a full copy of the repository on disk. Enroute keeps each repository’s refs and a list of immutable object layers in a Raft-replicated log. Packfiles are rewritten on ingestion so a read from object storage needs only a few requests, and Enroute reports more than 7,600 pushes per second into a single repository. Against stock git serving a repacked linux.git, full clones are about 17% slower and shallow clones more than twice as fast.</p>
+
+<h2 id="releases">Releases</h2>
+
+<p><a href="https://docs.gitlab.com/releases/19/gitlab-19-5-released/">GitLab 19.5</a> makes the GitLab MCP server and GitLab Secrets Manager, built on OpenBao, generally available. Smaller changes include a commit count variable for commit message templates, and commits signed by revoked GPG identities now show as unverified.</p>
+
+<p><a href="https://forgejo.org/2026-10-release-v17-0/">Forgejo 17.0</a> resolves absolute links in rendered documents against the repository root, as other forges do, and deprecates action run webhook events in favour of workflow run events. It also adds a Donate button driven by <code class="language-plaintext highlighter-rouge">FUNDING.yml</code>, migration from Bitbucket Data Center, and opt-in invitations for organisation membership. <a href="https://codeberg.org/forgejo/forgejo/src/branch/forgejo/release-notes-published/17.0.1.md">Forgejo 17.0.1, 16.0.7 and 15.0.11</a> followed on 26 October as security releases. The main fix stops a <code class="language-plaintext highlighter-rouge">pull_request_review</code> event running an Actions workflow as trusted from an arbitrary commit, including one from a fork, by ignoring the unvalidated <code class="language-plaintext highlighter-rouge">commit_id</code> on the submitted review. 17.0.1 also carries bug fixes for 17.0.0, which the project had <a href="https://floss.social/@forgejo/117450533397721524">advised holding off from</a> after reports of blocked pushes and merges.</p>
+
+<p><a href="https://gitroot.dev/blog/version-0.5.0.html">GitRoot 0.5.0</a>, a self-hosted forge with no database that is extended through WASM plugins, now references plugins by PURL with a checksum qualifier in place of separate URL, checksum and version fields. New per-forge and per-repository settings cap how many branches anonymous users can push before further anonymous pushes are rejected.</p>
+
+<p><a href="https://pushin.eu">Pushin.eu</a>, an invite-only forge hosted in the EU, shipped several releases this fortnight according to its <a href="https://pushin.eu/pjullrich/pushin/changelog">changelog</a>. 0.3.26 adds tag-based releases with a GitHub-compatible API and GoReleaser publishing, and 0.3.29 serves public repository files from <code class="language-plaintext highlighter-rouge">raw.pushin.eu</code>. 0.3.32 adds runner groups for self-hosted runners and removes the per-repository <code class="language-plaintext highlighter-rouge">allow_persistent_runners</code> setting.</p>
+
+<p><a href="https://forges.link/">forges</a> (Daniel Roe) is a TypeScript version of my Go library <a href="https://github.com/git-pkgs/forge">git-pkgs/forge</a>, with one interface for issues, pull requests, notifications, checks and webhooks across GitHub, GitLab, Bitbucket, Forgejo, Gitea, Gitee, Azure DevOps, Cursor Origin, Tangled, Pushin.eu and Sourcehut. Each provider declares which operations it supports, and the release notes show the capability changes per forge. <a href="https://github.com/danielroe/forges/releases/tag/v0.1.0">0.1.0</a> came out on 11 October, and <a href="https://github.com/danielroe/forges/releases/tag/v0.3.0">0.3.0</a> adds branch rules and review threads.</p>
+
+<p><a href="https://blog.gitea.com/release-of-gitea-cli-0.1.0/">gt 0.1.0</a> replaces <code class="language-plaintext highlighter-rouge">tea</code>, Gitea’s command line tool, with a rewrite under a new name and repository. Every list and view command supports <code class="language-plaintext highlighter-rouge">--json</code> and <code class="language-plaintext highlighter-rouge">--jq</code>, and <code class="language-plaintext highlighter-rouge">gt pr checkout</code> and <code class="language-plaintext highlighter-rouge">gt pr diff</code> handle fork and AGit pull requests. It requires Gitea 28 or newer.</p>
+
+<p><a href="https://github.com/GitoxideLabs/gitoxide/releases/tag/v0.61.0">gitoxide 0.61.0</a> moves the plumbing crates to a standard <code class="language-plaintext highlighter-rouge">std::error::Error</code> compatible error type and improves tracing across commands, along with security fixes.</p>
+
+<h2 id="security">Security</h2>
+
+<p><a href="https://github.com/git-lfs/git-lfs/releases/tag/v3.8.1">Git LFS 3.8.1</a> fixes four CVEs:</p>
+
+<ul>
+  <li>unquoted arguments in remote commands sent over SSH</li>
+  <li>Cookie headers forwarded to other hosts after a redirect</li>
+  <li>an arbitrary program run from a malicious repository through line feeds in a submodule URL</li>
+  <li>an arbitrary program run from a malicious repository through a custom transfer adapter set in <code class="language-plaintext highlighter-rouge">.lfsconfig</code></li>
+</ul>
+
+<p>GitLab shipped two critical patch releases for integer overflows in its regular expression compiler that allowed unauthenticated code execution. The <a href="https://www.bleepingcomputer.com/news/security/gitlab-warns-of-max-severity-rce-flaw-in-regex-compiler-engine/">first, on 12 October</a>, fixed CVE-2026-97229 in CI configuration patterns, and a <a href="https://docs.gitlab.com/releases/patches/patch-release-gitlab-19-5-1-released/">21 October release</a> fixed CVE-2026-110264, which affects every version from 7.0 and was backported as far as 18.11.13. The underlying bugs are in Ruby’s Onigmo, whose fixes were in <a href="/2026/10/24/this-week-in-package-management.html">last week’s package management roundup</a>.</p>
+
+<p><a href="https://blog.gitea.com/release-of-28.2.0/">Gitea 28.2.0</a> discloses 13 CVEs, two of them fixed in earlier releases. One fix limits which stored public keys an SSH certificate principal is matched against. Before the fix, matching against every stored key let a certificate authenticate as a different user.</p>
+
+<p><a href="https://git-annex.branchable.com/security/cross_repository_data_exfiltration_via_special_remote/">git-annex 10.20261026</a> fixes CVE-2026-112818, a cross-repository exfiltration attack found by Joey Hess. A repository the victim clones can autoenable a special remote that points at the victim’s own private git-annex storage, so a later <code class="language-plaintext highlighter-rouge">git-annex sync --content</code> reads the private files and sends them to the attacker. After the fix, <code class="language-plaintext highlighter-rouge">enableremote</code> requires the special remote’s configuration to be verified, and git-annex refuses to send content to an unverified autoenabled remote.</p>
+
+<p><a href="https://www.wiz.io/blog/gheist-attempted-scaled-abuse-of-stolen-github-tokens-stumbles">Gheist</a> (Rami McCarthy and Hila Ramati, Wiz) is a campaign that used stolen GitHub tokens to push a workflow to every reachable repository. The workflow writes repository secrets to its log in base32 so GitHub’s masking leaves them unredacted, and the attacker’s tool fetches the log over the API and deletes the run seconds later. GitHub’s hold on potentially malicious workflows in public repositories, in place since 28 July, blocked the payload there. Private repositories and GitHub Enterprise Server fall outside that hold, and Wiz observed successful runs and follow-on AWS activity from those.</p>
+
+<p>An attacker took over a developer’s GitHub account and <a href="https://www.bleepingcomputer.com/news/security/ovhcloud-cli-releases-backdoored-on-github-to-steal-developer-secrets/">replaced OVHcloud CLI releases 0.11.0 to 0.15.0</a> with builds that read secrets from disk. Release immutability was turned off on the repository, so the attacker could overwrite the existing releases directly and skip CI.</p>
+
+<h2 id="github">GitHub</h2>
+
+<p><a href="https://github.blog/changelog/2026-10-12-push-attribution-public-preview">Push attribution</a>, in limited preview for Enterprise customers, records the authenticated user who pushed each commit alongside the author and committer fields. A new “Committer must match pusher” ruleset condition accepts a push only when the committer matches one of the pusher’s verified email addresses.</p>
+
+<p>During periods of unusual traffic, <a href="https://github.blog/changelog/2026-10-19-some-git-over-https-may-temporarily-require-authentication">unauthenticated HTTPS clones and fetches of public repositories may require authentication</a>, while SSH, authenticated HTTPS and pushes work as before.</p>
+
+<p><a href="https://github.blog/changelog/2026-10-21-github-cli-opt-in-to-expiring-auto-refreshing-oauth-tokens">GitHub CLI 2.103.0</a> adds <code class="language-plaintext highlighter-rouge">gh auth login --expiring</code> for refreshable tokens that expire within hours. Used as a git credential helper, it requires git 2.46 or newer, which discards a cached credential when it expires.</p>
+
+<p>Repositories can now <a href="https://github.blog/changelog/2026-10-20-bulk-migrate-branch-protections-to-rulesets-for-a-repository">convert all their branch protection rules to rulesets</a> in one step, with a preview before anything changes. A new <a href="https://github.blog/changelog/2026-10-13-github-app-improvements-for-least-privilege-and-management"><code class="language-plaintext highlighter-rouge">repository_creation:write</code> permission</a> lets apps and fine-grained tokens create repositories with only that permission instead of full repository administration.</p>
+
+<p>On the Files changed tab of a pull request, the <a href="https://github.blog/changelog/2026-10-22-pull-requests-saved-whitespace-preferences-and-improved-split-view">whitespace visibility setting can be saved</a> so it applies across pull requests, and new and deleted files now span both columns in split view.</p>
+
+<p><a href="https://github.blog/changelog/2026-10-15-email-notifications-for-repository-push-events-have-been-retired">Email notifications for push events</a> have been retired because recipients could be added without consenting.</p>
+
+<h2 id="elsewhere">Elsewhere</h2>
+
+<p><a href="https://try.haxy.net/haxy:haxy">Haxy</a>, now in preview, is a local-first forge written in Zig that stores issues, pull requests and discussions as events on a <code class="language-plaintext highlighter-rouge">haxy/events</code> branch and serves a TUI over SSH alongside its web interface.</p>
+
+<p><a href="https://offby1.website/posts/making-git-hooks-visible-in-fish-shell.html">Making git hooks visible in fish shell</a> (Chris R) ports Ned Batchelder’s zsh function, which lists a repository’s executable hooks when you <code class="language-plaintext highlighter-rouge">cd</code> into it, after Frank Wiles nearly fell for an attack hidden in a shared hooks folder.</p>
+
+<p>jwz has created <a href="https://github.com/xscreensaver-official/xscreensaver">a GitHub repository</a> whose only content is a README stating that XScreenSaver releases are published only as tarballs on the XScreenSaver website and that other repositories are unofficial.</p>
+
+<p>Send links for next week to <a href="https://mastodon.social/@andrewnez">@andrewnez@mastodon.social</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
