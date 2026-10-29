@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Avoid Public Functions Calling Other Public Functions | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Avoid Public Functions Calling Other Public Functions</h1>
+        <div class="meta">matklad 2026-10-29T00:00:00Z</div>
+        <div class="links">
+          <a href="https://matklad.github.io/2026/10/29/pub-calls-pub.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/matklad-github-io/matklad-github-io-54449d593755df62.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A small-scale rule of thumb. This article will land much better with a concrete example, but I am drawing a blank here, so you gotta just blindly trust my say so!</div>
+        <div class="content">
+          <header>
+  <h1>Avoid Public Functions Calling Other Public Functions</h1>
+  <time class="meta" datetime="2026-10-29">Oct 29, 2026</time>
+</header>
+<p>A small-scale rule of thumb. This article will land much better with a concrete
+example, but I am drawing a blank here, so you gotta just blindly trust my say
+so!</p>
+<p>When implementing a software module, it’s often a case that you are writing a
+public function <code>foo</code>, and at least part of what <code>foo</code> does is already handled
+by another public function <code>bar</code>. The DRY instinct encourages you to call
+<code>bar()</code> from within <code>foo</code>. This usually creates problems down the line. Instead,
+create a new <em>private</em> function and refactor both <code>foo</code> and <code>bar</code> to call that
+shared helper:</p>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-comment">// BAD</span></span>
+<span class="line"><span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span><span class="hl-function"> foo</span>() <span class="hl-type">void</span> {</span>
+<span class="line">    <span class="hl-keyword">return</span> bar(.{ .frobnicate = <span class="hl-literal">true</span> });</span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span><span class="hl-function"> bar</span>(options: <span class="hl-keyword">struct</span> {</span>
+<span class="line">    frobnicate: <span class="hl-type">bool</span> = <span class="hl-literal">false</span>,</span>
+<span class="line">}) <span class="hl-type">void</span> {</span>
+<span class="line">    <span class="hl-comment">// ...</span></span>
+<span class="line">}</span></code></pre>
+
+</figure>
+
+<figure class="code-block">
+
+
+<pre><code><span class="line"><span class="hl-comment">// GOOD</span></span>
+<span class="line"><span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span><span class="hl-function"> foo</span>() <span class="hl-type">void</span> {</span>
+<span class="line">    <span class="hl-keyword">return</span> helper(.frobnicate);</span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">pub</span> <span class="hl-keyword">fn</span><span class="hl-function"> bar</span>() <span class="hl-type">void</span> {</span>
+<span class="line">    <span class="hl-keyword">return</span> helper(.transmogrify);</span>
+<span class="line">}</span>
+<span class="line"></span>
+<span class="line"><span class="hl-keyword">fn</span><span class="hl-function"> helper</span>(mode: <span class="hl-keyword">enum</span> { frobnicate, transmogrify }) <span class="hl-type">void</span> {</span>
+<span class="line">    <span class="hl-comment">// ...</span></span>
+<span class="line">}</span></code></pre>
+
+</figure>
+<p>Rationale: the goal of a public API is to provide an interface that works best
+at the call site. If parts of public API are re-used to implement the rest of
+the API, then there’s a tension between making the interface convenient for the
+outside user and making it convenient to use from within abstraction itself.
+Namely, functions tend to grow optional parameters that should never be set by
+the user. Crucially, the parameter growth and interface degradation can happen
+<em>after</em> the original code sharing.</p>
+<p>By proactively making the shared implementation private, the tension is defused.
+You still might need to tinker with <code>helper</code> signature until it does everything
+it needs to do, but, because the helper is private, this is a cheap, local
+change.</p>
+<p>A notable exception to this rule of thumb are “shortcut” APIs, where a public
+function is <em>defined</em> as a commonly used chain of calls to other public
+functions. There, the rule is the opposite — <em>no</em> private calls are allowed,
+to make sure that it is a genuine shortcut, and not a midlayer mistake.</p>
+<p>P.S. While researching if anyone wrote a better blog post already, I stumbled
+upon a fun stack overflow question, asking, paraphrasing:</p>
+
+<figure class="blockquote">
+<blockquote><p>I’ve heard that it is bad when a public function calls another public
+function. Is this really so?</p>
+</blockquote>
+
+</figure>
+<p>The most upvoted answer explains that it is indeed bad, because this makes
+mocking to test a single method in isolation more complicated. Which is, imo, a
+natural, but horrible consequence of misguided approach to testing. You
+shouldn’t be mocking your methods, you should mock your IO. And, similarly, you
+shouldn’t test methods, but rather software functionality (unless you are
+building a public library with a stable API, which is a fun and important, but
+very narrow fraction of software development).</p>
+<p>The accepted answer says that this recommendation makes no sense if it is not
+backed by an industry wide or an organizational standard. Which somehow manages
+to make even less sense — you shouldn’t follow the guideline rules because
+they are written in sanctified ink! Rather, you should apply each particular
+rule because of the underlying reasons that motivate the rule. Guidelines and
+best practices articles can concentrate lots of good reasoning in a single
+place, but they don’t absolve you from thinking!</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
