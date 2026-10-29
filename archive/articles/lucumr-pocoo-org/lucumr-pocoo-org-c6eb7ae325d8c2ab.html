@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Custom Voices With Qwen3-TTS | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Custom Voices With Qwen3-TTS</h1>
+        <div class="meta">Armin Ronacher&#x27;s Thoughts and Writings 2026-10-29T00:00:00Z</div>
+        <div class="links">
+          <a href="https://lucumr.pocoo.org/2026/10/29/qwen3-custom-voices/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/lucumr-pocoo-org/lucumr-pocoo-org-c6eb7ae325d8c2ab.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">With my kids I’m currently building a little dungeron crawler and we’re trying to learn a bit about game development along the way. However given that we live in the modern times of increasing capabilities we wanted to get a narrator and voice over. But we also wanted it to not sound like everyone’s standard AI voices so I looked into what options there are…</div>
+        <div class="content">
+          <p>With my kids I&#8217;m currently building a little <a href="https://github.com/mitsuhiko/dungeon-crawler">dungeron
+crawler</a> and we&#8217;re trying to
+<a href="https://mitsuhiko.github.io/dungeon-crawler/learn/">learn a bit about game
+development</a> along the way.
+However given that we live in the modern times of increasing capabilities we
+wanted to get a narrator and voice over.</p>
+<p>But we also wanted it to not sound like everyone&#8217;s standard AI voices so I
+looked into what options there are on the table.  After some investigation I
+narrowed down to using <a href="https://github.com/QwenLM/Qwen3-TTS">Qwen3-TTS</a> which
+uses voice embeddings for custom voices.</p>
+<p>With a bit of creativity you can also do more with those custom voices than
+appears initially.  In case this is of interest to you, this post just covers
+what we learned and with some examples.  You can probably point your agent to
+it and it can do something with it.</p>
+<h2>What Qwen Offers</h2>
+<p>Qwen3 is not the only TTS model in town, and it wans&#8217;t even my first choice.  We
+initially used <a href="https://huggingface.co/hexgrad/Kokoro-82M">Kokoro</a>.  However
+Qwen3 supports voice cloning and we wanted to have it feel a bit more unique.</p>
+<p>In practice it&#8217;s a bit tricker though. Qwen3 ships three kinds of models:</p>
+<ul>
+<li><code>1.7B-Base</code> (and 0.6B): clones a voice from a few seconds of reference audio</li>
+<li><code>1.7B-CustomVoice</code>: comes with nine built-in speakers and instructions</li>
+<li><code>1.7B-VoiceDesign</code>: invents a voice from a text description</li>
+</ul>
+<p>The base model clones either in context or from the speaker embedding alone but
+there is no documented way to clone a voice and direct it with instructions.
+That means unlike the custom voice and voice design models you cannot say &#8220;speak
+sad&#8221; or &#8220;whisper&#8221; with a cloned base model.</p>
+<p>At present the official options for a custom voice are fine-tuning Base on a
+single speaker or to make a clip with VoiceDesign and clone it with Base.  That
+is not all that bad, but it means instructions are gone.</p>
+<h2>Playing With It</h2>
+<p>For this blog post I took 28 seconds of me from my talk at <a href="https://www.youtube.com/watch?v=8RHYyRUxVrA">PyAI
+Conf</a>, cut between two pauses so
+that it starts and ends on a full sentence, and transcribed it with Whisper.
+The transcript is really only needed for baking but to compare against an
+already existing voice it&#8217;s useful to have it say the same thing as the original
+recording.</p>
+<p>Note that a conference talk recording is not ideal but it works anyways.  Which
+is also a good reminder that you really don&#8217;t need a particularly clean
+recording (or a very long one) to get a halfway convincing version of a person.
+Particularly when then presented to you on a low quality phone call, it won&#8217;t be
+very hard to trick your grandmother.</p>
+<p>The first thing you can do is to blend that recording with another voice.  For
+instance you can use VoiceDesign to make up a voice from a description.  For this blog
+post the designed voice was created like this, with Qwen&#8217;s own Python package
+<a href="https://pypi.org/project/qwen-tts/"><code>qwen-tts</code></a> (<code>pip install qwen-tts</code>, I used
+0.1.1), which the rest of the code in this post uses too:</p>
+<div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">qwen_tts</span><span class="w"> </span><span class="kn">import</span> <span class="n">Qwen3TTSModel</span>
+
+<span class="n">kw</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">device_map</span><span class="o">=</span><span class="s2">&quot;mps&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">bfloat16</span><span class="p">,</span> <span class="n">attn_implementation</span><span class="o">=</span><span class="s2">&quot;sdpa&quot;</span><span class="p">)</span>
+<span class="n">design</span> <span class="o">=</span> <span class="n">Qwen3TTSModel</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign&quot;</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+<span class="n">wavs</span><span class="p">,</span> <span class="n">sr</span> <span class="o">=</span> <span class="n">design</span><span class="o">.</span><span class="n">generate_voice_design</span><span class="p">(</span>
+    <span class="n">text</span><span class="o">=</span><span class="nb">open</span><span class="p">(</span><span class="s2">&quot;voices/transcript.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">(),</span> <span class="n">language</span><span class="o">=</span><span class="s2">&quot;English&quot;</span><span class="p">,</span>
+    <span class="n">instruct</span><span class="o">=</span><span class="s2">&quot;A man in his forties with a warm, natural, medium-low voice, speaking &quot;</span>
+             <span class="s2">&quot;clearly and calmly at an easy conversational pace, like someone reading &quot;</span>
+             <span class="s2">&quot;aloud to a friend.&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+<p>You can see how the two different voices behave, particularly when blended together:</p>
+<p><em><a href="https://lucumr.pocoo.org/2026/10/29/qwen3-custom-voices/">Interactive demo: see the post on the website.</a></em></p>
+
+<h2>Voice Embeddings</h2>
+<p>What Base takes from a recording when cloning from the embedding alone is a
+speaker embedding which is basically 2048 numbers out of a speaker encoder that
+was trained.  The same voice gets similar numbers and different voices get
+different ones.  Which btw, is also a convenient way to do speaker detection
+from recordings if you want to!  It&#8217;s not perfect, but it&#8217;s quite helpful for a
+single audio track recording to tell two speakers apart if you do some basic
+slicing and dicing (more on that below).</p>
+<p>Because it is just a vector, you can do arithmetic on it.  For instance a
+weighted average of two embeddings is a spaker that is somewhere between two
+voices:</p>
+<div class="highlight"><pre><span></span><span class="n">base</span> <span class="o">=</span> <span class="n">Qwen3TTSModel</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;Qwen/Qwen3-TTS-12Hz-1.7B-Base&quot;</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">fingerprint</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+    <span class="n">prompt</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">create_voice_clone_prompt</span><span class="p">(</span><span class="n">ref_audio</span><span class="o">=</span><span class="n">path</span><span class="p">,</span> <span class="n">x_vector_only_mode</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">prompt</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">ref_spk_embedding</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">blend</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">t</span><span class="p">):</span>
+    <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">float</span><span class="p">(),</span> <span class="n">b</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+    <span class="n">mixed</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">t</span><span class="p">)</span> <span class="o">*</span> <span class="n">a</span> <span class="o">+</span> <span class="n">t</span> <span class="o">*</span> <span class="n">b</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">mixed</span> <span class="o">/</span> <span class="n">mixed</span><span class="o">.</span><span class="n">norm</span><span class="p">()</span> <span class="o">*</span> <span class="p">((</span><span class="mi">1</span> <span class="o">-</span> <span class="n">t</span><span class="p">)</span> <span class="o">*</span> <span class="n">a</span><span class="o">.</span><span class="n">norm</span><span class="p">()</span> <span class="o">+</span> <span class="n">t</span> <span class="o">*</span> <span class="n">b</span><span class="o">.</span><span class="n">norm</span><span class="p">()))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">bfloat16</span><span class="p">)</span>
+
+<span class="n">armin</span><span class="p">,</span> <span class="n">designed</span> <span class="o">=</span> <span class="n">fingerprint</span><span class="p">(</span><span class="s2">&quot;voices/armin.flac&quot;</span><span class="p">),</span> <span class="n">fingerprint</span><span class="p">(</span><span class="s2">&quot;voices/designed.flac&quot;</span><span class="p">)</span>
+</pre></div>
+<p>Here is the same sentence in eleven blends:</p>
+<p><em><a href="https://lucumr.pocoo.org/2026/10/29/qwen3-custom-voices/">Interactive demo: see the post on the website.</a></em></p>
+<p>Note that it stops sounding like me quite quickly, but it retains some of my
+features.  And it for sure ends up with creating a unique voice regardless.
+I found some better successes when ensuing that the two voices have similar
+spectograms (eg: similar &#8220;recording setups&#8221;).  In this recording you can hear
+that one voice picked up by the lapel mic was a bit hollow compared to the
+designed voice.</p>
+<p>If you like a a voice that comes out, you can bake it back into a new recording
+that you can then use as reference:</p>
+<div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">soundfile</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">sf</span>
+
+<span class="n">mixed</span> <span class="o">=</span> <span class="n">blend</span><span class="p">(</span><span class="n">armin</span><span class="p">,</span> <span class="n">designed</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">)</span>
+<span class="n">audio</span><span class="p">,</span> <span class="n">rate</span> <span class="o">=</span> <span class="n">say</span><span class="p">(</span><span class="nb">open</span><span class="p">(</span><span class="s2">&quot;voices/transcript.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">(),</span> <span class="n">mixed</span><span class="p">)</span>  <span class="c1"># say() is shown further down</span>
+<span class="n">sf</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;voices/final.flac&quot;</span><span class="p">,</span> <span class="n">audio</span><span class="p">,</span> <span class="n">rate</span><span class="p">)</span>
+<span class="n">final</span> <span class="o">=</span> <span class="n">fingerprint</span><span class="p">(</span><span class="s2">&quot;voices/final.flac&quot;</span><span class="p">)</span>
+</pre></div>
+<p>The baked voice does not come back exactly as the blend but it makes handling it
+easier if you want to.  It&#8217;s just one voice reference file.</p>
+<p>So on the question of using those embeddings for speaker recognition: how good
+does that work?  I took an episode of <a href="https://www.youtube.com/watch?v=qCpY4K9jtOg">State of Agentic
+Coding</a>, the podcast Ben and I
+record, cut it into 2-second windows one second apart and compared each with an
+embedding of me form the conference.</p>
+<p>Somewhat surprising, but maybe not too surprising using my conference recording
+clip as the reference this does not work at all with Qwen3.  If instead I take
+the 20 seconds where I introduce myself at the start of the episode as the
+reference, it gets 98% of the rest right. </p>
+<p>On the other hand using a model that was trained for speaker verification
+instead does manage to pick me up from the conference recording clip.  For
+instance <a href="https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb">ECAPA</a>,
+finds me from the conference clip in 97% of the windows.</p>
+<p>Here are 20 minutes of that podcast, classified by speaker with the different
+approaches:</p>
+<p><em><a href="https://lucumr.pocoo.org/2026/10/29/qwen3-custom-voices/">Interactive demo: see the post on the website.</a></em></p>
+<h2>Instructed Cloned Voices</h2>
+<p>But the embeddings a very useful for the voice cloning!  But how to give them
+instructions?  Base and CustomVoice manipulate the speaker the same way: one
+vector inserted into the talker&#8217;s input sequence.  In CustomVoice that vector is
+a row of the embedding table.  In Base it is the x-vector from the speaker
+encoder, which only Base has.  The generation code takes either
+(<code>voice_clone_prompt</code> is a regular argument of <code>generate</code>), and the transformer
+weights of the two models are nearly identical.  So take the embedding with
+Base, then hand it to CustomVoice instead of one of its speakers:</p>
+<div class="highlight"><pre><span></span><span class="n">cv</span> <span class="o">=</span> <span class="n">Qwen3TTSModel</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s2">&quot;Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice&quot;</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">say</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">xvec</span><span class="p">,</span> <span class="n">instruct</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">language</span><span class="o">=</span><span class="s2">&quot;English&quot;</span><span class="p">):</span>
+    <span class="n">ids</span> <span class="o">=</span> <span class="n">cv</span><span class="o">.</span><span class="n">_tokenize_texts</span><span class="p">([</span><span class="n">cv</span><span class="o">.</span><span class="n">_build_assistant_text</span><span class="p">(</span><span class="n">text</span><span class="p">)])</span>
+    <span class="n">told</span> <span class="o">=</span> <span class="p">[</span><span class="n">cv</span><span class="o">.</span><span class="n">_tokenize_texts</span><span class="p">([</span><span class="n">cv</span><span class="o">.</span><span class="n">_build_instruct_text</span><span class="p">(</span><span class="n">instruct</span><span class="p">)])[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">instruct</span> <span class="k">else</span> <span class="kc">None</span><span class="p">]</span>
+    <span class="n">voice</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;ref_code&quot;</span><span class="p">:</span> <span class="p">[</span><span class="kc">None</span><span class="p">],</span> <span class="s2">&quot;ref_spk_embedding&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">xvec</span><span class="p">],</span>
+             <span class="s2">&quot;x_vector_only_mode&quot;</span><span class="p">:</span> <span class="p">[</span><span class="kc">True</span><span class="p">],</span> <span class="s2">&quot;icl_mode&quot;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">]}</span>
+    <span class="n">codes</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">cv</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span>
+        <span class="n">input_ids</span><span class="o">=</span><span class="n">ids</span><span class="p">,</span> <span class="n">instruct_ids</span><span class="o">=</span><span class="n">told</span><span class="p">,</span> <span class="n">voice_clone_prompt</span><span class="o">=</span><span class="n">voice</span><span class="p">,</span>
+        <span class="n">languages</span><span class="o">=</span><span class="p">[</span><span class="n">language</span><span class="p">],</span> <span class="n">non_streaming_mode</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">cv</span><span class="o">.</span><span class="n">_merge_generate_kwargs</span><span class="p">(</span><span class="n">temperature</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">subtalker_temperature</span><span class="o">=</span><span class="mf">0.7</span><span class="p">),</span>
+    <span class="p">)</span>
+    <span class="n">wavs</span><span class="p">,</span> <span class="n">rate</span> <span class="o">=</span> <span class="n">cv</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">speech_tokenizer</span><span class="o">.</span><span class="n">decode</span><span class="p">([{</span><span class="s2">&quot;audio_codes&quot;</span><span class="p">:</span> <span class="n">codes</span><span class="p">[</span><span class="mi">0</span><span class="p">]}])</span>
+    <span class="k">return</span> <span class="n">wavs</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">rate</span>
+
+<span class="n">wav</span><span class="p">,</span> <span class="n">rate</span> <span class="o">=</span> <span class="n">say</span><span class="p">(</span><span class="s2">&quot;I really thought this would work.&quot;</span><span class="p">,</span> <span class="n">armin</span><span class="p">,</span>
+                <span class="s2">&quot;Speak in a sad, sorrowful tone, voice low and heavy, on the verge of tears.&quot;</span><span class="p">)</span>
+</pre></div>
+<p>Pick a speaker for the slot, a model and an instruction:</p>
+<p><em><a href="https://lucumr.pocoo.org/2026/10/29/qwen3-custom-voices/">Interactive demo: see the post on the website.</a></em></p>
+<p>Instructions work on cloned voices, but less reliably than on the built-in
+speakers, and it depends on the emotion, but honestly, it came out better than I
+anticipated.  Definitely good enough to have some true custom voices for a voice
+over that don&#8217;t necessarily sound like something, someone else has in their
+game.</p>
+<h2>Other Fun Math</h2>
+<p>If a voice is a point in a 2048-dimensional space and blending works we can maybe
+do some other funny math on it.  The obvious one is to try to see if some math can
+be used to manipulate gender.</p>
+<p>To find it I had VoiceDesign create 14 different voices for men and women each.
+When you then take the average woman minus the average man you can then move any
+voice along that direction:</p>
+<div class="highlight"><pre><span></span><span class="n">women</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">fingerprint</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;design/f</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">.wav&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">14</span><span class="p">)])</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+<span class="n">men</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">fingerprint</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;design/m</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">.wav&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">14</span><span class="p">)])</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+<span class="n">middle</span> <span class="o">=</span> <span class="p">(</span><span class="n">women</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="n">men</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span> <span class="o">/</span> <span class="mi">2</span>
+<span class="n">axis</span> <span class="o">=</span> <span class="n">women</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">-</span> <span class="n">men</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">axis</span> <span class="o">=</span> <span class="n">axis</span> <span class="o">/</span> <span class="n">axis</span><span class="o">.</span><span class="n">norm</span><span class="p">()</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">move</span><span class="p">(</span><span class="n">xvec</span><span class="p">,</span> <span class="n">t</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Put the voice at position t along the gender axis, keep the rest.&quot;&quot;&quot;</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">xvec</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="p">(</span><span class="n">t</span> <span class="o">-</span> <span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="n">middle</span><span class="p">)</span> <span class="o">@</span> <span class="n">axis</span><span class="p">)</span> <span class="o">*</span> <span class="n">axis</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">bfloat16</span><span class="p">)</span>
+</pre></div>
+<p>Here is the result for my clone:</p>
+<p><em><a href="https://lucumr.pocoo.org/2026/10/29/qwen3-custom-voices/">Interactive demo: see the post on the website.</a></em></p>
+<p>Anyways, that&#8217;s that.  If you want to play around with Qwen3 TTS I hope this was
+of some help, and maybe you got some ideas of what to do with the voice
+embeddings.  Use it for good, not evil.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
