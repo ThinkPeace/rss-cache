@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LLMs are not superhuman at reading and writing neural network weights | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>LLMs are not superhuman at reading and writing neural network weights</h1>
+        <div class="meta">seangoedecke.com RSS feed 2026-11-03T00:00:00Z</div>
+        <div class="links">
+          <a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/seangoedecke-com/seangoedecke-com-fd7e5681cd68b91b.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">A recent paper argues that frontier LLMs can work with neural network weights directly. This seems superhuman, but it isn’t. The paper shows that GPT-6 Astra can take a small neural network and interact with its weights directly, “well past what we’d expect from humans or conventional algorithms”. Specifically, Astra was able to identify what games a small…</div>
+        <div class="content">
+          <p>A recent <a href="https://rikiyat.github.io/blog/weight-space-programming/">paper</a> argues that frontier LLMs can work with neural network weights directly. This seems superhuman, but it isn’t.</p>
+<p>The paper shows that GPT-6 Astra can take a small neural network and interact with its weights directly, “well past what we’d expect from humans or conventional algorithms”. Specifically, Astra was able to identify what games a small network<sup id="fnref-1"><a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fn-1" class="footnote-ref">1</a></sup> was trained to play just by looking at the weights, and even tweak the weights itself. The most impressive result is Astra significantly improving a 0.8B Qwen LLM’s ability on mathematics by natively editing its weights. The reason to be excited here is that “superhuman ability to improve language models” is precisely the kind of thing that could cause recursive self-improvement.</p>
+<p><strong>I think a smart human ML researcher could perform all of these tasks</strong>. Figuring out what game a model was trained to play based on the network sounds impressive until you consider three points:</p>
+<ol>
+<li>The input channels of the model directly listen to each 8x8 grid cell</li>
+<li>The input channels are <em>labeled</em> (e.g. “agent”, “moving objects”)</li>
+<li>It’s thus relatively trivial to calculate<sup id="fnref-2"><a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fn-2" class="footnote-ref">2</a></sup> which parts of the grid the first layer of weights cares about and why</li>
+</ol>
+<p>Here’s that calculation expressed as a heatmap in three lines of Python:</p>
+<pre class="language-text"><code class="language-text">d = np.load("a9f535cc.npz")
+W1 = d["actor/dense1/kernel"]
+norms = np.linalg.norm(W1.reshape(10,10,5,32).transpose(2,0,1,3), axis=-1)  # 5 x 10 x 10</code></pre>
+<p>And here’s the heatmap for each game:</p>
+<p><a class="post-image" href="/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/fig1_layer1_magnitude.png" target="_blank" rel="noopener"><img src="/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/fig1_layer1_magnitude.png" alt="fig1" title="fig1" loading="lazy" decoding="async"></a></p>
+<p>If someone showed you that heatmap without the game labels, I think you’d be able to immediately identify at least the first three games purely by noticing where the player is (e.g. for Breakout, in a horizontal line at the bottom) and where the moving objects are (e.g. for Pac-Man, in the distinctive Pac-Man maze). It’s neat<sup id="fnref-3"><a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fn-3" class="footnote-ref">3</a></sup> that Astra was able to calculate the norms in its head without executing Python, but not <em>that</em> impressive, and certainly not something that should shock anyone who’s been paying attention.</p>
+<p>I’m not going to go through each example<sup id="fnref-4"><a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fn-4" class="footnote-ref">4</a></sup> in the paper, so let’s skip straight to the most impressive one: fixing a 0.8B Qwen model’s ability to do mathematics. 0.8B is a lot of parameters, and “mathematics” is way more complicated than “guess what the game is based on how the player moves”, and editing weights is arguably harder than parsing them. What happened here?</p>
+<p>First, note that the Qwen model was not “bad at mathematics” in a pure capabilities sense. It had a specific problem where after 32k tokens it would get stuck in loops, so any mathematical task that needed more than 32k tokens would automatically fail<sup id="fnref-5"><a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fn-5" class="footnote-ref">5</a></sup>. If you had a model that looped like this, how would you update the weights to fix it? Personally, I would try <a href="/steering-vectors/">steering</a>: I would write some reasoning texts that looped and some reasoning texts that didn’t, calculate the difference between the looping and non-looping residuals, measure how much each weight contributed to that difference, then try manually trimming those top weights. This is basically the <a href="https://github.com/p-e-w/heretic">Heretic</a> abliteration playbook.</p>
+<p>And this is exactly what Astra did! It wrote four pairs of texts, measured<sup id="fnref-6"><a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fn-6" class="footnote-ref">6</a></sup> the weights that contributed to looping, started cutting them down and testing if it worked, and ended up finding a patch that stopped the Qwen model from looping, thus making it able to work on mathematical problems for more than 32k tokens. Again, <strong>this is exactly what a competent human researcher could have and would have done.</strong></p>
+<p>It’s cool that Astra was able to make direct weight updates. But we shouldn’t think of this like a radically new capability that will change how AI research is done. We should think of this as analogous to the ability of LLMs to emit machine code and tweak compiled binaries: it’s an impressive trick, but the best way to work with binaries is still to write source code and compile it. Likewise, the best way to update the weights of a model is to train it normally. To the extent that intelligent LLMs help with AI research, they will help by improving <em>training</em>, not by magically tweaking model weights directly.</p>
+<div class="footnotes">
+<hr>
+<ol>
+<li id="fn-1">
+<p>Around 17k weights.</p>
+<a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fnref-1" class="footnote-backref">↩</a>
+</li>
+<li id="fn-2">
+<p>By taking the L2 norm of each input across the 32 weights in the first layer.</p>
+<a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fnref-2" class="footnote-backref">↩</a>
+</li>
+<li id="fn-3">
+<p>Note that this is superhuman mental mathematics, not superhuman AI research.</p>
+<a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fnref-3" class="footnote-backref">↩</a>
+</li>
+<li id="fn-4">
+<p>The most impressive one I’m skipping is hand-writing a neural network from scratch. While cool, if you can express a task as a simple program, we already know it’s possible to <a href="https://github.com/anadim/AdderBoard">express that program as a NN</a>, even by <a href="https://vgel.me/posts/handmade-transformer/">unaugmented humans</a>.</p>
+<a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fnref-4" class="footnote-backref">↩</a>
+</li>
+<li id="fn-5">
+<p>All the &lt;32k token problems were solved successfully on the original Qwen model.</p>
+<a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fnref-5" class="footnote-backref">↩</a>
+</li>
+<li id="fn-6">
+<p>Unlike with the toy game networks, it had access to Python.</p>
+<a href="https://seangoedecke.com/llms-are-not-superhuman-at-reading-and-writing-neural-network-weights/#fnref-6" class="footnote-backref">↩</a>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
