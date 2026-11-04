@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>This Week in Source Control: 4 November 2026 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>This Week in Source Control: 4 November 2026</h1>
+        <div class="meta">Andrew Nesbitt 2026-11-04T10:00:00Z</div>
+        <div class="links">
+          <a href="https://nesbitt.io/2026/11/04/this-week-in-source-control.html">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/nesbitt-io/nesbitt-io-af9e15ad1e267e6e.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Releases, advisories, and articles from across version control and forges</div>
+        <div class="content">
+          <p>This week’s version control and forge news, gathered from release feeds for source control clients and forges, the <a href="https://lobste.rs/t/vcs">Lobsters vcs tag</a>, Hacker News, and my boosts on <a href="https://mastodon.social/@andrewnez">Mastodon</a>. Package management news is in the Saturday <a href="/2026/10/31/this-week-in-package-management.html">This Week in Package Management</a> roundup.</p>
+
+<h2 id="scaling">Scaling</h2>
+
+<p><a href="https://openai.com/index/scaling-git-at-openai/">Scaling Git at OpenAI</a> (Aaron Friel, Taylor Blau and Ted Nyman, OpenAI) describes Pando, a Rust backend for git repositories that now serves all development in OpenAI’s monorepo. Each push is stored as an immutable packfile in blob storage, and each branch update records a ref version in a metadata store, so pushes contend only when they target the same ref. The trade-off is causal consistency, so a client reading several branches can see them at different points in time.</p>
+
+<p>When a new branch is pushed, Pando advertises only trunk, which keeps the pushed pack reusable for anyone who already has trunk, and the median pack produced this way was under 20 KiB. On a fetch, Pando sends an empty packfile in the response and lists the packs the client needs as packfile-uri links. The client downloads those packs from a regional cache with a hit rate above 99%.</p>
+
+<p>Background compaction merges small packs into larger ones in levels, up to L4 in the monorepo, and the levels double as a skip list for choosing which packs a client needs. OpenAI reports median push latency down by nearly 80% and nearly a petabyte of git data served a day. Fixes to packfile-uri downloads have gone upstream, and other changes, such as downloading and indexing packs in parallel, are in <a href="https://github.com/openai/git">OpenAI’s git fork</a>.</p>
+
+<p><a href="https://typesanitizer.com/blog/scion.html">An outsider’s perspective on Scion and Mononoke</a> (typesanitizer) responds to Anthropic’s Scion post from someone on the source control team at Databricks, whose monorepo’s main branch history is 20-50GB. The author lists the parts of Scion’s design that already exist in Mononoke, Perforce or Piper, such as per-directory ACLs, server-side history queries and changesets in place of git trees.</p>
+
+<p>They also question Anthropic’s mirror count: Databricks serves CI from fewer than 10 git mirrors and reference repositories refreshed every two hours, while Anthropic reported running several hundred mirrors at its peak.</p>
+
+<p><a href="https://delta.dev/blog/fine-grained-version-control-for-agents">Building fine-grained version control for agents</a> (Antonio Scandurra, Delta) describes DeltaDB from the team behind Zed. Each agent thread is a DAG of CRDT deltas stored in SQLite on the client and synced to one Cloudflare Durable Object per thread.</p>
+
+<p>Worktrees are layered on top of git, starting from a commit and recording edits as deltas, and creating a commit adds a delta that links the DAG back to git’s history. Subagents work on separate timelines in the same DAG and merge back into it, and coordinating agents this way needs no git commit.</p>
+
+<p><a href="https://thenewstack.io/github-7-4b-commits-september/">GitHub saw 7.4B commits in September</a> (Frederic Lardinois, The New Stack) reports figures from GitHub Universe. GitHub had 1.4 billion commits a month in April and 2.9 billion in August. It has added 4 million CPU cores and 160 PB of storage this year, alongside the move to separate compute and storage covered in <a href="/2026/10/28/this-week-in-source-control.html">last week’s issue</a>.</p>
+
+<h2 id="releases">Releases</h2>
+
+<p><a href="https://github.com/meta/sapling/releases/tag/0.2.20261028-123539%2B7415fb2f">Sapling 0.2.20261028</a> makes <code class="language-plaintext highlighter-rouge">sl worktree</code> work in checkouts made with <code class="language-plaintext highlighter-rouge">git clone</code>, using <code class="language-plaintext highlighter-rouge">git worktree add</code> underneath, and ships it in builds without EdenFS, including the open source ones. <code class="language-plaintext highlighter-rouge">sl drop -r REV</code> is now on by default and removes commits from a stack, rebasing their descendants.</p>
+
+<p>This release also adds a <code class="language-plaintext highlighter-rouge">--plan</code> flag to <code class="language-plaintext highlighter-rouge">histedit</code> for giving the plan on the command line, plus an <code class="language-plaintext highlighter-rouge">into</code> verb that folds the previous commit in while keeping the current message. Rewriting a commit in the middle of a stack now works with <code class="language-plaintext highlighter-rouge">uncommit</code> too. <a href="https://github.com/meta/sapling/releases/tag/0.2.20261102-153821%2Ba53273dc">0.2.20261102</a> fixes a regression from that release, where files under directories matched by rules like <code class="language-plaintext highlighter-rouge">target/</code> showed up as untracked and nested <code class="language-plaintext highlighter-rouge">.gitignore</code> files were skipped.</p>
+
+<p><a href="https://github.com/ivankovic/omnidiff/releases/tag/v0.3.0">OmniDiff 0.3.0</a> is the latest release of Marko Ivankovic’s content-aware difftool in Rust. It was on Hacker News this week and diffs code by syntax, along with pictures, fonts, archives and PDFs. This release diffs code embedded in strings as its own language, for example shell in a YAML <code class="language-plaintext highlighter-rouge">run:</code> block or CSS in template literals, and diffs CSS class lists one class at a time.</p>
+
+<p>The <a href="https://gitroot.dev/blog/version-0.5.0-plugins.html">GitRoot 0.5.0 plugins</a> include Firefly, which is written in Zig and generates status pages inside the forge. Silo, which builds indexes from files and their metadata, can now render them to the web grouped by any property, and Apex, the plugin that renders repository files to the web, adds a slide layout.</p>
+
+<p><a href="https://blog.gitea.com/release-of-gitea-cli-1.0.0/">gt 1.0.0</a> is the first stable release of the Gitea command line tool <a href="/2026/10/28/this-week-in-source-control.html">introduced last week</a>, and it replaces tea as Gitea’s official CLI. tea is discontinued and its repository archived. A migration guide maps its commands and flags to gt’s. Commands, flags, <code class="language-plaintext highlighter-rouge">--json</code> fields and exit codes now follow semantic versioning. Changes since 0.1.0 include:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">gt upgrade</code> replaces the binary after checking its SHA-256 checksum, or names the package manager command when gt came from Homebrew, Nix, a Linux package or <code class="language-plaintext highlighter-rouge">go install</code>.</li>
+  <li>Extensions named <code class="language-plaintext highlighter-rouge">gt-NAME</code> install from any Gitea instance, and GitHub CLI extensions that avoid GitHub’s APIs also run.</li>
+  <li><code class="language-plaintext highlighter-rouge">gt pr backport</code> cherry-picks a merged pull request onto one or more release branches and opens a pull request into each.</li>
+  <li>Every command with <code class="language-plaintext highlighter-rouge">--json</code> also takes <code class="language-plaintext highlighter-rouge">--csv</code>.</li>
+</ul>
+
+<p><a href="https://github.com/narnaud/git-loom/releases/tag/v1.0.0">git-loom 1.0</a> merges a set of feature branches into one integration branch, where they are built and tested together. Its commands commit, amend, split and move changes between those branches while the integration branch stays checked out, and rewrite history so each stays a side branch joined by a merge.</p>
+
+<p>Stacked branches are pushed as one pull request each to GitHub, GitLab, Azure DevOps or Gerrit. Commits get short IDs from a <code class="language-plaintext highlighter-rouge">Change-Id</code> trailer, so the IDs stay the same across rewrites. With 1.0 the commands, <code class="language-plaintext highlighter-rouge">loom.*</code> settings and agent mode follow semantic versioning, and it requires Git 2.43 or later.</p>
+
+<p><a href="https://github.com/Wilfred/difftastic/releases/tag/0.72.0">difftastic 0.72.0</a> changes its preprocessing heuristics so it falls back to text diffing less often, and updates the Haskell and Kotlin parsers. Verilog, F# and Smali support is removed. The Verilog and F# parsers made the <code class="language-plaintext highlighter-rouge">difft</code> binary large, and the upstream Smali parser is unmaintained. It also fixes terminal width detection when stdin, stdout and stderr are all redirected, which broke in 0.71 and was most noticeable when running difft from jj.</p>
+
+<p><a href="https://github.com/gitbutlerapp/gitbutler/releases/tag/release%2F0.23.2">GitButler 0.23.2</a> stops commits and amends from disturbing staged files, and undo now restores deleted branches after a git garbage collection. Merge request listing also works on older GitLab instances. On the command line, <code class="language-plaintext highlighter-rouge">but agent setup</code> adds Amp support, and <code class="language-plaintext highlighter-rouge">but worktree new --above</code> takes branch names and IDs as well as git revisions.</p>
+
+<p>Also out: <a href="https://github.com/danielroe/forges/releases/tag/v0.3.1">forges v0.3.1</a>.</p>
+
+<h2 id="security">Security</h2>
+
+<p><a href="https://blog.gitea.com/release-of-28.3.0/">Gitea 28.3.0</a> fixes 21 CVEs, many of them places where public-only tokens could reach private data or admin actions. Among them:</p>
+
+<ul>
+  <li>With <code class="language-plaintext highlighter-rouge">ACCOUNT_LINKING = auto</code> and open registration, someone signing in through an OAuth2 provider could enter another user’s name or email and be linked to that existing account with only the OAuth2 sign-in (CVE-2026-120263).</li>
+  <li>A user with read access could submit a pull request review whose <code class="language-plaintext highlighter-rouge">commit_id</code> named their own commit, so <code class="language-plaintext highlighter-rouge">pull_request_review</code> workflows ran from that commit with the repository’s secrets and a write token (CVE-2026-118386).</li>
+  <li>A site administrator’s public-only token could use the admin API to list every user’s email address and create new administrators (CVE-2026-117635).</li>
+  <li>An organization owner’s public-only token had enough access to delete all of the organization’s repositories, private ones included (CVE-2026-119441).</li>
+  <li>Release binaries are built with Go 1.27.3, which rejects certificates chained through the eMudhra intermediates, for Gitea’s outgoing connections to OAuth2 providers, webhooks, mirrors and migrations (CVE-2026-111943). Saturday’s <a href="/2026/10/31/this-week-in-package-management.html">package management roundup</a> has more on that incident, including a test page showing that the git Apple ships with macOS still accepts those certificates.</li>
+</ul>
+
+<p>Alpine Linux <a href="https://alpinelinux.org/posts/GitLab-security-incident-CVE-2026-97229.html">rebuilt its GitLab instance</a> after an attacker tried to exploit CVE-2026-97229 on 20 and 21 October. The bug is in Onigmo, Ruby’s regular expression engine, and GitLab’s fix is a patch applied to the Ruby in its official packages. Alpine’s image used standard Ruby, so upgrading GitLab on 22 October left it vulnerable.</p>
+
+<p>The attacker crashed worker processes eight times, and Alpine found no evidence of code execution. A check on 26 October turned up the unpatched Ruby, and the instance was rebuilt and reopened on 29 October. The aports repository and packages, including the 21 October releases, were checked against outside records, and all passwords were reset. GitLab installs that use their own Ruby also need Ruby 3.3.13, 3.4.12, 4.0.9 or later.</p>
+
+<p><a href="https://www.mongodb.com/company/blog/technical/scanning-7-point-25-million-public-repositories-chinas-largest-git-platform-for-secrets">Scanning 7.25M public repositories on Gitee for secrets</a> (Ben Zimmermann, MongoDB) found 26,400 unique verified-live credentials using TruffleHog and Kingfisher. The only official Gitee API endpoint that returned useful data at that size was user search, so the repository list was built from that, Explore feeds, per-user pages and the Elasticsearch widget behind the site’s search. GitHub runs secret-scanning partnerships with credential issuers, and Gitee has no public equivalent.</p>
+
+<h2 id="github">GitHub</h2>
+
+<p><a href="https://github.blog/changelog/2026-11-02-github-desktop-adds-short-lived-authentication-tokens">GitHub Desktop 3.6.10 and later can sign in with short-lived tokens</a> that refresh automatically for API requests and git operations. The rollout is gradual and covers github.com only. Existing tokens stay as they are, and an installation gets short-lived tokens at its first sign-in after the rollout reaches it.</p>
+
+<p>The <a href="https://github.com/desktop/desktop/releases/tag/release-3.6.8">3.6.8 release notes</a> list the change alongside Git 2.56.0, Git LFS 3.8.1 and Git Credential Manager 2.9.1. <a href="https://github.com/desktop/desktop/releases/tag/release-3.6.10">3.6.10</a> bundles <a href="https://github.com/git-for-windows/git/releases/tag/v2.56.0.windows.4">Git for Windows 2.56.0.windows.4</a>, whose brotli upgrade to 1.2.1 fixes CVE-2026-111497.</p>
+
+<p>Pull request limits can now <a href="https://github.blog/changelog/2026-10-28-pull-request-limits-exempt-contributors-by-age-or-history">exempt contributors by account age or by number of merged pull requests</a> in that repository. A contributor who meets either enabled rule can open pull requests beyond the cap.</p>
+
+<p><a href="https://github.blog/changelog/2026-10-28-push-protection-beyond-predefined-secret-patterns">Push protection can block AI-detected secrets</a>, in public preview, using a classifier that scores a value by how the surrounding code uses it, in place of format matching. GitHub reports it more than doubled the number of pushes where push protection caught a secret. It is opt-in and requires AI-detected secret scanning and push protection to be enabled first.</p>
+
+<p>The Meta API now lists <a href="https://github.blog/changelog/2026-10-29-webhook-ip-ranges-added-to-the-meta-api">three more IP ranges for webhook deliveries</a> in its <code class="language-plaintext highlighter-rouge">hooks</code> field. Static allowlists for incoming webhooks need the new CIDR prefixes added.</p>
+
+<h2 id="elsewhere">Elsewhere</h2>
+
+<p>Tangled has <a href="https://tangled.org/blog/forge">relaunched as a federated code forge</a> on the AT Protocol. Knot2, a rewrite of its git server in Rust, stores issues, pull requests, comments and labels in the repository as collaborative objects, chains of git objects synced over the AT Protocol firehose. Each edit also writes an attestation record to the author’s own PDS.</p>
+
+<p>The release adds organization accounts and stacked pull requests with interdiffs for git and jj users. A new Svelte frontend is served from read-only Rust indexers in 11 or more regions, and self-hosted knots need upgrading to v1.20.0.</p>
+
+<p>David Bushell <a href="https://dbushell.com/2026/11/01/tangled-accessibility/">responded to the new Tangled UI</a> with an accessibility review. The interface sets text at 12px, and a <code class="language-plaintext highlighter-rouge">font-size: 16px</code> on the <code class="language-plaintext highlighter-rouge">&lt;html&gt;</code> element fixes the root size regardless of browser settings. Forcing a 200% resize clips and truncates text, which fails WCAG 2.2’s 1.4.4 Resize Text criterion.</p>
+
+<p>Forgejo is <a href="https://forgejo.org/2026-11-removing-openid/">removing OpenID 2.0 sign-in</a> in v19, due on 25 March 2027, and keeping OpenID Connect and OAuth. The v15 LTS keeps OpenID 2.0 until its end of life on 15 July 2027, and v17 and v18 keep it until 29 April 2027.</p>
+
+<p><a href="https://git.github.io/rev_news/2026/10/31/edition-140/">Git Rev News 140</a> leads with a fix for <code class="language-plaintext highlighter-rouge">git push --force-if-includes</code>, which rejected valid force pushes when the remote-tracking ref had no reflog. A ref created by <code class="language-plaintext highlighter-rouge">git clone</code> with the files backend gets its first reflog entry when it moves, and before that a cut-off timestamp was left uninitialised.</p>
+
+<p>Aleksei Sviridkin’s one-line patch sets it to 0. In review Junio Hamano suggested a 90-day cut-off, then agreed to 0 after Tyler Cipriani described a case with default gc settings where the cut-off gives the wrong answer.</p>
+
+<p>The first version of the patch carried an <code class="language-plaintext highlighter-rouge">Assisted-by: LLM</code> trailer following Linux kernel practice. After Junio pointed to the AI section of Git’s <code class="language-plaintext highlighter-rouge">SubmittingPatches</code>, version 3 of the patch dropped the trailer.</p>
+
+<p>Send links for next week to <a href="https://mastodon.social/@andrewnez">@andrewnez@mastodon.social</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
