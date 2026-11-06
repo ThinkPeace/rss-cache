@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A database is a store for global variables | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A database is a store for global variables</h1>
+        <div class="meta">seangoedecke.com RSS feed 2026-11-06T00:00:00Z</div>
+        <div class="links">
+          <a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/seangoedecke-com/seangoedecke-com-d803434c62757f16.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Databases are for storing global variables. We usually call them “rows” or “records” instead, but they’re definitionally global variables: any part of your program can read or write them. Isn’t this kind of weird? It’s common programming advice that global variables are bad, and yet many elegant programs rely on databases. Either the common advice is wrong,…</div>
+        <div class="content">
+          <p>Databases are for storing global variables. We usually call them “rows” or “records” instead, but they’re definitionally global variables: any part of your program can read or write them. Isn’t this kind of weird? It’s common programming advice that global variables are bad, and yet many elegant programs rely on databases. Either the common advice is wrong, or there’s something special about databases that makes them the exception to the rule.</p>
+<p>What’s so bad about global variables? Here’s the two main<sup id="fnref-1"><a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fn-1" class="footnote-ref">1</a></sup> reasons, in my view:</p>
+<ul>
+<li>They allow any part of your program to implicitly send data to any other part instead of passing it around via function signatures</li>
+<li>They couple different parts of your program: if one part depends on a variable having some value, any other part can break it</li>
+</ul>
+<p>Both of these apply to databases. Any part of your program that makes a query can send and receive data from any other part of your program. In practice this happens all the time: one function will save some data  on a record, and another one will check for it. And if you haven’t seen bugs where some piece of code makes some incorrect expectation about the shape<sup id="fnref-2"><a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fn-2" class="footnote-ref">2</a></sup> of a database column, you haven’t been working on web systems for long enough.</p>
+<p>So why aren’t database-backed apps in terrible architectural shape? In the rest of this post I’ll consider some options.</p>
+<p>First, we could <a href="https://en.wiktionary.org/wiki/bite_the_bullet">bite the bullet</a>: <strong>maybe all database-backed apps really are a mess</strong>. This is surprisingly plausible. When I think about the systems I’ve worked on that haven’t involved a database, they’re usually much cleaner and more elegant. If managing state is the hardest thing about designing software — and I think it is — then systems that manage less state are going to be better-designed. However, this doesn’t explain everything. Database-backed apps aren’t <em>that</em> bad, and even in database-backed apps, we try to avoid introducing regular global variables<sup id="fnref-3"><a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fn-3" class="footnote-ref">3</a></sup>, so in practice we treat global variables as worse.</p>
+<p>Second, we could say that <strong>databases offer ACID guarantees that mitigate the damage of global variables</strong>. Unlike regular global variables, databases offer a consistent view of state and the ability to atomically change multiple pieces of state together. I don’t really buy this. The problem with global variables is not just that they can get out of sync, it’s that they exist at all. If you think this is the difference, you are committed to thinking<sup id="fnref-4"><a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fn-4" class="footnote-ref">4</a></sup> that if you stick a mutex around a global variable then it suddenly becomes acceptable.</p>
+<p>Third, we could say that <strong>databases are more explicit</strong>. Mutating or reading a global variable looks like ordinary code, but database queries need some connection object to be passed in and some query function to be invoked. When you’re scanning through code, you can see where the database queries are at a glance<sup id="fnref-5"><a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fn-5" class="footnote-ref">5</a></sup>. Not so for global variables. This does actually kind of mitigate the implicit-coupling problem. Maybe regular global variables would be better if you had to set and get them with long, involved function calls.</p>
+<p>Fourth, we could say that <strong>databases are less flexible</strong>. A global variable could store <em>anything</em>: a function, a class, an image, and so on. A database just stores <em>data</em>. I can buy this explanation for untyped languages. Global Ruby variables that could be reassigned from a string to a hash table are far more terrifying than a “global” database column that could change from one string to another string. But since the advice to avoid global variables applies to typed languages as well, I don’t think this could be the reason why databases are better.</p>
+<p>Fifth, we could say that <strong>we know how to use databases</strong>. For instance, whenever I read from a database, I reflexively check the type of the column so that my code doesn’t make assumptions that aren’t guaranteed by the database. There are use-cases that I would never even consider using a database for (e.g. to track a counter in a loop, or to store the name of the <code class="language-text">.env</code> file where my config is stored). In other words, we have norms and customs<sup id="fnref-6"><a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fn-6" class="footnote-ref">6</a></sup> around using databases that minimize a lot of the damage that global variables can cause. There’s nothing inherent about databases that make them better, it’s just how we use them in practice.</p>
+<p>Overall I think the third and fifth reasons are most convincing: databases are better because they’re more explicit and because we only tend to use them for a limited set of purposes. It’s interesting to note that these reasons are <em>contingent</em>, not inherent. A codebase which had conventions around global variable use<sup id="fnref-7"><a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fn-7" class="footnote-ref">7</a></sup> could also fulfil these conditions. Would this make global variables fine, or at least no worse than a database? I think so.</p>
+<p>I don’t recommend you go out and start putting global variables in your programs. It’s more interesting to note the meta-point here: that two pieces of common software engineering dogma — avoid global variables and use a database for state — are partially inconsistent. Most software design knowledge is still just a pile of loose heuristics. <a href="/confidence/">I don’t really know how to build software and you don’t either</a>. As I’ve <a href="/taste/#how-to-identify-bad-taste">written about before</a>, we should therefore all be very suspicious of engineers who appeal to “best practice” without being able to give concrete reasons, even in cases as obvious as “global variables are bad”.</p>
+<div class="footnotes">
+<hr>
+<ol>
+<li id="fn-1">
+<p>For instance, concerns about <a href="https://embeddedartistry.com/fieldatlas/the-problems-with-global-variables/">readability and tracing</a> follow from the first reason. I don’t really buy reasons like “it’s not thread-safe” or “global variables might shadow local variables”: any architectural problem that can be trivially solved with a mutex or a linter is not a real problem.</p>
+<a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fnref-1" class="footnote-backref">↩</a>
+</li>
+<li id="fn-2">
+<p>For instance, that a string supports 4-byte UTF-8, or that a column can/can’t be NULL.</p>
+<a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fnref-2" class="footnote-backref">↩</a>
+</li>
+<li id="fn-3">
+<p>You could say we avoid introducing global variables because databases are essential and global variables are not. In theory you could replace any global variable by threading a local variable through, but you do need a database if you’ve got gigabytes of structured data to manage. However, that doesn’t explain why database-backed apps still tend to be better-designed than apps with many global variables.</p>
+<a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fnref-3" class="footnote-backref">↩</a>
+</li>
+<li id="fn-4">
+<p>I’m not saying this is necessarily wrong. The argument would go something like “well, if you implement a simple in-memory database for your global variables, that <em>is</em> better!”</p>
+<a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fnref-4" class="footnote-backref">↩</a>
+</li>
+<li id="fn-5">
+<p>This is only sort of true. If you’re designing a system, you’d be well-advised to make it as true as you can. While I love Rails, my main beef with ActiveRecord is that it makes queries invisible.</p>
+<a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fnref-5" class="footnote-backref">↩</a>
+</li>
+<li id="fn-6">
+<p>To be fair, some of these are guaranteed by the fact that the database exists over the network.</p>
+<a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fnref-6" class="footnote-backref">↩</a>
+</li>
+<li id="fn-7">
+<p>Plus types, probably, and concurrency controls if we’re not in a single-threaded language.</p>
+<a href="https://seangoedecke.com/a-database-is-a-store-for-global-variables/#fnref-7" class="footnote-backref">↩</a>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
