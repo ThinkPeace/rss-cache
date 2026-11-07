@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A bit about email | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>A bit about email</h1>
+        <div class="meta">Maurycy&#x27;s Blog 2026-11-06T00:00:00Z</div>
+        <div class="links">
+          <a href="https://maurycyz.com/misc/email/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/maurycyz-com/maurycyz-com-af6d9e80ffa8e6a3.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Before you torch and pitchfork me, I&#x27;m aware most of this is simplified and doesn&#x27;t go into edge cases, even though the internet is composed entirely of edge cases. Otherwise, I&#x27;d be writing a whole book. First, some terminology; A typical email will past through many different components on it&#x27;s way to the recipient: 1. Sender&#x27;s MUA [Via SMTP on port 465]…</div>
+        <div class="content">
+          <!-- mksite: start of content -->
+<p>
+
+</p>
+<note-box>
+  Before you torch and pitchfork me, I'm aware most of this is simplified and doesn't go into edge cases, even though the internet is composed entirely of edge cases.
+  Otherwise, I'd be writing a whole book.
+</note-box>
+<p>
+First, some terminology;
+A typical email will past through many different components on it's way to the recipient: 
+</p>
+<pre>
+1. Sender's MUA
+<h-c>[Via SMTP on port 465]</h-c>
+2. Sending MSA 
+3. Sending MTA 
+<h-c>[Via SMTP on port 25]</h-c>
+4. Receiving MTA
+5. Receiving LDA and message store
+<h-c>[Via IMAP]</h-c>
+7. Receiver's MUA
+</pre>
+<!-- snip -->
+</p>
+<p>
+<p>
+(These aren't all necessarily different machines or even different programs, but it is helpful to give a name for each step.)
+</p><p>
+The mail user agent (MUA) runs on the user's computer and is what they use to send or read messages.
+Let's say they send something:
+that message will be uploaded to to the submission agent (MSA) which checks the user's password before handing off to the mail transfer agent (MTA).
+</p><p>
+The transfer agent's job is to talk to the other mail servers and get the message to the receiving side's MTA.
+Once received, it's given to the local delivery agent (LDA) to be stored until the recipient checks their email.
+The name "LDA" is non-standard, but I use it to avoid having four different abbreviations differing by a single letter.
+</p><p>
+<em>The reason for this structure</em> is that when the system was being designed (around 1980),
+most organizations could only afford a single server.
+Maintenance was a full time job and updates often required multiple days of downtime. 
+A well-connected computer might have dedicated single-digits megabit/second link that worked half the time.
+</p><p>
+This forced the MTA and MUA distinction:
+if the recipient's server isn't up when the email is set, the sending MTA will save the message and re-attempt delivery later.
+This way, short outages don't cause bounced mail.
+Since the mail client is an interactive program the user runs, a separate message store is needed to keep the email until it can be read.
+</p><p>
+Most MTAs are configured to continue retrying a message for five days, usually with exponential backoff:
+mine will wait 5 minutes after the first failure, and increase the interval to one hour during prolonged outages.
+</p><p>
+The MSA and LDA have always existed in some capacity, but have gotten a lot more complicated
+when people started accessing email from their own computers instead or remotely logging onto the server.
+</p><p>
+<h2><em>SMTP</em></h2>
+</p><p>
+Most communication happens over the Simple Mail Transfer Protocol, including MTA-MTA delivery.
+To narrow it down a bit, I'll pretend do be an MTA sending email to blog@maurycyz.com.
+</p><p>
+The first step is to look up the receiving MTA for that domain:
+</p>
+<pre>
+# <h-n>dig</h-n> MX <h-s>maurycyz.com</h-s>
+<h-c>[snip]</h-c>
+maurycyz.com.           300     IN      MX      1 smallcrow.com.
+<h-c>[snip]</h-c>
+# <h-n>dig</h-n> A <h-s>smallcrow.com</h-s>
+<h-c>[snip]</h-c>
+smallcrow.com.          300     IN      A       65.109.172.162
+<h-c>[snip]</h-c>
+</pre>
+<p>
+Email is old enough to have it's own dedicated DNS record instead of using subdomain hacks or TXT abuse.
+The number is a priority (smaller is higher), which is used if multiple hosts are specified:
+a big email provider will have multiple servers to ensure timely delivery.
+</p><p>
+SMTP is a relatively straightforward text based protocol.
+The one catch is that most mail servers will require a CRLF as a data terminator.
+This can often be sent with ctrl-m, but using a tool that automatically inserts cartridge-return bytes is easier:
+</p>
+<pre>
+# telnet
+<h-c>telnet&gt;</h-c> <h-n>set</h-n> <h-v>crlf</h-v>
+Will send carriage returns as telnet &lt;CR&gt;&lt;LF&gt;.
+<h-c>telnet&gt;</h-c> <h-n>open</h-n> <h-s>smallcrow.com</h-s> 25
+<h-c>Trying 65.109.172.162...
+Connected to smallcrow.com.
+Escape character is '^]'.</h-c>
+<h-s>220 smallcrow.com ESMTP Postfix</h-s>
+<h-v>HELO nowhere</h-v>
+<h-s>250 smallcrow.com</h-s>
+<h-v>MAIL FROM:&lt;me@nowhere&gt;</h-v>
+<h-s>250 2.1.0 Ok</h-s>
+<h-v>RCPT TO:&lt;blog@maurycyz.com&gt;</h-v>
+<h-s>250 2.1.5 Ok</h-s>
+<h-v>DATA</h-v>
+<h-s>354 End data with &lt;CR&gt;&lt;LF&gt;.&lt;CR&gt;&lt;LF&gt;</h-s>
+From: &lt;me@nowhere&gt;
+To: &lt;blog@maurycyz.com&gt;
+
+Hello, world. 
+
+<h-v>.</h-v>
+<h-s>250 2.0.0 Ok: queued as C870D7CD93</h-s>
+<h-v>QUIT</h-v>
+<h-s>221 2.0.0 Bye</h-s>
+</pre>
+<p>
+Each line sent is a command, to which the remote server responds with a three digit number followed by human readable text.
+200 responses mean it worked,
+300 is "carry on...",
+400 is temporary errors which tell the sender to try again later,
+500 permanent errors mean the email should be returned as un-deliverable.
+</p><p>
+(If this seems similar to HTTP, that's no coincidence. A lot of the web, including its header syntax was lifted from SMTP)
+</p><p>
+The first command is always HELO (or EHLO), followed the sending MTA's hostname.
+This is usually not the same hostname as used in email addresses, but many provider require it to match the sender's IP address.
+Mine doesn't, so if you want to try this, put something random that's not a resolvable domain.
+. 
+The next two, MAIL FROM and RCPT TO specify the address to deliver to, and address to forward any bounce notifications to.
+Bounce messages are usually generated one step up from where the error occurred:
+in most cases the receiving MTA has a problem and sends an error code to the sending MTA, but by that time MSA has already, forcing a un-delivered mail notification.
+Those notification themselves use an empty MAIL FROM to avoid infinite loops.
+</p><p>
+Once the address has been specified and accepted, a DATA command is sent, followed by the actual email message.
+This at a minimum, contains the "From" and "To" headers along with some text.
+The message is terminated with a lone period to which the server indicates that the message is handed off.
+</p><p>
+<em>Final hop MTA's</em> should forward the email to the LDA before sending back a status code.
+This ensures that they never accept a message which they can't deliver which would result in a error notification.
+This "backscatter" message interacts badly with spammers that forge MAIL FROM:
+it turns their obviously bogus message into one that is likely to be delivered and cause annoyance.
+</p><p>
+There is no requirement for the addresses inside the email to match the ones in MAIL FROM and RCPT TO (also known as the envelope).
+The most common cause of this is a mail that has been forwarded.
+For example, a mailing list will set the envelope destination to match each member's email, but keep the original "From" header intact so that replies work correctly.
+The envelope from address will usually be changed to point to somewhere the list administrator will check for error notifications.
+</p><p>
+Now, it's not that intermediate systems don't modify the headers:
+Most stages will add a "received" header to record where they got the message.
+</p><p>
+<em>While required for MTA to MTA communication</em>, SMTP is used throughout the whole system.
+The mail client submits email using a different port, but over the same protocol.
+Communication between internal components (i.e. MTA to LDA) often uses the closely related Local Mail Transfer Protocol:
+the main difference is the assumption that the receiver doesn't have a message queue and will either deliver the mail immediately or return an error. 
+</p><p>
+Submission usually uses TLS connection to port 465, with the addition of a password (in base64):
+</p><p>
+<pre>
+<h-v>AUTH PLAIN</h-v>
+<h-s>334</h-s>
+<h-v>AGh1bnRlcgBodW50ZXIy</h-v>
+<h-s>235 2.7.0 Authentication successful</h-s>
+</pre>
+</p><p>
+The one thing that's significantly different is the MUA's fetch, which operates on a "pull" basis.
+I won't go into the syntax here, but it's not terribly complicated.
+</p><p>
+... but if you actually try sending an email to, say, gmail, based on what I've said so far, it won't work.
+Some of that is due to them enforcing things like the Message-Id header:
+a unique identifier used to de-duplicate mail in cases where the receiving MTA accepts an email but the connection drops before the sender is informed about this.
+This will cause the sender to try again later, which duplicating the message.
+</p><p>
+However, a big part of it is...
+</p><p>
+<h2><em>Authentication</em></h2>
+</p><p>
+Base SMTP trusts that every sender is be well behaved:
+anyone can send email as anyone else. 
+In fact, many hosts were configured to accept and relay mail from anyone as a conveyance for when someone's usual server was down.
+</p><p>
+The original solution to bad behavior was to get the culprit kicked off the internet...
+but that fell apart quickly once the network grew and companies began getting involved:
+the first documented case of spam email was sent in 1978 and sold 13 million dollars in computers.
+While authentication doesn't prevent spam, it makes it possible to filter out unwanted senders.
+</p><p>
+Verifying sender addresses is not possible using the MX record, since there is no guarantee the same host is used for receiving and sending mail.
+The simplest solution is to publish the sending address in a DNS record:
+</p><p>
+<pre>
+@ TXT v=spf1 <h-s>ip4:</h-s><h-v>65.109.172.162</h-v> <h-s>ip6:</h-s><h-v>2a01:4f9:c011:841a:b01d::1</h-v> -all
+<h-c>; Roughly:</h-c>
+<h-c>;   allow from 65.109.172.162</h-c>
+<h-c>;   allow from 2a01:4f9:c011:841a:b01d::1</h-c>
+<h-c>;   deny otherwise</h-c>
+</pre>
+</p><p>
+However, that's not quite enough for the email empire.
+Big-tech also wants the email body to be signed with a cryptographic key published via a DKIM DNS record.
+This requires adding a step to sending mails, usually as a plugin for the MTA. 
+</p><p>
+I rag on big-tech a lot, but this is actually a sensible policy:
+SPF can only verify the MAIL FROM, since forwarding the email will chance the source IP address. 
+DKIM signatures are attached to the message and can be used to verify the original sender (the "From" address) of a message.
+</p><p>
+<em>However</em>, both of these don't actually prevent spam, because spammers can just set up a few TXT records.
+Big-tech requires the sender's HELO hostname to be consistent with their IP address, via both forward and reverse DNS.
+This helps prevent compromised devices from spewing out junk:
+a smart TV is unlikely to have a meaningful PTR record, and if it does, that hostname won't resolve back to it's address.
+</p><p>
+... unfortunately this policy also makes it impossible to directly send mail from most residential internet connections unless you own the address block.
+Of course, the solution is to pay a big-tech company money to relay your emails.
+If you don't like the, find a mail provider with more permissive rules:
+the only reason big-tech is able to keep the racket running that five or so companies control 99% of communications.
+</p><p>
+<h2><em>The message</em></h2>
+</p><p>
+This is where SMTP stops being so simple.
+The message format is a mess of historical baggage, but first,
+let's look at the simplest possible email once it's been delivered:
+</p><p>
+<pre>
+<h-n>Return-Path</h-n>: &lt;alex@<h-s>there</h-s>&gt;
+<h-n>Delivered-To</h-n>: bob@<h-s>here</h-s>
+<h-n>Received</h-n>: from <h-s>here</h-s>
+        by <h-s>here</h-s> with LMTP
+        id bs05E10S7Go4VQMAHrglgg
+        (envelope-from &lt;alex@<h-s>there</h-s>&gt;)
+        for &lt;bob@<h-s>here</h-s>&gt;; Thu, 05 Nov 2026 05:21:33 +0000
+<h-n>DKIM-Filter</h-n>: OpenDKIM Filter v2.11.0 <h-s>here</h-s> B05E67CD18
+<h-n>Received-SPF</h-n>: None (mailfrom) identity=mailfrom; client-ip=<h-s>313.33.33.337</h-s>;
+        helo=<h-s>there</h-s>; envelope-from=alex@<h-s>there</h-s>; receiver=<h-s>here</h-s>
+<h-n>Received</h-n>: from <h-s>there</h-s> (unknown [<h-s>313.33.333.337</h-s>])
+        by <h-s>here</h-s> (Postfix) with SMTP id B05E67CD18
+        for &lt;bob@<h-s>here</h-s>&gt;; Thu, 05 Nov 2026 05:20:42 +0000 (UTC)
+<h-n>From</h-n>: alex@<h-s>there</h-s>
+<h-n>To</h-n>: bob@<h-s>here</h-s>
+
+Hello, World!
+</pre>
+</p><p>
+The format of the headers is superficially similar to HTTP headers,
+except that no line should exceed 78 bytes. (without the CRLF line terminator)
+Overlong headers are broken up and newly created lines are prefixed with whitespace to indicate that they are a continuation of the last header.
+</p><p>
+Mail software generally appends headers to the start of a message, so it's helpful to read them backwards.
+
+"From" and "to" are fairly self explanatory.
+Next, the "received" header contains a note from the receiving MTA:
+it includes the source's HELO name, IP address, RCPT TO and a timestamp.
+</p><p>
+The MTA then performed SPF and DKIM checks, which came up empty:
+There's no signature and the MAIL FROM hostname is not publically resolvable.
+</p><p>
+The LDA added another "received" header, although it's not very helpful.
+More importantly, it tacked on the "return-path" with the original MAIL FROM address and recorded the mailbox the message was delivered to.
+</p><p>
+<em>However, the body isn't always plain text.</em>
+Let's look at an email that includes formatting:
+</p><p>
+<pre>
+[...]
+<h-s>MIME-Version</h-s>: 1.0
+<h-s>Content-Type</h-s>: multipart/alternative;
+ boundary=----IX71FHL6PHA0538LS1WKT2W9SF7S8X
+<h-s>Content-Transfer-Encoding</h-s>: 7bit
+
+<h-n>------IX71FHL6PHA0538LS1WKT2W9SF7S8X</h-n>
+<h-s>Content-Type</h-s>: text/plain;
+ charset=utf-8
+<h-s>Content-Transfer-Encoding</h-s>: quoted-printable
+
+Hello, World! I can do bold text!
+
+<h-n>------IX71FHL6PHA0538LS1WKT2W9SF7S8X</h-n>
+<h-s>Content-Type</h-s>: text/html;
+ charset=utf-8
+<h-s>Content-Transfer-Encoding</h-s>: quoted-printable
+
+&lt;!DOCTYPE html>&lt;html>&lt;body>&lt;div dir<h-e>=3D</h-e>"auto">Hello, world! I can do &lt;b>bold&lt<h-e>=</h-e>
+/b> text&lt;/div>&lt;/body>&lt;/html>
+
+<h-n>------IX71FHL6PHA0538LS1WKT2W9SF7S8X--</h-n>
+</pre>
+</p><p>
+That's right, it's a web page!
+</p><p>
+However, since not all email clients can understand HTML, the message also includes a plain text version.
+This is done using MIME's "multipart" encoding, in this case, multipart/alternative, which indicates all the
+versions are functionally equivalent.
+</p><p>
+MIME's version number has been stuck at 1.0 since 1996.
+</p><p>
+The delimiter is a randomly chosen string, which allows multiple multiparts to be nested inside of each other without escaping.
+Each section of the message has it's own headers, in this case indicating that it's sent in the quoted-printable encoding.
+This allows the email message to contain any bytes without exposing the MTA to scary things like non-seven-bit ASCII:
+remember, the protocol is 45 years old. 
+</p><p>
+In quoted-printable, Equal signs are used as the escape character: if followed by two hex digits, it decodes to that byte.
+If followed by a newline, both characters should be removed.
+This is used to break long lines that could otherwise cause trouble.
+</p><p>
+In this email, the "=3D" becomes an equal sign and both lines are joined together.
+If you've ever seen an email with stray equal signs or which is missing one or two characters ~ every 80 bytes, broken quoted-printable decoding is usually the culprit.
+</p><p>
+The second "content-transfer-encoding" is base64, used for binary files like attached images:
+</p><p>
+<pre>
+<h-s>MIME-Version</h-s>: 1.0
+<h-s>Content-Type</h-s>: multipart/mixed; boundary="5ZTNvId/H+rlk7Fr"
+<h-s>Content-Disposition</h-s>: inline
+
+<h-n>--5ZTNvId/H+rlk7Fr</h-n>
+<h-s>Content-Type</h-s>: text/plain; charset=us-ascii
+<h-s>Content-Disposition</h-s>: inline
+
+Check out this file:
+
+<h-n>--5ZTNvId/H+rlk7Fr</h-n>
+<h-s>Content-Type</h-s>: application/octet-stream
+<h-s>Content-Disposition</h-s>: attachment; filename="file.bin"
+<h-s>Content-Transfer-Encoding</h-s>: base64
+
+J7mtSdbQItOAi345nwaNkkTXrnDIRPA0DSwhbSAOwm2C/KoHjQIotY9lnJRMBRk9InQaHOxL
+bb7DGd9EN6uRpjvCbox9xblAh3CxH7sl+YAkYcKw1V100RpBwMhgaXfUJBB3oRkLffgRwEyK
+v9qFBLp9zZ+SiRJoRWbA4aZLexPhHZ35vFROVKYtiAeMlD1s15v3kPZvEADam0e45BoSaqmp
+1S3z3b5wBIFHJUxQULD589MKaFx2Z2A+91pl/pbZWmZkzt55D/hZ05kjUUbXUnDnTYAQE2Gk
+WnN+SnrQvfEO+Tz7AdrbLD1q2DgwWW+k0cVJLKjdwRxesGhAkQCZfHVrno6R4iXjTbInIbQv
+hXzQiV840iUiUhk282WADd1ffJ0sot2Waf7XHLIE1lZVFQ3iGofYbw8pZlg3sb35AnIWPZKv
+fbC6Yh95RV23R4K2NHeBX1rpl4bSSiftnD2RbsBzv7cgw/6M/Lj3O40NFGAaUC+J7TpAaXdi
+tvlPsNQhMo8QRf/ub7WK42cPUlz1fKq1k1pzGN96YOsE5azMfF4vLANtbtbVmLIp2WmgBk0P
+9IGMWy/xIAe0cOh+bqzru2+ojJGgx9uX4VSTP9BaTOwkVX5+rQfpp1qJodtHiO8sHw6Pg+Mg
+WcpqQPC7118ccuT44cVpIRkwOSoJzsW++WM=
+
+<h-n>--5ZTNvId/H+rlk7Fr--</h-n>
+</pre>
+</p><p>
+This is why size limits are often disappointing:
+the encoded email will be ~ 35% larger than the original file.
+More efficient encodings (raw binary data) are supported by some MTAs, but may have to be converted to base64 somewhere down the path...
+which would break DKIM signing.
+</p><p>
+<em>Generally</em>:
+</p><p>
+<ul>
+  <li>No encoding ("7-bit") can be used if the message has short lines and fits in low-bit ASCII. However, "7-bit" is mostly seen as a null encoding for already encoded multipart containers.</li>
+  <li>Quoted printable if the message is mostly text, but has something that risks breaking ancient software.</li>
+  <li>Base64 for binary data.</li>
+</ul>
+</p><p>
+<h2><em>About TLS</em></h2>
+</p><p>
+The SSL/TLS used by mail clients is effectively the same as for a browser:
+the mail provider must go to a certificate authority, prove their identity, get a certificate and use it.
+Algorithms and ciphers are disabled at the slightest hint they may be insecure.
+</p><p>
+However, MTAs operates on "trusted" networks...
+although it's less that an attacker can't get access to internet traffic, but that if they could,
+it would be possible for them to pass an ACME challenge and take out a trusted certificate.
+</p><p>
+As a result, the goal is mostly to protect against passive eavesdropping:
+most sysadmins don't bother dealing with a CA and run a self-signed certificate.
+(it's not like CAs have a good track record: <a href=https://en.wikipedia.org/wiki/EMudhra>4</a>)
+</p><p>
+Another weird thing about email is that MTAs don't use a separate TLS port.
+All connections start as port 25 plaintext, then the sender issues a STARTTLS command and hands over the connection to a SSL/TLS library.
+It's somewhat janky, but it allows servers to attempt to use encryption and cleanly fall back if it's not supported.
+</p><p>
+Such an approach isn't great for submissions, since a fall back would result in leaking the password...
+and baddies on shared networks or nosy residential ISPs can strip out the STARTTLS command.
+For this case, it's best to default use the dedicated SSL submission port 465.
+</p><p>
+(This port actually has a bit of a history, with it being deprecated in favor of STARTTLS
+before being re-endorsed once we realized using optional SSL for passwords was a bad idea.)
+</p><p>
+<h2><em>So what??</em></h2>
+</p><p>
+Unless you write email related software or run infrastructure, most of this information is profoundly useless.
+However, there are a few things you might want to remember. 
+</p><p>
+<em>The underlying protocols allow five days for delivery</em>, and it can sometimes take longer.
+Since users expect delivery in seconds and most emails are at least somewhat time sensitive,
+some MTAs are configured to send out delay notification if a message is taking a while.
+</p><p>
+You may want to find out if yours does this before assuming the recipient is ignoring you.
+</p><p>
+<em>Emails are digital postcards</em>.
+</p><p>
+A message will be stored and forwarded by multiple systems in plaintext.
+Anyone on the network path may be able to read your email:
+SSL/TLS is not universally supported and can trivially be stripped out by active attackers.
+</p><p>
+This is an inherent part of email: there's no way to tack-on strong encryption without breaking existing clients.
+If you need a guarantee of privacy, you must encrypt the message before sending, and the recipient must decrypt it themselves. 
+Be careful with built-in tools like PGP:
+these generally make it way too easy to accidentally hit reply-all without encrypting, in addition to other flaws like exposing the subject line. 
+</p><p>
+"Encrypted" email providers are largely snake oil.
+While the message store can encrypt messages and a custom MUA could decrypt them, the MTA must have access to plaintext.
+As a result, it provides minimal to no security against most attack vectors despite the "mIlItArY gRaDe EnCrYpTiOn".
+The only way to fix email would be to get everyone to agree to switch to an end-to-end encrypted protocol...
+but the whole point of email is universal compatability:
+encrypted messaging can exist, but encrypted email is contradictory. 
+</p><p>
+The best hope is to find a mail provider that can be trusted not to snoop messages.
+That is to say, not an Advertising company (google) or one that's been pushing hard for LLMs (microsoft / apple):
+both of these businesses create strong incentives to read your messages.
+Although you'll still have to hope whoever you are communicating with isn't beign snooped on by their provider.
+</p><p>
+<em>Worse, DKIM signatures</em> act as a lifelong proof that an email came from your provider's servers, even if a message is years old and has no clear chain of custody.
+This makes leaked, hacked, or snooped emails ideal extortion material:
+since the bad actor can trivially prove they haven't been fabricated. 
+</p><p>
+This property, called non-repudiation, is generally not desirable for messaging systems.
+Avoiding signing not an option if you want to interoperate with big-tech, but it is possible to regularly rotate and publish private keys.
+Before they key is published, the signature can be trusted to verify it is legitimate.
+However, once the key has been published, the signature can been forged by anyone and is rendered retroactively untrustworthy.
+</p><p>
+Since authentication is checked during delivery by the MTA and LDA, this doesn't affect how the email will be handled.
+However, it will cast doubt on the authenticity of leaked messages since the signature could have been forged with minimal effort.
+</p><p>
+While key rotation is common practice, most mail providers don't publish their old private keys, 
+so the signature is still trustworthy (modulo the service being hacked).
+I would advise against emailing something you wouldn't be comfortable reading out in public.
+</p>
+<h1><em>Related</em>:</h1>
+<link-box>
+<ul>
+<li><a href=https://www.rfc-editor.org/info/rfc821/>https://www.rfc-editor.org/info/rfc821/</a>: Original SMTP</li>
+<li><a href=https://www.rfc-editor.org/info/rfc2045/>https://www.rfc-editor.org/info/rfc2045/</a>: MIME extended message format</li>
+<li><a href=https://www.rfc-editor.org/info/rfc7208/>https://www.rfc-editor.org/info/rfc7208/</a>: SPF Authentication</li>
+<li><a href=https://www.rfc-editor.org/info/rfc6376/>https://www.rfc-editor.org/info/rfc6376/</a>: DKIM signing</li>
+</ul>
+</link-box>
+<p>
+
+</p>
+<!-- mksite: end of content -->
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
