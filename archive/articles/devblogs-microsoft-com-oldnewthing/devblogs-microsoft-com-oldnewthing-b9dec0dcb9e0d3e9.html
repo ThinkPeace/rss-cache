@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why are we all worked up about atomicity when applying hot-patches if we can just suspend all the threads? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why are we all worked up about atomicity when applying hot-patches if we can just suspend all the threads?</h1>
+        <div class="meta">The Old New Thing 2026-11-06T15:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20261106-00/?p=112838/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-b9dec0dcb9e0d3e9.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Suspending all the threads stops the threads that are there now, those are not the only possible sources of change. The post Why are we all worked up about atomicity when applying hot-patches if we can just suspend all the threads? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>I noted that one of the concerns of the Windows hot-patching system is that the patch can be activated atomically. But why does it need to be atomic? Can&#8217;t just suspend all the threads of the process (except for the one doing the patching)? That way, nobody else can be executing a half-installed patch.</p>
+<p>For processors with variable-length instructions (<a title="The x86 architecture is the weirdo" href="https://devblogs.microsoft.com/oldnewthing/20040914-00/?p=37873">looking at you, x86</a>), the patched instruction cannot be shorter than its replacement. This applies even if you can suspend all the threads of the process, because you might suspend a thread just as it&#8217;s about to execute bytes from what would be the second of half of the replacement instruction.</p>
+<table border="0" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<td colspan="3">instruction<br />
+pointer</td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>↓</td>
+</tr>
+<tr>
+<td>original</td>
+<td><tt>XX</tt></td>
+<td><tt>YY</tt></td>
+</tr>
+<tr>
+<td colspan="3"> </td>
+</tr>
+<tr>
+<td>patch</td>
+<td colspan="2"><tt>AA BB</tt></td>
+</tr>
+</tbody>
+</table>
+<p>If you were unlucky and froze the thread after it executed the <code>XX</code> instruction and was about to execute the <code>YY</code> instruction, and then replaced both bytes with a two-byte instruction <code>AA BB</code>, then when the thread resumes, it will execute <code>BB</code> as if it were the start of a new instruction.</p>
+<p>Okay fine, so <a title="Why don’t Windows functions begin with a pointless MOV EDI,EDI instruction on x86-64?" href="https://devblogs.microsoft.com/oldnewthing/20221109-00/?p=107373"> we&#8217;ll make sure that the original instruction is at least as big as the replacement instruction</a>, so that a frozen thread is never caught in the middle of the replacement instruction. But assuming we do that, can&#8217;t we just suspend all the threads, and then patch at will without having to worry about atomicity?</p>
+<p>While it&#8217;s true that you suspended all the threads in the process, that doesn&#8217;t prevent new threads from being created in the process by a function like <code>Create­Remote­Thread</code>. The caller of <code>Create­Remote­Thread</code> can specify whether the new thread is suspended or not, and if it chooses non-suspended (or if it chose suspended and then decided to resume it), you now have a live thread running in the process while you are busy trying to patch it.</p>
+<p>Atomicity is important so that you don&#8217;t accidentally patch code while an injected thread happens to be running it.</p>
+<p><b>Bonus chatter</b>: Now, atomicity is still not bulletproof, because even if you manage to suspend all the threads, and prevent new ones from being injected, you still have the case where somebody calls <code>Write­Process­Memory</code> to modify the bytes of the process while everything in it is suspended.</p>
+<p>And we saw earlier that <a title="Is WriteProcessMemory faster than shared memory for transferring data between two processes?" href="https://devblogs.microsoft.com/oldnewthing/20251119-00/?p=111800"> <code>Write­Process­Memory</code> is not atomic</a>, so it&#8217;s possible that a two-byte <code>Write­Process­Memory</code> writes the first byte, and then you do your atomic update of both bytes, and then the <code>Write­Process­Memory</code> finishes by writing the second byte, leaving a mishmash of your patch and the rogue one.</p>
+<p>On the other hand, anybody who was using <code>Write­Process­Memory</code> to do code patching was already broken because of this lack of atomicity, so we are not introducing a new problem.</p>
+<p>Furthermore, since the hot-patching space is reserved for Windows Update, an outsider that uses <code>Write­Process­Memory</code> to apply a hot-patch from another process is already breaking the rules. At this point Windows Update says, &#8220;Look, I can&#8217;t protect myself from this, and you&#8217;re in double-unsupported territory by the time we got here, so whatever happens is your problem.&#8221;</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20261106-00/?p=112838/">Why are we all worked up about atomicity when applying hot-patches if we can just suspend all the threads?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
