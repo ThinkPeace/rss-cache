@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Monads in Lean | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Monads in Lean</h1>
+        <div class="meta">Eli Bendersky&#x27;s website 2026-11-11T03:25:00Z</div>
+        <div class="links">
+          <a href="https://eli.thegreenplace.net/2026/monads-in-lean/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/eli-thegreenplace-net/eli-thegreenplace-net-105ef5b0ed2c12c1.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">This post demonstrates how to use monads in the Lean programming language (Lean 4, to be specific). If you&#x27;re not familiar with Lean, this part of the language is very similar to other functional programming languages, like Haskell or OCaml. Motivating example - evaluating expressions Suppose we want to write a …</div>
+        <div class="content">
+          <p>This post demonstrates how to use monads in the Lean programming language
+(Lean 4, to be specific). If you're not familiar with Lean, this part of the
+language is very similar to other functional programming languages, like
+Haskell or OCaml.</p>
+<div class="section" id="motivating-example-evaluating-expressions">
+<h2>Motivating example - evaluating expressions</h2>
+<p>Suppose we want to write a simple numerical expression evaluator that supports
+numbers with addition and division:</p>
+<div class="highlight"><pre><span></span><span class="kn">inductive</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="kn">where</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="n">num</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Int</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Expr</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="n">add</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Expr</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Expr</span>
+</pre></div>
+<p>What happens when we encounter a division by zero? We'll want our evaluator
+to report this as a failure, which will be represented explicitly using the
+the <tt class="docutils literal">Option</tt> type:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">safeDiv</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Int</span><span class="o">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="n">Int</span><span class="w"> </span><span class="o">:=</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">==</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="n">none</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">/</span><span class="w"> </span><span class="n">y</span><span class="o">)</span>
+</pre></div>
+<p>With this in hand, the <tt class="docutils literal">eval</tt> function can be written as follows:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">eval</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="n">Int</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">n</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="k">match</span><span class="w"> </span><span class="n">eval</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="k">with</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="n">none</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">none</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">      </span><span class="k">match</span><span class="w"> </span><span class="n">eval</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="k">with</span>
+<span class="w">      </span><span class="bp">|</span><span class="w"> </span><span class="n">none</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">none</span>
+<span class="w">      </span><span class="bp">|</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">+</span><span class="w"> </span><span class="n">y</span><span class="o">)</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="k">match</span><span class="w"> </span><span class="n">eval</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="k">with</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="n">none</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">none</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">      </span><span class="k">match</span><span class="w"> </span><span class="n">eval</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="k">with</span>
+<span class="w">      </span><span class="bp">|</span><span class="w"> </span><span class="n">none</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">none</span>
+<span class="w">      </span><span class="bp">|</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">safeDiv</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="n">y</span>
+</pre></div>
+<p><tt class="docutils literal">safeDiv</tt> returns an <tt class="docutils literal">Option</tt>; to propagate that possible failure to
+its caller, <tt class="docutils literal">eval</tt> also returns an <tt class="docutils literal">Option</tt>, and - moreover - has to perform
+lots of tedious checking for the possibility of a <tt class="docutils literal">none</tt> value. Is there a
+better way?</p>
+<p>Note a common code pattern repeated here:</p>
+<ol class="arabic simple">
+<li>Examine the value of an <tt class="docutils literal">Option</tt></li>
+<li>If it's <tt class="docutils literal">none</tt>, return <tt class="docutils literal">none</tt> without proceeding</li>
+<li>Otherwise if it's <tt class="docutils literal">some result</tt>, continue the computation with <tt class="docutils literal">result</tt></li>
+</ol>
+<p>We can extract it into a helper function:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">withSome</span><span class="w"> </span><span class="o">(</span><span class="n">result</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="n">α</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="n">onSuccess</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">α</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="n">β</span><span class="o">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="n">β</span><span class="w"> </span><span class="o">:=</span>
+<span class="w">  </span><span class="k">match</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="k">with</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="n">none</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">none</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">onSuccess</span><span class="w"> </span><span class="n">x</span>
+</pre></div>
+<p>And rewrite our <tt class="docutils literal">eval</tt> using this helper:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">evalWithSome</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="n">Int</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">n</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">      </span><span class="n">withSome</span><span class="w"> </span><span class="o">(</span><span class="n">evalWithSome</span><span class="w"> </span><span class="n">a</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="k">fun</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">        </span><span class="n">withSome</span><span class="w"> </span><span class="o">(</span><span class="n">evalWithSome</span><span class="w"> </span><span class="n">b</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="k">fun</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">          </span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">+</span><span class="w"> </span><span class="n">y</span><span class="o">)))</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">      </span><span class="n">withSome</span><span class="w"> </span><span class="o">(</span><span class="n">evalWithSome</span><span class="w"> </span><span class="n">a</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="k">fun</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">        </span><span class="n">withSome</span><span class="w"> </span><span class="o">(</span><span class="n">evalWithSome</span><span class="w"> </span><span class="n">b</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="k">fun</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">          </span><span class="n">safeDiv</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="n">y</span><span class="o">))</span>
+</pre></div>
+<p>This is already much better; we can make it even cleaner using operator
+overloading:</p>
+<div class="highlight"><pre><span></span><span class="kn">infixl</span><span class="o">:</span><span class="mi">55</span><span class="w"> </span><span class="s2">&quot; &gt;&gt;? &quot;</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">withSome</span>
+
+<span class="kn">def</span><span class="w"> </span><span class="n">evalOp</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="n">Int</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">n</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">evalOp</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="bp">&gt;&gt;?</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">evalOp</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">&gt;&gt;?</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">+</span><span class="w"> </span><span class="n">y</span><span class="o">)</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">evalOp</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="bp">&gt;&gt;?</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">evalOp</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">&gt;&gt;?</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">safeDiv</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="n">y</span>
+</pre></div>
+<p>Congratulations - we've pretty much invented monads!</p>
+</div>
+<div class="section" id="option-as-a-monad-in-expression-evaluation">
+<h2><tt class="docutils literal">Option</tt> as a <tt class="docutils literal">Monad</tt> in expression evaluation</h2>
+<p>In simplified form, the <tt class="docutils literal">Monad</tt> type class in Lean is defined as:</p>
+<div class="highlight"><pre><span></span><span class="kn">class</span><span class="w"> </span><span class="n">Monad</span><span class="w"> </span><span class="o">(</span><span class="n">m</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">Type</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="kt">Type</span><span class="o">)</span><span class="w"> </span><span class="kn">where</span>
+<span class="w">  </span><span class="n">pure</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">α</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="n">α</span>
+<span class="w">  </span><span class="n">bind</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="n">α</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="o">(</span><span class="n">α</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="n">β</span><span class="o">)</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="n">β</span>
+</pre></div>
+<p>In our code, <tt class="docutils literal">pure</tt> is equivalent to <tt class="docutils literal">some</tt>, and <tt class="docutils literal">bind</tt> is equivalent
+to <tt class="docutils literal">withSome</tt>; in fact, the <tt class="docutils literal">Monad</tt> instance for <tt class="docutils literal">Option</tt> is something
+like:</p>
+<div class="highlight"><pre><span></span><span class="kn">instance</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Monad</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="kn">where</span>
+<span class="w">  </span><span class="n">pure</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">x</span>
+<span class="w">  </span><span class="n">bind</span><span class="w"> </span><span class="n">opt</span><span class="w"> </span><span class="n">next</span><span class="w"> </span><span class="o">:=</span>
+<span class="w">    </span><span class="k">match</span><span class="w"> </span><span class="n">opt</span><span class="w"> </span><span class="k">with</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="n">none</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">none</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">next</span><span class="w"> </span><span class="n">x</span>
+</pre></div>
+<p>An operator akin to <tt class="docutils literal">&gt;&gt;?</tt> for monads is already defined in Lean; it's called
+<tt class="docutils literal">&gt;&gt;=</tt>, and picks up the <tt class="docutils literal">bind</tt> method of the <tt class="docutils literal">Monad</tt> type class. So we can
+rewrite our evaluator using the standard <tt class="docutils literal">Monad</tt> instance, without defining
+<tt class="docutils literal">withSome</tt> or the <tt class="docutils literal">&gt;&gt;?</tt> operator <a class="footnote-reference" href="#footnote-1" id="footnote-reference-1">[1]</a>:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">evalBind</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="n">Int</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">pure</span><span class="w"> </span><span class="n">n</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">evalBind</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">evalBind</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">+</span><span class="w"> </span><span class="n">y</span><span class="o">)</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">evalBind</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">evalBind</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="n">safeDiv</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="n">y</span>
+</pre></div>
+<p>We can go even further with the <tt class="docutils literal">do</tt> notation, which is syntactic sugar around
+<tt class="docutils literal">&gt;&gt;=</tt> that lets us rewrite the evaluator as:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">evalDo</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="n">Int</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">pure</span><span class="w"> </span><span class="n">n</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalDo</span><span class="w"> </span><span class="n">a</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalDo</span><span class="w"> </span><span class="n">b</span>
+<span class="w">    </span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">+</span><span class="w"> </span><span class="n">y</span><span class="o">)</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalDo</span><span class="w"> </span><span class="n">a</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalDo</span><span class="w"> </span><span class="n">b</span>
+<span class="w">    </span><span class="n">safeDiv</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="n">y</span>
+</pre></div>
+<p>This notation should be familiar if you've seen Lean code dealing with I/O;
+we'll revisit I/O later in the post.</p>
+</div>
+<div class="section" id="monads-for-modeling-side-effects">
+<h2>Monads for modeling side effects</h2>
+<p>Functional programming languages place a lot of emphasis on <em>pure</em> functions
+that are free of side effects. There's no question that such functions are
+easier to reason about, debug, and even optimize (by memoization). That said,
+the real world is messy and sometimes side effects are inescapable; monads
+help encapsulate side effects in functional programs.</p>
+<p>The core idea is: side effects are encapsulated inside a <tt class="docutils literal">Monad</tt>, which
+wraps the value returned from a computation. The <tt class="docutils literal">bind</tt> method (or the
+equivalent <tt class="docutils literal">&gt;&gt;=</tt> operator) lets us take a wrapped value and push it into the
+next computation in the sequence. This may look familiar from
+continuation-passing style (CPS). Continuations themselves can also be modeled
+with a monad <a class="footnote-reference" href="#footnote-2" id="footnote-reference-2">[2]</a>.</p>
+<p>The definition of <tt class="docutils literal">bind</tt> is:</p>
+<div class="highlight"><pre><span></span><span class="n">bind</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="n">α</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="o">(</span><span class="n">α</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="n">β</span><span class="o">)</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="n">β</span>
+</pre></div>
+<p>Here's a mental model to think about it:</p>
+<ol class="arabic simple">
+<li>Take a value wrapped with potential side effects</li>
+<li>Take a computation that takes this value and may produce additional side
+effects</li>
+<li>Combine the results into a final wrapped value</li>
+</ol>
+<p>Chaining multiple <tt class="docutils literal">bind</tt>s together is essentially a sequence of computations
+while keeping track of the side effects. A monad decouples what computations
+<em>do</em> from <em>how they are sequenced</em>. The programmer describes the sequence of
+computations and their dependencies, while the monad's <tt class="docutils literal">bind</tt> implementation
+handles the bookkeeping necessary to combine their side effects.</p>
+<p>Our evaluator case study shows one example of side effects: early return from
+a computation with a <tt class="docutils literal">none</tt> value.</p>
+<p>Let's see another idiomatic way of doing that, with the <tt class="docutils literal">Except</tt> type that
+contains either a successful result or an error value (very similar to the
+<tt class="docutils literal">Result</tt> type in Rust).</p>
+<p>We'll begin by writing an exception-returning version of <tt class="docutils literal">safeDiv</tt>:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">safeDivExc</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Int</span><span class="o">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Except</span><span class="w"> </span><span class="n">String</span><span class="w"> </span><span class="n">Int</span><span class="w"> </span><span class="o">:=</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">==</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">then</span><span class="w"> </span><span class="bp">.</span><span class="n">error</span><span class="w"> </span><span class="s2">&quot;division by zero&quot;</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="bp">.</span><span class="n">ok</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">/</span><span class="w"> </span><span class="n">y</span><span class="o">)</span>
+</pre></div>
+<p>Instead of writing a whole new <tt class="docutils literal">eval</tt> variant for <tt class="docutils literal">Except</tt>, we'll
+create a generic one that works with any <tt class="docutils literal">Monad</tt> <a class="footnote-reference" href="#footnote-3" id="footnote-reference-3">[3]</a>:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">evalM</span><span class="w"> </span><span class="o">{</span><span class="n">m</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">Type</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="kt">Type</span><span class="o">}</span><span class="w"> </span><span class="o">[</span><span class="n">Monad</span><span class="w"> </span><span class="n">m</span><span class="o">]</span>
+<span class="w">    </span><span class="o">(</span><span class="n">div</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Int</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Int</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="n">Int</span><span class="o">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="n">Int</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">pure</span><span class="w"> </span><span class="n">n</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="k">do</span>
+<span class="w">      </span><span class="k">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalM</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="n">a</span>
+<span class="w">      </span><span class="k">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalM</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="n">b</span>
+<span class="w">      </span><span class="n">pure</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">+</span><span class="w"> </span><span class="n">y</span><span class="o">)</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="k">do</span>
+<span class="w">      </span><span class="k">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalM</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="n">a</span>
+<span class="w">      </span><span class="k">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalM</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="n">b</span>
+<span class="w">      </span><span class="n">div</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="n">y</span>
+</pre></div>
+<p>Now <tt class="docutils literal">evalM</tt> can be used with <tt class="docutils literal">safeDivExc</tt> to implement an evaluator where
+division returns <tt class="docutils literal">Except</tt>; used with <tt class="docutils literal">safeDiv</tt>, it would be equivalent to
+the <tt class="docutils literal">Option</tt>-specific <tt class="docutils literal">evalDo</tt> we've written before.</p>
+<div class="highlight"><pre><span></span><span class="bp">#</span><span class="n">eval</span><span class="w"> </span><span class="n">evalM</span><span class="w"> </span><span class="n">safeDiv</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="mi">4</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="mi">6</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="mi">0</span><span class="o">)))</span>
+<span class="bp">#</span><span class="n">eval</span><span class="w"> </span><span class="n">evalM</span><span class="w"> </span><span class="n">safeDivExc</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="mi">4</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="mi">6</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="mi">0</span><span class="o">)))</span>
+</pre></div>
+</div>
+<div class="section" id="logging-computations-an-example-of-the-writer-monad">
+<h2>Logging computations - an example of the writer monad</h2>
+<p>Let's look at a more advanced example: an evaluator that also <em>logs</em> the
+computation it executes in a linear log of strings. The challenge here is that
+we still have to combine that with <tt class="docutils literal">Option</tt> to support the divide-by-zero
+case, so we'll start by creating a new structure to carry the state of the
+computation:</p>
+<div class="highlight"><pre><span></span><span class="kn">structure</span><span class="w"> </span><span class="n">LoggedOption</span><span class="w"> </span><span class="o">(</span><span class="n">α</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">Type</span><span class="o">)</span><span class="w"> </span><span class="kn">where</span>
+<span class="w">  </span><span class="n">value</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="n">α</span>
+<span class="w">  </span><span class="n">log</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">List</span><span class="w"> </span><span class="n">String</span>
+</pre></div>
+<p>This will be the result of one <tt class="docutils literal">eval</tt> call; it produces an optional value,
+along with a list of strings (the log). Here's the <tt class="docutils literal">Monad</tt> implementation for
+this type:</p>
+<div class="highlight"><pre><span></span><span class="kn">instance</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Monad</span><span class="w"> </span><span class="n">LoggedOption</span><span class="w"> </span><span class="kn">where</span>
+<span class="w">  </span><span class="n">pure</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="bp">⟨</span><span class="n">some</span><span class="w"> </span><span class="n">x</span><span class="o">,</span><span class="w"> </span><span class="o">[]</span><span class="bp">⟩</span>
+<span class="w">  </span><span class="n">bind</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="n">next</span><span class="w"> </span><span class="o">:=</span>
+<span class="w">    </span><span class="k">match</span><span class="w"> </span><span class="n">v</span><span class="bp">.</span><span class="n">value</span><span class="w"> </span><span class="k">with</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="n">none</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="bp">⟨</span><span class="n">none</span><span class="o">,</span><span class="w"> </span><span class="n">v</span><span class="bp">.</span><span class="n">log</span><span class="bp">⟩</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">      </span><span class="k">let</span><span class="w"> </span><span class="n">nextResult</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="n">next</span><span class="w"> </span><span class="n">x</span>
+<span class="w">      </span><span class="bp">⟨</span><span class="n">nextResult</span><span class="bp">.</span><span class="n">value</span><span class="o">,</span><span class="w"> </span><span class="n">v</span><span class="bp">.</span><span class="n">log</span><span class="w"> </span><span class="bp">++</span><span class="w"> </span><span class="n">nextResult</span><span class="bp">.</span><span class="n">log</span><span class="bp">⟩</span>
+</pre></div>
+<p>The main idea is combining the stored log with the log of the next computation
+by appending them (thus accumulating a linear log). Here's our evaluator:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">evalLogged</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">LoggedOption</span><span class="w"> </span><span class="n">Int</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">pure</span><span class="w"> </span><span class="n">n</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalLogged</span><span class="w"> </span><span class="n">a</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalLogged</span><span class="w"> </span><span class="n">b</span>
+<span class="w">    </span><span class="bp">⟨</span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">+</span><span class="w"> </span><span class="n">y</span><span class="o">),</span><span class="w"> </span><span class="o">[</span><span class="n">s!</span><span class="s2">&quot;adding {x} and {y}&quot;</span><span class="o">]</span><span class="bp">⟩</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalLogged</span><span class="w"> </span><span class="n">a</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalLogged</span><span class="w"> </span><span class="n">b</span>
+<span class="w">    </span><span class="k">match</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="k">with</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="bp">⟨</span><span class="n">none</span><span class="o">,</span><span class="w"> </span><span class="o">[</span><span class="n">s!</span><span class="s2">&quot;dividing {x} by zero&quot;</span><span class="o">]</span><span class="bp">⟩</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="bp">_</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="bp">⟨</span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">/</span><span class="w"> </span><span class="n">y</span><span class="o">),</span><span class="w"> </span><span class="o">[</span><span class="n">s!</span><span class="s2">&quot;dividing {x} by {y}&quot;</span><span class="o">]</span><span class="bp">⟩</span>
+</pre></div>
+<p>Note how the code of <tt class="docutils literal">evalLogged</tt> doesn't have to deal with the mechanics
+of logging too much (other than adding new log entries). All of that is hidden
+within the monad instance. <tt class="docutils literal">LoggedOption</tt> is an example of the <em>writer monad</em>,
+which is a write-only version of the <em>state monad</em>.</p>
+</div>
+<div class="section" id="state-monad">
+<h2>State monad</h2>
+<p>One of the most important use cases of monads in functional programming
+languages is modeling mutable state through a computation.</p>
+<p>A stateful computation is modeled as a function that takes an initial state
+and returns a tuple containing the result value and a new, updated state. In
+Lean notation:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">State</span><span class="w"> </span><span class="o">(</span><span class="n">σ</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">Type</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="n">α</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">Type</span><span class="o">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">Type</span><span class="w"> </span><span class="o">:=</span>
+<span class="w">  </span><span class="n">σ</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="o">(</span><span class="n">α</span><span class="w"> </span><span class="bp">×</span><span class="w"> </span><span class="n">σ</span><span class="o">)</span>
+</pre></div>
+<p>To demonstrate this in action, let's enhance our evaluator to support variable
+assignments and lookups. Our state is going to be an association list of
+<tt class="docutils literal">name, value</tt> pairs:</p>
+<div class="highlight"><pre><span></span><span class="kn">abbrev</span><span class="w"> </span><span class="n">Vars</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="n">List</span><span class="w"> </span><span class="o">(</span><span class="n">String</span><span class="w"> </span><span class="bp">×</span><span class="w"> </span><span class="n">Int</span><span class="o">)</span>
+</pre></div>
+<p>And we'll augment our expression enum with additional operations:</p>
+<div class="highlight"><pre><span></span><span class="kn">inductive</span><span class="w"> </span><span class="n">ExprV</span><span class="w"> </span><span class="kn">where</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="n">num</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Int</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">ExprV</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="n">add</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">ExprV</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">ExprV</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">ExprV</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">ExprV</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">ExprV</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">ExprV</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="n">store</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">String</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">ExprV</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">ExprV</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="n">load</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">String</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">ExprV</span>
+</pre></div>
+<p>This is going to be our state monad:</p>
+<div class="highlight"><pre><span></span><span class="kn">structure</span><span class="w"> </span><span class="n">EvalM</span><span class="w"> </span><span class="o">(</span><span class="n">α</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">Type</span><span class="o">)</span><span class="w"> </span><span class="kn">where</span>
+<span class="w">  </span><span class="n">run</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Vars</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">Option</span><span class="w"> </span><span class="o">(</span><span class="n">α</span><span class="w"> </span><span class="bp">×</span><span class="w"> </span><span class="n">Vars</span><span class="o">)</span>
+</pre></div>
+<p>Note the correspondence of the <tt class="docutils literal">run</tt> function to the <tt class="docutils literal">State</tt> signature
+above:</p>
+<ul class="simple">
+<li>It takes the current state, which for our use cases is an association list
+carrying values for all defined variables.</li>
+<li>It returns an optional result which is a pair of some value (in our case,
+the result of the computation) and an updated state.</li>
+</ul>
+<p>This is its <tt class="docutils literal">Monad</tt> class implementation:</p>
+<div class="highlight"><pre><span></span><span class="kn">instance</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Monad</span><span class="w"> </span><span class="n">EvalM</span><span class="w"> </span><span class="kn">where</span>
+<span class="w">  </span><span class="n">pure</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="bp">⟨</span><span class="k">fun</span><span class="w"> </span><span class="n">vars</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="o">,</span><span class="w"> </span><span class="n">vars</span><span class="o">)</span><span class="bp">⟩</span>
+<span class="w">  </span><span class="n">bind</span><span class="w"> </span><span class="n">action</span><span class="w"> </span><span class="n">next</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="bp">⟨</span><span class="k">fun</span><span class="w"> </span><span class="n">vars</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="k">match</span><span class="w"> </span><span class="n">action</span><span class="bp">.</span><span class="n">run</span><span class="w"> </span><span class="n">vars</span><span class="w"> </span><span class="k">with</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="n">none</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">none</span>
+<span class="w">    </span><span class="bp">|</span><span class="w"> </span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="o">,</span><span class="w"> </span><span class="n">vars&#39;</span><span class="o">)</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="o">(</span><span class="n">next</span><span class="w"> </span><span class="n">x</span><span class="o">)</span><span class="bp">.</span><span class="n">run</span><span class="w"> </span><span class="n">vars&#39;</span><span class="bp">⟩</span>
+</pre></div>
+<p>And finally, the evaluator:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">evalState</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">ExprV</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">EvalM</span><span class="w"> </span><span class="n">Int</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">pure</span><span class="w"> </span><span class="n">n</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalState</span><span class="w"> </span><span class="n">a</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalState</span><span class="w"> </span><span class="n">b</span>
+<span class="w">    </span><span class="n">pure</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">+</span><span class="w"> </span><span class="n">y</span><span class="o">)</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalState</span><span class="w"> </span><span class="n">a</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalState</span><span class="w"> </span><span class="n">b</span>
+<span class="w">    </span><span class="bp">⟨</span><span class="k">fun</span><span class="w"> </span><span class="n">vars</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="o">(</span><span class="n">safeDiv</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="n">y</span><span class="o">)</span><span class="bp">.</span><span class="n">map</span><span class="w"> </span><span class="o">(</span><span class="k">fun</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="o">(</span><span class="n">value</span><span class="o">,</span><span class="w"> </span><span class="n">vars</span><span class="o">))</span><span class="bp">⟩</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">load</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">    </span><span class="bp">⟨</span><span class="k">fun</span><span class="w"> </span><span class="n">vars</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">      </span><span class="k">let</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">vars</span><span class="bp">.</span><span class="n">lookup</span><span class="w"> </span><span class="n">name</span>
+<span class="w">      </span><span class="n">pure</span><span class="w"> </span><span class="o">(</span><span class="n">value</span><span class="o">,</span><span class="w"> </span><span class="n">vars</span><span class="o">)</span><span class="bp">⟩</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">store</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="n">rhs</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalState</span><span class="w"> </span><span class="n">rhs</span>
+<span class="w">    </span><span class="bp">⟨</span><span class="k">fun</span><span class="w"> </span><span class="n">vars</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">      </span><span class="k">let</span><span class="w"> </span><span class="n">vars&#39;</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">(</span><span class="n">name</span><span class="o">,</span><span class="w"> </span><span class="n">value</span><span class="o">)</span><span class="w"> </span><span class="bp">::</span><span class="w"> </span><span class="n">vars</span><span class="bp">.</span><span class="n">filter</span><span class="w"> </span><span class="o">(</span><span class="k">fun</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">p</span><span class="bp">.</span><span class="m">1</span><span class="w"> </span><span class="bp">!=</span><span class="w"> </span><span class="n">name</span><span class="o">)</span>
+<span class="w">      </span><span class="n">some</span><span class="w"> </span><span class="o">(</span><span class="n">value</span><span class="o">,</span><span class="w"> </span><span class="n">vars&#39;</span><span class="o">)</span><span class="bp">⟩</span>
+</pre></div>
+<p>Operations that don't deal with variables directly (like <tt class="docutils literal">.num</tt> and
+<tt class="docutils literal">.add</tt>) just do their work as before. <tt class="docutils literal">.div</tt> only has to deal with the
+actual monad type to ensure that <tt class="docutils literal">none</tt> is propagated in case of division
+by zero. Note also that this evaluator supports stores as expressions, since
+they separately return a value and the updated state; therefore, computations
+like this one will work:</p>
+<div class="highlight"><pre><span></span><span class="c1">-- (x := 12) + (x / 3): the right operand sees the left operand&#39;s assignment.</span>
+<span class="bp">#</span><span class="n">eval</span><span class="w"> </span><span class="o">(</span><span class="n">evalState</span>
+<span class="w">  </span><span class="o">(</span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">store</span><span class="w"> </span><span class="s2">&quot;x&quot;</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="mi">12</span><span class="o">))</span>
+<span class="w">        </span><span class="o">(</span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">load</span><span class="w"> </span><span class="s2">&quot;x&quot;</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="mi">3</span><span class="o">))))</span><span class="bp">.</span><span class="n">run</span><span class="w"> </span><span class="o">[]</span>
+</pre></div>
+<p>Producing the result <tt class="docutils literal">some (16, <span class="pre">[(&quot;x&quot;,</span> <span class="pre">12)])</span></tt>.</p>
+<p>In a language with mutable state, modeling side effects is easy - just assign
+some state (like a struct field or class member). In a functional language like
+Lean, however, we have to carry this state across the computations explicitly;
+monads help us do this with elegance - by hiding most of the mechanics of
+actually carrying the state around, the majority of the code remains free
+of bookkeeping.</p>
+</div>
+<div class="section" id="io-monad">
+<h2>IO monad</h2>
+<p>Perhaps the most well known example of a monad in functional programming
+languages like Lean and Haskell is <tt class="docutils literal">IO</tt>. To anyone who's written a &quot;real&quot;
+program that interacts with the outer world, <tt class="docutils literal">IO</tt> is very familiar. Here's
+a customized &quot;Hello&quot; program that's typically taught in the first 15
+minutes of learning a new programming language:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">greet</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">IO</span><span class="w"> </span><span class="n">Unit</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="k">let</span><span class="w"> </span><span class="n">stdin</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">IO</span><span class="bp">.</span><span class="n">getStdin</span>
+<span class="w">  </span><span class="n">IO</span><span class="bp">.</span><span class="n">println</span><span class="w"> </span><span class="s2">&quot;What is your name?&quot;</span>
+<span class="w">  </span><span class="k">let</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">stdin</span><span class="bp">.</span><span class="n">getLine</span>
+<span class="w">  </span><span class="n">IO</span><span class="bp">.</span><span class="n">println</span><span class="w"> </span><span class="n">s!</span><span class="s2">&quot;Hello, {name}&quot;</span>
+</pre></div>
+<p>Note the <tt class="docutils literal">do</tt> notation here, suggesting monads. As mentioned before, <tt class="docutils literal">do</tt>
+is syntactic sugar for the monad's <tt class="docutils literal">bind</tt> method, or the <tt class="docutils literal">&gt;&gt;=</tt> operator; we
+can rewrite this code more explicitly as:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">greetBind</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">IO</span><span class="w"> </span><span class="n">Unit</span><span class="w"> </span><span class="o">:=</span>
+<span class="w">  </span><span class="n">IO</span><span class="bp">.</span><span class="n">getStdin</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="n">stdin</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">  </span><span class="n">IO</span><span class="bp">.</span><span class="n">println</span><span class="w"> </span><span class="s2">&quot;What is your name?&quot;</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="bp">_</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">  </span><span class="n">stdin</span><span class="bp">.</span><span class="n">getLine</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="k">fun</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="bp">=&gt;</span>
+<span class="w">  </span><span class="n">IO</span><span class="bp">.</span><span class="n">println</span><span class="w"> </span><span class="n">s!</span><span class="s2">&quot;Hello, {name}&quot;</span>
+</pre></div>
+<p>In essence, <tt class="docutils literal">IO</tt> is a state monad, where the state carried around represents
+the &quot;outside world&quot;. <tt class="docutils literal">IO</tt> operations like <tt class="docutils literal">println</tt> act on that world,
+and its state is carried over using <tt class="docutils literal">bind</tt>, like other state monads.</p>
+<p>Here's a version of our expression evaluator that logs directly to standard out,
+instead of collecting the log as a list of strings:</p>
+<div class="highlight"><pre><span></span><span class="kn">def</span><span class="w"> </span><span class="n">evalIO</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Expr</span><span class="w"> </span><span class="bp">→</span><span class="w"> </span><span class="n">OptionT</span><span class="w"> </span><span class="n">IO</span><span class="w"> </span><span class="n">Int</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">num</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">pure</span><span class="w"> </span><span class="n">n</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">add</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalIO</span><span class="w"> </span><span class="n">a</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalIO</span><span class="w"> </span><span class="n">b</span>
+<span class="w">    </span><span class="n">IO</span><span class="bp">.</span><span class="n">println</span><span class="w"> </span><span class="n">s!</span><span class="s2">&quot;adding {x} and {y}&quot;</span>
+<span class="w">    </span><span class="n">pure</span><span class="w"> </span><span class="o">(</span><span class="n">x</span><span class="w"> </span><span class="bp">+</span><span class="w"> </span><span class="n">y</span><span class="o">)</span>
+<span class="w">  </span><span class="bp">|</span><span class="w"> </span><span class="bp">.</span><span class="n">div</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalIO</span><span class="w"> </span><span class="n">a</span>
+<span class="w">    </span><span class="k">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="bp">←</span><span class="w"> </span><span class="n">evalIO</span><span class="w"> </span><span class="n">b</span>
+<span class="w">    </span><span class="n">IO</span><span class="bp">.</span><span class="n">println</span><span class="w"> </span><span class="n">s!</span><span class="s2">&quot;dividing {x} by {y}&quot;</span>
+<span class="w">    </span><span class="n">OptionT</span><span class="bp">.</span><span class="n">mk</span><span class="w"> </span><span class="o">(</span><span class="n">pure</span><span class="w"> </span><span class="o">(</span><span class="n">safeDiv</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="n">y</span><span class="o">))</span>
+</pre></div>
+<p>The only unusual construct here is <tt class="docutils literal">OptionT</tt>, which is a <em>monad transformer</em>
+that helps us compose <tt class="docutils literal">Option</tt> (for propagating failure from safe division)
+with the <tt class="docutils literal">IO</tt> Monad <a class="footnote-reference" href="#footnote-4" id="footnote-reference-4">[4]</a>.</p>
+<p>The <tt class="docutils literal">IO</tt> monad also supports <tt class="docutils literal">throw</tt> for Python-like exception behavior,
+but in this example we use <tt class="docutils literal">Option</tt> explicitly; exceptions are a matter of
+programming preference, and using them inside library functions like <tt class="docutils literal">eval</tt>
+doesn't feel right to me.</p>
+</div>
+<div class="section" id="monad-laws-in-lean">
+<h2>Monad laws in Lean</h2>
+<p>Just like in Haskell, monads in Lean should obey <a class="reference external" href="https://lean-lang.org/doc/reference/latest/Functors___-Monads-and--do--Notation/Laws/">certain laws</a>.
+Those are:</p>
+<p><strong>Left identity</strong>: wrapping a value in <tt class="docutils literal">pure</tt> and immediately passing it to
+<tt class="docutils literal">f</tt> with <tt class="docutils literal">bind</tt> should be equivalent to just calling <tt class="docutils literal">f</tt> on the value:</p>
+<div class="highlight"><pre><span></span><span class="n">pure</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="n">f</span><span class="w">       </span><span class="bp">=</span><span class="w">    </span><span class="n">f</span><span class="w"> </span><span class="n">v</span>
+</pre></div>
+<p><strong>Right identity</strong>: extracting a value from a computation and immediately
+wrapping it with <tt class="docutils literal">pure</tt> again should not change the computation:</p>
+<div class="highlight"><pre><span></span><span class="n">m</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="n">pure</span><span class="w">         </span><span class="bp">=</span><span class="w">    </span><span class="n">m</span>
+</pre></div>
+<p><strong>Associativity</strong>: the grouping of operations doesn't matter, as long as their
+order remains the same:</p>
+<div class="highlight"><pre><span></span><span class="o">(</span><span class="n">m</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="n">f</span><span class="o">)</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="n">g</span><span class="w">    </span><span class="bp">=</span><span class="w">    </span><span class="n">m</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="o">(</span><span class="k">fun</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="bp">=&gt;</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="bp">&gt;&gt;=</span><span class="w"> </span><span class="n">g</span><span class="o">)</span>
+</pre></div>
+<p>Let's see how <tt class="docutils literal">Option</tt> obeys these laws.</p>
+<p>For left identity, <tt class="docutils literal">pure v</tt> is <tt class="docutils literal">some v</tt> and the <tt class="docutils literal">bind</tt> implementation
+matches <tt class="docutils literal">some x</tt> to <tt class="docutils literal">next x</tt>, which is equivalent to <tt class="docutils literal">f v</tt>.</p>
+<p>For right identity, <tt class="docutils literal">m &gt;&gt;= pure</tt> just rewraps a <tt class="docutils literal">some</tt> value in <tt class="docutils literal">pure</tt>,
+leaving <tt class="docutils literal">none</tt> alone - this is equivalent to keeping things as they are.</p>
+<p>For associativity, if <tt class="docutils literal">m</tt> is <tt class="docutils literal">none</tt> then both sides are <tt class="docutils literal">none</tt>. If <tt class="docutils literal">m</tt>
+is <tt class="docutils literal">some v</tt>, the left side is <tt class="docutils literal">f v &gt;&gt;= g</tt>, and the right side reduces to
+the same, so again they are equivalent.</p>
+<p>While Lean doesn't enforce that a <tt class="docutils literal">Monad</tt> instance obeys these laws, it has
+a separate type class called <tt class="docutils literal">LawfulMonad</tt> which <em>does</em> require Lean proofs;
+this is useful for Lean's main use case - proving theorems about programs,
+expressed through its powerful type system. But this is a topic for another
+day.</p>
+<hr class="docutils" />
+<table class="docutils footnote" frame="void" id="footnote-1" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-1">[1]</a></td><td>We've replaced <tt class="docutils literal">some n</tt> by <tt class="docutils literal">pure n</tt> in the <tt class="docutils literal">.num</tt> case; technically
+this isn't necessary, but it will be useful later in the post when we
+examine other types implementing <tt class="docutils literal">Monad</tt>.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="footnote-2" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-2">[2]</a></td><td>This is explored in Philip Wadler's classical paper &quot;The essence of
+functional programming&quot;.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="footnote-3" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-3">[3]</a></td><td><tt class="docutils literal">Except</tt> also happens to implement <tt class="docutils literal">Monad</tt>.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="footnote-4" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#footnote-reference-4">[4]</a></td><td>We could also have used <tt class="docutils literal">OptionT</tt> in earlier examples, e.g. instead
+of explicitly defining <tt class="docutils literal">LoggedOption</tt> - try changing that code to use
+<tt class="docutils literal">OptionT</tt> as an exercise.</td></tr>
+</tbody>
+</table>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
