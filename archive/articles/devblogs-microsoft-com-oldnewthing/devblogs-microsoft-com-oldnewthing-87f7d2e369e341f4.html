@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How can I pass more than one parameter to co_await? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How can I pass more than one parameter to co_await?</h1>
+        <div class="meta">The Old New Thing 2026-11-12T15:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20261112-00/?p=112851/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-87f7d2e369e341f4.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">The co_await operator takes only one parameter, but it can be a big parameter. The post How can I pass more than one parameter to &lt;CODE&gt;co_await&lt;/CODE&gt;? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Suppose you have an awaitable object, but you want the caller to pass a bonus parameter when they do a <code>co_await</code>. For example, you may want the caller to be able to pass a priority or a timeout or something else that modifies how the await occurs.</p>
+<pre>struct Widget
+{
+    ⟦ ... other stuff ... ⟧
+
+    bool await_ready() const { return ⟦ ... ⟧; }
+
+    bool await_suspend(std::coroutine_handle&lt;&gt; handle)
+    {
+        int priority = ??? how do I get a priority ???;
+
+        return internal_start(handle, priority);
+    }
+
+    auto await_resume() { return ⟦ ... ⟧; }
+};
+
+// This doesn't work
+auto result = co_await (widget, priority);
+</pre>
+<p>So how do you pass two parameters to <code>co_await</code> so they can be used in <code>await_<wbr />suspend</code>?</p>
+<p>It&#8217;s a trick question. You can&#8217;t. The <code>co_await</code> operator takes only one parameter.</p>
+<p>So you&#8217;ll have to take all the things you want to use and put them into a single parameter.</p>
+<p>Wrap the awaitable object and its parameters into a larger object, and then await the larger object.</p>
+<p>First, let&#8217;s rename away the coroutine methods inside <code>Widget</code> since we aren&#8217;t awaiting it directly any more.</p>
+<pre>struct Widget
+{
+    ⟦ ... other stuff ... ⟧
+
+<span>private:</span>
+    bool <span>inner_</span>await_ready() const { return ⟦ ... ⟧; }
+
+    bool <span>inner_</span>await_suspend(std::coroutine_handle&lt;&gt; handle)
+    {
+        int priority = ??? how do I get a priority ???;
+
+        return internal_start(handle, priority);
+    }
+
+    auto <span>inner_</span>await_resume() const { return ⟦ ... ⟧; }
+};
+</pre>
+<p>Now we can add a priority parameter to the <code>inner_<wbr />await_<wbr />suspend</code>:</p>
+<pre>struct Widget
+{
+    ⟦ ... other stuff ... ⟧
+
+private:
+    bool inner_await_ready() const { return ⟦ ... ⟧; }
+
+    bool inner_await_suspend(std::coroutine_handle&lt;&gt; handle, <span>int priority</span>)
+    {
+        return internal_start(handle, priority);
+    }
+
+    auto inner_await_resume() const { return ⟦ ... ⟧; }
+};
+</pre>
+<p>And finally, we create a helper class (which is a friend of <code>Widget</code>) that wraps the original object and its priority into a single new awaitable object.</p>
+<pre>struct Widget
+{
+    ⟦ ... other stuff ... ⟧
+
+private:
+    <span>friend struct widget_with_priority;</span>
+
+    ⟦ ... as before ... ⟧
+};
+
+<span>struct widget_with_priority                                          </span>
+<span>{                                                                    </span>
+<span>    widget_with_priority(Widget const&amp; widget, int priority) :       </span>
+<span>        m_widget(widget), m_priority(priority) {}                    </span>
+<span><!-- -->                                                                     </span>
+<span>    bool await_ready() const { return m_widget.inner_await_ready(); }</span>
+<span><!-- -->                                                                     </span>
+<span>    auto await_suspend(std::coroutine_handle&lt;&gt; handle)               </span>
+<span>    {                                                                </span>
+<span>        return m_widget.inner_await_suspend(handle, m_priority);     </span>
+<span>    }                                                                </span>
+<span><!-- -->                                                                     </span>
+<span>    auto await_ready() {                                             </span>
+<span>        return m_widget.await_ready();                               </span>
+<span>    }                                                                </span>
+<span><!-- -->                                                                     </span>
+<span>    Widget const&amp; m_widget;                                          </span>
+<span>    int m_priority;                                                  </span>
+<span>};                                                                   </span>
+</pre>
+<p>You can now do</p>
+<pre>co_await widget_with_priority(widget, priority);
+</pre>
+<p>This solves the problem but is rather unwieldy. We&#8217;ll address that next time.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20261112-00/?p=112851/">How can I pass more than one parameter to &lt;CODE&gt;co_await&lt;/CODE&gt;?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
