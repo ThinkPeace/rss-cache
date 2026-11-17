@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How can I ask a second program to show a dialog box as if it were shown by my first program? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How can I ask a second program to show a dialog box as if it were shown by my first program?</h1>
+        <div class="meta">The Old New Thing 2026-11-17T05:54:01Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20261116-01/?p=112863/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-842e3fb9249f70e1.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">You have to explicitly coordinate the window management. The post How can I ask a second program to show a dialog box as if it were shown by my first program? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Suppose you have two programs, one a GUI program and another a program that runs in the background. The GUI program asks the background program to do some work, and then the background program realizes that it needs to display a dialog box. How do you get that dialog box to appear as if it were shown by the GUI program?</p>
+<p>If you have the background program simply try to show a dialog box with no owner, then that dialog box has no relationship to the GUI program&#8217;s main window, which means that there is no requirement that the dialog box appear in front of the GUI program&#8217;s main window. If the GUI program didn&#8217;t disable its main window, then you have the situation where both windows (the GUI program main window and the dialog box) can be clicked on and interacted with. But if the GUI program <i>did</i> disable its main window, the fact that the main window can end up in front of the dialog box from the background program means that the user can&#8217;t see the dialog box that is preventing them from making progress.</p>
+<p>The GUI program should include its window handle as part of the call into the background program, so that the background program can use that window handle as the owner for the dialog box. If the dialog box is modal, this also disables the GUI program&#8217;s window, and if the user tries to click on the GUI program&#8217;s window, the window manager will instead put focus on the dialog box (and blink its title bar).</p>
+<p>Note that a cross-thread owner/owned relationship implicitly attaches the two threads&#8217; input queues, which means that <a title="AttachThreadInput is like taking two threads and pooling their money into a joint bank account, where both parties need to be present in order to withdraw any money" href="https://devblogs.microsoft.com/oldnewthing/20130619-00/?p=4043"> both threads need to to remain responsive to window messages in order for things to work properly</a> until the attachment is implicitly broken when the dialog box is destroyed.</p>
+<p>That&#8217;s the ideal situation, but maybe you aren&#8217;t in the ideal situation.</p>
+<p>For example, maybe the GUI program is written in a framework that doesn&#8217;t give you access to the window handle.</p>
+<p>You could have the GUI program call <code>Allow­Set­Foreground­Window()</code> with the process ID of the background program, so that the background program can call <code>Set­Foreground­Window()</code> on its dialog box and try to bring it to foreground.</p>
+<p>Now, if the GUI program didn&#8217;t have foreground, then <a title="Foreground activation permission is like love: You can't steal it, it has to be given to you" href="https://devblogs.microsoft.com/oldnewthing/20090220-00/?p=19083"> it can&#8217;t give away a permission that it doesn&#8217;t itself possess</a>, and the call to <code>Set­Foreground­Window</code> will fail.</p>
+<p>There&#8217;s not much more you can do at this point. The system doesn&#8217;t want to let random programs steal focus, and since there was no coordination with the window that <i>has</i> focus, you look like a random program as far as the system is concerned.</p>
+<p>But really, the solution is to fix the design.</p>
+<p>You&#8217;ve already separated the problem into a GUI process and a background process, so honor that separation: Don&#8217;t make the background process try to do UI. UI is the job of the GUI process.</p>
+<p>If the background process wants to display UI, it can ask the GUI process to do it, and then the GUI process can send back the dialog box result. One way to do this would be to have the background process return an error code like &#8220;UI required&#8221; and information about what UI it needs. The GUI process can then display the UI, gather the answer, and then call the background process again. Another way to do it is to have the background process call back into the GUI process when it needs UI, and the GUI process displays the UI, gathers the answer, and returns it to the background process. There are pros and cons to both of these designs, so you can choose the one that works best for you.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20261116-01/?p=112863/">How can I ask a second program to show a dialog box as if it were shown by my first program?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
