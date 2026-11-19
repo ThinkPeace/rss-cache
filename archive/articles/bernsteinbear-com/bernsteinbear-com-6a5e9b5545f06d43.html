@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inside PyPy: first contact with RPython | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Inside PyPy: first contact with RPython</h1>
+        <div class="meta">Max Bernstein&#x27;s Blog 2026-11-19T00:00:00Z</div>
+        <div class="links">
+          <a href="https://bernsteinbear.com/blog/inside-pypy-first-contact-with-rpython/?utm_source=rss">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/bernsteinbear-com/bernsteinbear-com-6a5e9b5545f06d43.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I get restless now and then and I want to implement a programming language. Then after mustering the resolve, I stew, for there is no good implementation language. 1 What am I to do, build my own programming language so that I can then use it to implement the first language? So I go back to modifying an existing implementation instead. There do exist establ…</div>
+        <div class="content">
+          <p>I get restless now and then and I want to implement a programming language.
+Then after mustering the resolve, I stew, for there is no good implementation
+language.<sup id="fnref:come-at-me" role="doc-noteref"><a href="#fn:come-at-me" class="footnote" rel="footnote">1</a></sup> What am I to do, build my own programming language so
+that I can then use it to implement the first language? So I go back to
+modifying an existing implementation instead.</p>
+
+<p>There do exist established general-purpose tools for building fast programming
+language implementations:</p>
+
+<ul>
+  <li>RPython, which has PyPy (Python) as its primary success story but also can
+claim Topaz (Ruby) and a couple of other smaller ones</li>
+  <li>Truffle, which is the foundation of TruffleRuby, GraalPython, GraalJS, and
+even Sulong (LLVM)</li>
+</ul>
+
+<p>And more nascent ones such as <a href="https://github.com/luajit-remake/luajit-remake">Deegen</a>, which was used to reimplement Lua.</p>
+
+<p>They each take different approaches:</p>
+
+<ul>
+  <li>Deegen requires you to write your bytecode interpreter and type system in a
+C++ DSL. From this it generates an interpreter, a baseline JIT compiler, and,
+hopefully eventually, an optimizing JIT compiler.</li>
+  <li>Truffle requires you to write an AST or (newly) bytecode interpreter in an
+Annotation-based Java DSL. From this it specializes guest language code
+before emitting Graal IR, which uses aggressive partial evaluation to
+generate optimized code.</li>
+  <li>RPython requires you to write an interpreter in a restricted dialect of
+Python 2 that acts more like Java or Go than Python. The RPython compiler will then
+analyze your code, translate your “Python” program into C code bundled with
+RPython IR, and then “tier up” from the C code to JITed code at run-time. In
+order to go from “random RPython program” to “JIT compiler”, you need to
+participate in its <em>meta-tracing</em>, which requires annotating where your
+interpreter loop loops.</li>
+</ul>
+
+<p>While none of these <em>spark joy</em>, they do each have benefits, including
+accomplishing the primary goal of offloading a lot of the language runtime
+choices and nasty details.</p>
+
+<p>In this post we will take a first look at RPython because it is the kind of
+VM implementor’s programming language that I keep thinking about. More on that
+later.</p>
+
+<p>Before we continue, please heed this warning: RPython is an implementation
+detail of PyPy. It has not had the years of polish that the rest of the system
+has had. Please do not badger maintainers.</p>
+
+<h2 id="a-little-python">A little Python</h2>
+
+<p>We’re going to build a little program in RPython. I am mostly following along
+with <a href="https://rpython.readthedocs.io/en/latest/">the docs</a>, specifically
+<a href="https://rpython.readthedocs.io/en/latest/getting-started.html">Getting Started with
+RPython</a>.</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># double.py
+</span><span class="k">def</span> <span class="nf">double</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">x</span>
+
+<span class="k">def</span> <span class="nf">entry_point</span><span class="p">(</span><span class="n">argv</span><span class="p">):</span>
+    <span class="k">print</span> <span class="n">double</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s">"__main__"</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">sys</span>
+    <span class="n">sys</span><span class="p">.</span><span class="nb">exit</span><span class="p">(</span><span class="n">entry_point</span><span class="p">(</span><span class="n">sys</span><span class="p">.</span><span class="n">argv</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>There’s a little more ceremony than you might be used to and that’s because
+we’re going to run this file in two modes: normal Python 2 interpreter and
+compiled to C. This is the weirdness of RPython.</p>
+
+<p>Run it:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ python2 double.py
+</code></pre></div></div>
+
+<p>If you don’t have <code class="language-plaintext highlighter-rouge">python2</code> installed, you can install PyPy, which helpfully
+still implements Python 2.</p>
+
+<p>If this all went fine, you will see it print <code class="language-plaintext highlighter-rouge">6</code>.</p>
+
+<p>None of this is RPython <em>yet</em>. For that, we need a hint more ceremony.</p>
+
+<h2 id="first-contact">First contact</h2>
+
+<p>This is when we clone the PyPy project, in which we will find RPython.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ git clone --depth=1 https://github.com/pypy/pypy
+</code></pre></div></div>
+
+<p>Now edit the Python program. Below the <code class="language-plaintext highlighter-rouge">entry_point</code> definition, add the
+following function:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">def</span> <span class="nf">target</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">entry_point</span>
+</code></pre></div></div>
+
+<p>This <code class="language-plaintext highlighter-rouge">target</code> function looks unused, but it is actually a hint to RPython: this
+is where the compiler should start translating.</p>
+
+<p>Let us now compile this program. Either inside the PyPy directory or with
+<code class="language-plaintext highlighter-rouge">PYTHONPATH=/path/to/pypy</code>, run:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ python2 /path/to/pypy/rpython/bin/rpython double.py
+</code></pre></div></div>
+
+<p>If all goes well, you will see a whole mess of output, including a partially
+rendered Mandelbrot fractal. Finally, you will see something like:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>...
+[Timer] Timings:
+[Timer] loading target                 ---  0.0 s
+[Timer] annotate                       ---  0.5 s
+[Timer] rtype_lltype                   ---  0.5 s
+[Timer] backendopt_lltype              ---  0.3 s
+[Timer] stackcheckinsertion_lltype     ---  0.0 s
+[Timer] database_c                     --- 10.6 s
+[Timer] source_c                       ---  1.2 s
+[Timer] compile_c                      ---  1.5 s
+[Timer] =========================================
+[Timer] Total:                         --- 18.0 s
+$
+</code></pre></div></div>
+
+<p>This is the RPython compilation process. In it, RPython is analyzing types,
+removing memory allocations, monomorphizing functions, and generating C code.
+Then it hands this C code off to a C compiler to compile.</p>
+
+<p>You should have in your current directory an executable named <code class="language-plaintext highlighter-rouge">double-c</code>, which
+you can run like <code class="language-plaintext highlighter-rouge">./double-c</code>. It should also print <code class="language-plaintext highlighter-rouge">6</code>.</p>
+
+<p>So far, this is not so different from Python. But let’s try something Pythonic.
+Let’s see what happens when we also use <code class="language-plaintext highlighter-rouge">+</code> to mean string concatenation.</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">def</span> <span class="nf">double</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">x</span>
+
+<span class="k">def</span> <span class="nf">entry_point</span><span class="p">(</span><span class="n">argv</span><span class="p">):</span>
+    <span class="k">print</span> <span class="n">double</span><span class="p">(</span><span class="s">"a"</span><span class="p">)</span>
+    <span class="k">print</span> <span class="n">double</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+<span class="k">def</span> <span class="nf">target</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">entry_point</span>
+
+<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s">"__main__"</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">sys</span>
+    <span class="n">sys</span><span class="p">.</span><span class="nb">exit</span><span class="p">(</span><span class="n">entry_point</span><span class="p">(</span><span class="n">sys</span><span class="p">.</span><span class="n">argv</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>Under normal Python 2, this will work just fine, printing <code class="language-plaintext highlighter-rouge">aa</code> and then <code class="language-plaintext highlighter-rouge">6</code>.
+Under RPython, though, you get this inscrutable error (again, rough edges):</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[translation:ERROR] UnionError:
+
+Offending annotations:
+  SomeChar(const='a', no_nul=True)
+  SomeInteger(const=3, knowntype=int, nonneg=True, unsigned=False)
+
+
+Occurred processing the following simple_call:
+  function double &lt;double.py, line 1&gt; returning
+
+    v2 = simple_call((function double), (3))
+
+In &lt;FunctionGraph of (double:4)entry_point at 0x59c0ad837b40&gt;:
+Happened at file double.py line 6
+
+        print double("a")
+==&gt;     print double(3)
+
+Known variable annotations:
+
+Processing block:
+ block@6[argv_0] is a &lt;class 'rpython.flowspace.flowcontext.SpamBlock'&gt;
+ in (double:4)entry_point
+ containing the following operations:
+       v3 = simple_call((function double), ('a'))
+       v4 = str(v3)
+       v5 = simple_call((function rpython_print_item), v4)
+       v6 = simple_call((function rpython_print_newline))
+       v2 = simple_call((function double), (3))
+       v7 = str(v2)
+       v8 = simple_call((function rpython_print_item), v7)
+       v9 = simple_call((function rpython_print_newline))
+</code></pre></div></div>
+
+<p>and are unceremoniously dropped into the debugger, Pdb (hit Ctrl-D or type
+<code class="language-plaintext highlighter-rouge">exit</code>).</p>
+
+<p>From this message you are meant to intuit that RPython did not enjoy that two
+different types flowed into the <code class="language-plaintext highlighter-rouge">double</code> function. It helpfully tells you that
+there was a <code class="language-plaintext highlighter-rouge">UnionError</code> when trying to reconcile the <code class="language-plaintext highlighter-rouge">SomeChar</code> and
+<code class="language-plaintext highlighter-rouge">SomeInteger</code> types that flowed into the function’s first parameter. It then
+gives you a pointer to the offending line and an IR dump.</p>
+
+<p>This happens because RPython requires function parameters to be monomorphic.
+Though the variables are syntactically untyped, RPython computes a type
+analysis to discover what type each variable should be. When <code class="language-plaintext highlighter-rouge">"a"</code> and <code class="language-plaintext highlighter-rouge">3</code> both
+flow into <code class="language-plaintext highlighter-rouge">x</code>, boom, complaint.<sup id="fnref:variables" role="doc-noteref"><a href="#fn:variables" class="footnote" rel="footnote">2</a></sup></p>
+
+<p>To get around this, we do what all good C++ programmers do and we templatize
+the function. The RPython spelling of this is, as with many other features, a
+function annotation:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">rpython.rlib.objectmodel</span> <span class="kn">import</span> <span class="n">specialize</span>
+
+<span class="o">@</span><span class="n">specialize</span><span class="p">.</span><span class="n">argtype</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">double</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">x</span>
+
+<span class="c1"># ...
+</span></code></pre></div></div>
+
+<p>You will find now that RPython happily compiles the program. This works because
+it makes a new copy of <code class="language-plaintext highlighter-rouge">double</code> for every input type of the first (<code class="language-plaintext highlighter-rouge">0</code>)
+argument.</p>
+
+<p>“Hey wait a minute,”, you might ask, “doesn’t this mean it stops being a valid
+Python 2 program?”</p>
+
+<p>Great question. No.</p>
+
+<p>You can still run the program as long as you provide the location of the
+RPython libraries via <code class="language-plaintext highlighter-rouge">PYTHONPATH</code> (as before):</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ PYTHONPATH=/path/to/pypy pypy double.py
+aa
+6
+$
+</code></pre></div></div>
+
+<p>This runs ~instantly, which is a big relief. Developing an interpreter project
+with a 30 second or more turnaround time for each compile would be really
+frustrating.</p>
+
+<p>This has been a taste of RPython, both great and somewhat frustrating. I
+intentionally made it about RPython <em>as a programming language</em> rather than
+being so focused on RPython <em>as a programming language implementation tool</em>
+because I want some of its features to exist in a general purpose programming
+language… that then also might be used to implement other programming
+languages.</p>
+
+<p>I bring it up because I want to rehash the stuff that I occasionally grumble
+about in the vicinity of PLDI but for some reason have not written about
+online. Perhaps writing about it will encourage people.</p>
+
+<h2 id="a-new-meta-programming-toolkit">A new (meta-)programming toolkit</h2>
+
+<p>I think there is a lot of good stuff in RPython:</p>
+
+<ul>
+  <li>Compile to native AOT with additional JIT. Seems like this provides good
+start-up performance with (optional!) tier-up as the runtime system observes
+the system’s behavior.</li>
+  <li>Automatic memory optimization. There is no good way to syntactically express
+how an object should be allocated—Python is, after all, a very high-level
+language—so Python programs are profligate allocators of memory. RPython
+programs <em>would be</em> the same except that the AOT compiler does a
+whole-program analysis to try and remove these allocations. The JIT does too,
+but via a different mechanism.</li>
+  <li>The JIT is provided to you. You don’t have to think about program analysis;
+the PyPy authors think about it for you.</li>
+  <li>It is possible to do manual memory layout via <code class="language-plaintext highlighter-rouge">lltype</code> so that you can write
+better data structures than Python would otherwise let you express.</li>
+  <li>It provides a garbage collector for you. Furthermore, it handles all the
+stack scanning stuff and “oop maps” so you don’t have to build
+handles/<code class="language-plaintext highlighter-rouge">GC_PROTECT</code>/… yourself.</li>
+</ul>
+
+<p>I wish some stuff were different, or at least modifiable:</p>
+
+<ul>
+  <li>RPython does its partial evaluation and automatic JIT creation via
+<em>meta-tracing</em>. It is one of the last surviving tracing JIT compilers
+(alongside LuaJIT and, kind of, HHVM). For a lot of programs, method-based
+compilers seem to have produced better, or at least more predictable,
+results. I kind of want to see what a meta-method-JIT would look like.</li>
+  <li>The user experience leaves something to be desired. I want better error
+messages, faster compiles, and less output. I want thorough docs.</li>
+  <li>I want better performance feedback. This is in line with the rest of my
+ramblings about mechanical sympathy: the runtime should tell you what is
+wrong. I (or CF) shouldn’t have to stare at IR in traces and go “hmmmmm…”</li>
+  <li>It requires writing a lot of your tooling anew. Even if I had, for example, a
+JavaScript parser written in Python, it likely wouldn’t be in Python 2 and it
+likely would not work well with RPython’s special rules. Runtimes such as
+JRuby get around this by compiling parsers (Prism) to WebAssembly and then
+bundling a WebAssembly interpreter written in Java.</li>
+  <li>Along these lines, I would like more help with lexing and parsing, for which
+I have so little patience.</li>
+  <li>I think it would be neat if it had a way to pause and save an “image” of the
+heap. After all, RPython is in control of all the memory and the code.</li>
+  <li>It would be neat if, in addition to a JIT, it also helped you build an AOT
+compiler for your guest language.</li>
+  <li>What if your language is statically typed? Should the toolkit provide
+functionality for type checking? Type inference?</li>
+  <li>Some solution for C code. You can call it and stuff just fine but there’s no
+Sulong equivalent so it’s a totally opaque barrier to optimization. Don’t
+write your runtime helpers in C, sure, but at some point you have to interact
+with outside code.</li>
+</ul>
+
+<p>I will probably add more to this list as I continue to remember some years of
+these conversations.</p>
+
+<p>Wouldn’t this be great?</p>
+
+<h2 id="now-what">Now what?</h2>
+
+<p>I don’t really have the time, energy, or expertise to build such a thing. There
+are so many design decisions along the way. It would probably accidentally grow
+to be huge and ossify along the way, and what a bummer that would be.</p>
+
+<p>If you have any pointers to existing projects or a way to implement such a
+thing in a really lightweight form (read: sub 10k lines, portable ideas), I
+would be very interested.</p>
+
+<p>Here are some pointers to other projects in the neighborhood:</p>
+
+<ul>
+  <li>Weval, which turns an interpreter into a baseline AOT compiler. Its current
+implementation requires the interpreter to be compilable to Wasm and then its
+heap snapshottable with Wizer. One can imagine this technique being used
+instead to implement a JIT instead of an AOT, thereby also sidestepping the
+snapshot requirement. One might also imagine this applying to another IR than
+WebAssembly. Say, LLVM…</li>
+  <li>semPy, which is an executable semantics for Python.</li>
+  <li>Zig and other languages such as the more nascent k1 have the ability to run
+and generate code at build-time. Perhaps someone could implement a VM toolkit
+in one of these languages. I think a lot of the effort would still go toward
+something like GC handles if you want a moving GC.</li>
+  <li>Virgil</li>
+  <li>Mojo</li>
+</ul>
+
+<h2 id="thank-you">Thank you</h2>
+
+<p>Thanks for CF Bolz-Tereick first for allowing me to talk their ear off about
+this for years and second for reviewing this post.</p>
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:come-at-me" role="doc-endnote">
+      <p>I don’t want to implement atop Racket. C++ and C give me endless
+nightmares and are completely DIY. Yes, yes, I have built large VMs on C++
+and C before. One time I posted so hard about the frustration that my tech
+lead unfollowed me on Twitter. I don’t really want to try to think about GC
+in Rust. <a href="#fnref:come-at-me" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:variables" role="doc-endnote">
+      <p>I initially thought any variable had to be monomorphic but I
+could not get an error from programs such as <code class="language-plaintext highlighter-rouge">x = "a"; x = 3</code>. <a href="#fnref:variables" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
