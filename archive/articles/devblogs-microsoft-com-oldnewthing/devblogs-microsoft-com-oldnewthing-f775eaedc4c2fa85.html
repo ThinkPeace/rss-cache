@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why do I get inconsistent results when I ask for the icon for the .. parent folder? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why do I get inconsistent results when I ask for the icon for the .. parent folder?</h1>
+        <div class="meta">The Old New Thing 2026-11-20T15:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20261120-00/?p=112879/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-f775eaedc4c2fa85.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">It depends on what the parent folder is. The post Why do I get inconsistent results when I ask for the icon for the &lt;TT&gt;..&lt;/TT&gt; parent folder? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>A customer wanted their program to show a file listing with icons, and they also wanted to include an entry for the parent folder, programmatically known as <tt>..</tt> (double period). They obtained icons by calling the <code>SHGetFileInfo</code> function, but they got weird, inconsistent results when they asked for the icon of the <tt>..</tt> parent folder.</p>
+<pre>SHGetFileInfo(L"..", 0, &amp;info, sizeof(info),
+    SHGFI_ICON | SHGFI_SMALLICON | SHGFI_SYSICONINDEX);
+</pre>
+<p>They found that when they ran the program in a debugger, it gave them the desired folder icon 🗀. But when it ran on the customer&#8217;s system, it showed a drive icon 🖴. What&#8217;s going on? Why is the icon changing depending on who is running the program?</p>
+<p>My psychic debugging powers¹ told me that the developer told their debugger to run the program with the current directory equal to something that is at least two directory levels away from the root. Perhaps they are using Visual Studio and accepted the default configuration that sets the current directory to <tt>$(ProjectDir)</tt>, and their project directory is eomthing like <tt>C:\<wbr />Users\<wbr />name\<wbr />repos\<wbr />contoso</tt>. On the other hand, the customer is running the program while the current directory is set to an immediate subdirectory of the drive root, like <tt>C:\<wbr />Contoso</tt>.</p>
+<p>When you pass <tt>".."</tt> to <code>SHGetFileInfo</code>, it is recognized as a relative path and is resolved against the current directory. And then you get the icon for whatever that turns out to be.</p>
+<p>Resulting iconfolderdrive</p>
+<table class="cp3" border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th>Current directory</th>
+<td><tt>C:\repos\contoso</tt></td>
+<td><tt>C:\contoso</tt></td>
+</tr>
+<tr>
+<th><tt>".."</tt> resolves to</th>
+<td><tt>C:\repos</tt></td>
+<td><tt>C:\</tt></td>
+</tr>
+</tbody>
+</table>
+<p>So what should you do if you want to get a folder icon?</p>
+<p>You can pass the <code>SHGFI_<wbr />USE­FILE­ATTRIBUTES</code> flag, which means, &#8220;Just pretend that I gave you a valid path to a thing with the attributes I passed as the second parameter. What icon would you use for it?&#8221;</p>
+<pre>SHGetFileInfo(<span>L"C:\\a", FILE_ATTRIBUTE_DIRECTORY</span>, &amp;info, sizeof(info),
+    <span>SHGFI_USEFILEATTRIBUTES | </span>
+    SHGFI_ICON | SHGFI_SMALLICON | SHGFI_SYSICONINDEX);
+</pre>
+<p>We pass a file path of <tt>C:\a</tt> and say that its attributes are <code>FILE_<wbr />ATTRIBUTE_<wbr />DIRECTORY</code>. The actual path is not important, as long as it is a syntactically valid path.</p>
+<p>Next time, we&#8217;ll look at a follow-up question related to this problem.</p>
+<p>¹ I want to remind you that if you force me to do psychic debugging, then you have <i>failed</i>. When I coined the term &#8220;psychic debugging&#8221;, I used it to describe the case of debugging a problem where the person asking the question omitted crucial information, forcing me to go to the extra effort of obtaining that information through supernatural means. It&#8217;s like showing up at the passport office without having the proper forms filled out. The clerk can probably give you the correct form and help you fill it out, but they&#8217;re not going to be happy about it because you&#8217;re just creating extra work for them due to being ill-prepared.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20261120-00/?p=112879/">Why do I get inconsistent results when I ask for the icon for the &lt;TT&gt;..&lt;/TT&gt; parent folder?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
