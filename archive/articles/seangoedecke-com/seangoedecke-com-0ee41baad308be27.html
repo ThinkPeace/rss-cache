@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why output caching doesn&#x27;t work | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why output caching doesn&#x27;t work</h1>
+        <div class="meta">seangoedecke.com RSS feed 2026-11-21T00:00:00Z</div>
+        <div class="links">
+          <a href="https://seangoedecke.com/why-output-caching-doesnt-work/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/seangoedecke-com/seangoedecke-com-0ee41baad308be27.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">LLM inference economics depends on caching 1 model inputs, to prevent the entire conversation history being recomputed on each message 2 . Should we cache model outputs in the same way? As it turns out, no. Why cache outputs? First, here’s why we might think caching outputs is a good idea. We cache inputs to prevent repeated work, but LLMs do a lot of repea…</div>
+        <div class="content">
+          <p>LLM inference economics depends on caching<sup id="fnref-1"><a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fn-1" class="footnote-ref">1</a></sup> model inputs, to prevent the entire conversation history being recomputed on each message<sup id="fnref-2"><a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fn-2" class="footnote-ref">2</a></sup>. Should we cache model <em>outputs</em> in the same way? As it turns out, no.</p>
+<h3 id="why-cache-outputs">Why cache outputs?<a href="#why-cache-outputs" aria-label="why cache outputs permalink" class="heading-anchor after"></a></h3>
+<p>First, here’s why we might think caching outputs is a good idea. We cache inputs to prevent repeated work, but LLMs do a lot of repeated work in their output as well:</p>
+<ul>
+<li>When I get agents to write PRs I often ask them to repeat and explain relevant code snippets in the conversation</li>
+<li>Long-running agent investigations produce lots of evidence docs, but also need to quote from those docs when they respond to the user</li>
+<li>Every time I’ve played around with automated AI research I’ve asked the agent to repeat some sample model outputs so I can make my own qualitative check</li>
+</ul>
+<p>In all of these cases<sup id="fnref-3"><a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fn-3" class="footnote-ref">3</a></sup> I could go and read the files myself, but I don’t. Agents produce such a volume of output, and reading agent output is tiresome, so it’s better to simply ask for the key points.</p>
+<p>It’s an obvious waste of tokens<sup id="fnref-4"><a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fn-4" class="footnote-ref">4</a></sup> to repeat all of this content. In fact, it’s worse than the input caching situation, because it’s a waste of <em>output</em> tokens, which are significantly more expensive to produce<sup id="fnref-5"><a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fn-5" class="footnote-ref">5</a></sup> than input tokens are to ingest.</p>
+<h3 id="how-could-we-cache-outputs">How could we cache outputs?<a href="#how-could-we-cache-outputs" aria-label="how could we cache outputs permalink" class="heading-anchor after"></a></h3>
+<p>If you want to prevent this, you’d have to get the model to avoid repeating itself. For instance, you could fine-tune or prompt a coding model to output “src/script.py:12-15” instead of simply regurgitating those lines of the file.</p>
+<p>More generally, you could fine-tune a model to reference segments of its own conversation history instead of repeating them. The harness could then trivially expand those references with the actual content, so all of this is transparent to the user.</p>
+<h3 id="why-caching-outputs-is-probably-a-bad-idea">Why caching outputs is probably a bad idea<a href="#why-caching-outputs-is-probably-a-bad-idea" aria-label="why caching outputs is probably a bad idea permalink" class="heading-anchor after"></a></h3>
+<p>Unfortunately none of this is a good idea, because <strong>it only optimizes visible output</strong>. I don’t <em>think</em> models repeat themselves often in their internal chain of thought<sup id="fnref-6"><a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fn-6" class="footnote-ref">6</a></sup>. I can’t read frontier chains of thought, but my sense from open models and general principles is that they shouldn’t need to, because that information is already available to them. So optimizing repetition only optimizes the segment of model output that is visible to the user. How much is that?</p>
+<p>Based on my own agent histories, it’s about 6%. 50% of output tokens are reasoning tokens, and the remaining 44% are tool calls<sup id="fnref-7"><a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fn-7" class="footnote-ref">7</a></sup>. So we’re running headlong into <a href="https://en.wikipedia.org/wiki/Amdahl%27s_law">Amdahl’s law</a>: even if you can save two-thirds of the tokens in visible output (a ridiculously optimistic estimate), you’re still only saving 4% of total output tokens.</p>
+<h3 id="how-to-save-output-tokens">How to save output tokens<a href="#how-to-save-output-tokens" aria-label="how to save output tokens permalink" class="heading-anchor after"></a></h3>
+<p>If you want to save output tokens, you need to reduce the 94% of output tokens that are invisible, which largely depends on <em>intelligence</em>. The smarter the model<sup id="fnref-8"><a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fn-8" class="footnote-ref">8</a></sup>, the fewer reasoning tokens and tool calls it needs to get to the right answer. This is why we see a strange phenomenon<sup id="fnref-9"><a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fn-9" class="footnote-ref">9</a></sup> where more expensive models are actually cheaper to use: they might be 5x more expensive per-token, but they can get to the right answer with 6x fewer tokens, so the overall cost is less.</p>
+<div class="footnotes">
+<hr>
+<ol>
+<li id="fn-1">
+<p>In the KV cache.</p>
+<a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fnref-1" class="footnote-backref">↩</a>
+</li>
+<li id="fn-2">
+<p>Including tool calls.</p>
+<a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fnref-2" class="footnote-backref">↩</a>
+</li>
+<li id="fn-3">
+<p>Coding agents often used to repeat tokens in tool calls (e.g. by re-outputting the entire file content for each edit) but I think this behavior has mostly been replaced with more efficient find-and-replace editing tools.</p>
+<a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fnref-3" class="footnote-backref">↩</a>
+</li>
+<li id="fn-4">
+<p>I’m pretty sure that most mature inference providers already do speculative decoding based on previous ngrams in the input, which would at least exploit output repetition to deliver a speedup.</p>
+<a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fnref-4" class="footnote-backref">↩</a>
+</li>
+<li id="fn-5">
+<p>The reason, broadly speaking, is also the reason why transformers are so important: because of the attention mechanism, input tokens can be ingested in parallel, while output tokens must be generated one-at-a-time.</p>
+<a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fnref-5" class="footnote-backref">↩</a>
+</li>
+<li id="fn-6">
+<p>I’m only moderately confident about this. Some open-source reasoning models (particularly early ones) do, but those models also use way more tokens than frontier models for the same output, so my guess is that powerful frontier models don’t loop in their chain of thought very often.</p>
+<a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fnref-6" class="footnote-backref">↩</a>
+</li>
+<li id="fn-7">
+<p>It’s possible that tool calls involve some repetition as well, if agents are composing content in the chain of thought and then repeating it in the tool. Any readers who have done a lot of coding with open-source models (or who work at a frontier lab) and thus know the answer to this, please email me if you can — I’m curious.</p>
+<a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fnref-7" class="footnote-backref">↩</a>
+</li>
+<li id="fn-8">
+<p>And the better the harness, though I remain convinced that there isn’t that much comparative advantage in harness quality because everyone can copy each other.</p>
+<a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fnref-8" class="footnote-backref">↩</a>
+</li>
+<li id="fn-9">
+<p>This applies to real life too, and is the reason why you shouldn’t hire the cheapest plumber you can find.</p>
+<a href="https://seangoedecke.com/why-output-caching-doesnt-work/#fnref-9" class="footnote-backref">↩</a>
+</li>
+</ol>
+</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
