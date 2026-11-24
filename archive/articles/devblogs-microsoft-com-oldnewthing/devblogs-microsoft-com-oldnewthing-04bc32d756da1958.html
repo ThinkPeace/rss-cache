@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>When happens to entries in the CoreApplication Properties when the source apartment shuts down? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>When happens to entries in the CoreApplication Properties when the source apartment shuts down?</h1>
+        <div class="meta">The Old New Thing 2026-11-24T15:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20261124-00/?p=112889/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-04bc32d756da1958.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Nothing, unless it&#x27;s the last apartment. The post When happens to entries in the CoreApplication Properties when the source apartment shuts down? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p><a href="https://devblogs.microsoft.com/oldnewthing/20261023-00/?p=112793/&amp;commentid=144868#comment-144868"> Commenter Luca Bacci observed</a>:</p>
+<blockquote class="q"><p>Don&#8217;t know why, but last I tried the COM static store (runtime class &#8220;Windows.ApplicationModel.Core.CoreApplication&#8221;) was accessible from an unpackaged, Win32 application. It also seems to tie entries to the originating apartment lifetime (namely: the apartment from which the property is added). Can you shed some light?</p></blockquote>
+<p>First part first: The COM static store is available to all applications.</p>
+<blockquote class="q"><p>This API is supported in Universal Windows Platform apps only, <a href="https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.core.coreapplication?view=winrt-28000#:~:text=This%20API%20is%20supported%20in%20Universal%20Windows%20Platform%20apps%20only%2C%20except%20for%20the%20Properties%20property%2C%20which%20is%20always%20available."> except for the <code>Properties</code> property, which is always available</a>.</p></blockquote>
+<p>Okay, now the second part: What happens to the entries in the CoreApplication Properties when the source apartment shuts down?</p>
+<p>Nothing.</p>
+<p>Nothing happens to them. They are still there. Here&#8217;s a demonstration:</p>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;winrt/Windows.ApplicationModel.Core.h&gt;
+#include &lt;winrt/Windows.Foundation.Collections.h&gt;
+
+int main()
+{
+    winrt::init_apartment(winrt::apartment_type::single_threaded);
+
+    std::thread t([] {
+        winrt::init_apartment(winrt::apartment_type::single_threaded);
+        winrt::Windows::ApplicationModel::Core::CoreApplication::Properties().
+            Insert(L"meow", winrt::box_value(1));
+        winrt::uninit_apartment();
+        });
+
+    t.join();
+
+    auto value = winrt::unbox_value&lt;int&gt;(
+        winrt::Windows::ApplicationModel::Core::CoreApplication::Properties().
+        Lookup(L"meow"));
+    
+    printf("Got the value %d\n", value);
+    winrt::uninit_apartment();
+    return 0;
+}
+</pre>
+<p>After initializing COM on the main thread, we create a secondary thread, on which we also initialize COM in single-threaded mode, add a value to the <code>Core­Application.<wbr />Properties</code> called <code>"meow"</code> with a value of 1, and then uninitialize the apartment.</p>
+<p>Back on the main thread, we wait for that to finish, and then go to the <code>Core­Application.<wbr />Properties</code> and ask for the <code>"meow"</code> value, and hey, there it is!</p>
+<p>So the entries in <code>Core­Application.<wbr />Properties</code> do not expire at the expiration of the apartment that added them. But, they do expire when the <i>last</i> apartment shuts down, because that&#8217;s when COM shuts down for the entire process.</p>
+<p>Next time, we&#8217;ll investigate what Luca observed.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20261124-00/?p=112889/">When happens to entries in the CoreApplication Properties when the source apartment shuts down?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
