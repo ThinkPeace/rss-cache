@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ansible Fails waiting for privilege escalation on Ubuntu 26 | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Ansible Fails waiting for privilege escalation on Ubuntu 26</h1>
+        <div class="meta">Jeff Geerling 2026-11-25T21:43:00Z</div>
+        <div class="links">
+          <a href="https://www.jeffgeerling.com/blog/2026/ansible-fails-become-ubuntu2604/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jeffgeerling-com/jeffgeerling-com-3a9afe93a861bf68.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">I&#x27;ve slowly been moving my servers from Ubuntu 22 and 24 to 26 this year, and noticed my Ansible automation starts failing if I have password protection for sudo use: $ ansible-playbook main.yml -K BECOME password: PLAY [Security] ******************************************************* TASK [Gathering Facts] *************************************************…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>Ansible Fails waiting for privilege escalation on Ubuntu 26</h1>
+    <p>I've slowly been moving my servers from Ubuntu 22 and 24 to 26 this year, and noticed my Ansible automation starts failing if I have password protection for <pre>sudo</pre> use:</p>
+    <pre>
+      <pre>$ ansible-playbook main.yml -K
+BECOME password: 
+
+PLAY [Security] *******************************************************
+
+TASK [Gathering Facts] ***********************************************************************
+fatal: [my-server.local]: FAILED! =&gt; 
+    msg: 'Timeout (12s) waiting for privilege escalation prompt: '
+</pre>
+    </pre>
+    <p>Apparently Ubuntu's been rewriting system utilities in Rust, and the <pre>sudo-rs</pre> version that ships on Ubuntu 26.04 has some incompatiblities with the <pre>sudo</pre> I've used on servers for 20+ years.</p>
+    <p>It prints an extra string before the password prompt, which <pre>sudo</pre> doesn't do, and that can confuse automation tools like Ansible that wait for a specific prompt.</p>
+    <p>There's a thread in the Ansible project covering the issue: <a href="https://github.com/ansible/ansible/issues/85837">validate sudo become plugin against sudo-rs
+</a>. The fix landed in Ansible Core 2.22.0, and is being backported into updates in 2.16, 2.18, 2.19, 2.20, and maybe also 2.21 (it's quite disruptive!). It looks like it also broke <a href="https://github.com/pyinfra-dev/pyinfra/pull/1734">pyinfra</a>, and their fix is in the latest release of 3.11.</p>
+    <p>I updated Ansible (<pre>pip install -U ansible</pre>) and now <pre>-K</pre> (<pre>--ask-become-pass</pre>) works again.</p>
+    <p>Another alternative is to use the traditional version of <pre>sudo</pre> that still ships with Ubuntu 26. For that, the easiest way is to set the <pre>become_exe</pre> inside your hosts file:</p>
+    <pre>
+      <pre>dell-precision.local ansible_become_exe=sudo.ws
+</pre>
+    </pre>
+    <p>Or you could even revert <pre>sudo</pre> systemwide on your Ubuntu host:</p>
+    <pre>
+      <pre>update-alternatives --config sudo
+</pre>
+    </pre>
+    <p>I'm not sure why Ubuntu sees the need to <a href="https://www.abdallaelmorsi.net/ubuntu-rust-coreutils-migration-what-actually-breaks-in-scripts-and-how-to-fix-it/">rewrite common Linux utils in Rust</a>. I don't mind Rust, but these are foundational tools every Linux system relies on. This isn't a window manager, where experimentation is more acceptable<a href="https://www.jeffgeerling.com/blog/2026/ansible-fails-become-ubuntu2604/#fn:1">1</a>.</p>
+    <p>If other distros plan on moving to <pre>sudo-rs</pre> that's one thing, but if it's just Ubuntu, maybe I should hop back to Debian for everything, and not just my cloud servers.</p>
+    <ol>
+      <li>
+        <p>Yes, I know this makes me sound like "old man yells at [rust]," but major changes to structural components of Linux should take longer, IMO. At least on the Red Hat side, we have Fedora, which is more bleeding edge, then at least a few years' gap before it hits 'production' systems. With Ubuntu, there is no cutting edge upstream where things like this can be fixed or worked around before hitting prod! (And no, I don't consider non-LTS Ubuntu releases the same thing.) <a href="https://www.jeffgeerling.com/blog/2026/ansible-fails-become-ubuntu2604/#fnref:1">↩︎</a></p>
+      </li>
+    </ol>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
