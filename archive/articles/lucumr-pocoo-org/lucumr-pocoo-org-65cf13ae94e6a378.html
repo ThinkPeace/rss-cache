@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Abolish Lock Poisoning | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Abolish Lock Poisoning</h1>
+        <div class="meta">Armin Ronacher&#x27;s Thoughts and Writings 2026-11-25T00:00:00Z</div>
+        <div class="links">
+          <a href="https://lucumr.pocoo.org/2026/11/25/poisoning/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/lucumr-pocoo-org/lucumr-pocoo-org-65cf13ae94e6a378.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Rust has a curious feature that I don’t think the language would land today, if it was not there for a long time: mutex poisoning. When some Rust code panics while holding a std::sync::Mutex , the mutex is poisoned . That means that any further call to lock() returns a PoisonError . The motivation for this feature is that an object might have some internal…</div>
+        <div class="content">
+          <p>Rust has a curious feature that I don&#8217;t think the language would land today,
+if it was not there for a long time: mutex poisoning.  When some Rust code
+panics while holding a <code>std::sync::Mutex</code>, the mutex is <em>poisoned</em>.  That means
+that any further call to <code>lock()</code> returns a <code>PoisonError</code>.  The motivation for
+this feature is that an object might have some internal invariants that need to
+be upheld and panicking in the wrong moment might invalidate reasonable at and leave an
+object behind in a broken state.</p>
+<p>Personally I absolutely hate this feature as it has bitten me so many times and
+I cannot once remember it helping me.  The libs team is
+<a href="https://github.com/rust-lang/rust/issues/149359">discussing</a> making the
+non-poisoning locks the default in the next edition but entirely expectedly it
+has caused quite a few people to jump to the defence of the feature.</p>
+<p>In this post I want to make my personal case why poisoned locks should either
+be entirely removed or be made the exception.</p>
+<p>Primarily this is because I have yet to come across code in the wild that
+handles a poisoned lock correctly.  On the other hand I have come across enough
+code that mishandles it and as a result behaves worse than a
+<a href="https://docs.rs/parking_lot">parking_lot</a> lock would which does not support
+poisoning.</p>
+<p><a href="https://news.ycombinator.com/item?id=46041342">Josh Triplett</a> put it quite
+strongly in a hackernews comment: &#8220;In the entire history of the standard
+library, we have never once seen a single report of anyone attempting to recover
+from poison.&#8221;</p>
+<p>When a panic happens with a lock held, there are two reasonable reactions: shut
+the process down, or carry on and ignore the flag.  With <code>panic = &quot;abort&quot;</code> you
+get the former and poisoning never comes up.  From all the evidence I have seen,
+with unwinding, the idiomatic <code>lock().unwrap()</code> picks the worst option of all.</p>
+<p>That&#8217;s because it neither stops the process nor lets it continue as it will turn
+every further lock into a panic with sometimes disastrous effects.  But that
+is not the only issue with the system today.  So here I want to share some of
+the issues and with some references to real world code of how people got bitten.</p>
+<h2>The Error Holds the Lock</h2>
+<p>One subtle aspect to the poisoning is that the <code>PoisonError</code> needs to hold the guard.
+That&#8217;s because in order to ignore the poison flag, you need to fetch the guard
+from the error object.  Holding on to the error means holding on to the lock!</p>
+<p>That can cause common code that does error wrapping / error conversions into a
+deadlock hazard.  The innocent looking <code>m.lock()?</code> in a function returning
+<code>Box&lt;dyn Error&gt;</code> or similar keeps the mutex locked for as long as the error
+lives (<a href="https://github.com/rust-lang/rust/issues/159930">#159930</a>).</p>
+<p>This can also happen with if let.  For instance in
+<a href="https://github.com/farion1231/cc-switch/commit/43077f5539235f0255642ec9aab558d29f3f1b33">cc-switch</a>
+you can see that they had a test hung because a <code>if let Ok(..) = lock() { .. } else { .. }</code> fallback locked the same mutex again while the unnamed
+<code>PoisonError</code> from the condition still owned the guard.
+<a href="https://github.com/David-Martel/PC-AI/pull/273/changes">PC-AI</a> had the same bug
+in a <code>match</code> arm.  Another case can be found in
+<a href="https://github.com/anatolykoptev/ox-embed-server/issues/152">ox-embed-server</a>.</p>
+<h2>Panic To Outage</h2>
+<p>Deviously poisoning does not fail fast and done wrong, it fails forever.  The
+original panic happens once, on one thread, often somewhere unrelated from future
+failures.  Every later <code>lock().unwrap()</code> on that lock now however panics as
+well, and because so much Rust code survives panics (thread pools, request
+handlers, tokio tasks, FFI boundaries), the process stays up and becomes
+useless:</p>
+<ul>
+<li>In RLS a failed cargo build panicked with <code>ENV_LOCK</code> held <a href="https://github.com/rust-lang/rls/pull/492">which made any
+subsequent runs impossible</a>.</li>
+<li>Mozilla&#8217;s
+<a href="https://github.com/mozilla/application-services/issues/4661">application-services</a>
+saw <code>PoisonError</code> <a href="https://github.com/mozilla/application-services/issues/4658">rise to rank
+5</a> in crash
+stats and <a href="https://github.com/mozilla/application-services/pull/4663">moved to
+parking_lot</a> after
+they concluded they did not benefit of poisoning handling.</li>
+<li>A <a href="https://github.com/neondatabase/neon/issues/2200">Neon safekeeper</a> on
+staging failed every timeline lookup after a panic with a global lock held,
+and the original panic could not even be found in the logs.</li>
+</ul>
+<p>While not live services, test suites show the same general issue.  One failing
+test poisons a shared static and every test after it fails with <code>PoisonError</code>.
+This problem showed up for
+<a href="https://github.com/rust-lang/cargo/pull/12264">cargo</a>,
+<a href="https://github.com/denoland/deno/pull/6567">deno</a>,
+<a href="https://github.com/pola-rs/polars/pull/26627">polars</a> and
+<a href="https://github.com/rust-lang/rust/issues/43155#issuecomment-315535095">rustc</a>
+itself.</p>
+<h2>Attempt At Recovery</h2>
+<p>If you recover with <code>into_inner()</code>, the flag stays set and every later access
+takes the recovery path again.  And remember that for the first nine years of
+Rust after the poisoning feature landed, you could not even clear it as
+<code>clear_poison</code> arrived only in 1.77.  Not clearing the flag means that potentially
+expensive side effects will happen from that point onwards:</p>
+<p><a href="https://github.com/jarida-io/goose-in-a-pond/commit/8c7e7fed06385d3dfd2958ba86ef0bb119d56688">goose-in-a-pond</a>
+rebuilt its decoder state on every transcription after a single panic,
+<a href="https://github.com/librefang/librefang/commit/5edca0bfcf856324a6fc3701bf441d87ec7c9cca">librefang</a>
+logged the same warning on every access, and a
+<a href="https://github.com/anatolykoptev/ox-embed-server/issues/94">pool</a> threw its
+model away on every return.</p>
+<h2>Nobody Relies on It, Not Even std</h2>
+<p>So who is handling poisonings?  I&#8217;m really not sure, definitely not the standard library.
+Every place where the standard library&#8217;s own code ignores it.  Standard I/O has done so since <a href="https://github.com/rust-lang/rust/commit/2e8e8ab5648">March
+2015</a>, two months before
+1.0, because &#8220;any poison must have been the result of user code which the lock
+isn&#8217;t protecting&#8221;.  A common issue with a lot of poisoning errors that never
+had anything to do with the mutex that was held.</p>
+<p>Same with the <a href="https://github.com/rust-lang/rust/commit/72e96604c01">panic output
+capture</a>, the <a href="https://github.com/rust-lang/rust/commit/2d2c9e44939">backtrace
+lock</a> and the <a href="https://github.com/rust-lang/rust/commit/9530ba0fe21">WASI
+environment lock</a>.  They
+all do the same and unsurprisingly there is an <a href="https://github.com/rust-lang/rust/pull/148689">open
+PR</a> to move std&#8217;s internal
+mutexes to <code>nonpoison</code>.</p>
+<p>And I would argue the ecosystem has largely come to the same conclusion.  Tokio&#8217;s own locks don&#8217;t poison.
+Internally it wraps the std one in an <a href="https://github.com/tokio-rs/tokio/blob/master/tokio/src/loom/std/mutex.rs">adapter that removes poison</a>.  When it landed Carl Lerche remarked &#8220;<a href="https://github.com/tokio-rs/tokio/pull/2814#discussion_r485760722">I rather pretend lock poisoning isn&#8217;t a
+thing</a>.&#8221;  In
+one case Eliza Weisman <a href="https://github.com/tokio-rs/tokio/pull/2828#discussion_r492350077">needed
+<code>into_inner</code></a>
+to unlink a waiter during drop, or &#8220;we&#8217;ll leave the list with a potentially
+dangling pointer&#8221;.  I want to point to this in particular because this is a case where poisoning stood in the way of memory safety which is commonly argued as a reason you want poisoning.</p>
+<p>Wasmtime, crossbeam-channel, tracing-subscriber always ignores lock poisoning.
+rust-analyzer <a href="https://github.com/rust-lang/rust-analyzer/pull/1359">switched to
+parking_lot</a> after
+cancellation poisoned its solver like RLS did before.  The parking_lot maintainer
+<a href="https://github.com/Amanieu/parking_lot/issues/324#issuecomment-1059616487">described it</a>
+as an anti-feature that hurts usability and reliability to which I strongly
+concur.</p>
+<h2>Why Only Mutex?</h2>
+<p>Another aspect here is why this is done on <code>Mutex</code> but not on <code>RefCell</code>.  Surely
+if the case for poisoning is that some code temporarily breaks an invariant, panics, and
+someone else observes the broken state, then this should apply to more cases.</p>
+<p>Take the usual example that argues in favor of poisoning and replace <code>Mutex</code>
+with <code>RefCell</code>, and you have <a href="https://play.rust-lang.org/?version=stable&amp;mode=debug&amp;edition=2024&amp;gist=549fb7c9c0626a0ebd29bfa3a2e97ad4">exactly the same
+problem</a>.
+Threads are not needed at all and this is not hypothetical either as tokio
+catches every task panic.  Paired with a <code>LocalSet</code> the panic comes back as a
+<code>JoinError</code>, the next <code>borrow()</code> succeeds and <a href="https://play.rust-lang.org/?version=stable&amp;mode=debug&amp;edition=2024&amp;gist=925975f7d49c10c0d6821cfeb00e1f60">reads a null
+pointer</a>
+exactly like the mutex example from the issue.</p>
+<p>Given how much panic catching goes on in async code, much of which is <code>!Send</code>
+for performance reasons, I&#8217;m not even convinced that panics get caught more
+often in multi-threaded code yet nobody asks for <code>RefCell</code> to poison.</p>
+<p>The standard library isn&#8217;t consistent with itself either as <code>LazyLock</code> poisons
+for good, <code>OnceLock</code> never poisons, <code>Mutex</code> poisons but lets you recover.</p>
+<p>Also remember that poisoning only tracks panics and a more common early return
+has the same issue.  The <code>?</code> operator (as well as the <code>try!</code> macro before) that
+returns early from the middle of a critical section leaves the same broken
+invariant behind an unpoisoned lock.</p>
+<p>Note also that the coupling of poisoning of mutexes <a href="https://github.com/rust-lang/rust/issues/134645#issuecomment-3590942770">is
+historical</a>
+and an explicit <code>Poison&lt;T&gt;</code> type would allow you to opt into this for any
+interior mutability wrapper.</p>
+<h2>What I want</h2>
+<p>Personally I hope the rust team stabilizes <code>std::sync::nonpoison</code>, have
+<code>std::sync::Mutex</code> <a href="https://github.com/rust-lang/libs-team/issues/169">resolve to it by
+default</a>.  If someone wants
+poisoning add that separate <code>Poison&lt;T&gt;</code> wrapper then anyone who believes they
+need and can handle it, can opt into it for any type including <code>RefCell</code> or
+tokio threads.</p>
+<p>What I think would be the worst of all outcomes is the counter-proposal is to
+keep poisoning but have <code>lock()</code> panic instead of returning a <code>Result</code>.  That
+would only fix the held guard lock semantics, and to a smaller degree the
+ergonomics, but it makes the slow outage the only option.  That is what every
+<code>lock().unwrap()</code> does today, and the issues above should be plenty of evidence
+of this being a problematic behavior in light of the existence of <code>catch_unwind</code>.</p>
+<p>The post <a href="https://sunshowers.io/posts/on-poisoning/">In defense of lock
+poisoning</a> is the best argument for
+the other side and worth reading but I believe the evidence all points the other
+way, and most of what Oxide ships aborts on panic anyway which is also a
+reasonable behavior.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
