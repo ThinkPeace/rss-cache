@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Why did it seem that the entries in the CoreApplication Properties expired when the source application shut down? | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Why did it seem that the entries in the CoreApplication Properties expired when the source application shut down?</h1>
+        <div class="meta">The Old New Thing 2026-11-25T15:00:00Z</div>
+        <div class="links">
+          <a href="https://devblogs.microsoft.com/oldnewthing/20261125-00/?p=112895/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/devblogs-microsoft-com-oldnewthing/devblogs-microsoft-com-oldnewthing-55e518360832a1f8.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">It&#x27;s not the Properties. It&#x27;s the object that you put in the Properties. The post Why did it seem that the entries in the CoreApplication Properties expired when the source application shut down? appeared first on The Old New Thing .</div>
+        <div class="content">
+          <p>Last time, we confirmed that <a title="When happens to entries in the CoreApplication Properties when the source apartment shuts down?" href="https://devblogs.microsoft.com/oldnewthing/20261124-00/?p=112889"> entries in the <code>Core­Application.<wbr />Properties</code> are not tied to the lifetime of the apartment that added them</a>. But Luca claimed that they did. Where did this claim come from?</p>
+<p>While it&#8217;s true that the entries don&#8217;t expire, the <i>objects</i> might expire.</p>
+<p>If the object you put into the <code>Core­Application.<wbr />Properties</code> are not agile, then they must be used in the apartment that created them, and therefore when that apartment shuts down, the objects become unusable.</p>
+<p>When you put a non-agile object in the <code>Core­Application.<wbr />Properties</code>, it says, &#8220;Oh no, this object is not agile. I need to create an agile wrapper for it, and put the <i>wrapper</i> in the <code>Properties</code> collection.&#8221; It has to do this because the <code>Properties</code> is a global object that can be used from any thread, so it&#8217;s possible to retrieve the object from a thread different from the one that the non-agile object belongs to.</p>
+<p>When you retrieve the object from the <code>Properties</code>, the <code>Core­Application</code> unwraps the agile wrapper, and if you aren&#8217;t on the same thread that the wrapped object belongs to, then the COM infrastructure will create a proxy for the wrapped object. When you call methods on the proxy, the COM infrastructure switches to the object&#8217;s original thread, calls the method, and then takes the results back to the calling thread, possibly creating proxies for them if those results are themselves non-agile.</p>
+<p>This agile wrapper is nothing special. It&#8217;s the standard agile wrapper created by <code>Ro­Get­Agile­Reference</code> function.</p>
+<p>Here are some of the more common libraries for implementing COM objects and whether their objects are agile.</p>
+<table class="cp3" border="1" cellspacing="0" cellpadding="3">
+<tbody>
+<tr>
+<th>Library</th>
+<th>Object agility</th>
+</tr>
+<tr>
+<td>C#</td>
+<td>Agile</td>
+</tr>
+<tr>
+<td>C++/WinRT default</td>
+<td>Agile</td>
+</tr>
+<tr>
+<td>C++/WinRT + <tt>non_agile</tt></td>
+<td>Non-agile</td>
+</tr>
+<tr>
+<td>WRL default</td>
+<td>Agile</td>
+</tr>
+<tr>
+<td>WRL + <tt>__WRL_CONFIGURATION_LEGACY__</tt></td>
+<td>Non-agile</td>
+</tr>
+<tr>
+<td>C++/CX default</td>
+<td>Agile</td>
+</tr>
+<tr>
+<td>C++/CX + <tt>[MarshalingBehavior(Standard)]</tt></td>
+<td>Non-agile</td>
+</tr>
+<tr>
+<td>Handwritten</td>
+<td>Agile if you aggregate the<br />
+free-threaded marshaler</td>
+</tr>
+</tbody>
+</table>
+<p>My guess is that Luca implemented a COM object by hand, since the other libraries require you to opt out of agility explicitly, in which case the lack of agility probably would have been called out.</p>
+<p>Okay, so now we understand how Luca came to the conclusion that entries in the <code>Core­Application.<wbr />Properties</code> are auto-removed when the source apartment shuts down: The tests were done with non-agile objects. What they observed was the <i>value</i> expiring, not the entry.</p>
+<p>Next time, we&#8217;ll look some more at what happens when you put non-agile objects in the <code>Core­Application.<wbr />Properties</code>.</p>
+<p>The post <a href="https://devblogs.microsoft.com/oldnewthing/20261125-00/?p=112895/">Why did it seem that the entries in the CoreApplication Properties expired when the source application shut down?</a> appeared first on <a href="https://devblogs.microsoft.com/oldnewthing">The Old New Thing</a>.</p>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
