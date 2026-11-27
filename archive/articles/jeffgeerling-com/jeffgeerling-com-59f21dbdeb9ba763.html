@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Remotely unplugging a USB device on my Mac, without touching it | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Remotely unplugging a USB device on my Mac, without touching it</h1>
+        <div class="meta">Jeff Geerling 2026-11-27T05:18:00Z</div>
+        <div class="links">
+          <a href="https://www.jeffgeerling.com/blog/2026/remote-control-usb-hub/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/jeffgeerling-com/jeffgeerling-com-59f21dbdeb9ba763.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">Tonight I was remote debugging a USB-C device with custom firmware, which was plugged into my Mac Studio at work. I was accessing it over a WireGuard VPN tunnel. Part of the debugging process involves flashing firmware to the device using MIDI SysEx messages , and while handy, this technique can also be flaky, leaving the device in a partially-flashed state…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>Remotely unplugging a USB device on my Mac, without touching it</h1>
+    <p>Tonight I was remote debugging a USB-C device with custom firmware, which was plugged into my Mac Studio at work. I was accessing it over a WireGuard VPN tunnel.</p>
+    <img src="https://www.jeffgeerling.com/blog/2026/remote-control-usb-hub/m4-max-mac-studio-front.jpeg" alt="Front of M4 Max Mac Studio"/>
+    <p>Part of the debugging process involves flashing firmware to the device using <a href="https://www.sweetwater.com/sweetcare/articles/how-do-i-send-and-receive-sysex-on-pc-or-mac/">MIDI SysEx messages</a>, and while handy, this technique can also be flaky, leaving the device in a partially-flashed state that needs a physical re-plug to recover from.</p>
+    <p>Unfortunately (well, fortunately, in terms of me taking some time off for Thanksgiving!), I am not physically present at the Mac, and the device I was testing did need a physical unplug-and-replug.</p>
+    <p>I was going to give up, but instead I wondered if there was a way to power off a USB port on macOS, and then power it back on, which would effectively do what I needed.</p>
+    <p>A little research with Claude uncovered <a href="https://github.com/mvp/uhubctl"><pre>uhubctl</pre></a> which allows 'USB Hub per-port power control'—exactly what I wanted.</p>
+    <p>It works with Linux or macOS, and supports a ton of USB Hubs, but only listed explicit Mac support for the "M4 Mac mini (2 front ports only)" and "MacBook Air (Late 2010)".</p>
+    <p>Hoping I'd get lucky, I checked the status on my M4 Max Mac Studio:</p>
+    <pre>
+      <pre># Install uhubctl with Homebrew
+$ brew install uhubctl
+
+# List all available ports
+$ uhubctl
+Current status for hub 8-3 [05ac:8009 Apple USB2 Hub 7423J07, USB 2.10, 4 ports, ppps]
+  Port 1: 0100 power
+  Port 2: 0100 power
+  Port 3: 0103 power enable connect [3434:0b10 Keychron Keychron Q1 HE]
+  Port 4: 0503 power highspeed enable connect [05e3:0610 GenesysLogic USB2.0 Hub, USB 2.00, 4 ports, ganged]
+Current status for hub 8-1 [05ac:800a Apple USB3 Gen2 Hub 7423J07, USB 3.20, 4 ports, ppps]
+  Port 1: 0203 power 5gbps U0 enable connect [0bad:c0de Device Under Test]
+  Port 2: 02a0 power 5gbps Rx.Detect
+  Port 3: 02a0 power 5gbps Rx.Detect
+  Port 4: 0203 power 5gbps U0 enable connect [05e3:0617 GenesysLogic USB3.0 Hub, USB 3.00, 4 ports, ganged]
+</pre>
+    </pre>
+    <p>I was in luck! The leftmost front USB-C port on the Mac Studio looked to be controllable. I ran the command to power cycle <pre>Port 1</pre> on <pre>hub 8-1</pre> with a 5 second delay between (<pre>-d 5</pre>):</p>
+    <pre>
+      <pre>$ sudo uhubctl -l 8-1 -p 1 -a cycle -d 5
+Current status for hub 8-3 [05ac:8009 Apple USB2 Hub 7423J07, USB 2.10, 4 ports, ppps]
+  Port 1: 0100 power
+Sent power off request
+New status for hub 8-3 [05ac:8009 Apple USB2 Hub 7423J07, USB 2.10, 4 ports, ppps]
+  Port 1: 0000 off
+Current status for hub 8-1 [05ac:800a Apple USB3 Gen2 Hub 7423J07, USB 3.20, 4 ports, ppps]
+  Port 1: 0203 power 5gbps U0 enable connect [0bad:c0de Device Under Test]
+Sent power off request
+New status for hub 8-1 [05ac:800a Apple USB3 Gen2 Hub 7423J07, USB 3.20, 4 ports, ppps]
+  Port 1: 00a0 off
+Current status for hub 8-3 [05ac:8009 Apple USB2 Hub 7423J07, USB 2.10, 4 ports, ppps]
+  Port 1: 0000 off
+Sent power on request
+New status for hub 8-3 [05ac:8009 Apple USB2 Hub 7423J07, USB 2.10, 4 ports, ppps]
+  Port 1: 0100 power
+Current status for hub 8-1 [05ac:800a Apple USB3 Gen2 Hub 7423J07, USB 3.20, 4 ports, ppps]
+  Port 1: 00a0 off
+Sent power on request
+New status for hub 8-1 [05ac:800a Apple USB3 Gen2 Hub 7423J07, USB 3.20, 4 ports, ppps]
+  Port 1: 02a0 power 5gbps Rx.Detect
+</pre>
+    </pre>
+    <p>The device was power-cycled and re-connected (along with the corresponding USB 2 port, since both have to be toggled at the same time), and I could finish the firmware update.</p>
+    <p>What a handy tool! It doesn't work with Thunderbolt ports, but all the regular USB-C and USB-A ports on my Studio were available. And apparently it works on most models of Raspberry Pi, though their odd USB configuration means <a href="https://github.com/mvp/uhubctl#raspberry-pi-5">you can only toggle power to all four ports at once</a>.</p>
+    <p>Since it wasn't in the support matrix yet, I filed a PR to add the Mac Studio: <a href="https://github.com/mvp/uhubctl/pull/691">Add M4 Max Mac Studio</a>.</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
