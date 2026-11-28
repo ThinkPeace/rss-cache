@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How to easily measure temperature with a Raspberry Pi | rss-cache archive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f2ea;
+        --card: #fffdfa;
+        --text: #1f2933;
+        --muted: #52606d;
+        --border: #d9cbb8;
+        --accent: #b05a33;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      article {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.05;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.2rem;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .links a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .summary {
+        border-left: 4px solid var(--border);
+        padding-left: 1rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>How to easily measure temperature with a Raspberry Pi</h1>
+        <div class="meta">Bert Hubert&#x27;s writings 2026-11-28T12:50:00Z</div>
+        <div class="links">
+          <a href="https://berthub.eu/articles/posts/measuring-temperature-raspberry-pi/">Original article</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/archive/articles/berthub-eu/berthub-eu-62ef0f3496f571e7.json">Archive JSON</a>
+          <a href="https://ThinkPeace.github.io/rss-cache/">rss-cache home</a>
+        </div>
+        <div class="summary">For a long time I wanted to do something simple - measure room temperature affordably using a Raspberry Pi or something like that. But for some reason, I could never find the right solution. I’m not an electronics person, and I’ve long made a policy decision that I’m not going to solder anything. However, I could apparently not reasonably spend myself out o…</div>
+        <div class="content">
+          <html>
+  <body>
+    <h1>How to easily measure temperature with a Raspberry Pi</h1>
+    <p>For a long time I wanted to do something simple - measure room temperature affordably using a Raspberry Pi or something like that. But for some reason, I could never find the right solution. I’m not an electronics person, and I’ve long made a policy decision that I’m not going to solder anything. However, I could apparently not reasonably spend myself out of this problem by buying some kind of USB thermometer.</p>
+    <blockquote>
+<p>Full shopping list: any Raspberry Pi with headers (pins), a <a href="https://www.tinytronics.nl/en/sensors/temperature/ds18b20-to-92-thermometer-temperature-sensor">DS18B20</a>, three female-female <a href="https://en.wikipedia.org/wiki/Jump_wire">DuPont wires</a>.</p>
+</blockquote>
+    <p>So here’s the very easy solution I found, and with this page I hope to make it easy for you as well.</p>
+    <p>I settled on the <a href="https://www.analog.com/media/en/technical-documentation/data-sheets/ds18b20.pdf">DS18B20</a> digital thermometer, which is very well established and available in many forms. You can get <a href="https://www.tinytronics.nl/en/sensors/temperature/ds18b20-to-92-thermometer-temperature-sensor">a transistor-like looking variant</a>, but there are also probes, many of which can also <a href="https://www.tinytronics.nl/en/sensors/temperature/ds18b20-to-92-thermometer-temperature-sensor-with-cable-waterproof-high-temperature-1m">be submerged in water</a>.</p>
+    <p>You can buy these for <a href="https://www.tinytronics.nl/en/sensors/temperature/ds18b20-to-92-thermometer-temperature-sensor">next to nothing money</a> (‘1.5 euro’), and despite this there are counterfeit versions around, and I hear these can suck. So be careful.</p>
+    <p>The DS18B20 is a “1-Wire” device, yet still requires three wires, but let’s not get too upset about that, since it is all rather wonderful. It claims ±0.5C accuracy, and while I have not done any real tests of that, it measures the same temperatures as the professional Honeywell thermostat it has replaced.</p>
+    <p><img src="https://berthub.eu/articles/ds18b20-pinout.png"/><br/>
+The TO-92 form factor - from the <a href="https://www.analog.com/media/en/technical-documentation/data-sheets/ds18b20.pdf">data sheet</a></p>
+    <p>The three wires are called GND, DQ and Vdd. The manual states that you should mount a 5kΩ resistor between Vdd and DQ. But, it turns out the Raspberry Pi can be configured to provide a 50kΩ resistor function, and this also works for my use case (more about this later).</p>
+    <p>On your Raspberry, run the amazingly useful <pre>pinout</pre> command:</p>
+    <p><img src="https://berthub.eu/articles/pinout.png"/><br/>
+Output as shown on a Raspberry Pi Zero 2</p>
+    <p>Compare this to what your actual Raspberry Pi looks like, paying special attention to spotting where pin 1 is. If you mess this up you could fry your devices! Hint, check the colors, pin 1 is cyan in the picture above, and pins 2 and 4 are red.</p>
+    <p>Next up, hook up the GND pin of your DS18B20 to any of the ground pins (which you can recognize in the pinout picture above by having no label). Connect Vdd to any of the 3.3V pins. And connect DQ to GPIO14 (which is pin 8).</p>
+    <p>You then end up with this:</p>
+    <p><img src="https://berthub.eu/articles/pinout-photo.jpeg"/><br/>
+Note that we are facing the DS18B20’s arched side, so we are seeing the pins in Vdd, DQ, GND order. Vdd is connected to pin 1 on the Raspberry Pi</p>
+    <p>Next up, we need to tell the Raspberry that we hooked up a <a href="https://en.wikipedia.org/wiki/1-Wire">1-Wire device</a> to GPIO14. There are multiple ways to do this, but this is nicely persistent. Add the following to the existing <pre>/boot/firmware/config.txt</pre>:</p>
+    <pre>
+      <pre>dtoverlay=w1-gpio,gpiopin=14
+</pre>
+    </pre>
+    <p>Next up, reboot the Raspberry, and then run this command to enable the 50kΩ “pull-up” (pu) resistor:</p>
+    <pre>
+      <pre>pinctrl set 14 pu
+</pre>
+    </pre>
+    <p>And you should be in business! All 1-Wire devices show up in <pre>/sys/bus/w1/devices</pre>, and the DS18B20 ones all have a serial number that starts with 28:</p>
+    <pre>
+      <pre>$ cat /sys/bus/w1/devices/28-*/temperature 
+19625
+</pre>
+    </pre>
+    <p>This is 19.625C. Touch the sensor for a bit and repeat the command and you should see a higher temperature.</p>
+    <p>Note that the ‘pinctrl’ command is not persistent and needs to be repeated for every power-up! Also, it appears there is no special reason to specifically use GPIO14.</p>
+    <h3>Linux Details</h3>
+    <p>Behind the scenes, the kernel is running the 1W protocol for you, and you should see the following modules active:</p>
+    <pre>
+      <pre>$ lsmod | grep w1
+w1_therm               24576  0
+w1_gpio                12288  0
+wire                   49152  2 w1_gpio,w1_therm
+</pre>
+    </pre>
+    <p>In the <pre>/sys/bus/w1/devices/28*</pre> directory you can find lower level access to 1-Wire messages.</p>
+    <h3>With the recommended resistor</h3>
+    <p>The 1-Wire protocol is rather neat, and it also supports much longer cables, and also many devices sharing a single bus. When doing this, you’ll likely need the recommended 5kΩ resistor. Helpfully, <a href="https://www.tinytronics.nl/nl/sensoren/temperatuur/ds18b20-adapter">there are many adapters on sale</a> with that resistor built in, and which also make it easier to use DS18B20 variants that give you three wires instead of three pins:</p>
+    <p>
+      <img src="https://berthub.eu/articles/connector-board-for-ds18b20-1.jpg"/>
+    </p>
+    <h3>Good luck!</h3>
+    <p>Do let me know if you find mistakes on this page, or if you manage to get this to work in ‘parasitic mode’ with only two wires!</p>
+  </body>
+</html>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>
